@@ -1,15 +1,16 @@
 import { AppMetadata, UserProfile } from '../types';
 
+// 统一内容源：这里的数组和描述都可以直接替换为真实玩家资料、聊天记录、帖子与世界观内容。
 export const INITIAL_USER_PROFILE: UserProfile = {
-  name: '星野 遥',
-  handle: '@hoshino_haruka',
-  avatarSeed: 'haruka',
-  signature: '在数字微澜与水蓝晨光之间，收集未完待续的梦境。',
+  name: 'user',
+  handle: '@user',
+  avatarSeed: 'user',
+  signature: '天天开心',
   level: 'Lv.9 灵识观测者',
   tags: ['深蓝偏执', '漫游中', '番茄钟狂热'],
   battery: 88,
-  location: '新川市立虚拟图书馆 · 3F',
-  mood: '🫧 正在构思下一篇剧本',
+  location: '家',
+  mood: '懒懒的',
   stats: {
     friends: 42,
     moments: 128,
@@ -27,7 +28,6 @@ export const MAIN_GRID_APPS: AppMetadata[] = [
     category: '通讯',
     color: 'from-emerald-400/30 to-teal-500/20',
     textColor: 'text-teal-600',
-    badge: 3,
   },
   {
     id: 'phone_explorer',
@@ -157,6 +157,242 @@ export const THEMES = [
     accentColor: '#7E63C4',
     glowColor: 'rgba(235, 231, 250, 0.8)',
     tagColor: 'bg-purple-100/80 text-purple-800',
+  },
+];
+
+export const WECHAT_MOMENTS = [
+  {
+    id: 1,
+    author: '林汐',
+    avatar: '汐',
+    time: '1小时前',
+    content:
+      '雨后的云层像棉花糖一样，把今天的第一份剧本大纲写完了。大家记得按时喝水🫧',
+    likes: 18,
+    comments: 4,
+    images: ['#DFF1FA', '#FAD4E0'],
+  },
+  {
+    id: 2,
+    author: '苏子言',
+    avatar: '言',
+    time: '3小时前',
+    content:
+      '在工位边放了一盆小薄荷，连敲代码都带着草木香气。今天番茄钟已经达成 4 个循环！',
+    likes: 24,
+    comments: 7,
+    images: ['#E1F7EF'],
+  },
+];
+
+export const FORUM_CATEGORIES = ['全部', '树洞', '剧本围读', '同人二创', '技术探索'];
+
+export const FORUM_POSTS = [
+  {
+    id: 1,
+    title: '关于主线第 3 幕的结局走向，大家更倾向于哪个开放结局？',
+    author: '深海观星者',
+    tag: '剧本围读',
+    time: '25分钟前',
+    content:
+      '在第3幕中，旅人终于解开了掌心小手机的终极法则。究竟是选择将虚拟记忆永久固化在云端，还是携带着最初的温存回归现世？想听听大家的看法！',
+    upvotes: 89,
+    replies: 34,
+    isHot: true,
+  },
+  {
+    id: 2,
+    title: '【树洞】在数字浮岛独居的第 100 天，今天给自己做了一杯草莓生椰',
+    author: '棉花糖云朵',
+    tag: '树洞',
+    time: '1小时前',
+    content:
+      '虽然偶尔会觉得整个世界只有自己一个角色，但每次打开微信收到林汐和子言的消息，又觉得生活其实格外真实。希望大家今天也开心！',
+    upvotes: 142,
+    replies: 56,
+    isHot: true,
+  },
+  {
+    id: 3,
+    title: '关于世界书角色卡数值与属性设定的平衡性测算表',
+    author: '数据观测员07',
+    tag: '技术探索',
+    time: '3小时前',
+    content:
+      '基于现有的12个职业标签做了多维雷达图测算，目前敏捷系角色在第三轮交互中的触发概率略高，附上详细数据公式供大家参考。',
+    upvotes: 63,
+    replies: 19,
+    isHot: false,
+  },
+];
+
+export const PHONE_PHOTOS = [
+  { id: 1, title: '初秋午后的蔚蓝天际', tag: '风景', color: 'from-sky-200 to-blue-300' },
+  { id: 2, title: '剧本围读会议草稿纸', tag: '工作', color: 'from-amber-100 to-orange-200' },
+  { id: 3, title: '雨天路过的街角咖啡屋', tag: '随拍', color: 'from-teal-100 to-emerald-200' },
+  { id: 4, title: '世界书第一纪元草图', tag: '设定', color: 'from-purple-200 to-indigo-300' },
+  { id: 5, title: '落日微光里的水波', tag: '风景', color: 'from-rose-200 to-pink-300' },
+  { id: 6, title: '新川图书馆三楼窗景', tag: '日常', color: 'from-cyan-100 to-sky-200' },
+];
+
+export const PHONE_DIARIES = [
+  {
+    id: 1,
+    date: '10月12日 星期一 · 晴',
+    title: '关于“灵识网络”的灵感记录',
+    mood: '✨ 灵感迸发',
+    preview:
+      '今天在整理世界书的法则时，突然想到如果每一个AI旅人都拥有一部可以折叠进胸口的掌心小手机，那么他们之间的连接就不再是冰冷的代码，而是一串串带着晨光色泽的便签……',
+  },
+  {
+    id: 2,
+    date: '10月09日 星期五 · 微雨',
+    title: '在街角咖啡馆度过的两小时',
+    mood: '☕ 安静舒适',
+    preview:
+      '外面的小雨敲打在遮雨棚上，番茄钟响了三次。林汐发来新设定的审核反馈，提议把第二章的对话节奏放慢一点，我也觉得这样更能展现角色之间的微妙心绪。',
+  },
+  {
+    id: 3,
+    date: '10月05日 星期一 · 晴',
+    title: '新川图书馆开馆日',
+    mood: '📖 宁静平和',
+    preview:
+      '三楼靠窗的位置终于开放了，阳光透过双层玻璃洒在橡木桌上，很适合一整个下午都沉浸在故事世界里。',
+  },
+];
+
+export const PHONE_NOTES = [
+  { id: 1, text: '核对世界书第三章节 NPC 技能设定与平衡性', done: true },
+  { id: 2, text: '准备下周线上剧情研讨会的讲稿框架', done: false },
+  { id: 3, text: '给番茄钟增加白噪音环境声预设', done: false },
+  { id: 4, text: '去淘宝买一本新的点阵网格手账本', done: true },
+  { id: 5, text: '晚上记得备份虚拟手机里的日记与相册', done: false },
+];
+
+export const COUPLE_NOTES = [
+  { id: 1, author: '沐晴', time: '今日 11:20', text: '下午记得别喝太多冰生椰拿铁，降温啦要带件薄外套哦！🧣' },
+  { id: 2, author: '星野 遥', time: '昨日 22:45', text: '晚安，今晚的月色很美，明天见。🌙' },
+];
+
+export const ALIPAY_TRANSACTIONS = [
+  { id: 1, title: '浅井咖啡屋 · 冰生椰拿铁', category: '餐饮', amount: '-28.00', time: '今日 14:20', isExpense: true },
+  { id: 2, title: '世界书设定赏金入账', category: '收入', amount: '+1200.00', time: '昨日 18:30', isExpense: false },
+  { id: 3, title: '数字云主机租赁月费', category: '数码', amount: '-188.00', time: '10月11日', isExpense: true },
+  { id: 4, title: '新川市立图书馆研讨室预约', category: '学习', amount: '-45.00', time: '10月09日', isExpense: true },
+  { id: 5, title: '闲鱼二手手办转卖收入', category: '二手', amount: '+360.00', time: '10月07日', isExpense: false },
+];
+
+export const MEMORY_FRAGMENTS = [
+  {
+    id: 1,
+    title: '初遇新川虚拟图书馆',
+    category: 'milestones',
+    categoryLabel: '重大里程碑',
+    date: '2026年08月15日 · 晴',
+    excerpt: '初次开机的清晨，第一道水蓝微光在屏幕正中凝聚。与林汐和子言交换了第一张电子名片。',
+    mood: '🌸 温暖感动',
+    color: 'from-sky-300/30 to-blue-400/20',
+    tag: '#最初的起点',
+  },
+  {
+    id: 2,
+    title: '浮岛暴雨夜的围炉剧本研讨',
+    category: 'dialogue',
+    categoryLabel: '对话共鸣',
+    date: '2026年09月04日 · 暴雨',
+    excerpt: '雷声隔绝在玻璃窗外，咖啡香气弥漫了一整晚。我们敲定了世界书第三律的草案。',
+    mood: '☕ 静谧专注',
+    color: 'from-amber-300/30 to-orange-400/20',
+    tag: '#羁绊加深',
+  },
+  {
+    id: 3,
+    title: '浮光浅滩的落日快照',
+    category: 'snapshots',
+    categoryLabel: '时光快照',
+    date: '2026年09月28日 · 霞光',
+    excerpt: '粉白与水蓝交织的天际线，微风掠过水面留下细小的涟漪。那一刻时间仿佛彻底静止。',
+    mood: '🌅 宁静永恒',
+    color: 'from-pink-300/30 to-rose-400/20',
+    tag: '#浅滩留影',
+  },
+  {
+    id: 4,
+    title: 'PocketOS 掌心终端正式激活',
+    category: 'milestones',
+    categoryLabel: '重大里程碑',
+    date: '2026年10月12日 · 晨曦',
+    excerpt: '所有模块组装完毕，轻触小白条即可无缝穿梭于每一个精心编织的应用之间。',
+    mood: '✨ 晶莹闪耀',
+    color: 'from-teal-300/30 to-emerald-400/20',
+    tag: '#系统新生',
+  },
+];
+
+export const TAOBAO_PRODUCTS = [
+  {
+    id: 1,
+    title: '生椰燕麦轻乳茶 (双倍珍珠)',
+    store: '浅井茶饮研究所',
+    price: '21.5',
+    origPrice: '26',
+    rating: '4.9',
+    tag: '30分钟必达',
+    badge: '外卖热销',
+    color: 'from-amber-100 to-orange-200',
+  },
+  {
+    id: 2,
+    title: '低糖手作巴斯克芝士蛋糕',
+    store: '星野甜点屋',
+    price: '35.0',
+    origPrice: '42',
+    rating: '5.0',
+    tag: '冷链配送',
+    badge: '今日推荐',
+    color: 'from-pink-100 to-rose-200',
+  },
+  {
+    id: 3,
+    title: '全麦熏鸡肉牛油果波奇饭',
+    store: 'GreenBite 轻食便当',
+    price: '28.8',
+    origPrice: '36',
+    rating: '4.8',
+    tag: '减脂推荐',
+    badge: '满减优惠',
+    color: 'from-emerald-100 to-teal-200',
+  },
+];
+
+export const XIANYU_ITEMS = [
+  {
+    id: 1,
+    title: '【99新】Retro 68键 客制化机械键盘 (水蓝轴)',
+    seller: '键圈漫游者',
+    price: '268',
+    views: '42人想要',
+    desc: '仅通电试轴两次，手感顺滑如水，附赠透明防尘罩与拔轴器。',
+    color: 'from-sky-200 to-indigo-200',
+  },
+  {
+    id: 2,
+    title: '【正版】世界书创世纪典藏设定画集 (首刷带特典)',
+    seller: '藏书猫猫',
+    price: '145',
+    views: '118人想要',
+    desc: '书脊完好无折痕，内页全彩铜版纸，附赠独家角色书签三枚。',
+    color: 'from-purple-200 to-pink-200',
+  },
+  {
+    id: 3,
+    title: '【日版】胶片复古便携袖珍相机',
+    seller: '晴天小林',
+    price: '199',
+    views: '86人想要',
+    desc: '成色极佳，镜头通透无霉，附带全新电池与皮革腕带。',
+    color: 'from-amber-200 to-yellow-200',
   },
 ];
 

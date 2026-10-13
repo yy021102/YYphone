@@ -11,6 +11,7 @@ import {
   PieChart,
 } from 'lucide-react';
 import { AppHeader } from '../components/AppHeader';
+import { ALIPAY_TRANSACTIONS } from '../data/mockData';
 
 interface AlipayAppProps {
   onBack: () => void;
@@ -21,14 +22,7 @@ type AlipayTab = 'wallet' | 'ledger';
 export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
   const [activeTab, setActiveTab] = useState<AlipayTab>('wallet');
 
-  // Transactions list
-  const transactions = [
-    { id: 1, title: '浅井咖啡屋 · 冰生椰拿铁', category: '餐饮', amount: '-28.00', time: '今日 14:20', isExpense: true },
-    { id: 2, title: '世界书设定赏金入账', category: '收入', amount: '+1200.00', time: '昨日 18:30', isExpense: false },
-    { id: 3, title: '数字云主机租赁月费', category: '数码', amount: '-188.00', time: '10月11日', isExpense: true },
-    { id: 4, title: '新川市立图书馆研讨室预约', category: '学习', amount: '-45.00', time: '10月09日', isExpense: true },
-    { id: 5, title: '闲鱼二手手办转卖收入', category: '二手', amount: '+360.00', time: '10月07日', isExpense: false },
-  ];
+  const transactions = ALIPAY_TRANSACTIONS;
 
   return (
     <div className="flex-1 w-full flex flex-col bg-[#F2F6FA] overflow-hidden">

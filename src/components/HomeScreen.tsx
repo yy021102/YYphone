@@ -19,14 +19,18 @@ import {
   SkipForward,
   Camera,
   RefreshCw,
+  Pencil,
 } from 'lucide-react';
-import { AppId, AppMetadata, UserProfile } from '../types';
+import { AppIconOverrides, AppId, AppMetadata, UserProfile } from '../types';
+import { ProfileEditor } from './ProfileEditor';
 
 interface HomeScreenProps {
   userProfile: UserProfile;
   apps: AppMetadata[];
   dockApps: AppMetadata[];
   onOpenApp: (id: AppId) => void;
+  onSaveUserProfile: (profile: UserProfile) => boolean;
+  appIcons: AppIconOverrides;
 }
 
 export const HomeScreen: React.FC<HomeScreenProps> = ({
@@ -34,6 +38,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   apps,
   dockApps,
   onOpenApp,
+  onSaveUserProfile,
+  appIcons,
 }) => {
   // Static audio widget state
   const [isPlaying, setIsPlaying] = useState(false);
@@ -60,6 +66,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     },
   ];
   const [photoIndex, setPhotoIndex] = useState(0);
+  const [isProfileEditorOpen, setIsProfileEditorOpen] = useState(false);
 
   const handleNextPhoto = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -71,7 +78,14 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   // Bottom-left 4 apps: 论坛, 番茄钟, 线下, 情侣空间
   const bottomLeftApps = apps.slice(4, 8);
 
-  const renderAppIcon = (iconName: string, className = 'w-6 h-6 text-[#2C4A5C]') => {
+  const renderAppIcon = (
+    iconName: string,
+    className = 'w-6 h-6 text-[#2C4A5C]',
+    imageUrl?: string
+  ) => {
+    if (imageUrl) {
+      return <img src={imageUrl} alt="" className={`${className} object-cover rounded-[22%]`} />;
+    }
     switch (iconName) {
       case 'MessageCircle':
         return <MessageCircle className={className} />;
@@ -123,7 +137,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               app.iconName,
               `w-[clamp(22px,6vw,28px)] h-[clamp(22px,6vw,28px)] ${
                 app.textColor || 'text-[#2C4A5C]'
-              } stroke-[2.2] drop-shadow-xs`
+              } stroke-[2.2] drop-shadow-xs`,
+              appIcons[app.id]
             )}
           </div>
         </div>
@@ -143,7 +158,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   );
 
   return (
-    <div className="w-full h-full flex flex-col justify-between overflow-hidden select-none">
+    <div className="relative w-full h-full flex flex-col justify-between overflow-hidden select-none">
       {/* Upper Content Area (Profile Card + 4 Quadrants Grid) */}
       <div className="w-full flex-1 min-h-0 flex flex-col justify-between px-[clamp(12px,3vw,18px)] pt-1 pb-1.5 overflow-hidden">
         {/* 
@@ -151,20 +166,31 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         - Generous & spacious height with banner, avatar, mood pill, bio, and stats
         - Flexible card that does not shrink into a tiny ribbon
       */}
-      <div
-        onClick={() => onOpenApp('wechat')}
-        className="w-full shrink-0 glass-card rounded-[clamp(20px,4.5vw,28px)] overflow-hidden cursor-pointer active:scale-[0.99] transition-all group shadow-sm flex flex-col"
-      >
+      <div className="w-full shrink-0 glass-card rounded-[clamp(20px,4.5vw,28px)] overflow-hidden transition-all shadow-sm flex flex-col">
         {/* Cover Art Banner */}
-        <div className="h-[clamp(44px,7.5vh,58px)] w-full bg-gradient-to-r from-sky-200 via-blue-100 to-pink-100 relative overflow-hidden flex items-center justify-between px-3.5 shrink-0">
+        <div
+          className="h-[clamp(44px,7.5vh,58px)] w-full bg-gradient-to-r from-sky-200 via-blue-100 to-pink-100 relative overflow-hidden flex items-center justify-between px-3.5 shrink-0 bg-cover bg-center"
+        >
+          {userProfile.coverImageUrl && (
+            <img
+              src={userProfile.coverImageUrl}
+              alt=""
+              className="absolute inset-0 h-full w-full object-cover"
+            />
+          )}
           <div className="absolute inset-0 opacity-40 bg-[radial-gradient(circle_at_30%_50%,rgba(255,255,255,0.8),transparent_60%)]" />
           <span className="text-[11px] font-mono font-bold text-[#2C4A5C]/80 relative z-10 tracking-wide">
-            PocketOS · 灵识漫游终端
+            YYphone·歪歪机
           </span>
-          <div className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-white/70 backdrop-blur-md text-[10px] font-semibold text-[#2C4A5C] border border-white/75 shadow-2xs relative z-10">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            <span>在线</span>
-          </div>
+          <button
+            type="button"
+            onClick={() => setIsProfileEditorOpen(true)}
+            aria-label="编辑资料"
+            title="编辑资料"
+            className="flex items-center justify-center w-7 h-7 rounded-full bg-white/80 backdrop-blur-md text-[#2C4A5C] border border-white/75 shadow-2xs relative z-10"
+          >
+            <Pencil className="w-3 h-3" />
+          </button>
         </div>
 
         {/* Profile Content Body */}
@@ -173,12 +199,17 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           <div className="flex items-end justify-between -mt-5 mb-1">
             <div className="relative">
               <div className="w-[clamp(44px,11vw,52px)] h-[clamp(44px,11vw,52px)] rounded-[clamp(12px,3vw,16px)] bg-gradient-to-tr from-sky-400 via-teal-300 to-pink-300 p-0.5 shadow-md">
-                <div className="w-full h-full rounded-[clamp(10px,2.6vw,14px)] bg-white flex items-center justify-center font-bold text-[#2C4A5C] text-[clamp(15px,3.8vw,18px)] backdrop-blur-sm">
-                  遥
-                </div>
-              </div>
-              <div className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-sky-500 border border-white flex items-center justify-center text-[8px] text-white font-bold">
-                ✓
+                {userProfile.avatarUrl ? (
+                  <img
+                    src={userProfile.avatarUrl}
+                    alt={`${userProfile.name} 的头像`}
+                    className="w-full h-full rounded-[clamp(10px,2.6vw,14px)] object-cover"
+                  />
+                ) : (
+                  <div className="w-full h-full rounded-[clamp(10px,2.6vw,14px)] bg-white flex items-center justify-center font-bold text-[#2C4A5C] text-[clamp(15px,3.8vw,18px)] backdrop-blur-sm">
+                    {userProfile.name.trim().charAt(0) || '?'}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -195,9 +226,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               <h2 className="text-[clamp(13.5px,3.5vw,16px)] font-bold text-[#2C4A5C] tracking-tight">
                 {userProfile.name}
               </h2>
-              <span className="text-[9.5px] font-semibold px-1.5 py-0.2 rounded bg-sky-100/90 text-sky-800 font-mono">
-                {userProfile.level}
-              </span>
             </div>
             <span className="text-[10.5px] text-slate-500 font-mono">
               {userProfile.handle}
@@ -402,7 +430,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                   dockApp.iconName,
                   `w-[clamp(22px,5.8vw,26px)] h-[clamp(22px,5.8vw,26px)] ${
                     dockApp.textColor || 'text-[#2C4A5C]'
-                  } stroke-[2.2] drop-shadow-xs`
+                  } stroke-[2.2] drop-shadow-xs`,
+                  appIcons[dockApp.id]
                 )}
               </div>
             </div>
@@ -412,6 +441,13 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           </button>
         ))}
       </div>
+      {isProfileEditorOpen && (
+        <ProfileEditor
+          profile={userProfile}
+          onSave={onSaveUserProfile}
+          onClose={() => setIsProfileEditorOpen(false)}
+        />
+      )}
     </div>
   );
 };

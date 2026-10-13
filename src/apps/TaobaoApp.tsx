@@ -10,6 +10,7 @@ import {
   Filter,
 } from 'lucide-react';
 import { AppHeader } from '../components/AppHeader';
+import { TAOBAO_PRODUCTS, XIANYU_ITEMS } from '../data/mockData';
 
 interface TaobaoAppProps {
   onBack: () => void;
@@ -20,73 +21,8 @@ type TaobaoTab = 'takeout' | 'xianyu';
 export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
   const [activeTab, setActiveTab] = useState<TaobaoTab>('takeout');
 
-  // Food / Delivery & Goods
-  const products = [
-    {
-      id: 1,
-      title: '生椰燕麦轻乳茶 (双倍珍珠)',
-      store: '浅井茶饮研究所',
-      price: '21.5',
-      origPrice: '26',
-      rating: '4.9',
-      tag: '30分钟必达',
-      badge: '外卖热销',
-      color: 'from-amber-100 to-orange-200',
-    },
-    {
-      id: 2,
-      title: '低糖手作巴斯克芝士蛋糕',
-      store: '星野甜点屋',
-      price: '35.0',
-      origPrice: '42',
-      rating: '5.0',
-      tag: '冷链配送',
-      badge: '今日推荐',
-      color: 'from-pink-100 to-rose-200',
-    },
-    {
-      id: 3,
-      title: '全麦熏鸡肉牛油果波奇饭',
-      store: 'GreenBite 轻食便当',
-      price: '28.8',
-      origPrice: '36',
-      rating: '4.8',
-      tag: '减脂推荐',
-      badge: '满减优惠',
-      color: 'from-emerald-100 to-teal-200',
-    },
-  ];
-
-  // Xianyu Secondhand Items
-  const xianyuItems = [
-    {
-      id: 1,
-      title: '【99新】Retro 68键 客制化机械键盘 (水蓝轴)',
-      seller: '键圈漫游者',
-      price: '268',
-      views: '42人想要',
-      desc: '仅通电试轴两次，手感顺滑如水，附赠透明防尘罩与拔轴器。',
-      color: 'from-sky-200 to-indigo-200',
-    },
-    {
-      id: 2,
-      title: '【正版】世界书创世纪典藏设定画集 (首刷带特典)',
-      seller: '藏书猫猫',
-      price: '145',
-      views: '118人想要',
-      desc: '书脊完好无折痕，内页全彩铜版纸，附赠独家角色书签三枚。',
-      color: 'from-purple-200 to-pink-200',
-    },
-    {
-      id: 3,
-      title: '【日版】胶片复古便携袖珍相机',
-      seller: '晴天小林',
-      price: '199',
-      views: '86人想要',
-      desc: '成色极佳，镜头通透无霉，附带全新电池与皮革腕带。',
-      color: 'from-amber-200 to-yellow-200',
-    },
-  ];
+  const products = TAOBAO_PRODUCTS;
+  const xianyuItems = XIANYU_ITEMS;
 
   return (
     <div className="flex-1 w-full flex flex-col bg-[#FAF6F4] overflow-hidden">

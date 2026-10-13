@@ -27,6 +27,8 @@ export interface UserProfile {
   name: string;
   handle: string;
   avatarSeed: string;
+  avatarUrl?: string;
+  coverImageUrl?: string;
   signature: string;
   level: string;
   tags: string[];
@@ -39,6 +41,41 @@ export interface UserProfile {
     notes: number;
     coins: number;
   };
+}
+
+export interface UserPersona {
+  id: string;
+  name: string;
+  avatarUrl?: string;
+  identity: string;
+  personality: string;
+  background: string;
+  speakingStyle: string;
+}
+
+export interface PersonaCollection {
+  profiles: UserPersona[];
+  activeProfileId: string;
+}
+
+export interface CustomWallpapers {
+  lockScreen: string;
+  homeScreen: string;
+}
+
+export type AppIconOverrides = Partial<Record<AppId, string>>;
+
+export interface BeautySettings {
+  themeId: string;
+  wallpaperId: string;
+  wallpapers: CustomWallpapers;
+  appIcons: AppIconOverrides;
+}
+
+export interface BeautyPreset {
+  id: string;
+  name: string;
+  settings: BeautySettings;
 }
 
 export interface SystemState {

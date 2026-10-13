@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
-import { Flashlight, Camera, Lock, Delete, Unlock, ChevronUp } from 'lucide-react';
+import { Flashlight, Camera, Lock, Delete, ChevronUp } from 'lucide-react';
 
 interface LockScreenProps {
   onUnlock: () => void;
   timeString: string;
   dateString: string;
   wallpaperStyle: string;
+  wallpaperImage?: string;
+  password?: string;
 }
 
 export const LockScreen: React.FC<LockScreenProps> = ({
@@ -13,20 +15,28 @@ export const LockScreen: React.FC<LockScreenProps> = ({
   timeString,
   dateString,
   wallpaperStyle,
+  wallpaperImage,
+  password,
 }) => {
   const [showKeypad, setShowKeypad] = useState(false);
   const [pin, setPin] = useState<string>('');
   const [flashlightOn, setFlashlightOn] = useState(false);
+  const [passwordError, setPasswordError] = useState('');
 
   const handleKeyPress = (num: string) => {
     if (pin.length < 4) {
       const nextPin = pin + num;
       setPin(nextPin);
       if (nextPin.length === 4) {
-        // Unlock immediately on 4 digits or let user click unlock
-        setTimeout(() => {
-          onUnlock();
-        }, 200);
+        if (password && nextPin === password) {
+          setTimeout(onUnlock, 200);
+        } else {
+          setPasswordError('密码错误，请重试。');
+          setTimeout(() => {
+            setPin('');
+            setPasswordError('');
+          }, 700);
+        }
       }
     }
   };
@@ -38,10 +48,18 @@ export const LockScreen: React.FC<LockScreenProps> = ({
   return (
     <div
       className="relative w-full h-full flex flex-col justify-between p-6 select-none overflow-hidden transition-all duration-500"
-      style={{ background: wallpaperStyle }}
+      style={
+        wallpaperImage
+          ? {
+              backgroundImage: `url("${wallpaperImage}")`,
+              backgroundSize: 'cover',
+              backgroundPosition: 'center',
+            }
+          : { background: wallpaperStyle }
+      }
     >
       {/* Subtle background ambient overlays */}
-      <div className="absolute inset-0 bg-white/20 backdrop-blur-[2px] pointer-events-none" />
+      <div className="absolute inset-0 bg-white/10 backdrop-blur-[2px] pointer-events-none" />
       <div className="absolute -top-24 -right-24 w-72 h-72 rounded-full bg-pink-200/40 blur-3xl pointer-events-none" />
       <div className="absolute -bottom-24 -left-24 w-72 h-72 rounded-full bg-sky-200/50 blur-3xl pointer-events-none" />
 
@@ -64,47 +82,18 @@ export const LockScreen: React.FC<LockScreenProps> = ({
             </p>
           </div>
 
-          {/* Middle section: Lockscreen Notification / Inspiration Widget */}
-          <div className="w-full max-w-[340px] flex flex-col gap-3 my-auto">
-            {/* Widget Card */}
-            <div className="glass-card rounded-2xl p-3.5 flex items-start gap-3 transition-transform hover:scale-[1.02] shadow-sm">
-              <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-sky-400 to-teal-300 flex items-center justify-center text-white shrink-0 shadow-sm text-sm">
-                🫧
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between text-[11px] text-[#2C4A5C]/80 mb-0.5">
-                  <span className="font-semibold">微信 · 剧本研讨组</span>
-                  <span className="text-[10px]">10分钟前</span>
-                </div>
-                <p className="text-xs text-[#2C4A5C] font-medium leading-relaxed truncate">
-                  林汐：“今晚要不要一起来世界书整理NPC的背景设定？”
-                </p>
-              </div>
-            </div>
-
-            {/* Weather / Status Pill */}
-            <div className="bg-white/45 backdrop-blur-md border border-white/70 rounded-2xl px-3.5 py-2 flex items-center justify-between text-xs text-[#2C4A5C]">
-              <span className="flex items-center gap-1.5 font-medium">
-                <span>🌤️ 22°C</span>
-                <span className="text-slate-400">·</span>
-                <span>轻度薄云</span>
-              </span>
-              <span className="text-[11px] text-[#2C4A5C]/75 bg-white/50 px-2 py-0.5 rounded-full font-mono">
-                灵感充盈
-              </span>
-            </div>
-          </div>
-
           {/* Bottom section: Unlock swipe button & Utility controls */}
           <div className="w-full flex flex-col items-center gap-6">
             <button
-              onClick={() => setShowKeypad(true)}
+              onClick={() => (password ? setShowKeypad(true) : onUnlock())}
               className="flex flex-col items-center gap-1.5 text-xs font-semibold text-[#2C4A5C]/85 hover:text-[#2C4A5C] active:scale-95 transition-all cursor-pointer group"
             >
               <div className="w-8 h-8 rounded-full bg-white/50 backdrop-blur-md flex items-center justify-center border border-white/70 shadow-sm group-hover:bg-white/80 transition-all">
                 <ChevronUp className="w-4 h-4 animate-bounce text-[#2C4A5C]" />
               </div>
-              <span className="text-[12px] tracking-wide">轻触或上滑解锁</span>
+              <span className="text-[12px] tracking-wide">
+                {password ? '轻触或上滑解锁' : '轻触进入主屏'}
+              </span>
             </button>
 
             {/* Quick action buttons */}
@@ -122,7 +111,7 @@ export const LockScreen: React.FC<LockScreenProps> = ({
               </button>
 
               <button
-                onClick={() => setShowKeypad(true)}
+                onClick={() => (password ? setShowKeypad(true) : onUnlock())}
                 title="相机"
                 className="w-12 h-12 rounded-full bg-white/40 hover:bg-white/60 backdrop-blur-xl border border-white/70 flex items-center justify-center text-[#2C4A5C] shadow-sm transition-all active:scale-90"
               >
@@ -142,10 +131,6 @@ export const LockScreen: React.FC<LockScreenProps> = ({
             <h2 className="text-base font-bold text-[#2C4A5C] tracking-tight">
               输入密码
             </h2>
-            <p className="text-xs text-[#2C4A5C]/70 mt-1">
-              可输入任意数字，或直接点击解锁
-            </p>
-
             {/* PIN indicators */}
             <div className="flex items-center gap-3 mt-6">
               {[0, 1, 2, 3].map((idx) => (
@@ -159,6 +144,11 @@ export const LockScreen: React.FC<LockScreenProps> = ({
                 />
               ))}
             </div>
+            {passwordError && (
+              <p role="alert" className="text-xs text-rose-700 font-semibold">
+                {passwordError}
+              </p>
+            )}
           </div>
 
           {/* Numeric Keypad Grid */}
@@ -194,27 +184,8 @@ export const LockScreen: React.FC<LockScreenProps> = ({
                 >
                   <Delete className="w-5 h-5 stroke-[2]" />
                 </button>
-              ) : (
-                <button
-                  onClick={onUnlock}
-                  title="免密直接解锁"
-                  className="w-11 h-11 rounded-full flex items-center justify-center text-sky-700 hover:bg-white/40 active:scale-90 transition-all"
-                >
-                  <Unlock className="w-5 h-5 stroke-[2]" />
-                </button>
-              )}
+              ) : <span className="w-11 h-11" />}
             </div>
-          </div>
-
-          {/* Quick Direct Unlock Button */}
-          <div className="w-full flex justify-center pb-2 shrink-0">
-            <button
-              onClick={onUnlock}
-              className="px-5 py-2 rounded-full bg-white/60 hover:bg-white/80 active:scale-95 border border-white/80 text-xs font-bold text-[#2C4A5C] backdrop-blur-md shadow-sm transition-all flex items-center gap-1.5"
-            >
-              <Unlock className="w-3.5 h-3.5" />
-              <span>直接进入主屏</span>
-            </button>
           </div>
         </div>
       )}

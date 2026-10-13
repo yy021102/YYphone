@@ -11,6 +11,7 @@ import {
   Circle,
 } from 'lucide-react';
 import { AppHeader } from '../components/AppHeader';
+import { PHONE_DIARIES, PHONE_NOTES, PHONE_PHOTOS } from '../data/mockData';
 
 interface PhoneExplorerAppProps {
   onBack: () => void;
@@ -21,52 +22,9 @@ type ExplorerTab = 'photos' | 'diary' | 'notes';
 export const PhoneExplorerApp: React.FC<PhoneExplorerAppProps> = ({ onBack }) => {
   const [activeTab, setActiveTab] = useState<ExplorerTab>('photos');
 
-  // Mock photo albums
-  const photos = [
-    { id: 1, title: '初秋午后的蔚蓝天际', tag: '风景', color: 'from-sky-200 to-blue-300' },
-    { id: 2, title: '剧本围读会议草稿纸', tag: '工作', color: 'from-amber-100 to-orange-200' },
-    { id: 3, title: '雨天路过的街角咖啡屋', tag: '随拍', color: 'from-teal-100 to-emerald-200' },
-    { id: 4, title: '世界书第一纪元草图', tag: '设定', color: 'from-purple-200 to-indigo-300' },
-    { id: 5, title: '落日微光里的水波', tag: '风景', color: 'from-rose-200 to-pink-300' },
-    { id: 6, title: '新川图书馆三楼窗景', tag: '日常', color: 'from-cyan-100 to-sky-200' },
-  ];
-
-  // Mock diary entries
-  const diaries = [
-    {
-      id: 1,
-      date: '10月12日 星期一 · 晴',
-      title: '关于“灵识网络”的灵感记录',
-      mood: '✨ 灵感迸发',
-      preview:
-        '今天在整理世界书的法则时，突然想到如果每一个AI旅人都拥有一部可以折叠进胸口的掌心小手机，那么他们之间的连接就不再是冰冷的代码，而是一串串带着晨光色泽的便签……',
-    },
-    {
-      id: 2,
-      date: '10月09日 星期五 · 微雨',
-      title: '在街角咖啡馆度过的两小时',
-      mood: '☕ 安静舒适',
-      preview:
-        '外面的小雨敲打在遮雨棚上，番茄钟响了三次。林汐发来新设定的审核反馈，提议把第二章的对话节奏放慢一点，我也觉得这样更能展现角色之间的微妙心绪。',
-    },
-    {
-      id: 3,
-      date: '10月05日 星期一 · 晴',
-      title: '新川图书馆开馆日',
-      mood: '📖 宁静平和',
-      preview:
-        '三楼靠窗的位置终于开放了，阳光透过双层玻璃洒在橡木桌上，很适合一整个下午都沉浸在故事世界里。',
-    },
-  ];
-
-  // Mock notes
-  const [notes, setNotes] = useState([
-    { id: 1, text: '核对世界书第三章节 NPC 技能设定与平衡性', done: true },
-    { id: 2, text: '准备下周线上剧情研讨会的讲稿框架', done: false },
-    { id: 3, text: '给番茄钟增加白噪音环境声预设', done: false },
-    { id: 4, text: '去淘宝买一本新的点阵网格手账本', done: true },
-    { id: 5, text: '晚上记得备份虚拟手机里的日记与相册', done: false },
-  ]);
+  const photos = PHONE_PHOTOS;
+  const diaries = PHONE_DIARIES;
+  const [notes, setNotes] = useState(PHONE_NOTES);
 
   const toggleNote = (id: number) => {
     setNotes((prev) =>

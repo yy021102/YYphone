@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Sparkles, Clock, Calendar, Heart, Bookmark, Eye, Search, Plus } from 'lucide-react';
 import { AppHeader } from '../components/AppHeader';
+import { MEMORY_FRAGMENTS } from '../data/mockData';
 
 interface MemoryAppProps {
   onBack: () => void;
@@ -9,52 +10,7 @@ interface MemoryAppProps {
 export const MemoryApp: React.FC<MemoryAppProps> = ({ onBack }) => {
   const [activeFilter, setActiveFilter] = useState<'all' | 'milestones' | 'dialogue' | 'snapshots'>('all');
 
-  const memoryFragments = [
-    {
-      id: 1,
-      title: '初遇新川虚拟图书馆',
-      category: 'milestones',
-      categoryLabel: '重大里程碑',
-      date: '2026年08月15日 · 晴',
-      excerpt: '初次开机的清晨，第一道水蓝微光在屏幕正中凝聚。与林汐和子言交换了第一张电子名片。',
-      mood: '🌸 温暖感动',
-      color: 'from-sky-300/30 to-blue-400/20',
-      tag: '#最初的起点',
-    },
-    {
-      id: 2,
-      title: '浮岛暴雨夜的围炉剧本研讨',
-      category: 'dialogue',
-      categoryLabel: '对话共鸣',
-      date: '2026年09月04日 · 暴雨',
-      excerpt: '雷声隔绝在玻璃窗外，咖啡香气弥漫了一整晚。我们敲定了世界书第三律的草案。',
-      mood: '☕ 静谧专注',
-      color: 'from-amber-300/30 to-orange-400/20',
-      tag: '#羁绊加深',
-    },
-    {
-      id: 3,
-      title: '浮光浅滩的落日快照',
-      category: 'snapshots',
-      categoryLabel: '时光快照',
-      date: '2026年09月28日 · 霞光',
-      excerpt: '粉白与水蓝交织的天际线，微风掠过水面留下细小的涟漪。那一刻时间仿佛彻底静止。',
-      mood: '🌅 宁静永恒',
-      color: 'from-pink-300/30 to-rose-400/20',
-      tag: '#浅滩留影',
-    },
-    {
-      id: 4,
-      title: 'PocketOS 掌心终端正式激活',
-      category: 'milestones',
-      categoryLabel: '重大里程碑',
-      date: '2026年10月12日 · 晨曦',
-      excerpt: '所有模块组装完毕，轻触小白条即可无缝穿梭于每一个精心编织的应用之间。',
-      mood: '✨ 晶莹闪耀',
-      color: 'from-teal-300/30 to-emerald-400/20',
-      tag: '#系统新生',
-    },
-  ];
+  const memoryFragments = MEMORY_FRAGMENTS;
 
   const filtered = memoryFragments.filter((m) => {
     if (activeFilter === 'all') return true;

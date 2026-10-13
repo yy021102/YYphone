@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Heart, Calendar, Sparkles, Image as ImageIcon, Send, Clock, Smile } from 'lucide-react';
 import { AppHeader } from '../components/AppHeader';
+import { COUPLE_NOTES } from '../data/mockData';
 
 interface CoupleSpaceAppProps {
   onBack: () => void;
@@ -8,10 +9,7 @@ interface CoupleSpaceAppProps {
 
 export const CoupleSpaceApp: React.FC<CoupleSpaceAppProps> = ({ onBack }) => {
   const [loveNote, setLoveNote] = useState('');
-  const [notes, setNotes] = useState([
-    { id: 1, author: '沐晴', time: '今日 11:20', text: '下午记得别喝太多冰生椰拿铁，降温啦要带件薄外套哦！🧣' },
-    { id: 2, author: '星野 遥', time: '昨日 22:45', text: '晚安，今晚的月色很美，明天见。🌙' },
-  ]);
+  const [notes, setNotes] = useState(COUPLE_NOTES);
 
   const handleSendNote = () => {
     if (!loveNote.trim()) return;

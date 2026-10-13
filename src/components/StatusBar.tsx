@@ -3,11 +3,10 @@ import { Wifi, BatteryMedium, Signal, Lock } from 'lucide-react';
 
 interface StatusBarProps {
   time: string;
-  isLocked?: boolean;
   onLockClick?: () => void;
 }
 
-export const StatusBar: React.FC<StatusBarProps> = ({ time, isLocked = false, onLockClick }) => {
+export const StatusBar: React.FC<StatusBarProps> = ({ time, onLockClick }) => {
   return (
     <div className="w-full pt-2 px-5 pb-1 flex items-center justify-between text-[#2C4A5C] text-xs font-semibold select-none z-30 transition-colors">
       {/* Left: Time and date indicator */}
@@ -20,11 +19,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({ time, isLocked = false, on
         <div className="w-2.5 h-2.5 rounded-full bg-slate-800/80 border border-white/20 flex items-center justify-center">
           <div className="w-1 h-1 rounded-full bg-sky-400 animate-pulse"></div>
         </div>
-        {isLocked ? (
-          <Lock className="w-3 h-3 text-slate-700" />
-        ) : (
-          <span className="text-[10px] text-slate-700 font-medium tracking-wide">PocketOS</span>
-        )}
+        <span className="text-[10px] text-slate-700 font-medium tracking-wide">歪歪机</span>
       </div>
 
       {/* Right: Connectivity & Battery */}
@@ -35,7 +30,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({ time, isLocked = false, on
           <span className="text-[10px] font-mono tabular-nums font-bold">88%</span>
           <BatteryMedium className="w-4 h-4 stroke-[2.2] text-[#2C4A5C]" />
         </div>
-        {onLockClick && !isLocked && (
+        {onLockClick && (
           <button
             onClick={onLockClick}
             title="锁定屏幕"

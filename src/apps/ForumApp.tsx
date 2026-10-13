@@ -9,6 +9,7 @@ import {
   PenLine,
 } from 'lucide-react';
 import { AppHeader } from '../components/AppHeader';
+import { FORUM_CATEGORIES, FORUM_POSTS } from '../data/mockData';
 
 interface ForumAppProps {
   onBack: () => void;
@@ -17,46 +18,8 @@ interface ForumAppProps {
 export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
   const [activeCategory, setActiveCategory] = useState('全部');
 
-  const categories = ['全部', '树洞', '剧本围读', '同人二创', '技术探索'];
-
-  const posts = [
-    {
-      id: 1,
-      title: '关于主线第 3 幕的结局走向，大家更倾向于哪个开放结局？',
-      author: '深海观星者',
-      tag: '剧本围读',
-      time: '25分钟前',
-      content:
-        '在第3幕中，旅人终于解开了掌心小手机的终极法则。究竟是选择将虚拟记忆永久固化在云端，还是携带着最初的温存回归现世？想听听大家的看法！',
-      upvotes: 89,
-      replies: 34,
-      isHot: true,
-    },
-    {
-      id: 2,
-      title: '【树洞】在数字浮岛独居的第 100 天，今天给自己做了一杯草莓生椰',
-      author: '棉花糖云朵',
-      tag: '树洞',
-      time: '1小时前',
-      content:
-        '虽然偶尔会觉得整个世界只有自己一个角色，但每次打开微信收到林汐和子言的消息，又觉得生活其实格外真实。希望大家今天也开心！',
-      upvotes: 142,
-      replies: 56,
-      isHot: true,
-    },
-    {
-      id: 3,
-      title: '关于世界书角色卡数值与属性设定的平衡性测算表',
-      author: '数据观测员07',
-      tag: '技术探索',
-      time: '3小时前',
-      content:
-        '基于现有的12个职业标签做了多维雷达图测算，目前敏捷系角色在第三轮交互中的触发概率略高，附上详细数据公式供大家参考。',
-      upvotes: 63,
-      replies: 19,
-      isHot: false,
-    },
-  ];
+  const categories = FORUM_CATEGORIES;
+  const posts = FORUM_POSTS;
 
   return (
     <div className="flex-1 w-full flex flex-col bg-[#F5F8FA] overflow-hidden">
