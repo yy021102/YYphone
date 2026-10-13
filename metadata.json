@@ -1,0 +1,6 @@
+{
+  "name": "AI 小手机 - Pocket OS",
+  "description": "移动端优先的真机体验 AI 小手机系统，具有轻柔琉璃质感锁屏、个性化主屏与微信、支付宝、世界书等完整套件。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,38 @@
+{
+  "id": "/",
+  "name": "AI 小手机 - Pocket OS",
+  "short_name": "AI小手机",
+  "description": "移动端优先的真机体验 AI 小手机系统，具有轻柔琉璃质感锁屏、个性化主屏与应用套件。",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#DFF1FA",
+  "background_color": "#DFF1FA",
+  "icons": [
+    {
+      "src": "/pwa-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-maskable-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icon.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
