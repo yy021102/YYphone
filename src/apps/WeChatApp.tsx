@@ -457,6 +457,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
     readStoredValue(CHAT_APPEARANCE_STORAGE_KEY, DEFAULT_CHAT_APPEARANCE, isChatAppearance)
   );
   const [chatAppearancePresetName, setChatAppearancePresetName] = useState('');
+  const [selectedChatAppearancePresetId, setSelectedChatAppearancePresetId] = useState('');
   const [bubbleCssPresetName, setBubbleCssPresetName] = useState('');
   const [selectedBubbleCssPresetId, setSelectedBubbleCssPresetId] = useState('');
   const [chatAppearanceMessage, setChatAppearanceMessage] = useState('');
@@ -619,6 +620,26 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
     }
   };
 
+  const handleDeletePersonaPreset = () => {
+    if (personaCollection.profiles.length <= 1) {
+      setPersonaError('至少保留一个人设预设。');
+      setPersonaStatus('');
+      return;
+    }
+    const nextProfiles = personaCollection.profiles.filter(
+      (persona) => persona.id !== personaCollection.activeProfileId
+    );
+    const nextActivePersona = nextProfiles[0];
+    const updatedCollection = {
+      profiles: nextProfiles,
+      activeProfileId: nextActivePersona.id,
+    };
+    if (savePersonaCollection(updatedCollection)) {
+      setPersonaDraft(nextActivePersona);
+      setPersonaStatus('当前人设预设已删除，并切换到另一个预设。');
+    }
+  };
+
   const updatePersonaField = (field: keyof UserPersona, value: string) => {
     setPersonaDraft((current) => ({ ...current, [field]: value }));
     setPersonaStatus('');
@@ -709,10 +730,14 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
       generateIconUrl: chatAppearance.generateIconUrl ?? '',
     };
     const nextAppearance = { ...chatAppearance, presets: [...chatAppearance.presets, preset] };
-    if (persistChatAppearance(nextAppearance)) setChatAppearancePresetName('');
+    if (persistChatAppearance(nextAppearance)) {
+      setChatAppearancePresetName('');
+      setSelectedChatAppearancePresetId(preset.id);
+    }
   };
 
   const applyChatAppearancePreset = (presetId: string) => {
+    setSelectedChatAppearancePresetId(presetId);
     const preset = chatAppearance.presets.find((item) => item.id === presetId);
     if (!preset) return;
     updateChatAppearance({
@@ -724,6 +749,17 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
       sendIconUrl: preset.sendIconUrl ?? '',
       generateIconUrl: preset.generateIconUrl ?? '',
     });
+  };
+
+  const deleteChatAppearancePreset = () => {
+    if (!selectedChatAppearancePresetId) return;
+    const nextAppearance = {
+      ...chatAppearance,
+      presets: chatAppearance.presets.filter(
+        (preset) => preset.id !== selectedChatAppearancePresetId
+      ),
+    };
+    if (persistChatAppearance(nextAppearance)) setSelectedChatAppearancePresetId('');
   };
 
   const saveBubbleCssPreset = () => {
@@ -1289,6 +1325,20 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
     const preset = contextPresets.find((item) => item.id === presetId);
     if (preset && chatSettingsDraft) {
       setChatSettingsDraft({ ...chatSettingsDraft, context: preset.context });
+    }
+  };
+
+  const deleteContextPreset = () => {
+    if (!selectedContextPresetId) return;
+    const nextPresets = contextPresets.filter((preset) => preset.id !== selectedContextPresetId);
+    try {
+      writeStoredValue(CHAT_CONTEXT_PRESETS_STORAGE_KEY, nextPresets);
+      setContextPresets(nextPresets);
+      setSelectedContextPresetId('');
+      setChatError('');
+    } catch (error) {
+      console.error('Could not delete chat context preset.', error);
+      setChatError('删除预设失败，请检查浏览器本地存储空间后重试。');
     }
   };
 
@@ -2435,6 +2485,15 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                     <option key={persona.id} value={persona.id}>{persona.name}</option>
                   ))}
                 </select>
+                <button
+                  type="button"
+                  onClick={handleDeletePersonaPreset}
+                  disabled={personaCollection.profiles.length <= 1}
+                  className="shrink-0 rounded-xl bg-rose-50 px-3 text-xs font-semibold text-rose-700 disabled:opacity-40"
+                  aria-label="删除当前人设预设"
+                >
+                  <Trash2 className="mr-1 inline h-3.5 w-3.5" />删除
+                </button>
               </div>
 
               <div className="flex items-center gap-3">
@@ -2524,17 +2583,28 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                 <h3 className="text-xs font-bold text-[#2C4A5C]">聊天美化</h3>
                 <p className="mt-1 text-[10px] text-slate-500">自定义聊天背景、气泡 CSS、小图标与页面布局，并保存或导入导出美化预设。</p>
               </div>
-              <select
-                value=""
-                onChange={(event) => applyChatAppearancePreset(event.target.value)}
-                aria-label="切换聊天美化预设"
-                className="w-full rounded-xl border border-white bg-white/75 px-3 py-2 text-xs text-[#2C4A5C] outline-none"
-              >
-                <option value="">选择已保存的美化预设</option>
-                {chatAppearance.presets.map((preset) => (
-                  <option key={preset.id} value={preset.id}>{preset.name}</option>
-                ))}
-              </select>
+              <div className="flex gap-2">
+                <select
+                  value={selectedChatAppearancePresetId}
+                  onChange={(event) => applyChatAppearancePreset(event.target.value)}
+                  aria-label="切换聊天美化预设"
+                  className="min-w-0 flex-1 rounded-xl border border-white bg-white/75 px-3 py-2 text-xs text-[#2C4A5C] outline-none"
+                >
+                  <option value="">选择已保存的美化预设</option>
+                  {chatAppearance.presets.map((preset) => (
+                    <option key={preset.id} value={preset.id}>{preset.name}</option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={deleteChatAppearancePreset}
+                  disabled={!selectedChatAppearancePresetId}
+                  className="shrink-0 rounded-xl bg-rose-50 px-3 text-[10px] font-semibold text-rose-700 disabled:opacity-40"
+                  aria-label="删除聊天美化预设"
+                >
+                  <Trash2 className="mr-1 inline h-3.5 w-3.5" />删除
+                </button>
+              </div>
               <label className="block text-[11px] font-semibold text-[#2C4A5C]">
                 聊天背景图片链接
                 <input
@@ -2608,7 +2678,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                     onClick={saveBubbleCssPreset}
                     className="rounded-lg bg-teal-600 px-3 text-[10px] font-semibold text-white"
                   >
-                    保存预设
+                    新建预设
                   </button>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
@@ -2690,7 +2760,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                   className="min-w-0 flex-1 rounded-xl border border-white bg-white/70 px-3 py-2 text-xs outline-none"
                 />
                 <button onClick={saveChatAppearancePreset} className="shrink-0 rounded-xl bg-sky-100 px-3 py-2 text-[10px] font-bold text-sky-800">
-                  保存预设
+                  新建预设
                 </button>
               </div>
               <div className="grid grid-cols-2 gap-2">
@@ -2952,6 +3022,14 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                     <option key={preset.id} value={preset.id}>{preset.name}</option>
                   ))}
                 </select>
+                <button
+                  type="button"
+                  onClick={deleteContextPreset}
+                  disabled={!selectedContextPresetId}
+                  className="w-full rounded-lg bg-rose-50 py-2 text-[10px] font-semibold text-rose-700 disabled:opacity-40"
+                >
+                  <Trash2 className="mr-1 inline h-3.5 w-3.5" />删除所选预设
+                </button>
                 <div className="flex gap-2">
                   <input
                     value={contextPresetName}
@@ -2964,7 +3042,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                     onClick={saveContextPreset}
                     className="shrink-0 rounded-lg bg-sky-100 px-3 py-2 text-[11px] font-semibold text-sky-800"
                   >
-                    保存预设
+                    新建预设
                   </button>
                 </div>
               </div>

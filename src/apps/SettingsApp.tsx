@@ -24,6 +24,11 @@ interface ApiPreset {
   model?: string;
 }
 
+interface ApiModel {
+  id: string;
+  label: string;
+}
+
 const API_PRESETS_STORAGE_KEY = 'yyphone:api-presets';
 const ACTIVE_API_PRESET_STORAGE_KEY = 'yyphone:active-api-preset';
 const isApiPresetList = (value: unknown): value is ApiPreset[] =>
@@ -81,6 +86,8 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
   const [apiKey, setApiKey] = useState(() => initialApiPreset?.apiKey ?? '');
   const [apiModel, setApiModel] = useState(() => initialApiPreset?.model ?? 'gpt-4o-mini');
   const [showApiKey, setShowApiKey] = useState(false);
+  const [apiModels, setApiModels] = useState<ApiModel[]>([]);
+  const [isLoadingApiModels, setIsLoadingApiModels] = useState(false);
   const [apiMessage, setApiMessage] = useState('');
   const [apiError, setApiError] = useState('');
   const [backupMessage, setBackupMessage] = useState('');
@@ -112,7 +119,7 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
       id: selectedApiPresetId || `api-${Date.now()}`,
       name,
       endpoint: apiEndpoint.trim(),
-      apiKey: apiKey.trim(),
+      apiKey,
       model: apiModel.trim() || 'gpt-4o-mini',
     };
     const nextPresets = selectedApiPresetId
@@ -131,6 +138,7 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
     setApiEndpoint(preset?.endpoint ?? '');
     setApiKey(preset?.apiKey ?? '');
     setApiModel(preset?.model ?? 'gpt-4o-mini');
+    setApiModels([]);
     if (preset) writeStoredValue(ACTIVE_API_PRESET_STORAGE_KEY, id);
     setApiMessage('');
     setApiError('');
@@ -142,6 +150,7 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
     setApiEndpoint('');
     setApiKey('');
     setApiModel('gpt-4o-mini');
+    setApiModels([]);
     setApiMessage('');
     setApiError('');
   };
@@ -159,6 +168,109 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
     if (nextPreset) writeStoredValue(ACTIVE_API_PRESET_STORAGE_KEY, nextPreset.id);
     else window.localStorage.removeItem(ACTIVE_API_PRESET_STORAGE_KEY);
     setApiMessage('API 配置预设已删除。');
+  };
+
+  const handleFetchApiModels = async () => {
+    const endpointValue = apiEndpoint.trim();
+    const key = apiKey;
+    if (!endpointValue || !key.trim()) {
+      setApiError('请先填写 API 接入端点和 API Key。');
+      setApiMessage('');
+      return;
+    }
+
+    let modelsUrl: URL;
+    try {
+      modelsUrl = new URL(endpointValue);
+      if (modelsUrl.protocol !== 'http:' && modelsUrl.protocol !== 'https:') {
+        throw new Error('API 接入端点必须使用 HTTP 或 HTTPS。');
+      }
+    } catch (error) {
+      setApiError(error instanceof Error ? error.message : 'API 接入端点格式无效。');
+      setApiMessage('');
+      return;
+    }
+
+    const isGeminiEndpoint =
+      modelsUrl.hostname.includes('generativelanguage.googleapis.com') ||
+      /\/v1beta(?:\/|$)/i.test(modelsUrl.pathname);
+    const path = modelsUrl.pathname.replace(/\/+$/, '');
+    if (isGeminiEndpoint) {
+      modelsUrl.pathname = path
+        .replace(/\/models(?:\/[^/]+)?$/i, '')
+        .replace(/\/[^/]+:generateContent$/i, '');
+      if (!/\/v1beta$/i.test(modelsUrl.pathname)) {
+        modelsUrl.pathname = `${modelsUrl.pathname.replace(/\/+$/, '')}/v1beta`;
+      }
+      modelsUrl.pathname = `${modelsUrl.pathname}/models`;
+      modelsUrl.searchParams.set('key', key);
+    } else {
+      modelsUrl.pathname = path
+        .replace(/\/chat\/completions$/i, '')
+        .replace(/\/completions$/i, '')
+        .replace(/\/models$/i, '');
+      modelsUrl.pathname = `${modelsUrl.pathname.replace(/\/+$/, '')}/models`;
+    }
+    modelsUrl.hash = '';
+
+    setIsLoadingApiModels(true);
+    setApiModels([]);
+    setApiError('');
+    setApiMessage('');
+    try {
+      const response = await fetch(modelsUrl.toString(), {
+        method: 'GET',
+        headers: isGeminiEndpoint
+          ? { 'Content-Type': 'application/json' }
+          : { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      });
+      if (!response.ok) {
+        const detail = await response.text();
+        throw new Error(`模型拉取失败（HTTP ${response.status}）：${detail || response.statusText}`);
+      }
+
+      const payload: unknown = await response.json();
+      if (!payload || typeof payload !== 'object') {
+        throw new Error('接口返回的数据格式无效。');
+      }
+      const rawModels = Array.isArray((payload as { data?: unknown }).data)
+        ? (payload as { data: unknown[] }).data
+        : Array.isArray((payload as { models?: unknown }).models)
+          ? (payload as { models: unknown[] }).models
+          : [];
+      const models = rawModels.flatMap((item): ApiModel[] => {
+        if (!item || typeof item !== 'object') return [];
+        const record = item as Record<string, unknown>;
+        if (
+          Array.isArray(record.supportedGenerationMethods) &&
+          !record.supportedGenerationMethods.includes('generateContent')
+        ) return [];
+        const rawId = typeof record.id === 'string'
+          ? record.id
+          : typeof record.name === 'string'
+            ? record.name.replace(/^models\//, '')
+            : '';
+        if (!rawId) return [];
+        const label = typeof record.displayName === 'string'
+          ? `${record.displayName} (${rawId})`
+          : rawId;
+        return [{ id: rawId, label }];
+      });
+      if (models.length === 0) {
+        throw new Error('接口已响应，但没有找到可用模型；请确认反代是否开放模型列表接口。');
+      }
+      setApiModels(models);
+      setApiMessage(`连接成功，已拉取 ${models.length} 个模型。`);
+    } catch (error) {
+      console.error('Could not fetch API models.', error);
+      setApiError(
+        error instanceof Error
+          ? `${error.message}${error instanceof TypeError ? '；也可能是反代未允许浏览器跨域请求（CORS）。' : ''}`
+          : '模型拉取失败，请检查反代地址、密钥及网络。'
+      );
+    } finally {
+      setIsLoadingApiModels(false);
+    }
   };
 
   const handleSaveLockSettings = () => {
@@ -310,12 +422,19 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
             <label className="block text-[11px] font-semibold text-[#2C4A5C]">
               API 接入端点
               <input
-                type="url"
+                type="text"
+                inputMode="url"
                 value={apiEndpoint}
-                onChange={(event) => setApiEndpoint(event.target.value)}
-                placeholder="输入服务 Base URL"
+                onChange={(event) => {
+                  setApiEndpoint(event.target.value);
+                  setApiModels([]);
+                }}
+                placeholder="反代 Base URL，例如 https://proxy.example.com/v1"
                 className="mt-1 w-full bg-white/70 border border-white rounded-xl px-3 py-2 text-xs font-mono outline-none"
               />
+              <span className="mt-1 block text-[10px] font-normal text-slate-400">
+                支持 OpenAI 兼容反代；可填写 Base URL、/v1 或完整的 /chat/completions 地址。
+              </span>
             </label>
             <label className="block text-[11px] font-semibold text-[#2C4A5C]">
               API Key
@@ -323,10 +442,14 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
                 <input
                   type={showApiKey ? 'text' : 'password'}
                   autoComplete="off"
+                  spellCheck={false}
                   value={apiKey}
-                  onChange={(event) => setApiKey(event.target.value)}
+                  onChange={(event) => {
+                    setApiKey(event.target.value);
+                    setApiModels([]);
+                  }}
                   placeholder="输入 API Key"
-                  className="w-full bg-white/70 border border-white rounded-xl pl-3 pr-10 py-2 text-xs font-mono outline-none"
+                  className="min-w-0 w-full overflow-x-auto bg-white/70 border border-white rounded-xl pl-3 pr-10 py-2 text-xs font-mono outline-none"
                 />
                 <button
                   type="button"
@@ -338,15 +461,40 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
                 </button>
               </span>
             </label>
-            <label className="block text-[11px] font-semibold text-[#2C4A5C]">
-              模型标识
-              <input
-                value={apiModel}
-                onChange={(event) => setApiModel(event.target.value)}
-                placeholder="gpt-4o-mini 或 gemini-2.5-flash"
-                className="mt-1 w-full bg-white/70 border border-white rounded-xl px-3 py-2 text-xs font-mono outline-none"
-              />
-            </label>
+            <div className="space-y-2">
+              <label className="block text-[11px] font-semibold text-[#2C4A5C]">
+                模型标识
+                <input
+                  value={apiModel}
+                  onChange={(event) => setApiModel(event.target.value)}
+                  placeholder="拉取模型后选择，或手动填写模型 ID"
+                  className="mt-1 w-full bg-white/70 border border-white rounded-xl px-3 py-2 text-xs font-mono outline-none"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => void handleFetchApiModels()}
+                disabled={isLoadingApiModels}
+                className="w-full rounded-xl bg-white/80 border border-white py-2 text-xs font-semibold text-[#2C4A5C] disabled:opacity-50"
+              >
+                {isLoadingApiModels ? '正在测试并拉取模型…' : '拉取模型'}
+              </button>
+              {apiModels.length > 0 && (
+                <label className="block text-[10px] font-semibold text-slate-600">
+                  选择模型
+                  <select
+                    value={apiModels.some((model) => model.id === apiModel) ? apiModel : ''}
+                    onChange={(event) => setApiModel(event.target.value)}
+                    className="mt-1 w-full bg-white/70 border border-white rounded-xl px-3 py-2 text-xs outline-none"
+                  >
+                    <option value="">请选择已拉取的模型</option>
+                    {apiModels.map((model) => (
+                      <option key={model.id} value={model.id}>{model.label}</option>
+                    ))}
+                  </select>
+                </label>
+              )}
+            </div>
             <div className="flex gap-2">
               <button
                 type="button"
