@@ -37,6 +37,12 @@ import { PersonaCollection, UserPersona } from '../types';
 import { readStoredValue, writeStoredValue } from '../utils/localStorage';
 import { compressImageFile } from '../utils/imageFile';
 import { buildPrompt } from '../utils/buildPrompt';
+import {
+  chargeAlipay,
+  readAlipayData,
+  sendIntimatePayInteraction,
+} from '../utils/alipayData';
+import { appendCharacterContextEvent } from '../utils/characterContext';
 
 interface WeChatAppProps {
   onBack: () => void;
@@ -86,6 +92,7 @@ interface ChatMessage {
   amount?: string;
   quantity?: number;
   recipientId?: string;
+  payerId?: string;
   thought?: string;
 }
 
@@ -272,6 +279,7 @@ const isChatList = (value: unknown): value is ChatConversation[] =>
           (message.amount === undefined || typeof message.amount === 'string') &&
           (message.quantity === undefined || typeof message.quantity === 'number') &&
           (message.recipientId === undefined || typeof message.recipientId === 'string') &&
+          (message.payerId === undefined || typeof message.payerId === 'string') &&
           (message.thought === undefined || typeof message.thought === 'string')
       ) &&
       (chat.groupTitle === undefined || typeof chat.groupTitle === 'string') &&
@@ -522,6 +530,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
     amount: '',
     quantity: '1',
     recipientId: '',
+    paymentSelection: 'balance',
   });
   const attachmentInputRef = useRef<HTMLInputElement>(null);
   const [voiceModalOpen, setVoiceModalOpen] = useState(false);
@@ -1188,7 +1197,8 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
   };
 
   const updateChat = (chatId: string, update: (chat: ChatConversation) => ChatConversation) => {
-    const nextChats = chats.map((chat) => (chat.id === chatId ? update(chat) : chat));
+    const latestChats = readStoredValue(CHATS_STORAGE_KEY, chats, isChatList);
+    const nextChats = latestChats.map((chat) => (chat.id === chatId ? update(chat) : chat));
     return persistChats(nextChats);
   };
 
@@ -1378,6 +1388,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
         ? String(activeChat.participantIds.length + 1)
         : '1',
       recipientId: '',
+      paymentSelection: 'balance',
     });
     setAttachmentMode(mode);
     setComposerOpen(false);
@@ -1406,6 +1417,10 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
 
   const submitAttachment = () => {
     if (!attachmentMode) return;
+    if (attachmentMode === 'transfer' && (!activeChat || activeChat.type === 'observer' || activeChat.blocked)) {
+      setChatError('当前会话不可进行转账。');
+      return;
+    }
     let saved = false;
     if (attachmentMode === 'photo') {
       if (!attachmentDraft.text.trim()) {
@@ -1443,6 +1458,27 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
         setChatError('请选择一位收款角色。');
         return;
       }
+      let intimatePayerId: string | undefined;
+      if (attachmentMode === 'transfer') {
+        const source = attachmentDraft.paymentSelection === 'balance'
+          ? { type: 'balance' as const }
+          : {
+              type: 'intimate' as const,
+              charId: attachmentDraft.paymentSelection.slice('intimate:'.length),
+            };
+        try {
+          const payment = chargeAlipay(
+            Number(attachmentDraft.amount),
+            `微信转账${attachmentDraft.recipientId ? `给${contactName(attachmentDraft.recipientId)}` : ''}`,
+            source,
+            { notifyIntimatePayer: false }
+          );
+          intimatePayerId = payment.payer?.charId;
+        } catch (error) {
+          setChatError(error instanceof Error ? error.message : '支付宝扣款失败。');
+          return;
+        }
+      }
       saved = saveAttachmentMessage(
         attachmentMode,
         attachmentDraft.text.trim() || (attachmentMode === 'red-packet' ? '恭喜发财，大吉大利' : '转账'),
@@ -1451,11 +1487,26 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
           ...(attachmentMode === 'red-packet' && activeChat?.type === 'group'
             ? { quantity: Number(attachmentDraft.quantity) }
             : {}),
-          ...(attachmentMode === 'transfer' && activeChat?.type === 'group'
-            ? { recipientId: attachmentDraft.recipientId }
+          ...(attachmentMode === 'transfer'
+            ? {
+                recipientId: attachmentDraft.recipientId || activeChat?.participantIds[0],
+                ...(intimatePayerId ? { payerId: intimatePayerId } : {}),
+              }
             : {}),
         }
       );
+      if (saved && intimatePayerId) {
+        try {
+          sendIntimatePayInteraction(
+            intimatePayerId,
+            `微信转账${attachmentDraft.recipientId ? `给${contactName(attachmentDraft.recipientId)}` : ''}`,
+            Number(attachmentDraft.amount)
+          );
+          setChats(readStoredValue(CHATS_STORAGE_KEY, [] as ChatConversation[], isChatList));
+        } catch (error) {
+          setChatError(error instanceof Error ? `支付和转账已完成，但亲密付互动消息发送失败：${error.message}` : '支付已完成，但互动消息发送失败。');
+        }
+      }
     } else if (attachmentMode === 'link') {
       if (!attachmentDraft.title.trim()) {
         setChatError('请填写链接标题。');
@@ -1469,7 +1520,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
     }
     if (saved) {
       setAttachmentMode(null);
-      setAttachmentDraft({ imageUrl: '', text: '', title: '', source: '', content: '', amount: '', quantity: '1', recipientId: '' });
+      setAttachmentDraft({ imageUrl: '', text: '', title: '', source: '', content: '', amount: '', quantity: '1', recipientId: '', paymentSelection: 'balance' });
       setChatError('');
     }
   };
@@ -1590,7 +1641,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
         regenerate,
       });
       const responseInstructions = [
-        `以${chat.type === 'direct' ? `${contact.name}的` : '其中一位参与角色的'}身份自然回复。只返回 JSON：{"reply":"给用户看的消息","thought":"角色未说出口的心声","speakerId":"发言角色ID"${chat.type === 'group' && chat.allowAgentGroupRename ? ',"groupTitle":"建议群名，可省略","groupNicknames":{"角色ID":"建议群昵称"}' : ''}}。群聊的 speakerId 必须从以下 ID 中选择：${chatContacts.map((chatContact) => chatContact.id).join(', ')}。${chat.type === 'group' && chat.allowAgentGroupRename ? '群名或群昵称只有在情节自然需要时才修改，可仅返回其中需要修改的字段；groupNicknames 的键只能使用上方角色 ID。' : ''}${chat.type === 'observer' ? '这是旁观群聊，user不在群里；根据角色之间的对话和旁白提供的情境，继续以某个角色的身份发言。' : ''}`,
+        `以${chat.type === 'direct' ? `${contact.name}的` : '其中一位参与角色的'}身份自然回复。只返回 JSON 对象，至少包含 reply、thought、speakerId 字段。${regenerate ? '本次是重生成，不要重复执行或返回送礼动作。' : '可选 gift 字段只能是 {"existingProductId":"现有商品ID"} 或 {"title":"新商品名","desc":"描述","price":数字,"category":"shopping或eleme","emoji":"emoji"}。gift 仅在角色自然决定送礼或点外卖时提供，可省略；新商品送达后将加入淘宝或饿了么。'}${chat.type === 'group' && chat.allowAgentGroupRename ? '可选 groupTitle 和 groupNicknames 字段，只在情节自然需要时修改群名或昵称。' : ''}群聊的 speakerId 必须从以下 ID 中选择：${chatContacts.map((chatContact) => chatContact.id).join(', ')}。${chat.type === 'group' && chat.allowAgentGroupRename ? 'groupNicknames 的键只能使用上方角色 ID。' : ''}${chat.type === 'observer' ? '这是旁观群聊，user不在群里；根据角色之间的对话和旁白提供的情境，继续以某个角色的身份发言。' : ''}`,
         ...(activeCallMode === 'video'
           ? ['当前为视频通话，请在角色的每次回复最前方先写一段用小括号包裹的可视动作描写，再接角色说的话。']
           : []),
@@ -1657,12 +1708,16 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
       let speakerId = contact.id;
       let generatedGroupTitle: string | undefined;
       let generatedGroupNicknames: Record<string, string> | undefined;
+      let generatedGift: Record<string, unknown> | undefined;
       try {
         const result: unknown = JSON.parse(reply.replace(/^```(?:json)?\s*|\s*```$/g, ''));
         if (result && typeof result === 'object') {
           const record = result as Record<string, unknown>;
           if (typeof record.reply === 'string') reply = record.reply.trim();
           if (typeof record.thought === 'string') thought = record.thought.trim();
+          if (record.gift && typeof record.gift === 'object' && !Array.isArray(record.gift)) {
+            generatedGift = record.gift as Record<string, unknown>;
+          }
           if (typeof record.speakerId === 'string' && chatContacts.some((item) => item.id === record.speakerId)) {
             speakerId = record.speakerId;
           }
@@ -1687,6 +1742,56 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
         // Some compatible endpoints ignore JSON response mode and return plain text.
       }
       if (!reply) throw new Error('AI 返回了空消息，请检查模型配置后重试。');
+      if (generatedGift && !regenerate) {
+        const marketStorageKey = 'yyphone:taobao-market-products';
+        const rawProducts = window.localStorage.getItem(marketStorageKey);
+        const storedProducts: unknown = rawProducts ? JSON.parse(rawProducts) : [];
+        if (!Array.isArray(storedProducts)) throw new Error('淘宝商品数据格式无效，无法保存角色送达的商品。');
+        const existingProductId = generatedGift.existingProductId;
+        let deliveredTitle = '';
+        let deliveredCategory: 'shopping' | 'eleme' | undefined;
+        if (typeof existingProductId === 'string') {
+          const existing = storedProducts.find((item) =>
+            !!item &&
+            typeof item === 'object' &&
+            (item as Record<string, unknown>).id === existingProductId &&
+            ((item as Record<string, unknown>).category === 'shopping' ||
+              (item as Record<string, unknown>).category === 'eleme')
+          ) as Record<string, unknown> | undefined;
+          if (existing) {
+            deliveredTitle = String(existing.title ?? '商品');
+            deliveredCategory = existing.category as 'shopping' | 'eleme';
+          }
+        } else if (
+          typeof generatedGift.title === 'string' &&
+          typeof generatedGift.desc === 'string' &&
+          typeof generatedGift.price === 'number' &&
+          Number.isFinite(generatedGift.price) &&
+          generatedGift.price > 0 &&
+          (generatedGift.category === 'shopping' || generatedGift.category === 'eleme')
+        ) {
+          deliveredTitle = generatedGift.title.trim().slice(0, 100);
+          deliveredCategory = generatedGift.category;
+          const characterName = chatContacts.find((item) => item.id === speakerId)?.name ?? contact.name;
+          storedProducts.unshift({
+            id: `gift-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            category: deliveredCategory,
+            title: deliveredTitle,
+            desc: generatedGift.desc.trim().slice(0, 500),
+            price: generatedGift.price,
+            emoji: typeof generatedGift.emoji === 'string' ? generatedGift.emoji : deliveredCategory === 'shopping' ? '🎁' : '🍱',
+            store: `${characterName}送你的`,
+            badge: '角色赠礼',
+            fromCharName: characterName,
+          });
+          window.localStorage.setItem(marketStorageKey, JSON.stringify(storedProducts));
+        }
+        if (deliveredTitle && deliveredCategory) {
+          const characterName = chatContacts.find((item) => item.id === speakerId)?.name ?? contact.name;
+          reply += `\n\n（${characterName}已将「${deliveredTitle}」送到你的${deliveredCategory === 'eleme' ? '饿了么' : '淘宝'}。）`;
+          appendCharacterContextEvent(speakerId, `角色送玩家商品「${deliveredTitle}」，已立即送达。`, 'taobao');
+        }
+      }
       if (activeCallMode === 'video' && !/^\s*[（(].*[）)]/.test(reply)) {
         reply = `（${getChatParticipantName(chat, speakerId)}看向镜头，轻轻开口）${reply}`;
       }
@@ -2001,6 +2106,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                           <div className="flex items-center gap-2 font-semibold"><Wallet className="h-5 w-5" />微信转账</div>
                           <p className="mt-2 text-lg font-bold">¥{message.amount}</p>
                           {message.recipientId && <p className="text-[10px] opacity-90">给 {getChatParticipantName(activeChat, message.recipientId)}</p>}
+                          {message.payerId && <p className="text-[10px] opacity-90">由 {contactName(message.payerId)} 的亲密付付款</p>}
                           <p className="text-[10px] opacity-90">{message.text}</p>
                         </div>
                       ) : message.kind === 'link' ? (
@@ -3226,6 +3332,30 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                     className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
                   />
                 </label>
+                {attachmentMode === 'transfer' && (
+                  <label className="block text-[11px] font-semibold text-[#2C4A5C]">
+                    扣款方式
+                    <select
+                      value={attachmentDraft.paymentSelection}
+                      onChange={(event) => setAttachmentDraft({
+                        ...attachmentDraft,
+                        paymentSelection: event.target.value,
+                      })}
+                      className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs outline-none"
+                    >
+                      <option value="balance">支付宝个人余额 · ¥{readAlipayData().balance.toFixed(2)}</option>
+                      {readAlipayData().intimateCards.map((card) => (
+                        <option
+                          key={card.id}
+                          value={`intimate:${card.charId}`}
+                          disabled={card.monthlyLimit - card.usedAmount < Number(attachmentDraft.amount || 0)}
+                        >
+                          {contactName(card.charId)} 的亲密付 · 可用 ¥{Math.max(0, card.monthlyLimit - card.usedAmount).toFixed(2)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
                 {attachmentMode === 'red-packet' && activeChat.type === 'group' && (
                   <label className="block text-[11px] font-semibold text-[#2C4A5C]">
                     红包个数

@@ -1,0 +1,310 @@
+export interface IntimatePayCard {
+  id: string;
+  charId: string;
+  charName: string;
+  avatar?: string;
+  monthlyLimit: number;
+  usedAmount: number;
+  note: string;
+  usageMonth?: string;
+}
+
+export interface RealLedgerItem {
+  id: string;
+  title: string;
+  amount: number;
+  isExpense: boolean;
+  date: string;
+  time: string;
+  category?: string;
+}
+
+export interface AlipayData {
+  balance: number;
+  yuebao: number;
+  bankCardCount: string;
+  bankCardNote: string;
+  intimateCards: IntimatePayCard[];
+  monthlyBudgets: Record<string, number>;
+  ledgerList: RealLedgerItem[];
+  allowedViewers: string[];
+  lastInterestDate: string;
+}
+
+export interface AlipayContact {
+  id: string;
+  name: string;
+  avatarUrl?: string;
+}
+
+export const ALIPAY_STORAGE_KEY = 'yyphone:alipay-data';
+export const WECHAT_CONTACTS_STORAGE_KEY = 'pocketos:wechat-contacts';
+export const WECHAT_CHATS_STORAGE_KEY = 'yyphone:wechat-chats';
+
+const localDate = (date: Date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+
+const today = () => localDate(new Date());
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  !!value && typeof value === 'object' && !Array.isArray(value);
+
+const validLedgerItem = (value: unknown): value is RealLedgerItem =>
+  isRecord(value) &&
+  typeof value.id === 'string' &&
+  typeof value.title === 'string' &&
+  typeof value.amount === 'number' &&
+  Number.isFinite(value.amount) &&
+  typeof value.isExpense === 'boolean' &&
+  typeof value.date === 'string' &&
+  typeof value.time === 'string';
+
+const validCard = (value: unknown): value is IntimatePayCard =>
+  isRecord(value) &&
+  typeof value.id === 'string' &&
+  typeof value.charId === 'string' &&
+  typeof value.charName === 'string' &&
+  typeof value.monthlyLimit === 'number' &&
+  Number.isFinite(value.monthlyLimit) &&
+  typeof value.usedAmount === 'number' &&
+  Number.isFinite(value.usedAmount) &&
+  typeof value.note === 'string';
+
+export const emptyAlipayData = (): AlipayData => ({
+  balance: 0,
+  yuebao: 0,
+  bankCardCount: '0 张',
+  bankCardNote: '暂无绑定银行卡',
+  intimateCards: [],
+  monthlyBudgets: {},
+  ledgerList: [],
+  allowedViewers: [],
+  lastInterestDate: today(),
+});
+
+const normalizeAlipayData = (value: unknown): AlipayData => {
+  const defaults = emptyAlipayData();
+  if (!isRecord(value)) return defaults;
+  const budgets = isRecord(value.monthlyBudgets)
+    ? Object.fromEntries(
+        Object.entries(value.monthlyBudgets).filter(
+          ([key, amount]) => /^\d{4}-\d{2}$/.test(key) && typeof amount === 'number' && Number.isFinite(amount) && amount >= 0
+        )
+      ) as Record<string, number>
+    : {};
+  return {
+    balance: typeof value.balance === 'number' && Number.isFinite(value.balance) ? Math.max(0, value.balance) : 0,
+    yuebao: typeof value.yuebao === 'number' && Number.isFinite(value.yuebao) ? Math.max(0, value.yuebao) : 0,
+    bankCardCount: typeof value.bankCardCount === 'string' ? value.bankCardCount : defaults.bankCardCount,
+    bankCardNote: typeof value.bankCardNote === 'string' ? value.bankCardNote : defaults.bankCardNote,
+    intimateCards: Array.isArray(value.intimateCards)
+      ? value.intimateCards.filter(validCard).map((card) => {
+          const month = today().slice(0, 7);
+          return card.usageMonth && card.usageMonth !== month
+            ? { ...card, usedAmount: 0, usageMonth: month }
+            : { ...card, usageMonth: month };
+        })
+      : [],
+    monthlyBudgets: budgets,
+    ledgerList: Array.isArray(value.ledgerList) ? value.ledgerList.filter(validLedgerItem) : [],
+    allowedViewers: Array.isArray(value.allowedViewers)
+      ? value.allowedViewers.filter((id): id is string => typeof id === 'string')
+      : [],
+    lastInterestDate: typeof value.lastInterestDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value.lastInterestDate)
+      ? value.lastInterestDate
+      : today(),
+  };
+};
+
+export const readAlipayData = (): AlipayData => {
+  try {
+    const raw = window.localStorage.getItem(ALIPAY_STORAGE_KEY);
+    const account = normalizeAlipayData(raw ? JSON.parse(raw) : null);
+    const now = today();
+    const lastDate = new Date(`${account.lastInterestDate}T00:00:00`);
+    const todayDate = new Date(`${now}T00:00:00`);
+    const elapsedDays = Math.max(0, Math.floor((todayDate.getTime() - lastDate.getTime()) / 86400000));
+    if (elapsedDays > 0) {
+      for (let day = 0; day < elapsedDays; day += 1) {
+        account.yuebao += account.yuebao * 0.0208 / 365;
+      }
+      account.lastInterestDate = now;
+      writeAlipayData(account);
+    } else if (!raw) {
+      writeAlipayData(account);
+    }
+    return account;
+  } catch (error) {
+    console.error('Could not read Alipay data.', error);
+    return emptyAlipayData();
+  }
+};
+
+export const writeAlipayData = (data: AlipayData) => {
+  window.localStorage.setItem(ALIPAY_STORAGE_KEY, JSON.stringify(data));
+};
+
+export const readAlipayContacts = (): AlipayContact[] => {
+  try {
+    const value: unknown = JSON.parse(
+      window.localStorage.getItem(WECHAT_CONTACTS_STORAGE_KEY) ?? '[]'
+    );
+    if (!Array.isArray(value)) return [];
+    return value.flatMap((contact): AlipayContact[] =>
+      isRecord(contact) &&
+      typeof contact.id === 'string' &&
+      typeof contact.name === 'string'
+        ? [{
+            id: contact.id,
+            name: contact.name,
+            avatarUrl: typeof contact.avatarUrl === 'string' ? contact.avatarUrl : undefined,
+          }]
+        : []
+    );
+  } catch (error) {
+    console.error('Could not read WeChat contacts for Alipay.', error);
+    return [];
+  }
+};
+
+export type PaymentSource =
+  | { type: 'balance' }
+  | { type: 'intimate'; charId: string };
+
+export interface PaymentResult {
+  data: AlipayData;
+  payer?: IntimatePayCard;
+}
+
+const makeLedgerItem = (title: string, amount: number): RealLedgerItem => {
+  const now = new Date();
+  return {
+    id: `ledger-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    title,
+    amount,
+    isExpense: true,
+    date: localDate(now),
+    time: `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`,
+    category: '消费',
+  };
+};
+
+const appendIntimatePayMessage = (
+  contact: AlipayContact,
+  note: string,
+  title: string,
+  amount: number
+) => {
+  const chatsRaw = window.localStorage.getItem(WECHAT_CHATS_STORAGE_KEY);
+  const chatsValue: unknown = chatsRaw ? JSON.parse(chatsRaw) : [];
+  if (!Array.isArray(chatsValue)) throw new Error('微信聊天数据格式无效，无法发送亲密付互动消息。');
+  const chats = chatsValue as Array<Record<string, unknown>>;
+  let conversation = chats.find((chat) =>
+    chat.type === 'direct' &&
+    Array.isArray(chat.participantIds) &&
+    chat.participantIds.length === 1 &&
+    chat.participantIds[0] === contact.id
+  );
+  const timestamp = new Date().toISOString();
+  const message = {
+    id: `message-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    senderId: contact.id,
+    text: `${note ? `${note}。` : ''}我刚刚用亲密付帮你支付了「${title}」（¥${amount.toFixed(2)}），记得查收～`,
+    createdAt: timestamp,
+    thought: '',
+  };
+  if (!conversation) {
+    conversation = {
+      id: `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      type: 'direct',
+      participantIds: [contact.id],
+      noteName: '',
+      context: '',
+      narratorEnabled: false,
+      blocked: false,
+      pinned: false,
+      avatars: {},
+      messages: [],
+      updatedAt: timestamp,
+      groupTitle: '',
+      groupNicknames: {},
+      allowAgentGroupRename: false,
+      attachHistory: false,
+      attachedHistoryCount: 10,
+    };
+    chats.unshift(conversation);
+  }
+  if (!Array.isArray(conversation.messages)) {
+    throw new Error('目标微信会话的消息列表格式无效。');
+  }
+  conversation.messages.push(message);
+  conversation.updatedAt = timestamp;
+  window.localStorage.setItem(WECHAT_CHATS_STORAGE_KEY, JSON.stringify(chats));
+};
+
+export const chargeAlipay = (
+  amount: number,
+  title: string,
+  source: PaymentSource,
+  options: { notifyIntimatePayer?: boolean; recordLedger?: boolean } = {}
+): PaymentResult => {
+  if (!Number.isFinite(amount) || amount <= 0) throw new Error('支付金额必须大于 0。');
+  const data = readAlipayData();
+  const payer = source.type === 'intimate'
+    ? data.intimateCards.find((card) => card.charId === source.charId)
+    : undefined;
+  if (source.type === 'intimate' && !payer) throw new Error('该角色尚未开通亲密付。');
+  if (payer) {
+    const remaining = payer.monthlyLimit - payer.usedAmount;
+    if (amount > remaining) throw new Error(`亲密付额度不足，当前剩余 ¥${Math.max(0, remaining).toFixed(2)}。`);
+  } else if (amount > data.balance) {
+    throw new Error(`支付宝余额不足，当前余额 ¥${data.balance.toFixed(2)}。`);
+  }
+
+  const nextData: AlipayData = {
+    ...data,
+    balance: payer ? data.balance : data.balance - amount,
+    intimateCards: payer
+      ? data.intimateCards.map((card) =>
+          card.charId === payer.charId
+            ? {
+                ...card,
+                usedAmount: card.usedAmount + amount,
+                usageMonth: today().slice(0, 7),
+              }
+            : card
+        )
+      : data.intimateCards,
+    ledgerList: options.recordLedger === false
+      ? data.ledgerList
+      : [makeLedgerItem(title, amount), ...data.ledgerList],
+  };
+
+  if (payer) {
+    const contact = readAlipayContacts().find((item) => item.id === payer.charId);
+    if (!contact) throw new Error('亲密付角色已不在微信通讯录中。');
+    writeAlipayData(nextData);
+    if (options.notifyIntimatePayer !== false) {
+      try {
+        appendIntimatePayMessage(contact, payer.note, title, amount);
+      } catch (error) {
+        writeAlipayData(data);
+        throw error;
+      }
+    }
+  } else {
+    writeAlipayData(nextData);
+  }
+  return { data: nextData, payer };
+};
+
+export const sendIntimatePayInteraction = (
+  charId: string,
+  title: string,
+  amount: number
+) => {
+  const contact = readAlipayContacts().find((item) => item.id === charId);
+  const payer = readAlipayData().intimateCards.find((card) => card.charId === charId);
+  if (!contact || !payer) throw new Error('找不到亲密付角色，无法发送互动消息。');
+  appendIntimatePayMessage(contact, payer.note, title, amount);
+};

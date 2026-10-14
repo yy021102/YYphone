@@ -275,14 +275,6 @@ export const COUPLE_NOTES = [
   { id: 2, author: '星野 遥', time: '昨日 22:45', text: '晚安，今晚的月色很美，明天见。🌙' },
 ];
 
-export const ALIPAY_TRANSACTIONS = [
-  { id: 1, title: '浅井咖啡屋 · 冰生椰拿铁', category: '餐饮', amount: '-28.00', time: '今日 14:20', isExpense: true },
-  { id: 2, title: '世界书设定赏金入账', category: '收入', amount: '+1200.00', time: '昨日 18:30', isExpense: false },
-  { id: 3, title: '数字云主机租赁月费', category: '数码', amount: '-188.00', time: '10月11日', isExpense: true },
-  { id: 4, title: '新川市立图书馆研讨室预约', category: '学习', amount: '-45.00', time: '10月09日', isExpense: true },
-  { id: 5, title: '闲鱼二手手办转卖收入', category: '二手', amount: '+360.00', time: '10月07日', isExpense: false },
-];
-
 export const MEMORY_FRAGMENTS = [
   {
     id: 1,
@@ -327,72 +319,6 @@ export const MEMORY_FRAGMENTS = [
     mood: '✨ 晶莹闪耀',
     color: 'from-teal-300/30 to-emerald-400/20',
     tag: '#系统新生',
-  },
-];
-
-export const TAOBAO_PRODUCTS = [
-  {
-    id: 1,
-    title: '生椰燕麦轻乳茶 (双倍珍珠)',
-    store: '浅井茶饮研究所',
-    price: '21.5',
-    origPrice: '26',
-    rating: '4.9',
-    tag: '30分钟必达',
-    badge: '外卖热销',
-    color: 'from-amber-100 to-orange-200',
-  },
-  {
-    id: 2,
-    title: '低糖手作巴斯克芝士蛋糕',
-    store: '星野甜点屋',
-    price: '35.0',
-    origPrice: '42',
-    rating: '5.0',
-    tag: '冷链配送',
-    badge: '今日推荐',
-    color: 'from-pink-100 to-rose-200',
-  },
-  {
-    id: 3,
-    title: '全麦熏鸡肉牛油果波奇饭',
-    store: 'GreenBite 轻食便当',
-    price: '28.8',
-    origPrice: '36',
-    rating: '4.8',
-    tag: '减脂推荐',
-    badge: '满减优惠',
-    color: 'from-emerald-100 to-teal-200',
-  },
-];
-
-export const XIANYU_ITEMS = [
-  {
-    id: 1,
-    title: '【99新】Retro 68键 客制化机械键盘 (水蓝轴)',
-    seller: '键圈漫游者',
-    price: '268',
-    views: '42人想要',
-    desc: '仅通电试轴两次，手感顺滑如水，附赠透明防尘罩与拔轴器。',
-    color: 'from-sky-200 to-indigo-200',
-  },
-  {
-    id: 2,
-    title: '【正版】世界书创世纪典藏设定画集 (首刷带特典)',
-    seller: '藏书猫猫',
-    price: '145',
-    views: '118人想要',
-    desc: '书脊完好无折痕，内页全彩铜版纸，附赠独家角色书签三枚。',
-    color: 'from-purple-200 to-pink-200',
-  },
-  {
-    id: 3,
-    title: '【日版】胶片复古便携袖珍相机',
-    seller: '晴天小林',
-    price: '199',
-    views: '86人想要',
-    desc: '成色极佳，镜头通透无霉，附带全新电池与皮革腕带。',
-    color: 'from-amber-200 to-yellow-200',
   },
 ];
 

@@ -1,4 +1,5 @@
 import { PersonaCollection, UserPersona } from '../types';
+import { readAlipayData } from './alipayData';
 
 export interface PromptChatMessage {
   id: string;
@@ -69,6 +70,8 @@ const STORAGE_KEYS = {
   personas: 'pocketos:personas',
   worldBooks: 'yyphone:world-books',
   moments: 'yyphone:wechat-moments',
+  taobaoProducts: 'yyphone:taobao-market-products',
+  characterContextEvents: 'yyphone:character-context-events',
 } as const;
 
 const readJson = <T,>(key: string, fallback: T): T => {
@@ -215,6 +218,7 @@ export const buildPrompt = ({
   const worldBooksValue: unknown = readJson(STORAGE_KEYS.worldBooks, []);
   const personaValue: unknown = readJson(STORAGE_KEYS.personas, null);
   const momentsValue: unknown = readJson(STORAGE_KEYS.moments, []);
+  const alipayData = readAlipayData();
 
   const chats = Array.isArray(chatsValue) ? chatsValue.filter(isChatConversation) : [];
   const chat = chats.find((item) => item.id === chatId);
@@ -272,6 +276,77 @@ export const buildPrompt = ({
 
   // 5. User Persona.
   messages.push({ role: 'system', content: `玩家设定：\n${getPersonaText(persona)}\n当前聊天补充：${chat.context || '无'}` });
+
+  const contextEvents = readJson<unknown>(STORAGE_KEYS.characterContextEvents, []);
+  if (Array.isArray(contextEvents)) {
+    const relevantEvents = contextEvents
+      .filter((event): event is Record<string, unknown> =>
+        isRecord(event) &&
+        typeof event.charId === 'string' &&
+        chat.participantIds.includes(event.charId) &&
+        typeof event.content === 'string' &&
+        typeof event.createdAt === 'string'
+      )
+      .sort((left, right) =>
+        (Date.parse(String(left.createdAt)) || 0) - (Date.parse(String(right.createdAt)) || 0)
+      )
+      .slice(-20);
+    if (relevantEvents.length > 0) {
+      messages.push({
+        role: 'system',
+        content: `角色近期互动上下文（包括闲鱼对话和礼物互动）：\n${relevantEvents
+          .map((event) => `${contacts.find((contact) => contact.id === event.charId)?.name ?? event.charId}：${event.content}`)
+          .join('\n')}`,
+      });
+    }
+  }
+
+  const marketProducts = readJson<unknown>(STORAGE_KEYS.taobaoProducts, []);
+  if (Array.isArray(marketProducts)) {
+    const availableProducts = marketProducts.filter((item): item is Record<string, unknown> =>
+      isRecord(item) &&
+      typeof item.id === 'string' &&
+      (item.category === 'shopping' || item.category === 'eleme') &&
+      typeof item.title === 'string' &&
+      typeof item.desc === 'string' &&
+      typeof item.price === 'number'
+    );
+    messages.push({
+      role: 'system',
+      content: [
+        '情节礼物规则：当角色在剧情合适时，可以自然地送玩家一件现有淘宝/饿了么商品，或提出一件新商品/外卖并立即送达；不必每次都送。',
+        `现有可送商品：${JSON.stringify(availableProducts.map(({ id, category, title, desc, price, emoji }) => ({ id, category, title, desc, price, emoji })))}`,
+        '若要送现有商品，在 JSON 回复中增加 gift: {"existingProductId":"商品ID"}；若要现场生成，增加 gift: {"title":"商品名","desc":"商品描述","price":价格数字,"category":"shopping或eleme","emoji":"合适emoji"}。不得虚构 existingProductId。',
+      ].join('\n'),
+    });
+  }
+
+  const allowedViewers = new Set(alipayData.allowedViewers);
+  const canSeeLedger = chat.participantIds.length > 0 &&
+    chat.participantIds.every((participantId) => allowedViewers.has(participantId));
+  if (canSeeLedger) {
+    const recentLedger = [...alipayData.ledgerList]
+      .sort((left, right) =>
+        `${right.date} ${right.time}`.localeCompare(`${left.date} ${left.time}`)
+      )
+      .slice(0, 10)
+      .reverse();
+    if (recentLedger.length > 0) {
+      const authorizedNames = chat.participantIds
+        .map((id) => contacts.find((contact) => contact.id === id)?.name ?? id)
+        .join('、');
+      messages.push({
+        role: 'system',
+        content: [
+          `玩家已允许当前聊天角色（${authorizedNames}）查看近期真实日常记账。`,
+          '仅在对话自然相关时关心或提及，不要逐条复述、夸大或泄露给未获授权的角色。',
+          ...recentLedger.map((item) =>
+            `${item.date} ${item.time} · ${item.isExpense ? '支出' : '收入'} · ${item.title} · ¥${item.amount.toFixed(2)}${item.category ? ` · ${item.category}` : ''}`
+          ),
+        ].join('\n'),
+      });
+    }
+  }
 
   // 6. Recent history, then mounted chat records, merged in chronological order.
   const input = currentInput ?? [...chat.messages].reverse().find((message) => message.senderId === 'user')?.text ?? '';
