@@ -18,9 +18,8 @@ import {
   Image as ImageIcon,
   User,
   Palette,
-  LayoutGrid,
-  Check,
   Save,
+  Shuffle,
 } from 'lucide-react';
 import { AppHeader } from '../components/AppHeader';
 import {
@@ -83,6 +82,7 @@ export interface XianyuChatThread {
   peerName: string;
   linkedCharId?: string;
   isAltAccount?: boolean;
+  isPlayerItem?: boolean;
   messages: {
     id: string;
     sender: 'me' | 'peer';
@@ -103,14 +103,14 @@ export interface PlayerXianyuProfile {
 export interface TaobaoThemePreset {
   id: string;
   name: string;
-  bgGradient: string; // 背景 CSS 渐变
-  wallpaperUrl: string; // 壁纸图片（URL 或 Base64）
-  primaryGradient: string; // 按钮/高亮渐变色
-  cardBg: string; // 卡片背景色与透明度
-  textColor: string; // 主文字颜色
-  layoutMode: 'list' | 'grid'; // 栏目布局：单列列表 vs 双列网格
-  cardRadius: string; // 卡片圆角大小 (如 24px)
-  customCss: string; // 进阶自定义 CSS
+  bgGradient: string;
+  wallpaperUrl: string;
+  primaryGradient: string;
+  cardBg: string;
+  textColor: string;
+  layoutMode: 'list' | 'grid';
+  cardRadius: string;
+  customCss: string;
 }
 
 const DEFAULT_TAOBAO_PRESET: TaobaoThemePreset = {
@@ -126,7 +126,7 @@ const DEFAULT_TAOBAO_PRESET: TaobaoThemePreset = {
   customCss: '/* 可在此粘贴或修改额外样式，例如修改字体或边框 */',
 };
 
-const TAOBAO_STORAGE_KEYS = {
+const STORAGE_KEYS = {
   marketProducts: 'yyphone:taobao-market-products',
   xianyuItems: 'yyphone:taobao-xianyu-items',
   xianyuThreads: 'yyphone:taobao-xianyu-threads',
@@ -134,14 +134,13 @@ const TAOBAO_STORAGE_KEYS = {
   themePresets: 'yyphone:taobao-theme-presets',
   activePresetId: 'yyphone:taobao-active-preset-id',
   currentTheme: 'yyphone:taobao-current-theme',
-  characterEvents: 'yyphone:character-context-events',
-  chats: 'yyphone:wechat-chats',
+  wechatChats: 'yyphone:wechat-chats',
 } as const;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === 'object' && !Array.isArray(value);
 
-const isMarketProducts = (value: unknown): value is MarketProduct[] =>
+const isMarketProductList = (value: unknown): value is MarketProduct[] =>
   Array.isArray(value) && value.every((item) =>
     isRecord(item) &&
     typeof item.id === 'string' &&
@@ -152,7 +151,7 @@ const isMarketProducts = (value: unknown): value is MarketProduct[] =>
     typeof item.emoji === 'string'
   );
 
-const isXianyuItems = (value: unknown): value is XianyuProduct[] =>
+const isXianyuProductList = (value: unknown): value is XianyuProduct[] =>
   Array.isArray(value) && value.every((item) =>
     isRecord(item) &&
     typeof item.id === 'string' &&
@@ -164,7 +163,7 @@ const isXianyuItems = (value: unknown): value is XianyuProduct[] =>
     typeof item.sellerName === 'string'
   );
 
-const isXianyuThreads = (value: unknown): value is XianyuChatThread[] =>
+const isXianyuThreadList = (value: unknown): value is XianyuChatThread[] =>
   Array.isArray(value) && value.every((thread) =>
     isRecord(thread) &&
     typeof thread.id === 'string' &&
@@ -172,6 +171,7 @@ const isXianyuThreads = (value: unknown): value is XianyuChatThread[] =>
     typeof thread.itemTitle === 'string' &&
     typeof thread.itemPrice === 'number' &&
     typeof thread.peerName === 'string' &&
+    (thread.isPlayerItem === undefined || typeof thread.isPlayerItem === 'boolean') &&
     Array.isArray(thread.messages) &&
     thread.messages.every((message) =>
       isRecord(message) &&
@@ -182,7 +182,7 @@ const isXianyuThreads = (value: unknown): value is XianyuChatThread[] =>
     )
   );
 
-const isPlayerProfile = (value: unknown): value is PlayerXianyuProfile =>
+const isPlayerXianyuProfile = (value: unknown): value is PlayerXianyuProfile =>
   isRecord(value) &&
   typeof value.nickname === 'string' &&
   typeof value.xianyuId === 'string' &&
@@ -202,16 +202,16 @@ const isThemePreset = (value: unknown): value is TaobaoThemePreset =>
   typeof value.cardRadius === 'string' &&
   typeof value.customCss === 'string';
 
-const isThemePresets = (value: unknown): value is TaobaoThemePreset[] =>
+const isThemePresetList = (value: unknown): value is TaobaoThemePreset[] =>
   Array.isArray(value) && value.every(isThemePreset);
 
-const readCharacterPersona = (charId: string) => {
-  const storedContacts = readStoredValue<unknown[]>(
+const getCharacterPersona = (charId: string) => {
+  const contacts = readStoredValue<unknown[]>(
     'pocketos:wechat-contacts',
     [],
     (value): value is unknown[] => Array.isArray(value)
   );
-  const character = storedContacts.find((item) => isRecord(item) && item.id === charId);
+  const character = contacts.find((item) => isRecord(item) && item.id === charId);
   return isRecord(character) && typeof character.persona === 'string' ? character.persona : '';
 };
 
@@ -226,44 +226,42 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
 
   // ==================== 3. 淘宝专属美化与预设管理状态 ====================
   const [themePresets, setThemePresets] = useState<TaobaoThemePreset[]>(() => {
-    const stored = readStoredValue(TAOBAO_STORAGE_KEYS.themePresets, [] as TaobaoThemePreset[], isThemePresets);
-    const withDefault = stored.some((preset) => preset.id === 'default')
+    const stored = readStoredValue(STORAGE_KEYS.themePresets, [] as TaobaoThemePreset[], isThemePresetList);
+    return stored.some((preset) => preset.id === 'default')
       ? stored
       : [DEFAULT_TAOBAO_PRESET, ...stored];
-    return withDefault.length > 0 ? withDefault : [DEFAULT_TAOBAO_PRESET];
   });
   const [activePresetId, setActivePresetId] = useState<string>(() =>
-    readStoredValue(TAOBAO_STORAGE_KEYS.activePresetId, 'default', (value): value is string => typeof value === 'string')
+    readStoredValue(STORAGE_KEYS.activePresetId, 'default', (value): value is string => typeof value === 'string')
   );
-  const [currentTheme, setCurrentTheme] = useState<TaobaoThemePreset>(() => {
-    const stored = readStoredValue(TAOBAO_STORAGE_KEYS.currentTheme, DEFAULT_TAOBAO_PRESET, isThemePreset);
-    return stored;
-  });
+  const [currentTheme, setCurrentTheme] = useState<TaobaoThemePreset>(() =>
+    readStoredValue(STORAGE_KEYS.currentTheme, DEFAULT_TAOBAO_PRESET, isThemePreset)
+  );
   const [newPresetName, setNewPresetName] = useState<string>('');
-  const [menuTab, setMenuTab] = useState<'theme' | 'data'>('theme'); // 右上角菜单内切换：美化设置 vs 数据管理
+  const [menuTab, setMenuTab] = useState<'theme' | 'data'>('theme');
 
   // ==================== 4. 三大板块商品列表 ====================
   const [marketProducts, setMarketProducts] = useState<MarketProduct[]>(() =>
-    readStoredValue(TAOBAO_STORAGE_KEYS.marketProducts, [] as MarketProduct[], isMarketProducts)
+    readStoredValue(STORAGE_KEYS.marketProducts, [] as MarketProduct[], isMarketProductList)
   );
 
   const [xianyuItems, setXianyuItems] = useState<XianyuProduct[]>(() =>
-    readStoredValue(TAOBAO_STORAGE_KEYS.xianyuItems, [] as XianyuProduct[], isXianyuItems)
+    readStoredValue(STORAGE_KEYS.xianyuItems, [] as XianyuProduct[], isXianyuProductList)
   );
 
   const [xianyuThreads, setXianyuThreads] = useState<XianyuChatThread[]>(() =>
-    readStoredValue(TAOBAO_STORAGE_KEYS.xianyuThreads, [] as XianyuChatThread[], isXianyuThreads)
+    readStoredValue(STORAGE_KEYS.xianyuThreads, [] as XianyuChatThread[], isXianyuThreadList)
   );
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [chatInput, setChatInput] = useState('');
 
   const [playerProfile, setPlayerProfile] = useState<PlayerXianyuProfile>({
-    ...readStoredValue(TAOBAO_STORAGE_KEYS.playerProfile, {
+    ...readStoredValue(STORAGE_KEYS.playerProfile, {
       nickname: '',
       xianyuId: '',
       avatarUrl: '',
       bio: '',
-    }, isPlayerProfile),
+    }, isPlayerXianyuProfile),
   });
 
   // ==================== 5. 各类弹窗开关与表单状态 ====================
@@ -272,7 +270,12 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
   const [aiError, setAiError] = useState('');
   const [isXianyuReplying, setIsXianyuReplying] = useState(false);
 
-  // 商品新增/编辑弹窗
+  // 闲鱼 AI 上新配置弹窗状态（选择是否包含角色、随机或指定角色）
+  const [showXianyuAiModal, setShowXianyuAiModal] = useState(false);
+  const [includeCharInXianyuAi, setIncludeCharInXianyuAi] = useState<boolean>(true);
+  const [xianyuAiCharTarget, setXianyuAiCharTarget] = useState<string>('random'); // 'random' 或 具体角色 id
+
+  // 商品新增/编辑弹窗（玩家手动挂闲置默认就是玩家自己）
   const [showEditorModal, setShowEditorModal] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formTitle, setFormTitle] = useState('');
@@ -281,8 +284,6 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
   const [formEmoji, setFormEmoji] = useState('🎁');
   const [formImageUrl, setFormImageUrl] = useState('');
   const [formFreeShipping, setFormFreeShipping] = useState(true);
-  const [formSellerName, setFormSellerName] = useState('我的闲置小铺');
-  const [formLinkedCharId, setFormLinkedCharId] = useState('');
 
   // 购买/送礼结算弹窗
   const [checkoutProduct, setCheckoutProduct] = useState<{
@@ -302,13 +303,13 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
 
   useEffect(() => {
     try {
-      writeStoredValue(TAOBAO_STORAGE_KEYS.marketProducts, marketProducts);
-      writeStoredValue(TAOBAO_STORAGE_KEYS.xianyuItems, xianyuItems);
-      writeStoredValue(TAOBAO_STORAGE_KEYS.xianyuThreads, xianyuThreads);
-      writeStoredValue(TAOBAO_STORAGE_KEYS.playerProfile, playerProfile);
-      writeStoredValue(TAOBAO_STORAGE_KEYS.themePresets, themePresets);
-      writeStoredValue(TAOBAO_STORAGE_KEYS.activePresetId, activePresetId);
-      writeStoredValue(TAOBAO_STORAGE_KEYS.currentTheme, currentTheme);
+      writeStoredValue(STORAGE_KEYS.marketProducts, marketProducts);
+      writeStoredValue(STORAGE_KEYS.xianyuItems, xianyuItems);
+      writeStoredValue(STORAGE_KEYS.xianyuThreads, xianyuThreads);
+      writeStoredValue(STORAGE_KEYS.playerProfile, playerProfile);
+      writeStoredValue(STORAGE_KEYS.themePresets, themePresets);
+      writeStoredValue(STORAGE_KEYS.activePresetId, activePresetId);
+      writeStoredValue(STORAGE_KEYS.currentTheme, currentTheme);
     } catch (error) {
       console.error('Could not persist Taobao app data.', error);
       setAiError('淘宝数据保存失败，请检查设备存储空间。');
@@ -376,14 +377,14 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
   };
 
   const handleDeletePreset = (id: string) => {
-    if (id === 'default') return; // 默认预设保留
+    if (id === 'default') return;
     const nextList = themePresets.filter((p) => p.id !== id);
     setThemePresets(nextList);
     setActivePresetId('default');
-    setCurrentTheme( nextList.find((p) => p.id === 'default') || DEFAULT_TAOBAO_PRESET );
+    setCurrentTheme(nextList.find((p) => p.id === 'default') || DEFAULT_TAOBAO_PRESET);
   };
 
-  // ==================== 8. 商品增删改与 AI 生成模拟 ====================
+  // ==================== 8. 商品增删改与 AI 生成逻辑 ====================
   const openCreateModal = () => {
     setEditingId(null);
     setFormTitle('');
@@ -392,8 +393,6 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
     setFormEmoji(activeTab === 'shopping' ? '🛍️' : activeTab === 'eleme' ? '🍱' : '📦');
     setFormImageUrl('');
     setFormFreeShipping(true);
-    setFormSellerName(playerProfile.nickname || '玩家自营');
-    setFormLinkedCharId('');
     setShowEditorModal(true);
   };
 
@@ -415,8 +414,6 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
     setFormEmoji(item.emoji || '📦');
     setFormImageUrl(item.imageUrl || '');
     setFormFreeShipping(item.freeShipping);
-    setFormSellerName(item.sellerName);
-    setFormLinkedCharId(item.linkedCharId || '');
     setShowEditorModal(true);
   };
 
@@ -456,6 +453,7 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
         setMarketProducts((prev) => [newProd, ...prev]);
       }
     } else {
+      // 玩家手动挂闲置：默认卖家就是玩家自己！
       if (editingId) {
         setXianyuItems((prev) =>
           prev.map((item) =>
@@ -468,8 +466,6 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
                   freeShipping: formFreeShipping,
                   emoji: formEmoji || '📦',
                   imageUrl: formImageUrl.trim() || undefined,
-                  sellerName: formSellerName.trim() || playerProfile.nickname,
-                  linkedCharId: formLinkedCharId || undefined,
                 }
               : item
           )
@@ -483,9 +479,8 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
           freeShipping: formFreeShipping,
           emoji: formEmoji || '📦',
           imageUrl: formImageUrl.trim() || undefined,
-          sellerName: formSellerName.trim() || playerProfile.nickname,
-          isPlayerItem: !formLinkedCharId,
-          linkedCharId: formLinkedCharId || undefined,
+          sellerName: playerProfile.nickname || '玩家',
+          isPlayerItem: true,
         };
         setXianyuItems((prev) => [newXy, ...prev]);
       }
@@ -501,70 +496,90 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
     }
   };
 
-  const handleAiGenerateItems = async () => {
+  // 点击顶部“AI 上新”按钮：如果是闲鱼，先弹出角色彩蛋选择框；如果是购物/饿了么，直接生成
+  const handleClickAiButton = () => {
+    if (activeTab === 'xianyu') {
+      setShowXianyuAiModal(true);
+    } else {
+      runAiGeneration();
+    }
+  };
+
+  // 执行 AI 生成商品
+  const runAiGeneration = async () => {
+    setShowXianyuAiModal(false);
     setIsAiGenerating(true);
     setAiError('');
     try {
-      const category = activeTab;
-      const response = await requestConfiguredAiText(
-        '你是虚拟手机商城的商品编辑。只生成符合指定板块的中文商品，内容具体自然，价格使用人民币数字。',
-        category === 'xianyu'
-          ? '为闲鱼生成 2 到 3 件真实可信的二手闲置商品，语气贴近真实闲鱼卖家。只返回 JSON：{"products":[{"title":"标题","desc":"描述","price":数字,"freeShipping":true或false,"emoji":"emoji"}]}。'
-          : `为${category === 'shopping' ? '淘宝购物' : '饿了么外卖'}板块生成 2 到 3 件契合主题的商品。只返回 JSON：{"products":[{"title":"标题","desc":"描述","price":数字,"emoji":"emoji"}]}。`,
-        { json: true }
-      );
-      const parsed: unknown = JSON.parse(response);
+      let chosenChar: AlipayContact | undefined;
+      if (activeTab === 'xianyu' && includeCharInXianyuAi && contacts.length > 0) {
+        if (xianyuAiCharTarget === 'random') {
+          chosenChar = contacts[Math.floor(Math.random() * contacts.length)];
+        } else {
+          chosenChar = contacts.find((contact) => contact.id === xianyuAiCharTarget);
+          if (!chosenChar) throw new Error('选择的通讯录角色已不存在，请重新选择。');
+        }
+      }
+
+      const systemPrompt = chosenChar
+        ? `你是闲鱼二手卖家，正在以角色${chosenChar.name}的小号上架闲置商品。角色人设：${getCharacterPersona(chosenChar.id) || '根据聊天角色的生活习惯自然创作'}。商品必须像角色真实拥有并可能出售的物品。`
+        : '你是虚拟商城商品编辑，生成符合板块且真实自然的中文商品。闲鱼商品必须是普通路人卖家的二手闲置，不能关联任何通讯录角色。';
+      const userPrompt = activeTab === 'xianyu'
+        ? '生成 2 到 3 件闲鱼二手闲置商品，文案像真实卖家发布，包含成色、转卖原因或交易语气。只返回 JSON：{"products":[{"title":"标题","desc":"描述","price":数字,"freeShipping":true或false,"emoji":"契合商品的emoji"}]}。'
+        : `为${activeTab === 'shopping' ? '淘宝购物' : '饿了么外卖'}板块生成 2 到 3 件符合板块主题的虚拟商品。只返回 JSON：{"products":[{"title":"标题","desc":"描述","price":数字,"emoji":"契合商品的emoji"}]}。`;
+      const content = await requestConfiguredAiText(systemPrompt, userPrompt, { json: true });
+      const parsed: unknown = JSON.parse(content);
       const rawProducts = Array.isArray(parsed)
         ? parsed
         : isRecord(parsed) && Array.isArray(parsed.products)
           ? parsed.products
           : [];
-      const products = rawProducts.filter((item): item is Record<string, unknown> =>
-        isRecord(item) &&
-        typeof item.title === 'string' &&
-        typeof item.desc === 'string' &&
-        typeof item.price === 'number' &&
-        Number.isFinite(item.price) &&
-        item.price > 0
+      const validProducts = rawProducts.filter((product): product is Record<string, unknown> =>
+        isRecord(product) &&
+        typeof product.title === 'string' &&
+        !!product.title.trim() &&
+        typeof product.desc === 'string' &&
+        !!product.desc.trim() &&
+        typeof product.price === 'number' &&
+        Number.isFinite(product.price) &&
+        product.price > 0
       ).slice(0, 3);
-      if (products.length < 2) throw new Error('AI 至少需要返回两件有效商品，请重试。');
+      if (validProducts.length < 2) {
+        throw new Error('AI 至少需要返回两件有效商品，请重试。');
+      }
 
-      if (category === 'xianyu') {
-        const generatedItems: XianyuProduct[] = products.map((item, index) => {
-          const linkedChar = contacts.length > 0 && Math.random() < 0.45
-            ? contacts[Math.floor(Math.random() * contacts.length)]
-            : undefined;
-          const isAltAccount = !!linkedChar && Math.random() < 0.5;
-          return {
-            id: `xy-ai-${Date.now()}-${index}`,
-            title: item.title as string,
-            desc: item.desc as string,
-            price: item.price as number,
-            freeShipping: typeof item.freeShipping === 'boolean' ? item.freeShipping : true,
-            emoji: typeof item.emoji === 'string' ? item.emoji : '📦',
-            sellerName: linkedChar
-              ? (isAltAccount ? `${linkedChar.name}的小号` : linkedChar.name)
-              : `闲置卖家_${Math.floor(100 + Math.random() * 900)}`,
-            linkedCharId: linkedChar?.id,
-            isAltAccount,
-          };
-        });
+      if (activeTab === 'xianyu') {
+        const generatedItems: XianyuProduct[] = validProducts.map((product, index) => ({
+          id: `xy-ai-${Date.now()}-${index}`,
+          title: (product.title as string).trim(),
+          desc: (product.desc as string).trim(),
+          price: product.price as number,
+          freeShipping: typeof product.freeShipping === 'boolean' ? product.freeShipping : true,
+          emoji: typeof product.emoji === 'string' ? product.emoji : '📦',
+          sellerName: chosenChar
+            ? `${chosenChar.name.slice(0, 1)}***的小号`
+            : `闲置卖家_${Math.floor(100 + Math.random() * 900)}`,
+          linkedCharId: chosenChar?.id,
+          isAltAccount: chosenChar ? true : undefined,
+          isPlayerItem: false,
+        }));
         setXianyuItems((previous) => [...generatedItems, ...previous]);
       } else {
-        const generatedItems: MarketProduct[] = products.map((item, index) => ({
+        const category = activeTab;
+        const generatedItems: MarketProduct[] = validProducts.map((product, index) => ({
           id: `${category}-ai-${Date.now()}-${index}`,
           category,
-          title: item.title as string,
-          desc: item.desc as string,
-          price: item.price as number,
-          emoji: typeof item.emoji === 'string' ? item.emoji : category === 'shopping' ? '🛍️' : '🍱',
+          title: (product.title as string).trim(),
+          desc: (product.desc as string).trim(),
+          price: product.price as number,
+          emoji: typeof product.emoji === 'string' ? product.emoji : category === 'shopping' ? '🛍️' : '🍱',
           store: category === 'shopping' ? 'AI 灵感好物店' : 'AI 今日推荐',
           badge: 'AI上新',
         }));
         setMarketProducts((previous) => [...generatedItems, ...previous]);
       }
     } catch (error) {
-      console.error('Could not generate Taobao items.', error);
+      console.error('Could not generate Taobao products.', error);
       setAiError(error instanceof Error ? error.message : 'AI 上新失败，请检查 API 配置后重试。');
     } finally {
       setIsAiGenerating(false);
@@ -574,22 +589,22 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
   const sendCharacterDeliveryNotification = async (charId: string, eventText: string) => {
     const character = contacts.find((contact) => contact.id === charId);
     if (!character) throw new Error('找不到要通知的通讯录角色。');
-    const raw = window.localStorage.getItem(TAOBAO_STORAGE_KEYS.chats);
-    const parsed: unknown = raw ? JSON.parse(raw) : [];
-    if (!Array.isArray(parsed)) throw new Error('微信聊天数据格式无效。');
-    const chats = parsed as Array<Record<string, unknown>>;
+    const rawChats = window.localStorage.getItem(STORAGE_KEYS.wechatChats);
+    const parsedChats: unknown = rawChats ? JSON.parse(rawChats) : [];
+    if (!Array.isArray(parsedChats)) throw new Error('微信聊天数据格式无效。');
+    const chats = parsedChats as Array<Record<string, unknown>>;
     let chat = chats.find((item) =>
       item.type === 'direct' &&
       Array.isArray(item.participantIds) &&
       item.participantIds.length === 1 &&
       item.participantIds[0] === charId
     );
-    const now = new Date().toISOString();
+    const timestamp = new Date().toISOString();
     const triggerMessage = {
       id: `message-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       senderId: 'user',
       text: `【系统提示：礼物已立即送达】${eventText} 请以角色身份自然地向玩家发一条感谢或互动消息。`,
-      createdAt: now,
+      createdAt: timestamp,
     };
     if (!chat) {
       chat = {
@@ -603,7 +618,7 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
         pinned: false,
         avatars: {},
         messages: [],
-        updatedAt: now,
+        updatedAt: timestamp,
         groupTitle: '',
         groupNicknames: {},
         allowAgentGroupRename: false,
@@ -614,31 +629,30 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
     }
     if (!Array.isArray(chat.messages)) throw new Error('角色微信会话的消息列表格式无效。');
     chat.messages.push(triggerMessage);
-    chat.updatedAt = now;
-    window.localStorage.setItem(TAOBAO_STORAGE_KEYS.chats, JSON.stringify(chats));
+    chat.updatedAt = timestamp;
+    window.localStorage.setItem(STORAGE_KEYS.wechatChats, JSON.stringify(chats));
 
     const reply = await requestConfiguredAiText(
-      `你正在扮演${character.name}。角色设定：${readCharacterPersona(character.id) || '保持自然、亲切且符合上下文。'}。你刚收到玩家送来的商品，请用微信消息自然感谢或互动。只返回一条简短纯文本消息，不要 JSON。`,
+      `你正在扮演${character.name}。角色设定：${getCharacterPersona(character.id) || '保持自然、亲切且符合上下文。'}。你刚收到玩家送来的商品，请用微信消息自然感谢或互动。只返回一条简短纯文本消息，不要 JSON。`,
       triggerMessage.text
     );
-    const latestRaw = window.localStorage.getItem(TAOBAO_STORAGE_KEYS.chats);
-    const latest: unknown = latestRaw ? JSON.parse(latestRaw) : [];
-    if (!Array.isArray(latest)) throw new Error('微信聊天数据格式无效，无法保存 AI 回复。');
-    const latestChats = latest as Array<Record<string, unknown>>;
-    const latestChat = latestChats.find((item) => item.id === chat?.id);
-    if (!latestChat || !Array.isArray(latestChat.messages)) {
+    const latestRaw = window.localStorage.getItem(STORAGE_KEYS.wechatChats);
+    const latestChats: unknown = latestRaw ? JSON.parse(latestRaw) : [];
+    if (!Array.isArray(latestChats)) throw new Error('微信聊天数据格式无效，无法保存 AI 回复。');
+    const currentChat = (latestChats as Array<Record<string, unknown>>).find((item) => item.id === chat?.id);
+    if (!currentChat || !Array.isArray(currentChat.messages)) {
       throw new Error('保存 AI 回复时找不到角色微信会话。');
     }
-    const replyTime = new Date().toISOString();
-    latestChat.messages.push({
+    const replyTimestamp = new Date().toISOString();
+    currentChat.messages.push({
       id: `message-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       senderId: charId,
       text: reply,
       thought: '',
-      createdAt: replyTime,
+      createdAt: replyTimestamp,
     });
-    latestChat.updatedAt = replyTime;
-    window.localStorage.setItem(TAOBAO_STORAGE_KEYS.chats, JSON.stringify(latestChats));
+    currentChat.updatedAt = replyTimestamp;
+    window.localStorage.setItem(STORAGE_KEYS.wechatChats, JSON.stringify(latestChats));
   };
 
   // ==================== 9. 结算支付与送礼/通知角色 ====================
@@ -653,19 +667,19 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
         ? { type: 'balance' as const }
         : { type: 'intimate' as const, charId: paymentSelection.slice('intimate:'.length) };
 
-    let result: ReturnType<typeof chargeAlipay>;
+    let purchaseResult: ReturnType<typeof chargeAlipay>;
     try {
       const targetNote =
         buyForWho === 'char'
           ? `送给角色礼物(${contacts.find((c) => c.id === targetCharId)?.name || 'TA'})`
           : '自购';
-      result = chargeAlipay(
+      purchaseResult = chargeAlipay(
         Number(checkoutProduct.price),
         `${checkoutProduct.type === 'eleme' ? '饿了么' : checkoutProduct.type === 'xianyu' ? '闲鱼' : '淘宝'} · ${checkoutProduct.title} [${targetNote}]`,
         source,
-        { recordLedger: false }
+        { recordLedger: false, notifyIntimatePayer: false }
       );
-      setFinanceData(result.data);
+      setFinanceData(purchaseResult.data);
       setPaymentError('');
       setPaymentNotice(
         buyForWho === 'char'
@@ -681,19 +695,14 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
 
     try {
       if (buyForWho === 'char') {
-        const character = contacts.find((contact) => contact.id === targetCharId);
-        if (!character) throw new Error('找不到收礼角色。');
-        const event = `玩家立即送达礼物「${checkoutProduct.title}」（¥${Number(checkoutProduct.price).toFixed(2)}），收礼对象：${character.name}。`;
-        appendCharacterContextEvent(character.id, event, 'taobao');
-        await sendCharacterDeliveryNotification(character.id, event);
+        const recipient = contacts.find((contact) => contact.id === targetCharId);
+        if (!recipient) throw new Error('找不到收礼角色。');
+        const event = `玩家立即送达礼物「${checkoutProduct.title}」（¥${Number(checkoutProduct.price).toFixed(2)}），收礼对象：${recipient.name}。`;
+        appendCharacterContextEvent(recipient.id, event, 'taobao');
+        await sendCharacterDeliveryNotification(recipient.id, event);
       } else {
         const event = `玩家购买了「${checkoutProduct.title}」（¥${Number(checkoutProduct.price).toFixed(2)}），并选择让你知道。`;
-        for (const charId of notifyCharIds) {
-          appendCharacterContextEvent(charId, event, 'taobao');
-        }
-      }
-      if (result.payer && buyForWho === 'char') {
-        setPaymentNotice((notice) => `${notice} 已通知亲密付角色。`);
+        notifyCharIds.forEach((charId) => appendCharacterContextEvent(charId, event, 'taobao'));
       }
     } catch (error) {
       console.error('Purchase succeeded, but character notification failed.', error);
@@ -719,6 +728,7 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
       peerName: item.sellerName,
       linkedCharId: item.linkedCharId,
       isAltAccount: item.isAltAccount,
+      isPlayerItem: item.isPlayerItem,
       messages: [],
     };
     setXianyuThreads((prev) => [newThread, ...prev]);
@@ -747,32 +757,48 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
     const linkedCharacter = thread.linkedCharId
       ? contacts.find((contact) => contact.id === thread.linkedCharId)
       : undefined;
-    const contextMessage = `闲鱼商品「${thread.itemTitle}」（¥${thread.itemPrice}），玩家闲鱼 ID：${playerProfile.xianyuId || '未设置'}。${linkedCharacter ? `当前卖家关联角色：${linkedCharacter.name}${thread.isAltAccount ? '（使用小号）' : ''}。` : ''}玩家消息：${text}`;
+    const history = thread.messages
+      .map((message) => `${message.sender === 'me' ? '玩家' : thread.peerName}：${message.text}`)
+      .join('\n');
+    const playerIdContext = `玩家闲鱼 ID：${playerProfile.xianyuId || '未设置'}。`;
     try {
       if (thread.linkedCharId) {
-        appendCharacterContextEvent(thread.linkedCharId, `闲鱼对话（${thread.isAltAccount ? '小号' : '角色账号'}「${thread.peerName}」）：玩家：${text}`, 'xianyu');
+        appendCharacterContextEvent(
+          thread.linkedCharId,
+          `闲鱼对话（${thread.isAltAccount ? '小号' : '角色账号'}「${thread.peerName}」）：玩家：${text}`,
+          'xianyu'
+        );
       }
-      const history = thread.messages.map((message) =>
-        `${message.sender === 'me' ? '玩家' : thread.peerName}：${message.text}`
-      ).join('\n');
       const reply = await requestConfiguredAiText(
         linkedCharacter
-          ? `你正在闲鱼上扮演角色${linkedCharacter.name}（${thread.isAltAccount ? '使用关联小号' : '使用角色账号'}）回复买家。角色设定：${readCharacterPersona(linkedCharacter.id) || '自然、可信地交流'}。回复要像真实闲鱼聊天，简洁、有生活感，只返回消息正文。`
-          : `你正在扮演闲鱼卖家「${thread.peerName}」，围绕商品自然、简短地回复买家，只返回消息正文。`,
-        `${contextMessage}\n此前对话：\n${history || '暂无'}\n请自然回复玩家的最新消息。`
+          ? `你正在闲鱼上扮演角色${linkedCharacter.name}${thread.isAltAccount ? '的小号' : ''}回复买家。角色人设：${getCharacterPersona(linkedCharacter.id) || '自然、可信地交流'}。回复要像真实闲鱼聊天，简洁有生活感，只返回消息正文。`
+          : thread.isPlayerItem
+            ? `你是闲鱼用户「${thread.peerName}」，正在作为买家咨询玩家发布的二手商品。请像真实买家一样自然简短回复，只返回消息正文。`
+            : `你正在扮演闲鱼卖家「${thread.peerName}」，围绕商品自然、简短地回复买家，只返回消息正文。`,
+        `${playerIdContext}\n商品「${thread.itemTitle}」（¥${thread.itemPrice}）。\n此前对话：\n${history || '暂无'}\n玩家最新消息：${text}`
       );
-      const peerMessage = { id: `m-${Date.now()}`, sender: 'peer' as const, text: reply, time: '刚刚' };
       setXianyuThreads((previous) =>
-        previous.map((item) => item.id === activeThreadId
-          ? { ...item, messages: [...item.messages, peerMessage] }
-          : item
+        previous.map((item) =>
+          item.id === activeThreadId
+            ? {
+                ...item,
+                messages: [
+                  ...item.messages,
+                  { id: `m-${Date.now()}`, sender: 'peer', text: reply, time: '刚刚' },
+                ],
+              }
+            : item
         )
       );
       if (thread.linkedCharId) {
-        appendCharacterContextEvent(thread.linkedCharId, `闲鱼对话（${thread.isAltAccount ? '小号' : '角色账号'}「${thread.peerName}」）：${thread.peerName}：${reply}`, 'xianyu');
+        appendCharacterContextEvent(
+          thread.linkedCharId,
+          `闲鱼对话（${thread.isAltAccount ? '小号' : '角色账号'}「${thread.peerName}」）：${thread.peerName}：${reply}`,
+          'xianyu'
+        );
       }
     } catch (error) {
-      console.error('Could not generate Xianyu reply.', error);
+      console.error('Could not generate Xianyu chat reply.', error);
       setAiError(error instanceof Error ? error.message : '闲鱼 AI 回复失败，请检查 API 配置。');
     } finally {
       setIsXianyuReplying(false);
@@ -807,10 +833,8 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
         color: currentTheme.textColor,
       }}
     >
-      {/* 注入玩家自定义的进阶 CSS */}
       {currentTheme.customCss && <style>{currentTheme.customCss}</style>}
 
-      {/* 淡雅清新粉蓝背景光晕（仅在未设置自定义壁纸时显现） */}
       {!currentTheme.wallpaperUrl && (
         <>
           <div className="absolute -top-16 -left-16 w-56 h-56 rounded-full bg-sky-200/25 blur-3xl pointer-events-none" />
@@ -818,7 +842,7 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
         </>
       )}
 
-      {/* 顶栏：名字改为“淘宝”，右上角三横杠设置菜单 */}
+      {/* 顶栏：淘宝 */}
       <AppHeader
         title="淘宝"
         onBack={onBack}
@@ -863,7 +887,6 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
 
       {/* 主内容滚动区 */}
       <div className="relative z-10 flex-1 min-h-0 overflow-y-auto no-scrollbar px-4 pt-1 space-y-3 pb-[max(env(safe-area-inset-bottom,0px),20px)]">
-        {/* 支付成功提示条 */}
         {paymentNotice && (
           <div
             role="status"
@@ -875,12 +898,17 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
             </button>
           </div>
         )}
+        {aiError && (
+          <p role="alert" className="rounded-xl bg-rose-50/90 px-3 py-2 text-[10px] font-semibold text-rose-500">
+            {aiError}
+          </p>
+        )}
 
-        {/* 简洁双按钮栏：去掉了搜索框，“AI上新”与“加商品/挂闲置”平分整行 */}
+        {/* 简洁双按钮栏：“AI 上新”与“加商品/挂闲置”平分整行 */}
         {!(activeTab === 'xianyu' && xianyuSubTab === 'messages') && (
           <div className="grid grid-cols-2 gap-2.5">
             <button
-              onClick={handleAiGenerateItems}
+              onClick={handleClickAiButton}
               disabled={isAiGenerating}
               className="w-full py-2.5 rounded-2xl bg-gradient-to-r from-[#9BD2FC] to-[#B6C8F8] text-white text-xs font-bold flex items-center justify-center gap-1.5 shadow-2xs border border-white/60 active:scale-98 transition-transform cursor-pointer"
             >
@@ -896,11 +924,6 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
               <span>{activeTab === 'xianyu' ? '挂闲置' : '加商品'}</span>
             </button>
           </div>
-        )}
-        {aiError && (
-          <p role="alert" className="rounded-xl bg-rose-50/90 px-3 py-2 text-[10px] font-semibold text-rose-500">
-            {aiError}
-          </p>
         )}
 
         {/* ==================== 板块 1 & 2：购物 / 饿了么 ==================== */}
@@ -940,7 +963,6 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
                         : 'flex gap-3.5'
                     }`}
                   >
-                    {/* 商品缩略图 */}
                     <div
                       className={`${
                         currentTheme.layoutMode === 'grid' ? 'w-full h-28' : 'w-20 h-20'
@@ -953,7 +975,6 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
                       )}
                     </div>
 
-                    {/* 商品详情与操作 */}
                     <div className="flex-1 min-w-0 flex flex-col justify-between">
                       <div>
                         <div className="flex items-center justify-between gap-1 mb-0.5">
@@ -999,7 +1020,6 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
                           onClick={() => {
                             setPaymentSelection('balance');
                             setBuyForWho('self');
-                            setNotifyCharIds([]);
                             setPaymentError('');
                             setCheckoutProduct({
                               id: p.id,
@@ -1026,7 +1046,6 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
         {/* ==================== 板块 3：闲鱼 (商品页 + 消息页) ==================== */}
         {activeTab === 'xianyu' && (
           <div className="space-y-3">
-            {/* 闲鱼内部二级导航 */}
             <div className="flex items-center justify-between bg-white/55 backdrop-blur-xl border border-white/80 p-1 rounded-2xl">
               <button
                 onClick={() => {
@@ -1097,6 +1116,11 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
                             {item.sellerName.slice(0, 1)}
                           </div>
                           <span className="text-[11px] font-bold truncate">@{item.sellerName}</span>
+                          {item.isPlayerItem && (
+                            <span className="text-[9px] bg-sky-50 text-sky-500 px-1.5 py-0.5 rounded-full font-bold shrink-0">
+                              我发布的
+                            </span>
+                          )}
                         </div>
 
                         <div className="flex items-center gap-1 shrink-0">
@@ -1155,7 +1179,6 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
                             onClick={() => {
                               setPaymentSelection('balance');
                               setBuyForWho('self');
-                              setNotifyCharIds([]);
                               setCheckoutProduct({
                                 id: item.id,
                                 title: item.title,
@@ -1179,7 +1202,6 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
             {/* 闲鱼子页 B：消息列表 + 玩家自己的闲鱼号 */}
             {xianyuSubTab === 'messages' && (
               <div className="space-y-3">
-                {/* 玩家闲鱼名片 */}
                 <div
                   style={{
                     backgroundColor: currentTheme.cardBg,
@@ -1290,7 +1312,9 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
                         style={{ background: currentTheme.primaryGradient }}
                         className="p-2 rounded-2xl text-white cursor-pointer active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        {isXianyuReplying ? <Sparkles className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                        {isXianyuReplying
+                          ? <Sparkles className="w-4 h-4 animate-spin" />
+                          : <Send className="w-4 h-4" />}
                       </button>
                     </div>
                   </div>
@@ -1337,6 +1361,117 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
           </div>
         )}
       </div>
+
+      {/* ==================== 弹窗 0：闲鱼 AI 上新配置窗（选择是否包含角色彩蛋 & 指定/随机角色） ==================== */}
+      {showXianyuAiModal && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-900/30 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-sm bg-white/95 backdrop-blur-2xl border border-white rounded-3xl p-5 shadow-xl space-y-4 text-slate-700">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-extrabold flex items-center gap-1.5">
+                <Sparkles className="w-4 h-4 text-sky-400" />
+                <span>闲鱼 AI 上新设置</span>
+              </h3>
+              <button
+                onClick={() => setShowXianyuAiModal(false)}
+                className="w-7 h-7 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* 选择本次生成是否包含角色 */}
+            <div className="space-y-2">
+              <span className="text-xs font-bold block">本次生成是否包含角色闲置彩蛋？</span>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIncludeCharInXianyuAi(true)}
+                  className={`py-2 rounded-2xl text-xs font-bold border transition-all cursor-pointer ${
+                    includeCharInXianyuAi
+                      ? 'bg-gradient-to-r from-[#9BD2FC] to-[#F7B9D2] text-white border-transparent shadow-2xs'
+                      : 'bg-slate-50 text-slate-500 border-slate-200'
+                  }`}
+                >
+                  ✨ 是，包含角色
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIncludeCharInXianyuAi(false)}
+                  className={`py-2 rounded-2xl text-xs font-bold border transition-all cursor-pointer ${
+                    !includeCharInXianyuAi
+                      ? 'bg-sky-400 text-white border-transparent shadow-2xs'
+                      : 'bg-slate-50 text-slate-500 border-slate-200'
+                  }`}
+                >
+                  🌿 否，纯路人闲置
+                </button>
+              </div>
+            </div>
+
+            {/* 如果选择包含角色：出现随机生成 or 角色点选列表 */}
+            {includeCharInXianyuAi && (
+              <div className="space-y-2 bg-pink-50/50 p-3.5 rounded-2xl border border-pink-100">
+                <span className="text-[11px] font-bold text-slate-600 block">
+                  选择要偶遇哪位角色的闲置（本人或小号）：
+                </span>
+
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setXianyuAiCharTarget('random')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold border flex items-center gap-1 cursor-pointer ${
+                      xianyuAiCharTarget === 'random'
+                        ? 'bg-pink-400 text-white border-transparent shadow-2xs'
+                        : 'bg-white text-slate-600 border-slate-200'
+                    }`}
+                  >
+                    <Shuffle className="w-3 h-3" />
+                    <span>随机角色</span>
+                  </button>
+
+                  {contacts.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => setXianyuAiCharTarget(c.id)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold border cursor-pointer ${
+                        xianyuAiCharTarget === c.id
+                          ? 'bg-sky-400 text-white border-transparent shadow-2xs'
+                          : 'bg-white text-slate-600 border-slate-200'
+                      }`}
+                    >
+                      {c.name}
+                    </button>
+                  ))}
+                </div>
+
+                {contacts.length === 0 && (
+                  <p className="text-[10px] text-slate-400">
+                    当前通讯录暂无角色，将默认生成神秘路人闲置~
+                  </p>
+                )}
+              </div>
+            )}
+
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={() => setShowXianyuAiModal(false)}
+                className="flex-1 py-2.5 rounded-2xl bg-slate-100 text-xs font-bold text-slate-500 cursor-pointer"
+              >
+                取消
+              </button>
+              <button
+                onClick={runAiGeneration}
+                disabled={isAiGenerating}
+                style={{ background: currentTheme.primaryGradient }}
+                className="flex-1 py-2.5 rounded-2xl text-xs font-bold text-white shadow-2xs cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isAiGenerating ? 'AI 生成中...' : '立即生成'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ==================== 弹窗 1：购买 / 送给角色 / 选择支付方式弹窗 ==================== */}
       {checkoutProduct && (
@@ -1502,13 +1637,13 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
         </div>
       )}
 
-      {/* ==================== 弹窗 2：新增 / 编辑商品弹窗 ==================== */}
+      {/* ==================== 弹窗 2：新增 / 编辑商品弹窗（玩家挂闲置仅保留“是否包邮”开关，默认玩家本人） ==================== */}
       {showEditorModal && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-900/30 p-4 backdrop-blur-xs">
           <div className="w-full max-w-sm bg-white/95 backdrop-blur-2xl border border-white rounded-3xl p-5 shadow-xl space-y-3 max-h-[90%] overflow-y-auto text-slate-700">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-extrabold">
-                {editingId ? '编辑商品' : '上架新商品'}
+                {editingId ? '编辑商品' : activeTab === 'xianyu' ? '挂出我的闲置' : '上架新商品'}
               </h3>
               <button
                 onClick={() => setShowEditorModal(false)}
@@ -1527,7 +1662,7 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
             />
 
             <textarea
-              placeholder="商品简介 / 描述..."
+              placeholder="商品简介 / 闲置描述..."
               value={formDesc}
               onChange={(e) => setFormDesc(e.target.value)}
               rows={2}
@@ -1575,39 +1710,19 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
               </label>
             </div>
 
+            {/* 闲鱼专属：仅保留清爽的“是否包邮”开关，默认就是玩家自己的闲置 */}
             {activeTab === 'xianyu' && (
-              <div className="space-y-2 bg-pink-50/40 p-3 rounded-2xl border border-pink-100">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold">是否包邮</span>
-                  <button
-                    type="button"
-                    onClick={() => setFormFreeShipping(!formFreeShipping)}
-                    className={`px-3 py-1 rounded-full text-[11px] font-bold cursor-pointer ${
-                      formFreeShipping ? 'bg-emerald-400 text-white' : 'bg-slate-200 text-slate-600'
-                    }`}
-                  >
-                    {formFreeShipping ? '✓ 包邮' : '邮费自理'}
-                  </button>
-                </div>
-                <input
-                  type="text"
-                  placeholder="卖家昵称"
-                  value={formSellerName}
-                  onChange={(e) => setFormSellerName(e.target.value)}
-                  className="w-full px-2.5 py-1.5 rounded-xl bg-white border border-slate-200 text-xs"
-                />
-                <select
-                  value={formLinkedCharId}
-                  onChange={(e) => setFormLinkedCharId(e.target.value)}
-                  className="w-full px-2.5 py-1.5 rounded-xl bg-white border border-slate-200 text-xs"
+              <div className="flex items-center justify-between bg-pink-50/40 p-3 rounded-2xl border border-pink-100">
+                <span className="text-xs font-bold">是否包邮</span>
+                <button
+                  type="button"
+                  onClick={() => setFormFreeShipping(!formFreeShipping)}
+                  className={`px-3 py-1 rounded-full text-[11px] font-bold cursor-pointer ${
+                    formFreeShipping ? 'bg-emerald-400 text-white' : 'bg-slate-200 text-slate-600'
+                  }`}
                 >
-                  <option value="">卖家身份：我自己 / 普通路人</option>
-                  {contacts.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      角色本人或小号：{c.name}
-                    </option>
-                  ))}
-                </select>
+                  {formFreeShipping ? '✓ 包邮' : '邮费自理'}
+                </button>
               </div>
             )}
 
@@ -1697,7 +1812,7 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
         </div>
       )}
 
-      {/* ==================== 弹窗 4：右上角编辑页面（新增美化板块 + 预设切换 + 壁纸 + 数据管理） ==================== */}
+      {/* ==================== 弹窗 4：右上角编辑页面（美化预设 + 壁纸 + 数据管理） ==================== */}
       {showTopMenu && (
         <div className="absolute inset-0 z-50 bg-slate-900/30 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="w-full max-w-sm bg-white/95 backdrop-blur-2xl border border-white rounded-3xl p-5 shadow-xl space-y-3.5 max-h-[92%] overflow-y-auto text-slate-700">
@@ -1711,7 +1826,6 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
               </button>
             </div>
 
-            {/* 顶部切换：页面美化 vs 数据管理 */}
             <div className="grid grid-cols-2 p-1 bg-slate-100 rounded-2xl">
               <button
                 onClick={() => setMenuTab('theme')}
@@ -1733,10 +1847,8 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
               </button>
             </div>
 
-            {/* 板块 A：淘宝专属美化与预设管理 */}
             {menuTab === 'theme' && (
               <div className="space-y-3 text-xs">
-                {/* 1. 预设切换与删除框 */}
                 <div className="bg-sky-50/60 border border-sky-100 rounded-2xl p-3 space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="font-bold text-slate-700">当前美化预设</span>
@@ -1763,7 +1875,6 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
                     ))}
                   </select>
 
-                  {/* 另存为新预设 */}
                   <div className="flex gap-1.5 pt-1">
                     <input
                       type="text"
@@ -1781,7 +1892,6 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
                   </div>
                 </div>
 
-                {/* 2. 栏目布局与圆角设置 */}
                 <div className="bg-slate-50 border border-slate-100 rounded-2xl p-3 space-y-2">
                   <span className="font-bold block">各栏目商品布局</span>
                   <div className="grid grid-cols-2 gap-2">
@@ -1810,7 +1920,6 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
                   </div>
                 </div>
 
-                {/* 3. 淘宝专属壁纸（支持图床 URL 和本地上传） */}
                 <div className="bg-pink-50/50 border border-pink-100 rounded-2xl p-3 space-y-1.5">
                   <div className="flex items-center justify-between">
                     <span className="font-bold">淘宝专属背景壁纸</span>
@@ -1848,7 +1957,6 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
                   </label>
                 </div>
 
-                {/* 4. 原美化参数展示与直接修改（方便玩家对照改配色，比如改成黑银） */}
                 <div className="bg-slate-50 border border-slate-100 rounded-2xl p-3 space-y-2">
                   <span className="font-bold block">配色与样式参数（可直接参照原参数修改）</span>
 
@@ -1942,7 +2050,6 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
               </div>
             )}
 
-            {/* 板块 B：数据导入、导出与清除 */}
             {menuTab === 'data' && (
               <div className="grid grid-cols-3 gap-2.5 pt-1">
                 <button
@@ -1968,24 +2075,25 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
                         try {
                           const data: unknown = JSON.parse(String(ev.target?.result));
                           if (!isRecord(data)) throw new Error('导入文件内容必须是对象。');
-                          if (isMarketProducts(data.marketProducts)) setMarketProducts(data.marketProducts);
-                          if (isXianyuItems(data.xianyuItems)) setXianyuItems(data.xianyuItems);
-                          if (isXianyuThreads(data.xianyuThreads)) setXianyuThreads(data.xianyuThreads);
-                          if (isPlayerProfile(data.playerProfile)) setPlayerProfile(data.playerProfile);
-                          if (isThemePresets(data.themePresets)) {
+                          if (isMarketProductList(data.marketProducts)) setMarketProducts(data.marketProducts);
+                          if (isXianyuProductList(data.xianyuItems)) setXianyuItems(data.xianyuItems);
+                          if (isXianyuThreadList(data.xianyuThreads)) setXianyuThreads(data.xianyuThreads);
+                          if (isPlayerXianyuProfile(data.playerProfile)) setPlayerProfile(data.playerProfile);
+                          if (isThemePresetList(data.themePresets)) {
                             const presets = data.themePresets.some((preset) => preset.id === 'default')
                               ? data.themePresets
                               : [DEFAULT_TAOBAO_PRESET, ...data.themePresets];
                             setThemePresets(presets);
-                            const activeId = typeof data.activePresetId === 'string' &&
+                            const selectedId = typeof data.activePresetId === 'string' &&
                               presets.some((preset) => preset.id === data.activePresetId)
                               ? data.activePresetId
                               : 'default';
-                            setActivePresetId(activeId);
-                            const selectedTheme = isThemePreset(data.currentTheme)
-                              ? data.currentTheme
-                              : presets.find((preset) => preset.id === activeId) ?? DEFAULT_TAOBAO_PRESET;
-                            setCurrentTheme(selectedTheme);
+                            setActivePresetId(selectedId);
+                            setCurrentTheme(
+                              isThemePreset(data.currentTheme)
+                                ? data.currentTheme
+                                : presets.find((preset) => preset.id === selectedId) ?? DEFAULT_TAOBAO_PRESET
+                            );
                           }
                           setShowTopMenu(false);
                         } catch (error) {
