@@ -16,7 +16,7 @@ import {
   CustomWallpapers,
 } from '../types';
 import { compressImageFile } from '../utils/imageFile';
-import { readStoredValue, writeStoredValue } from '../utils/localStorage';
+import { readSetting, saveSetting, SETTINGS_KEYS } from '../utils/settings';
 
 interface ThemeCustomizerAppProps {
   onBack: () => void;
@@ -32,7 +32,6 @@ interface ThemeCustomizerAppProps {
   currentSettings: BeautySettings;
 }
 
-const PRESETS_STORAGE_KEY = 'yyphone:beauty-presets';
 const DEFAULT_PRESETS: BeautyPreset[] = [];
 
 const isBeautySettings = (value: unknown): value is BeautySettings => {
@@ -80,7 +79,7 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
   const [wallpaperDraft, setWallpaperDraft] = useState(customWallpapers);
   const [iconDraft, setIconDraft] = useState<AppIconOverrides>(appIcons);
   const [presets, setPresets] = useState(() =>
-    readStoredValue(PRESETS_STORAGE_KEY, DEFAULT_PRESETS, isBeautyPresetList)
+    readSetting(SETTINGS_KEYS.beautyPresets, DEFAULT_PRESETS, isBeautyPresetList)
   );
   const [presetName, setPresetName] = useState('');
   const [selectedPresetId, setSelectedPresetId] = useState('');
@@ -180,7 +179,7 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
 
   const persistPresets = (nextPresets: BeautyPreset[]) => {
     try {
-      writeStoredValue(PRESETS_STORAGE_KEY, nextPresets);
+      saveSetting(SETTINGS_KEYS.beautyPresets, nextPresets);
       setPresets(nextPresets);
       return true;
     } catch (storageError) {

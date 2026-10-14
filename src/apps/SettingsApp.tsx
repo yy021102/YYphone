@@ -8,13 +8,20 @@ import {
   Key,
   Lock,
   Plus,
+  RotateCcw,
   Save,
   Sliders,
   Trash2,
   Upload,
 } from 'lucide-react';
 import { AppHeader } from '../components/AppHeader';
-import { readStoredValue, writeStoredValue } from '../utils/localStorage';
+import {
+  readSetting,
+  removeSetting,
+  resetAllSettings,
+  saveSetting,
+  SETTINGS_KEYS,
+} from '../utils/settings';
 
 interface ApiPreset {
   id: string;
@@ -29,8 +36,6 @@ interface ApiModel {
   label: string;
 }
 
-const API_PRESETS_STORAGE_KEY = 'yyphone:api-presets';
-const ACTIVE_API_PRESET_STORAGE_KEY = 'yyphone:active-api-preset';
 const isApiPresetList = (value: unknown): value is ApiPreset[] =>
   Array.isArray(value) &&
   value.every(
@@ -47,7 +52,7 @@ const isApiPresetList = (value: unknown): value is ApiPreset[] =>
 interface SettingsAppProps {
   onBack: () => void;
   showStatusBar: boolean;
-  onToggleStatusBar: () => void;
+  onToggleStatusBar: () => boolean;
   onLockScreen: () => void;
   lockSettings: { mode: 'none' | 'lock' | 'password'; password: string };
   onSaveLockSettings: (settings: {
@@ -69,10 +74,10 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
   const [lockSettingsSaved, setLockSettingsSaved] = useState(false);
   const [lockSettingsError, setLockSettingsError] = useState('');
   const [apiPresets, setApiPresets] = useState(() =>
-    readStoredValue(API_PRESETS_STORAGE_KEY, [] as ApiPreset[], isApiPresetList)
+    readSetting(SETTINGS_KEYS.apiPresets, [] as ApiPreset[], isApiPresetList)
   );
-  const activeApiPresetId = readStoredValue(
-    ACTIVE_API_PRESET_STORAGE_KEY,
+  const activeApiPresetId = readSetting(
+    SETTINGS_KEYS.activeApiPreset,
     apiPresets[0]?.id ?? '',
     (value): value is string => typeof value === 'string'
   );
@@ -92,10 +97,11 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
   const [apiError, setApiError] = useState('');
   const [backupMessage, setBackupMessage] = useState('');
   const [backupError, setBackupError] = useState('');
+  const [statusBarError, setStatusBarError] = useState('');
 
   const persistApiPresets = (nextPresets: ApiPreset[]): boolean => {
     try {
-      writeStoredValue(API_PRESETS_STORAGE_KEY, nextPresets);
+      saveSetting(SETTINGS_KEYS.apiPresets, nextPresets);
       setApiPresets(nextPresets);
       setApiError('');
       setApiMessage('API 配置预设已保存。');
@@ -127,7 +133,7 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
       : [...apiPresets, preset];
     if (persistApiPresets(nextPresets)) {
       setSelectedApiPresetId(preset.id);
-      writeStoredValue(ACTIVE_API_PRESET_STORAGE_KEY, preset.id);
+      saveSetting(SETTINGS_KEYS.activeApiPreset, preset.id);
     }
   };
 
@@ -139,7 +145,7 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
     setApiKey(preset?.apiKey ?? '');
     setApiModel(preset?.model ?? 'gpt-4o-mini');
     setApiModels([]);
-    if (preset) writeStoredValue(ACTIVE_API_PRESET_STORAGE_KEY, id);
+    if (preset) saveSetting(SETTINGS_KEYS.activeApiPreset, id);
     setApiMessage('');
     setApiError('');
   };
@@ -165,8 +171,8 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
     setApiEndpoint(nextPreset?.endpoint ?? '');
     setApiKey(nextPreset?.apiKey ?? '');
     setApiModel(nextPreset?.model ?? 'gpt-4o-mini');
-    if (nextPreset) writeStoredValue(ACTIVE_API_PRESET_STORAGE_KEY, nextPreset.id);
-    else window.localStorage.removeItem(ACTIVE_API_PRESET_STORAGE_KEY);
+    if (nextPreset) saveSetting(SETTINGS_KEYS.activeApiPreset, nextPreset.id);
+    else removeSetting(SETTINGS_KEYS.activeApiPreset);
     setApiMessage('API 配置预设已删除。');
   };
 
@@ -377,6 +383,20 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
     }
   };
 
+  const handleFactoryReset = () => {
+    if (!window.confirm('恢复出厂设置将永久清除本浏览器中歪歪机的全部本地数据（包括聊天、角色、设置、API 配置和备份），且无法撤销。建议先导出备份。确定继续吗？')) {
+      return;
+    }
+    try {
+      resetAllSettings();
+      window.location.reload();
+    } catch (error) {
+      console.error('Could not reset local app data.', error);
+      setBackupError(error instanceof Error ? `恢复出厂设置失败：${error.message}` : '恢复出厂设置失败，请稍后重试。');
+      setBackupMessage('');
+    }
+  };
+
   return (
     <div className="flex-1 w-full flex flex-col bg-[#F3F6F8] overflow-hidden">
       <AppHeader title="设置 · 系统配置" onBack={onBack} />
@@ -553,6 +573,13 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
             </div>
             {backupMessage && <p className="text-[11px] text-emerald-700">{backupMessage}</p>}
             {backupError && <p role="alert" className="text-[11px] text-rose-600">{backupError}</p>}
+            <button
+              type="button"
+              onClick={handleFactoryReset}
+              className="w-full rounded-xl border border-rose-200 bg-rose-50 py-2 text-xs font-bold text-rose-700"
+            >
+              <RotateCcw className="inline w-3.5 h-3.5 mr-1" />恢复出厂设置
+            </button>
           </div>
         </section>
 
@@ -619,7 +646,10 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
                 <span className="text-[10px] text-slate-400">时间、电量、灵动岛指示器</span>
               </div>
               <button
-                onClick={onToggleStatusBar}
+                onClick={() => {
+                  const saved = onToggleStatusBar();
+                  setStatusBarError(saved ? '' : '状态栏设置保存失败，请检查浏览器本地存储空间。');
+                }}
                 className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer ${
                   showStatusBar ? 'bg-sky-500' : 'bg-slate-300'
                 }`}
@@ -631,6 +661,7 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
                 />
               </button>
             </div>
+            {statusBarError && <p role="alert" className="px-3.5 pb-2 text-[11px] text-rose-600">{statusBarError}</p>}
 
             {lockSettings.mode !== 'none' && (
               <div className="flex items-center justify-between p-3.5">

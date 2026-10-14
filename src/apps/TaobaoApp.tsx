@@ -32,6 +32,7 @@ import {
 import { requestConfiguredAiText } from '../utils/aiApi';
 import { appendCharacterContextEvent } from '../utils/characterContext';
 import { readStoredValue, writeStoredValue } from '../utils/localStorage';
+import { readSetting, saveSetting, SETTINGS_KEYS } from '../utils/settings';
 
 interface TaobaoAppProps {
   onBack: () => void;
@@ -131,9 +132,9 @@ const STORAGE_KEYS = {
   xianyuItems: 'yyphone:taobao-xianyu-items',
   xianyuThreads: 'yyphone:taobao-xianyu-threads',
   playerProfile: 'yyphone:taobao-player-profile',
-  themePresets: 'yyphone:taobao-theme-presets',
-  activePresetId: 'yyphone:taobao-active-preset-id',
-  currentTheme: 'yyphone:taobao-current-theme',
+  themePresets: SETTINGS_KEYS.taobaoThemePresets,
+  activePresetId: SETTINGS_KEYS.taobaoActivePresetId,
+  currentTheme: SETTINGS_KEYS.taobaoCurrentTheme,
   wechatChats: 'yyphone:wechat-chats',
 } as const;
 
@@ -226,16 +227,16 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
 
   // ==================== 3. 淘宝专属美化与预设管理状态 ====================
   const [themePresets, setThemePresets] = useState<TaobaoThemePreset[]>(() => {
-    const stored = readStoredValue(STORAGE_KEYS.themePresets, [] as TaobaoThemePreset[], isThemePresetList);
+    const stored = readSetting(STORAGE_KEYS.themePresets, [] as TaobaoThemePreset[], isThemePresetList);
     return stored.some((preset) => preset.id === 'default')
       ? stored
       : [DEFAULT_TAOBAO_PRESET, ...stored];
   });
   const [activePresetId, setActivePresetId] = useState<string>(() =>
-    readStoredValue(STORAGE_KEYS.activePresetId, 'default', (value): value is string => typeof value === 'string')
+    readSetting(STORAGE_KEYS.activePresetId, 'default', (value): value is string => typeof value === 'string')
   );
   const [currentTheme, setCurrentTheme] = useState<TaobaoThemePreset>(() =>
-    readStoredValue(STORAGE_KEYS.currentTheme, DEFAULT_TAOBAO_PRESET, isThemePreset)
+    readSetting(STORAGE_KEYS.currentTheme, DEFAULT_TAOBAO_PRESET, isThemePreset)
   );
   const [newPresetName, setNewPresetName] = useState<string>('');
   const [menuTab, setMenuTab] = useState<'theme' | 'data'>('theme');
@@ -307,9 +308,9 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
       writeStoredValue(STORAGE_KEYS.xianyuItems, xianyuItems);
       writeStoredValue(STORAGE_KEYS.xianyuThreads, xianyuThreads);
       writeStoredValue(STORAGE_KEYS.playerProfile, playerProfile);
-      writeStoredValue(STORAGE_KEYS.themePresets, themePresets);
-      writeStoredValue(STORAGE_KEYS.activePresetId, activePresetId);
-      writeStoredValue(STORAGE_KEYS.currentTheme, currentTheme);
+      saveSetting(STORAGE_KEYS.themePresets, themePresets);
+      saveSetting(STORAGE_KEYS.activePresetId, activePresetId);
+      saveSetting(STORAGE_KEYS.currentTheme, currentTheme);
     } catch (error) {
       console.error('Could not persist Taobao app data.', error);
       setAiError('淘宝数据保存失败，请检查设备存储空间。');

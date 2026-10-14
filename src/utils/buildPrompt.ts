@@ -1,5 +1,6 @@
 import { PersonaCollection, UserPersona } from '../types';
 import { readAlipayData } from './alipayData';
+import { readSetting, SETTINGS_KEYS } from './settings';
 
 export interface PromptChatMessage {
   id: string;
@@ -67,7 +68,6 @@ export type OpenAiMessage = {
 const STORAGE_KEYS = {
   chats: 'yyphone:wechat-chats',
   contacts: 'pocketos:wechat-contacts',
-  personas: 'pocketos:personas',
   worldBooks: 'yyphone:world-books',
   moments: 'yyphone:wechat-moments',
   taobaoProducts: 'yyphone:taobao-market-products',
@@ -216,7 +216,7 @@ export const buildPrompt = ({
   const chatsValue: unknown = readJson(STORAGE_KEYS.chats, []);
   const contactsValue: unknown = readJson(STORAGE_KEYS.contacts, []);
   const worldBooksValue: unknown = readJson(STORAGE_KEYS.worldBooks, []);
-  const personaValue: unknown = readJson(STORAGE_KEYS.personas, null);
+  const personaValue = readSetting<unknown>(SETTINGS_KEYS.personas, null, (_value): _value is unknown => true);
   const momentsValue: unknown = readJson(STORAGE_KEYS.moments, []);
   const alipayData = readAlipayData();
 

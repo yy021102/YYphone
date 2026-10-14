@@ -12,7 +12,7 @@ import {
   THEMES,
   WALLPAPERS,
 } from './data/mockData';
-import { readStoredValue, writeStoredValue } from './utils/localStorage';
+import { readSetting, saveSetting, SETTINGS_KEYS } from './utils/settings';
 import { StatusBar } from './components/StatusBar';
 import { LockScreen } from './components/LockScreen';
 import { HomeScreen } from './components/HomeScreen';
@@ -30,10 +30,6 @@ import { SettingsApp } from './apps/SettingsApp';
 import { ThemeCustomizerApp } from './apps/ThemeCustomizerApp';
 import { WorldBookApp } from './apps/WorldBookApp';
 import { MemoryApp } from './apps/MemoryApp';
-
-const USER_PROFILE_STORAGE_KEY = 'pocketos:user-profile';
-const BEAUTY_SETTINGS_STORAGE_KEY = 'yyphone:beauty-settings';
-const LOCK_SETTINGS_STORAGE_KEY = 'yyphone:lock-settings';
 
 type LockMode = 'none' | 'lock' | 'password';
 interface LockSettings {
@@ -102,17 +98,19 @@ const isUserProfile = (value: unknown): value is UserProfile => {
 
 export default function App() {
   const [lockSettings, setLockSettings] = useState<LockSettings>(() =>
-    readStoredValue(LOCK_SETTINGS_STORAGE_KEY, DEFAULT_LOCK_SETTINGS, isLockSettings)
+    readSetting(SETTINGS_KEYS.lock, DEFAULT_LOCK_SETTINGS, isLockSettings)
   );
   const [isLocked, setIsLocked] = useState(() => lockSettings.mode !== 'none');
   const [activeApp, setActiveApp] = useState<AppId | null>(null);
-  const [showStatusBar, setShowStatusBar] = useState(true);
+  const [showStatusBar, setShowStatusBar] = useState(() =>
+    readSetting(SETTINGS_KEYS.statusBarVisible, true, (value): value is boolean => typeof value === 'boolean')
+  );
   const [userProfile, setUserProfile] = useState<UserProfile>(() =>
-    readStoredValue(USER_PROFILE_STORAGE_KEY, INITIAL_USER_PROFILE, isUserProfile)
+    readSetting(SETTINGS_KEYS.userProfile, INITIAL_USER_PROFILE, isUserProfile)
   );
 
   const [beautySettings, setBeautySettings] = useState<BeautySettings>(() => {
-    const legacyWallpapers = readStoredValue<CustomWallpapers>(
+    const legacyWallpapers = readSetting<CustomWallpapers>(
       'pocketos:wallpapers',
       { lockScreen: '', homeScreen: '' },
       (value): value is CustomWallpapers =>
@@ -121,7 +119,7 @@ export default function App() {
         typeof (value as CustomWallpapers).lockScreen === 'string' &&
         typeof (value as CustomWallpapers).homeScreen === 'string'
     );
-    return readStoredValue(BEAUTY_SETTINGS_STORAGE_KEY, {
+    return readSetting(SETTINGS_KEYS.beauty, {
       ...DEFAULT_BEAUTY_SETTINGS,
       wallpapers: legacyWallpapers,
     }, isBeautySettings);
@@ -179,7 +177,7 @@ export default function App() {
       password: settings.mode === 'password' ? settings.password : '',
     };
     try {
-      writeStoredValue(LOCK_SETTINGS_STORAGE_KEY, normalizedSettings);
+      saveSetting(SETTINGS_KEYS.lock, normalizedSettings);
       setLockSettings(normalizedSettings);
       if (normalizedSettings.mode === 'none') setIsLocked(false);
       return true;
@@ -191,7 +189,7 @@ export default function App() {
 
   const handleSaveUserProfile = (profile: UserProfile): boolean => {
     try {
-      writeStoredValue(USER_PROFILE_STORAGE_KEY, profile);
+      saveSetting(SETTINGS_KEYS.userProfile, profile);
       setUserProfile(profile);
       return true;
     } catch (error) {
@@ -202,7 +200,7 @@ export default function App() {
 
   const handleSaveBeautySettings = (settings: BeautySettings): boolean => {
     try {
-      writeStoredValue(BEAUTY_SETTINGS_STORAGE_KEY, settings);
+      saveSetting(SETTINGS_KEYS.beauty, settings);
       setBeautySettings(settings);
       return true;
     } catch (error) {
@@ -231,6 +229,18 @@ export default function App() {
 
   const handleSelectPresetSettings = (settings: BeautySettings): boolean =>
     handleSaveBeautySettings(settings);
+
+  const handleToggleStatusBar = (): boolean => {
+    const nextValue = !showStatusBar;
+    try {
+      saveSetting(SETTINGS_KEYS.statusBarVisible, nextValue);
+      setShowStatusBar(nextValue);
+      return true;
+    } catch (error) {
+      console.error('Could not save status bar preference.', error);
+      return false;
+    }
+  };
 
   return (
     <div className="w-full h-full min-h-[100dvh] bg-[#DFF1FA] md:bg-[#080D14] flex items-center justify-center p-0 md:p-3 overflow-hidden select-none">
@@ -320,7 +330,7 @@ export default function App() {
                 <SettingsApp
                   onBack={handleBackToHome}
                   showStatusBar={showStatusBar}
-                  onToggleStatusBar={() => setShowStatusBar(!showStatusBar)}
+                  onToggleStatusBar={handleToggleStatusBar}
                   onLockScreen={handleLock}
                   lockSettings={lockSettings}
                   onSaveLockSettings={handleSaveLockSettings}

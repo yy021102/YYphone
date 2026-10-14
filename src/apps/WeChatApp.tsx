@@ -35,6 +35,7 @@ import { AppHeader } from '../components/AppHeader';
 import { WECHAT_MOMENTS } from '../data/mockData';
 import { PersonaCollection, UserPersona } from '../types';
 import { readStoredValue, writeStoredValue } from '../utils/localStorage';
+import { readSetting, saveSetting, SETTINGS_KEYS } from '../utils/settings';
 import { compressImageFile } from '../utils/imageFile';
 import { buildPrompt } from '../utils/buildPrompt';
 import {
@@ -167,15 +168,10 @@ interface ChatConversation {
   attachedHistoryChatIds?: string[];
 }
 
-const PERSONA_STORAGE_KEY = 'pocketos:personas';
 const CONTACTS_STORAGE_KEY = 'pocketos:wechat-contacts';
 const CONTACT_EXPORT_FORMAT = 'yyphone-contacts';
 const CHATS_STORAGE_KEY = 'yyphone:wechat-chats';
-const CHAT_CONTEXT_PRESETS_STORAGE_KEY = 'yyphone:chat-context-presets';
 const CHAT_STICKERS_STORAGE_KEY = 'yyphone:chat-stickers';
-const API_PRESETS_STORAGE_KEY = 'yyphone:api-presets';
-const ACTIVE_API_PRESET_STORAGE_KEY = 'yyphone:active-api-preset';
-const CHAT_APPEARANCE_STORAGE_KEY = 'yyphone:chat-appearance';
 const BASIC_EMOJIS = ['😀', '😂', '🥰', '😍', '😎', '😭', '🥺', '😡', '🤔', '👍', '👎', '❤️', '💕', '🎉', '🙏', '🌹'];
 const DEFAULT_CHAT_APPEARANCE: ChatAppearance = {
   backgroundUrl: '',
@@ -451,7 +447,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
   const [activeTab, setActiveTab] = useState<WeChatTab>('chats');
   const [searchQuery, setSearchQuery] = useState('');
   const [personaCollection, setPersonaCollection] = useState(() =>
-    readStoredValue(PERSONA_STORAGE_KEY, DEFAULT_PERSONAS, isPersonaCollection)
+    readSetting(SETTINGS_KEYS.personas, DEFAULT_PERSONAS, isPersonaCollection)
   );
   const selectedPersona =
     personaCollection.profiles.find(
@@ -462,7 +458,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
   const [personaError, setPersonaError] = useState('');
   const [presetNameDraft, setPresetNameDraft] = useState('');
   const [chatAppearance, setChatAppearance] = useState(() =>
-    readStoredValue(CHAT_APPEARANCE_STORAGE_KEY, DEFAULT_CHAT_APPEARANCE, isChatAppearance)
+    readSetting(SETTINGS_KEYS.chatAppearance, DEFAULT_CHAT_APPEARANCE, isChatAppearance)
   );
   const [chatAppearancePresetName, setChatAppearancePresetName] = useState('');
   const [selectedChatAppearancePresetId, setSelectedChatAppearancePresetId] = useState('');
@@ -513,7 +509,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
   const [isProcessingChatImage, setIsProcessingChatImage] = useState(false);
   const chatImportRef = useRef<HTMLInputElement>(null);
   const [contextPresets, setContextPresets] = useState(() =>
-    readStoredValue(CHAT_CONTEXT_PRESETS_STORAGE_KEY, [] as ChatContextPreset[], isChatContextPresetList)
+    readSetting(SETTINGS_KEYS.chatContextPresets, [] as ChatContextPreset[], isChatContextPresetList)
   );
   const [selectedContextPresetId, setSelectedContextPresetId] = useState('');
   const [contextPresetName, setContextPresetName] = useState('');
@@ -567,7 +563,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
 
   const savePersonaCollection = (updatedCollection: PersonaCollection) => {
     try {
-      writeStoredValue(PERSONA_STORAGE_KEY, updatedCollection);
+      saveSetting(SETTINGS_KEYS.personas, updatedCollection);
       setPersonaCollection(updatedCollection);
       setPersonaError('');
       return true;
@@ -677,7 +673,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
 
   const persistChatAppearance = (nextAppearance: ChatAppearance) => {
     try {
-      writeStoredValue(CHAT_APPEARANCE_STORAGE_KEY, nextAppearance);
+      saveSetting(SETTINGS_KEYS.chatAppearance, nextAppearance);
       setChatAppearance(nextAppearance);
       setChatAppearanceError('');
       setChatAppearanceMessage('聊天美化已保存。');
@@ -1319,7 +1315,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
     };
     const nextPresets = [...contextPresets, preset];
     try {
-      writeStoredValue(CHAT_CONTEXT_PRESETS_STORAGE_KEY, nextPresets);
+      saveSetting(SETTINGS_KEYS.chatContextPresets, nextPresets);
       setContextPresets(nextPresets);
       setSelectedContextPresetId(preset.id);
       setContextPresetName('');
@@ -1342,7 +1338,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
     if (!selectedContextPresetId) return;
     const nextPresets = contextPresets.filter((preset) => preset.id !== selectedContextPresetId);
     try {
-      writeStoredValue(CHAT_CONTEXT_PRESETS_STORAGE_KEY, nextPresets);
+      saveSetting(SETTINGS_KEYS.chatContextPresets, nextPresets);
       setContextPresets(nextPresets);
       setSelectedContextPresetId('');
       setChatError('');
@@ -1602,9 +1598,9 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
     const chat = chats.find((item) => item.id === activeChatId);
     if (!chat || chat.blocked || isGeneratingReply) return;
 
-    const apiPresets = readStoredValue(API_PRESETS_STORAGE_KEY, [] as ApiPreset[], isApiPresetList);
-    const activePresetId = readStoredValue(
-      ACTIVE_API_PRESET_STORAGE_KEY,
+    const apiPresets = readSetting(SETTINGS_KEYS.apiPresets, [] as ApiPreset[], isApiPresetList);
+    const activePresetId = readSetting(
+      SETTINGS_KEYS.activeApiPreset,
       apiPresets[0]?.id ?? '',
       (value): value is string => typeof value === 'string'
     );

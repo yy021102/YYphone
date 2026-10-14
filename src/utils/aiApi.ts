@@ -1,4 +1,4 @@
-import { readStoredValue } from './localStorage';
+import { readSetting, SETTINGS_KEYS } from './settings';
 
 interface ApiPreset {
   id: string;
@@ -7,9 +7,6 @@ interface ApiPreset {
   apiKey: string;
   model?: string;
 }
-
-const API_PRESETS_STORAGE_KEY = 'yyphone:api-presets';
-const ACTIVE_API_PRESET_STORAGE_KEY = 'yyphone:active-api-preset';
 
 const isApiPresetList = (value: unknown): value is ApiPreset[] =>
   Array.isArray(value) &&
@@ -24,9 +21,9 @@ const isApiPresetList = (value: unknown): value is ApiPreset[] =>
   );
 
 export const getActiveApiPreset = () => {
-  const presets = readStoredValue(API_PRESETS_STORAGE_KEY, [] as ApiPreset[], isApiPresetList);
-  const activeId = readStoredValue(
-    ACTIVE_API_PRESET_STORAGE_KEY,
+  const presets = readSetting(SETTINGS_KEYS.apiPresets, [] as ApiPreset[], isApiPresetList);
+  const activeId = readSetting(
+    SETTINGS_KEYS.activeApiPreset,
     presets[0]?.id ?? '',
     (value): value is string => typeof value === 'string'
   );
