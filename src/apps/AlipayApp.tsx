@@ -269,11 +269,11 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
   };
 
   return (
-    <div className="relative flex-1 w-full flex flex-col bg-gradient-to-b from-[#EAF4FF] via-[#F3F1FA] to-[#FDEBF3] overflow-hidden select-none">
+    <div className="relative flex-1 w-full flex flex-col bg-gradient-to-b from-[#F2F8FF] via-[#F7F5FC] to-[#FEF3F8] overflow-hidden select-none">
       {/* 氛围背景光晕 */}
-      <div className="absolute -top-16 -left-16 w-56 h-56 rounded-full bg-sky-300/30 blur-3xl pointer-events-none" />
-      <div className="absolute top-1/3 -right-20 w-64 h-64 rounded-full bg-pink-300/25 blur-3xl pointer-events-none" />
-      <div className="absolute bottom-0 left-1/4 w-48 h-48 rounded-full bg-indigo-200/25 blur-3xl pointer-events-none" />
+      <div className="absolute -top-16 -left-16 w-56 h-56 rounded-full bg-sky-200/30 blur-3xl pointer-events-none" />
+      <div className="absolute top-1/3 -right-20 w-64 h-64 rounded-full bg-pink-200/25 blur-3xl pointer-events-none" />
+      <div className="absolute bottom-0 left-1/4 w-48 h-48 rounded-full bg-indigo-100/25 blur-3xl pointer-events-none" />
 
       {/* 顶部栏：右上角改为三个横杠按钮 */}
       <AppHeader
@@ -304,7 +304,7 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
                 onClick={() => setActiveTab(key as AlipayTab)}
                 className={`flex-1 py-2 flex items-center justify-center gap-1.5 rounded-xl text-xs font-bold transition-all duration-300 cursor-pointer ${
                   isActive
-                    ? 'bg-gradient-to-r from-sky-400 via-blue-500 to-indigo-400 text-white shadow-md shadow-sky-400/25 scale-[1.01]'
+                    ? 'bg-gradient-to-r from-sky-200 via-blue-200 to-indigo-200 text-slate-700 shadow-md shadow-sky-200/40 scale-[1.01]'
                     : 'text-slate-500 hover:text-slate-700'
                 }`}
               >
@@ -322,52 +322,52 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
         {activeTab === 'wallet' && (
           <div className="space-y-4">
             {/* 主资产大卡片 */}
-            <div className="w-full bg-gradient-to-br from-[#5698F7] via-[#7A88F5] to-[#F396C8] text-white rounded-[28px] p-5 shadow-[0_12px_28px_-6px_rgba(105,135,245,0.4)] border border-white/40 relative overflow-hidden">
-              <div className="absolute -top-10 -right-10 w-40 h-40 rounded-full bg-white/20 blur-2xl pointer-events-none" />
-              <div className="absolute -bottom-12 -left-8 w-36 h-36 rounded-full bg-pink-200/25 blur-xl pointer-events-none" />
+            <div className="w-full bg-gradient-to-br from-[#A8CDF8] via-[#BFC6F7] to-[#F8C6DF] text-slate-700 rounded-[28px] p-5 shadow-[0_12px_28px_-6px_rgba(148,180,245,0.35)] border border-white/50 relative overflow-hidden">
+              <div className="absolute -top-10 -right-10 w-40 h-40 rounded-full bg-white/30 blur-2xl pointer-events-none" />
+              <div className="absolute -bottom-12 -left-8 w-36 h-36 rounded-full bg-pink-100/30 blur-xl pointer-events-none" />
 
-              <div className="relative flex items-center justify-between text-xs text-white/90">
+              <div className="relative flex items-center justify-between text-xs text-slate-600">
                 <span className="flex items-center gap-1 font-medium tracking-wide">
-                  <Sparkles className="w-3.5 h-3.5 text-pink-200" />
+                  <Sparkles className="w-3.5 h-3.5 text-pink-300" />
                   <span>总资产估值 (CNY)</span>
                 </span>
-                <span className="flex items-center gap-1 text-[10px] font-medium bg-white/20 border border-white/30 px-2.5 py-0.5 rounded-full backdrop-blur-md">
-                  <TrendingUp className="w-3 h-3 text-emerald-200" />
+                <span className="flex items-center gap-1 text-[10px] font-medium bg-white/45 border border-white/55 px-2.5 py-0.5 rounded-full backdrop-blur-md">
+                  <TrendingUp className="w-3 h-3 text-emerald-500" />
                   <span>余额宝日收益 +{dailyYuebaoProfit}</span>
                 </span>
               </div>
 
               <div className="relative mt-3 mb-4">
                 <div className="flex items-baseline gap-1">
-                  <span className="text-lg font-bold opacity-85">¥</span>
+                  <span className="text-lg font-bold opacity-70">¥</span>
                   <span className="text-3xl font-extrabold tracking-tight font-mono drop-shadow-xs">
                     {totalAssets.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
                 </div>
-                <p className="text-[11px] text-white/80 mt-1 flex items-center gap-2">
+                <p className="text-[11px] text-slate-600 mt-1 flex items-center gap-2">
                   <span>可用余额: ¥ {balance.toFixed(2)}</span>
-                  <span className="opacity-50">|</span>
+                  <span className="opacity-40">|</span>
                   <span className="flex items-center gap-1">
-                    <ShieldCheck className="w-3 h-3 text-sky-200" />
+                    <ShieldCheck className="w-3 h-3 text-sky-500" />
                     小手机虚拟金库
                   </span>
                 </p>
               </div>
 
               {/* 快捷操作栏：去掉了“转账”，保留 3 项，点击“充值”可交互 */}
-              <div className="relative grid grid-cols-3 gap-2.5 p-2 rounded-2xl bg-white/15 backdrop-blur-md border border-white/25">
-                <button className="flex flex-col items-center py-1.5 hover:bg-white/20 active:scale-95 rounded-xl transition-all cursor-pointer group">
-                  <div className="w-8 h-8 rounded-xl bg-white/20 border border-white/30 flex items-center justify-center">
-                    <Scan className="w-4 h-4 text-white stroke-[2.2]" />
+              <div className="relative grid grid-cols-3 gap-2.5 p-2 rounded-2xl bg-white/30 backdrop-blur-md border border-white/45">
+                <button className="flex flex-col items-center py-1.5 hover:bg-white/35 active:scale-95 rounded-xl transition-all cursor-pointer group">
+                  <div className="w-8 h-8 rounded-xl bg-white/40 border border-white/55 flex items-center justify-center">
+                    <Scan className="w-4 h-4 text-slate-600 stroke-[2.2]" />
                   </div>
-                  <span className="text-[10px] text-white font-medium mt-1">扫一扫</span>
+                  <span className="text-[10px] text-slate-600 font-medium mt-1">扫一扫</span>
                 </button>
 
-                <button className="flex flex-col items-center py-1.5 hover:bg-white/20 active:scale-95 rounded-xl transition-all cursor-pointer group">
-                  <div className="w-8 h-8 rounded-xl bg-white/20 border border-white/30 flex items-center justify-center">
-                    <QrCode className="w-4 h-4 text-white stroke-[2.2]" />
+                <button className="flex flex-col items-center py-1.5 hover:bg-white/35 active:scale-95 rounded-xl transition-all cursor-pointer group">
+                  <div className="w-8 h-8 rounded-xl bg-white/40 border border-white/55 flex items-center justify-center">
+                    <QrCode className="w-4 h-4 text-slate-600 stroke-[2.2]" />
                   </div>
-                  <span className="text-[10px] text-white font-medium mt-1">付款码</span>
+                  <span className="text-[10px] text-slate-600 font-medium mt-1">付款码</span>
                 </button>
 
                 <button
@@ -375,12 +375,12 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
                     setTopUpTarget('balance');
                     setShowTopUpModal(true);
                   }}
-                  className="flex flex-col items-center py-1.5 bg-white/25 hover:bg-white/35 active:scale-95 rounded-xl transition-all cursor-pointer border border-white/40 shadow-2xs"
+                  className="flex flex-col items-center py-1.5 bg-white/45 hover:bg-white/60 active:scale-95 rounded-xl transition-all cursor-pointer border border-white/60 shadow-2xs"
                 >
-                  <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-pink-400/80 to-sky-400/80 border border-white/50 flex items-center justify-center">
-                    <ArrowDownLeft className="w-4 h-4 text-white stroke-[2.4]" />
+                  <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-pink-200 to-sky-200 border border-white/70 flex items-center justify-center">
+                    <ArrowDownLeft className="w-4 h-4 text-slate-600 stroke-[2.4]" />
                   </div>
-                  <span className="text-[10px] text-white font-bold mt-1">充值余额</span>
+                  <span className="text-[10px] text-slate-700 font-bold mt-1">充值余额</span>
                 </button>
               </div>
             </div>
@@ -389,7 +389,7 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
             <div className="grid grid-cols-2 gap-3">
               {/* 余额宝 */}
               <div className="bg-white/55 backdrop-blur-xl border border-white/80 rounded-3xl p-4 shadow-[0_8px_20px_-6px_rgba(148,163,184,0.15)] space-y-1.5 relative overflow-hidden">
-                <div className="absolute -right-4 -bottom-4 w-16 h-16 rounded-full bg-emerald-200/30 blur-xl pointer-events-none" />
+                <div className="absolute -right-4 -bottom-4 w-16 h-16 rounded-full bg-emerald-100/40 blur-xl pointer-events-none" />
                 <div className="flex items-center justify-between text-xs text-slate-500 font-medium">
                   <span>余额宝</span>
                   <button
@@ -399,7 +399,7 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
                       setTopUpInput('');
                       setShowTopUpModal(true);
                     }}
-                    className="rounded-full bg-emerald-100/80 border border-emerald-200/60 px-2 py-1 text-[9px] font-semibold text-emerald-700"
+                    className="rounded-full bg-emerald-50/90 border border-emerald-100/70 px-2 py-1 text-[9px] font-semibold text-emerald-600"
                     aria-label="转入余额宝"
                   >
                     <TrendingUp className="mr-1 inline h-3 w-3" />转入
@@ -408,14 +408,14 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
                 <p className="text-lg font-extrabold text-[#2C4A5C] font-mono tracking-tight">
                   ¥ {yuebao.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
                 </p>
-                <span className="inline-block text-[10px] text-emerald-600 bg-emerald-50/90 border border-emerald-200/50 px-2 py-0.5 rounded-full font-semibold">
+                <span className="inline-block text-[10px] text-emerald-600 bg-emerald-50/90 border border-emerald-100/60 px-2 py-0.5 rounded-full font-semibold">
                   七日年化 2.08%
                 </span>
               </div>
 
               {/* 绑定银行卡 (点击右上角小卡包弹出编辑框) */}
               <div className="bg-white/55 backdrop-blur-xl border border-white/80 rounded-3xl p-4 shadow-[0_8px_20px_-6px_rgba(148,163,184,0.15)] space-y-1.5 relative overflow-hidden">
-                <div className="absolute -right-4 -bottom-4 w-16 h-16 rounded-full bg-sky-200/40 blur-xl pointer-events-none" />
+                <div className="absolute -right-4 -bottom-4 w-16 h-16 rounded-full bg-sky-100/50 blur-xl pointer-events-none" />
                 <div className="flex items-center justify-between text-xs text-slate-500 font-medium">
                   <span>绑定银行卡</span>
                   <button
@@ -424,16 +424,16 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
                       setTempBankNote(bankCardNote);
                       setShowBankEditModal(true);
                     }}
-                    className="w-6 h-6 rounded-full bg-sky-100/90 hover:bg-sky-200/80 border border-sky-200/80 flex items-center justify-center transition-transform active:scale-90 cursor-pointer"
+                    className="w-6 h-6 rounded-full bg-sky-50/90 hover:bg-sky-100/80 border border-sky-100/80 flex items-center justify-center transition-transform active:scale-90 cursor-pointer"
                     title="点击编辑银行卡装饰信息"
                   >
-                    <CreditCard className="w-3.5 h-3.5 text-sky-600" />
+                    <CreditCard className="w-3.5 h-3.5 text-sky-500" />
                   </button>
                 </div>
                 <p className="text-lg font-extrabold text-[#2C4A5C] font-mono tracking-tight">
                   {bankCardCount}
                 </p>
-                <span className="inline-block text-[10px] text-sky-600 bg-sky-50/90 border border-sky-200/50 px-2 py-0.5 rounded-full font-semibold truncate max-w-full">
+                <span className="inline-block text-[10px] text-sky-600 bg-sky-50/90 border border-sky-100/60 px-2 py-0.5 rounded-full font-semibold truncate max-w-full">
                   {bankCardNote}
                 </span>
               </div>
@@ -443,7 +443,7 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
             <div className="space-y-2.5">
               <div className="flex items-center justify-between px-1">
                 <span className="text-xs font-extrabold text-[#2C4A5C] flex items-center gap-1.5">
-                  <HeartHandshake className="w-4 h-4 text-pink-500" />
+                  <HeartHandshake className="w-4 h-4 text-pink-400" />
                   <span>TA 的亲密付 · 角色专属卡包</span>
                 </span>
                 <span className="text-[10px] text-slate-400">支持淘宝/转账时选择扣款</span>
@@ -481,11 +481,11 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
                     <div
                       key={card.id}
                       onClick={() => openIntimateEditor(contact.id)}
-                      className="bg-gradient-to-r from-pink-100/70 via-white/75 to-sky-100/70 backdrop-blur-xl border border-white/90 rounded-3xl p-4 shadow-[0_6px_18px_rgba(244,114,182,0.1)] space-y-2.5"
+                      className="bg-gradient-to-r from-pink-50/80 via-white/75 to-sky-50/80 backdrop-blur-xl border border-white/90 rounded-3xl p-4 shadow-[0_6px_18px_rgba(244,114,182,0.08)] space-y-2.5"
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2.5">
-                          <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-pink-400 to-sky-400 text-white flex items-center justify-center text-xs font-extrabold shadow-xs border border-white/60 overflow-hidden">
+                          <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-pink-200 to-sky-200 text-slate-600 flex items-center justify-center text-xs font-extrabold shadow-xs border border-white/70 overflow-hidden">
                             {contact.avatarUrl
                               ? <img src={contact.avatarUrl} alt="" className="h-full w-full object-cover" />
                               : contact.name.slice(0, 1)}
@@ -495,7 +495,7 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
                               <p className="text-xs font-extrabold text-[#2C4A5C]">
                                 {contact.name} 的亲密付
                               </p>
-                              <span className="text-[9px] bg-pink-500/10 text-pink-600 border border-pink-200/60 px-1.5 py-0.2 rounded-full font-semibold">
+                              <span className="text-[9px] bg-pink-100/60 text-pink-500 border border-pink-100/70 px-1.5 py-0.2 rounded-full font-semibold">
                                 已开通
                               </span>
                             </div>
@@ -504,7 +504,7 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
                         </div>
                         <div className="text-right">
                           <span className="text-[10px] text-slate-400 block">剩余可用</span>
-                          <span className="text-sm font-extrabold font-mono text-pink-500">
+                          <span className="text-sm font-extrabold font-mono text-pink-400">
                             ¥ {remain.toLocaleString()}
                           </span>
                         </div>
@@ -514,7 +514,7 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
                       <div className="space-y-1">
                         <div className="w-full h-1.5 bg-white/80 rounded-full overflow-hidden">
                           <div
-                            className="h-full bg-gradient-to-r from-pink-400 to-sky-400 rounded-full"
+                            className="h-full bg-gradient-to-r from-pink-200 to-sky-200 rounded-full"
                             style={{
                               width: `${Math.min(100, (card.usedAmount / card.monthlyLimit) * 100)}%`,
                             }}
@@ -529,7 +529,7 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
                   );
                 })}
                 {intimateCards.length === 0 && (
-                  <div className="rounded-2xl border border-dashed border-pink-200 bg-white/40 p-4 text-center text-[10px] text-slate-400">
+                  <div className="rounded-2xl border border-dashed border-pink-100 bg-white/40 p-4 text-center text-[10px] text-slate-400">
                     尚未开通亲密付。请选择一位通讯录角色设置月度额度。
                   </div>
                 )}
@@ -543,19 +543,19 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
           <div className="space-y-4">
             {/* 月份切换器 + 月度收支与预算卡片 */}
             <div className="bg-white/65 backdrop-blur-xl border border-white/85 rounded-3xl p-4 space-y-3.5 shadow-[0_8px_24px_-6px_rgba(148,163,184,0.15)] relative overflow-hidden">
-              <div className="absolute -top-8 -right-8 w-28 h-28 rounded-full bg-pink-200/30 blur-2xl pointer-events-none" />
+              <div className="absolute -top-8 -right-8 w-28 h-28 rounded-full bg-pink-100/40 blur-2xl pointer-events-none" />
 
               {/* 顶部：日历式月份切换器 (支持查看上月、上上月、去年) */}
               <div className="flex items-center justify-between">
                 <span className="text-xs font-extrabold text-[#2C4A5C] flex items-center gap-1.5">
-                  <Calendar className="w-3.5 h-3.5 text-sky-500" />
+                  <Calendar className="w-3.5 h-3.5 text-sky-400" />
                   <span>月度账本总览</span>
                 </span>
 
                 <div className="flex items-center gap-1 bg-white/80 border border-white px-1.5 py-0.5 rounded-full shadow-2xs">
                   <button
                     onClick={() => handleMonthChange(-1)}
-                    className="p-1 text-slate-500 hover:text-sky-600 active:scale-90 cursor-pointer"
+                    className="p-1 text-slate-500 hover:text-sky-500 active:scale-90 cursor-pointer"
                     title="上个月"
                   >
                     <ChevronLeft className="w-3.5 h-3.5" />
@@ -565,7 +565,7 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
                   </span>
                   <button
                     onClick={() => handleMonthChange(1)}
-                    className="p-1 text-slate-500 hover:text-sky-600 active:scale-90 cursor-pointer"
+                    className="p-1 text-slate-500 hover:text-sky-500 active:scale-90 cursor-pointer"
                     title="下个月"
                   >
                     <ChevronRight className="w-3.5 h-3.5" />
@@ -575,15 +575,15 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
 
               {/* 总支出 & 总收入 */}
               <div className="grid grid-cols-2 gap-3">
-                <div className="bg-rose-50/65 border border-rose-100/80 rounded-2xl p-3">
-                  <span className="text-[11px] text-rose-400 font-medium">本月总支出</span>
-                  <p className="text-lg font-extrabold text-rose-500 font-mono mt-0.5">
+                <div className="bg-rose-50/70 border border-rose-100/80 rounded-2xl p-3">
+                  <span className="text-[11px] text-rose-300 font-medium">本月总支出</span>
+                  <p className="text-lg font-extrabold text-rose-400 font-mono mt-0.5">
                     - ¥ {monthExpense.toFixed(2)}
                   </p>
                 </div>
-                <div className="bg-emerald-50/65 border border-emerald-100/80 rounded-2xl p-3">
-                  <span className="text-[11px] text-emerald-500 font-medium">本月总收入</span>
-                  <p className="text-lg font-extrabold text-emerald-600 font-mono mt-0.5">
+                <div className="bg-emerald-50/70 border border-emerald-100/80 rounded-2xl p-3">
+                  <span className="text-[11px] text-emerald-400 font-medium">本月总收入</span>
+                  <p className="text-lg font-extrabold text-emerald-500 font-mono mt-0.5">
                     + ¥ {monthIncome.toFixed(2)}
                   </p>
                 </div>
@@ -593,7 +593,7 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
               <div className="space-y-1.5 pt-0.5">
                 <div className="w-full bg-slate-200/60 h-2.5 rounded-full overflow-hidden p-0.5 border border-white/60">
                   <div
-                    className="bg-gradient-to-r from-sky-400 via-indigo-400 to-pink-400 h-full rounded-full transition-all duration-300"
+                    className="bg-gradient-to-r from-sky-200 via-indigo-200 to-pink-200 h-full rounded-full transition-all duration-300"
                     style={{ width: `${budgetPercent}%` }}
                   />
                 </div>
@@ -609,7 +609,7 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
                       setTempBudgetInput(String(currentBudget));
                       setShowBudgetModal(true);
                     }}
-                    className="flex items-center gap-1 text-sky-600 hover:text-sky-700 bg-sky-50/80 border border-sky-100 px-2 py-0.5 rounded-full cursor-pointer active:scale-95 transition-transform"
+                    className="flex items-center gap-1 text-sky-500 hover:text-sky-600 bg-sky-50/80 border border-sky-100 px-2 py-0.5 rounded-full cursor-pointer active:scale-95 transition-transform"
                   >
                     <span>预算上限 ¥ {currentBudget.toFixed(0)}</span>
                     <Pencil className="w-2.5 h-2.5" />
@@ -651,7 +651,7 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
                     setNewLedgerDate(todayStr);
                     setShowAddLedgerModal(true);
                   }}
-                  className="flex items-center gap-1.5 bg-gradient-to-r from-sky-400 to-pink-400 text-white text-xs font-bold px-3 py-1.5 rounded-full shadow-sm shadow-pink-300/40 active:scale-95 transition-transform cursor-pointer"
+                  className="flex items-center gap-1.5 bg-gradient-to-r from-sky-200 to-pink-200 text-slate-700 text-xs font-bold px-3 py-1.5 rounded-full shadow-sm shadow-pink-200/50 active:scale-95 transition-transform cursor-pointer"
                 >
                   <Pencil className="w-3 h-3" />
                   <span>记一笔</span>
@@ -661,7 +661,7 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
               {/* 账单列表（支持空状态提示） */}
               {displayedTransactions.length === 0 ? (
                 <div className="bg-white/50 backdrop-blur-xl border border-white/80 rounded-3xl p-8 text-center space-y-2">
-                  <div className="w-10 h-10 rounded-2xl bg-sky-100/70 text-sky-500 flex items-center justify-center mx-auto">
+                  <div className="w-10 h-10 rounded-2xl bg-sky-50/70 text-sky-400 flex items-center justify-center mx-auto">
                     <Receipt className="w-5 h-5" />
                   </div>
                   <p className="text-xs font-bold text-slate-500">
@@ -682,8 +682,8 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
                         <div
                           className={`w-10 h-10 rounded-2xl flex items-center justify-center text-xs font-extrabold border shadow-2xs ${
                             t.isExpense
-                              ? 'bg-gradient-to-br from-rose-50 to-pink-100/80 text-rose-500 border-rose-200/60'
-                              : 'bg-gradient-to-br from-emerald-50 to-teal-100/80 text-emerald-600 border-emerald-200/60'
+                              ? 'bg-gradient-to-br from-rose-50 to-pink-50/80 text-rose-400 border-rose-100/60'
+                              : 'bg-gradient-to-br from-emerald-50 to-teal-50/80 text-emerald-500 border-emerald-100/60'
                           }`}
                         >
                           {t.isExpense ? '支' : '收'}
@@ -699,7 +699,7 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
                         className={`text-xs font-extrabold font-mono tabular-nums px-2 py-1 rounded-lg ${
                           t.isExpense
                             ? 'text-slate-700 bg-slate-100/60'
-                            : 'text-emerald-600 bg-emerald-50/80'
+                            : 'text-emerald-500 bg-emerald-50/80'
                         }`}
                       >
                         {t.isExpense ? `- ¥${t.amount.toFixed(2)}` : `+ ¥${t.amount.toFixed(2)}`}
@@ -730,7 +730,7 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
             {/* 谁可以看我的日常记账 */}
             <div className="space-y-2 bg-sky-50/60 border border-sky-100 rounded-2xl p-3.5">
               <div className="flex items-center gap-1.5 text-xs font-bold text-[#2C4A5C]">
-                <Eye className="w-3.5 h-3.5 text-sky-500" />
+                <Eye className="w-3.5 h-3.5 text-sky-400" />
                 <span>谁可以查看我的「日常记账」？</span>
               </div>
               <p className="text-[10px] text-slate-400">
@@ -749,7 +749,7 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
                       }
                       className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
                         checked
-                          ? 'bg-gradient-to-r from-sky-400 to-pink-400 text-white border-transparent shadow-2xs'
+                          ? 'bg-gradient-to-r from-sky-200 to-pink-200 text-slate-700 border-transparent shadow-2xs'
                           : 'bg-white/80 text-slate-500 border-slate-200'
                       }`}
                     >
@@ -770,12 +770,12 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
                 onClick={handleExportData}
                 className="flex flex-col items-center gap-1.5 p-3 rounded-2xl bg-white border border-slate-100 hover:bg-sky-50/50 text-xs font-bold text-slate-600 cursor-pointer"
               >
-                <Download className="w-4 h-4 text-sky-500" />
+                <Download className="w-4 h-4 text-sky-400" />
                 <span>导出记录</span>
               </button>
 
               <label className="flex flex-col items-center gap-1.5 p-3 rounded-2xl bg-white border border-slate-100 hover:bg-sky-50/50 text-xs font-bold text-slate-600 cursor-pointer">
-                <Upload className="w-4 h-4 text-indigo-500" />
+                <Upload className="w-4 h-4 text-indigo-400" />
                 <span>导入记录</span>
                 <input
                   type="file"
@@ -826,7 +826,7 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
                     setShowMenuModal(false);
                   }
                 }}
-                className="flex flex-col items-center gap-1.5 p-3 rounded-2xl bg-rose-50/70 border border-rose-100 hover:bg-rose-100/60 text-xs font-bold text-rose-500 cursor-pointer"
+                className="flex flex-col items-center gap-1.5 p-3 rounded-2xl bg-rose-50/70 border border-rose-100 hover:bg-rose-100/60 text-xs font-bold text-rose-400 cursor-pointer"
               >
                 <Trash2 className="w-4 h-4" />
                 <span>清除数据</span>
@@ -848,7 +848,7 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
               placeholder="请输入充值金额 (例如 1000)"
               value={topUpInput}
               onChange={(e) => setTopUpInput(e.target.value)}
-              className="w-full px-3.5 py-2.5 rounded-2xl bg-slate-100/80 border border-slate-200 text-sm font-mono focus:outline-none focus:border-sky-400"
+              className="w-full px-3.5 py-2.5 rounded-2xl bg-slate-100/80 border border-slate-200 text-sm font-mono focus:outline-none focus:border-sky-300"
             />
             <div className="flex gap-2">
               <button
@@ -859,7 +859,7 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
               </button>
               <button
                 onClick={handleTopUpConfirm}
-                className="flex-1 py-2 rounded-xl bg-gradient-to-r from-sky-400 to-pink-400 text-xs font-bold text-white cursor-pointer"
+                className="flex-1 py-2 rounded-xl bg-gradient-to-r from-sky-200 to-pink-200 text-xs font-bold text-slate-700 cursor-pointer"
               >
                 {topUpTarget === 'yuebao' ? '确认转入' : '确认充值'}
               </button>
@@ -902,7 +902,7 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
               </button>
               <button
                 onClick={handleSaveBankInfo}
-                className="flex-1 py-2 rounded-xl bg-gradient-to-r from-sky-400 to-pink-400 text-xs font-bold text-white cursor-pointer"
+                className="flex-1 py-2 rounded-xl bg-gradient-to-r from-sky-200 to-pink-200 text-xs font-bold text-slate-700 cursor-pointer"
               >
                 保存修改
               </button>
@@ -934,7 +934,7 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
               </button>
               <button
                 onClick={handleSaveBudget}
-                className="flex-1 py-2 rounded-xl bg-gradient-to-r from-sky-400 to-pink-400 text-xs font-bold text-white cursor-pointer"
+                className="flex-1 py-2 rounded-xl bg-gradient-to-r from-sky-200 to-pink-200 text-xs font-bold text-slate-700 cursor-pointer"
               >
                 保存预算
               </button>
@@ -954,7 +954,7 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
               <button
                 onClick={() => setNewLedgerIsExpense(true)}
                 className={`py-1.5 rounded-xl text-xs font-bold cursor-pointer transition-all ${
-                  newLedgerIsExpense ? 'bg-rose-500 text-white shadow-2xs' : 'text-slate-500'
+                  newLedgerIsExpense ? 'bg-rose-300 text-white shadow-2xs' : 'text-slate-500'
                 }`}
               >
                 支出
@@ -962,7 +962,7 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
               <button
                 onClick={() => setNewLedgerIsExpense(false)}
                 className={`py-1.5 rounded-xl text-xs font-bold cursor-pointer transition-all ${
-                  !newLedgerIsExpense ? 'bg-emerald-500 text-white shadow-2xs' : 'text-slate-500'
+                  !newLedgerIsExpense ? 'bg-emerald-300 text-white shadow-2xs' : 'text-slate-500'
                 }`}
               >
                 收入
@@ -1001,7 +1001,7 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
               </button>
               <button
                 onClick={handleAddLedgerItem}
-                className="flex-1 py-2 rounded-xl bg-gradient-to-r from-sky-400 to-pink-400 text-xs font-bold text-white cursor-pointer"
+                className="flex-1 py-2 rounded-xl bg-gradient-to-r from-sky-200 to-pink-200 text-xs font-bold text-slate-700 cursor-pointer"
               >
                 保存记录
               </button>
@@ -1040,13 +1040,13 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
                 className="mt-1 w-full rounded-2xl border border-slate-200 bg-slate-100/80 px-3.5 py-2.5 text-xs"
               />
             </label>
-            {intimateError && <p role="alert" className="text-[11px] text-rose-600">{intimateError}</p>}
+            {intimateError && <p role="alert" className="text-[11px] text-rose-500">{intimateError}</p>}
             <div className="flex gap-2">
               {intimateCards.some((card) => card.charId === intimateContactId) && (
                 <button
                   type="button"
                   onClick={handleRemoveIntimateCard}
-                  className="rounded-xl bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700"
+                  className="rounded-xl bg-rose-50 px-3 py-2 text-xs font-bold text-rose-500"
                 >
                   关闭亲密付
                 </button>
@@ -1061,7 +1061,7 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
               <button
                 type="button"
                 onClick={handleSaveIntimateCard}
-                className="flex-1 rounded-xl bg-gradient-to-r from-sky-400 to-pink-400 py-2 text-xs font-bold text-white"
+                className="flex-1 rounded-xl bg-gradient-to-r from-sky-200 to-pink-200 py-2 text-xs font-bold text-slate-700"
               >
                 保存额度
               </button>
