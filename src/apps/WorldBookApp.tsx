@@ -342,7 +342,9 @@ export const WorldBookApp: React.FC<WorldBookAppProps> = ({ onBack }) => {
       />
 
       {menuOpen && (
-        <div className="absolute top-12 right-4 z-40 w-44 rounded-2xl bg-white/90 backdrop-blur-2xl shadow-xl border border-white p-1.5 space-y-0.5">
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setMenuOpen(false)} />
+          <div className="absolute top-12 right-4 z-40 w-44 rounded-2xl bg-white/90 backdrop-blur-2xl shadow-xl border border-white p-1.5 space-y-0.5">
           <button onClick={openNewEntry} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-left text-slate-700 hover:bg-sky-50/70 rounded-xl font-medium cursor-pointer">
             <Plus className="w-3.5 h-3.5 text-sky-500" />新增条目
           </button>
@@ -378,7 +380,8 @@ export const WorldBookApp: React.FC<WorldBookAppProps> = ({ onBack }) => {
               <Trash2 className="w-3.5 h-3.5" />删除当前世界书
             </button>
           )}
-        </div>
+          </div>
+        </>
       )}
 
       <input
