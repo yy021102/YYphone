@@ -17,8 +17,8 @@ export const StatusBar: React.FC<StatusBarProps> = ({ time, onLockClick }) => {
 
       {/* Center: Dynamic island / Notch mimic pill */}
       <div className="h-5 px-3 bg-black/15 backdrop-blur-md rounded-full flex items-center justify-center gap-1.5 shadow-inner">
-        <div className="w-2.5 h-2.5 rounded-full bg-slate-800/80 border border-white/20 flex items-center justify-center">
-          <div className="w-1 h-1 rounded-full bg-sky-400 animate-pulse"></div>
+        <div className="w-2.5 h-2.5 rounded-full bg-[#FFF8EE] border border-white/70 shadow-[0_0_0_0.5px_rgba(244,184,204,0.35)] flex items-center justify-center">
+          <div className="w-1 h-1 rounded-full bg-pink-200"></div>
         </div>
         <span className="text-[10px] text-slate-600 font-medium tracking-wide">歪歪机</span>
       </div>

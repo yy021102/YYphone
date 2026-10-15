@@ -27,7 +27,7 @@ export const MAIN_GRID_APPS: AppMetadata[] = [
     iconName: 'MessageCircle',
     category: '通讯',
     color: 'from-emerald-400/30 to-teal-500/20',
-    textColor: 'text-teal-600',
+    textColor: 'text-[#8FD3C4]',
   },
   {
     id: 'phone_explorer',
@@ -35,7 +35,7 @@ export const MAIN_GRID_APPS: AppMetadata[] = [
     iconName: 'Smartphone',
     category: '秘密',
     color: 'from-sky-400/30 to-blue-500/20',
-    textColor: 'text-sky-600',
+    textColor: 'text-[#9CCBEA]',
   },
   {
     id: 'alipay',
@@ -43,7 +43,7 @@ export const MAIN_GRID_APPS: AppMetadata[] = [
     iconName: 'Coins',
     category: '金融',
     color: 'from-blue-500/30 to-indigo-600/20',
-    textColor: 'text-blue-600',
+    textColor: 'text-[#A9B7F0]',
   },
   {
     id: 'taobao',
@@ -51,7 +51,7 @@ export const MAIN_GRID_APPS: AppMetadata[] = [
     iconName: 'ShoppingBag',
     category: '生活',
     color: 'from-orange-400/30 to-amber-500/20',
-    textColor: 'text-orange-600',
+    textColor: 'text-[#F5C29A]',
   },
   {
     id: 'forum',
@@ -59,7 +59,7 @@ export const MAIN_GRID_APPS: AppMetadata[] = [
     iconName: 'Flame',
     category: '社区',
     color: 'from-rose-400/30 to-pink-500/20',
-    textColor: 'text-rose-600',
+    textColor: 'text-[#F2A9B8]',
   },
   {
     id: 'pomodoro',
@@ -67,7 +67,7 @@ export const MAIN_GRID_APPS: AppMetadata[] = [
     iconName: 'Timer',
     category: '专注',
     color: 'from-red-400/30 to-rose-500/20',
-    textColor: 'text-red-500',
+    textColor: 'text-[#F4B1AE]',
   },
   {
     id: 'offline_mode',
@@ -75,7 +75,7 @@ export const MAIN_GRID_APPS: AppMetadata[] = [
     iconName: 'Compass',
     category: '现实',
     color: 'from-cyan-400/30 to-teal-500/20',
-    textColor: 'text-cyan-600',
+    textColor: 'text-[#8ED6DD]',
   },
   {
     id: 'couple_space',
@@ -83,7 +83,7 @@ export const MAIN_GRID_APPS: AppMetadata[] = [
     iconName: 'HeartHandshake',
     category: '伴侣',
     color: 'from-pink-400/30 to-rose-400/20',
-    textColor: 'text-pink-500',
+    textColor: 'text-[#F2B0CC]',
   },
 ];
 
@@ -95,7 +95,7 @@ export const DOCK_APPS: AppMetadata[] = [
     iconName: 'Settings',
     category: '系统',
     color: 'from-slate-400/30 to-slate-600/20',
-    textColor: 'text-slate-600',
+    textColor: 'text-[#A9B6C4]',
   },
   {
     id: 'customizer',
@@ -103,7 +103,7 @@ export const DOCK_APPS: AppMetadata[] = [
     iconName: 'Palette',
     category: '系统',
     color: 'from-pink-400/30 to-rose-400/20',
-    textColor: 'text-pink-600',
+    textColor: 'text-[#E3B3F0]',
   },
   {
     id: 'world_book',
@@ -111,7 +111,7 @@ export const DOCK_APPS: AppMetadata[] = [
     iconName: 'BookOpen',
     category: '设定',
     color: 'from-violet-400/30 to-purple-600/20',
-    textColor: 'text-purple-600',
+    textColor: 'text-[#C2B5F0]',
   },
   {
     id: 'memory',
@@ -119,7 +119,7 @@ export const DOCK_APPS: AppMetadata[] = [
     iconName: 'Sparkles',
     category: '回忆',
     color: 'from-amber-400/30 to-sky-400/20',
-    textColor: 'text-amber-600',
+    textColor: 'text-[#F2D494]',
   },
 ];
 
@@ -157,31 +157,6 @@ export const THEMES = [
     accentColor: '#7E63C4',
     glowColor: 'rgba(235, 231, 250, 0.8)',
     tagColor: 'bg-purple-100/80 text-purple-800',
-  },
-];
-
-export const WECHAT_MOMENTS = [
-  {
-    id: 1,
-    author: '林汐',
-    avatar: '汐',
-    time: '1小时前',
-    content:
-      '雨后的云层像棉花糖一样，把今天的第一份剧本大纲写完了。大家记得按时喝水🫧',
-    likes: 18,
-    comments: 4,
-    images: ['#DFF1FA', '#FAD4E0'],
-  },
-  {
-    id: 2,
-    author: '苏子言',
-    avatar: '言',
-    time: '3小时前',
-    content:
-      '在工位边放了一盆小薄荷，连敲代码都带着草木香气。今天番茄钟已经达成 4 个循环！',
-    likes: 24,
-    comments: 7,
-    images: ['#E1F7EF'],
   },
 ];
 

@@ -13,16 +13,12 @@ import {
   BookOpen,
   Sparkles,
   MapPin,
-  Music2,
-  Play,
-  Pause,
-  SkipForward,
-  Camera,
-  RefreshCw,
   Pencil,
 } from 'lucide-react';
 import { AppIconOverrides, AppId, AppMetadata, UserProfile } from '../types';
 import { ProfileEditor } from './ProfileEditor';
+import { ListenTogetherWidget } from './ListenTogetherWidget';
+import { CalendarWidget } from './CalendarWidget';
 
 interface HomeScreenProps {
   userProfile: UserProfile;
@@ -41,37 +37,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   onSaveUserProfile,
   appIcons,
 }) => {
-  // Static audio widget state
-  const [isPlaying, setIsPlaying] = useState(false);
-
-  // Photo widget preset list for quick switching
-  const photoPresets = [
-    {
-      title: '浮光浅滩霞光',
-      date: '10月12日 · 晴',
-      gradient: 'linear-gradient(135deg, #CEE9F7 0%, #FAD4E0 55%, #FFFFFF 100%)',
-      sticker: '🌅 浅滩微风',
-    },
-    {
-      title: '图书馆窗边微雨',
-      date: '10月09日 · 雨',
-      gradient: 'linear-gradient(135deg, #DFF1FA 0%, #BFE3F7 60%, #FFFFFF 100%)',
-      sticker: '🌧️ 窗边水滴',
-    },
-    {
-      title: '星空下双人书签',
-      date: '10月04日 · 夜',
-      gradient: 'linear-gradient(135deg, #EBE7FA 0%, #D4C7F5 60%, #FFFFFF 100%)',
-      sticker: '✨ 灵犀闪烁',
-    },
-  ];
-  const [photoIndex, setPhotoIndex] = useState(0);
   const [isProfileEditorOpen, setIsProfileEditorOpen] = useState(false);
 
-  const handleNextPhoto = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setPhotoIndex((prev) => (prev + 1) % photoPresets.length);
-  };
 
   // Top-right 4 apps: 微信, 查手机, 支付宝, 淘宝
   const topRightApps = apps.slice(0, 4);
@@ -169,7 +136,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       <div className="w-full shrink-0 glass-card rounded-[clamp(20px,4.5vw,28px)] overflow-hidden transition-all shadow-sm flex flex-col">
         {/* Cover Art Banner */}
         <div
-          className="h-[clamp(44px,7.5vh,58px)] w-full bg-gradient-to-r from-sky-200 via-blue-100 to-pink-100 relative overflow-hidden flex items-center justify-between px-3.5 shrink-0 bg-cover bg-center"
+          className="h-[clamp(44px,7.5vh,58px)] w-full bg-gradient-to-r from-sky-200 via-blue-100 to-pink-100 relative overflow-hidden flex items-center justify-end px-3.5 shrink-0 bg-cover bg-center"
         >
           {userProfile.coverImageUrl && (
             <img
@@ -179,9 +146,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             />
           )}
           <div className="absolute inset-0 opacity-40 bg-[radial-gradient(circle_at_30%_50%,rgba(255,255,255,0.8),transparent_60%)]" />
-          <span className="-translate-y-1 text-[11px] font-mono font-bold text-[#587589]/80 relative z-10 tracking-wide">
-            YYphone·歪歪机
-          </span>
           <button
             type="button"
             onClick={() => setIsProfileEditorOpen(true)}
@@ -196,13 +160,13 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         {/* Profile Content Body */}
         <div className="px-3.5 pb-2.5 pt-0 relative flex flex-col">
           {/* Avatar & Mood pill row */}
-          <div className="flex items-end justify-between -mt-5 mb-1">
+          <div className="flex items-end justify-between -mt-[clamp(27px,6.9vw,31px)] mb-1">
             <div className="relative">
               <div
                 className={`flex items-center justify-center ${
                   userProfile.avatarFrameEnabled
-                    ? 'h-[clamp(40px,10vw,46px)] w-[clamp(40px,10vw,46px)] rounded-[38%] p-[4px] shadow-sm'
-                    : 'h-[clamp(40px,10vw,46px)] w-[clamp(40px,10vw,46px)] rounded-[38%]'
+                    ? 'h-[clamp(54px,13.8vw,62px)] w-[clamp(54px,13.8vw,62px)] rounded-[38%] p-[4px] shadow-sm'
+                    : 'h-[clamp(54px,13.8vw,62px)] w-[clamp(54px,13.8vw,62px)] rounded-[38%]'
                 }`}
                 style={userProfile.avatarFrameEnabled ? {
                   background: 'linear-gradient(135deg, #f5c9d9 0%, #fff0dc 48%, #cde8f4 100%)',
@@ -216,7 +180,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                     className={`h-full w-full object-cover ${userProfile.avatarFrameEnabled ? 'rounded-[32%] border-2 border-[#fff8ed]' : 'rounded-[inherit]'}`}
                   />
                 ) : (
-                  <div className={`flex h-full w-full items-center justify-center bg-white/90 font-bold text-[#587589] text-[clamp(15px,3.8vw,18px)] backdrop-blur-sm ${userProfile.avatarFrameEnabled ? 'rounded-[32%] border-2 border-[#fff8ed]' : 'rounded-[inherit]'}`}>
+                  <div className={`flex h-full w-full items-center justify-center bg-white/90 font-bold text-[#587589] text-[clamp(20px,5vw,24px)] backdrop-blur-sm ${userProfile.avatarFrameEnabled ? 'rounded-[32%] border-2 border-[#fff8ed]' : 'rounded-[inherit]'}`}>
                     {userProfile.name.trim().charAt(0) || '?'}
                   </div>
                 )}
@@ -265,81 +229,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       {/* Home widgets and app groups retain the 2×2 phone home layout. */}
       <div className="grid grid-cols-2 gap-[clamp(10px,2.6vw,14px)] w-full my-auto shrink-0">
         {/* Music widget */}
-        <div className="glass-card rounded-[clamp(20px,4.8vw,28px)] p-[clamp(9px,2.4vw,13px)] aspect-square flex flex-col justify-between overflow-hidden relative shadow-sm">
-          {/* Top header */}
-          <div className="flex items-center justify-between z-10 shrink-0">
-            <div className="flex items-center gap-1.5">
-              <div className="w-[clamp(20px,5vw,24px)] h-[clamp(20px,5vw,24px)] rounded-lg bg-sky-100/90 text-sky-700 flex items-center justify-center">
-                <Music2 className="w-3.5 h-3.5" />
-              </div>
-              <span className="text-[clamp(11px,2.8vw,13px)] font-bold text-[#587589]">一起听歌</span>
-            </div>
-            <span className="flex items-center gap-0.5">
-              <span className="w-1 h-2 rounded-full bg-sky-400 animate-pulse" />
-              <span className="w-1 h-3 rounded-full bg-pink-400 animate-pulse delay-100" />
-              <span className="w-1 h-1.5 rounded-full bg-sky-400 animate-pulse delay-200" />
-            </span>
-          </div>
-
-          {/* Middle: Music Album Art & Song Info */}
-          <div className="flex items-center gap-2.5 my-auto z-10 min-h-0">
-            {/* Vinyl disc */}
-            <div className="relative shrink-0">
-              <div
-                className={`w-[clamp(36px,9.5vw,48px)] h-[clamp(36px,9.5vw,48px)] rounded-full p-0.5 shadow-sm bg-gradient-to-tr from-sky-300 via-pink-200 to-indigo-300 border border-white/80 flex items-center justify-center ${
-                  isPlaying ? 'animate-spin [animation-duration:8s]' : ''
-                }`}
-              >
-                <div className="w-4 h-4 rounded-full bg-slate-800/80 border border-white flex items-center justify-center">
-                  <div className="w-1.5 h-1.5 rounded-full bg-sky-400" />
-                </div>
-              </div>
-            </div>
-
-            {/* Title & Artist */}
-            <div className="flex-1 min-w-0">
-              <h4 className="text-[clamp(11px,2.8vw,12.5px)] font-bold text-[#587589] truncate">
-                浅海微澜与晨光
-              </h4>
-              <p className="text-[clamp(9px,2.2vw,10.5px)] text-slate-500 truncate mt-0.5">
-                星野遥 & 沐晴
-              </p>
-            </div>
-          </div>
-
-          {/* Bottom: Progress Bar & Controls */}
-          <div className="space-y-1 z-10 shrink-0">
-            <div className="w-full bg-slate-200/60 h-1.5 rounded-full overflow-hidden">
-              <div className="bg-gradient-to-r from-sky-400 to-pink-400 h-full w-[48%]" />
-            </div>
-
-            <div className="flex items-center justify-between pt-0.5">
-              <span className="text-[8.5px] text-slate-400 font-mono">01:42</span>
-
-              {/* Control Buttons */}
-              <div className="flex items-center gap-1.5">
-                <button
-                  onClick={() => setIsPlaying(!isPlaying)}
-                  className="w-[clamp(22px,6vw,28px)] h-[clamp(22px,6vw,28px)] rounded-full bg-white/80 hover:bg-white text-[#587589] flex items-center justify-center shadow-2xs active:scale-90 transition-all cursor-pointer"
-                >
-                  {isPlaying ? (
-                    <Pause className="w-3 h-3 fill-[#587589]" />
-                  ) : (
-                    <Play className="w-3 h-3 fill-[#587589] ml-0.5" />
-                  )}
-                </button>
-                <button
-                  onClick={() => setIsPlaying(true)}
-                  className="w-[clamp(20px,5vw,24px)] h-[clamp(20px,5vw,24px)] rounded-full hover:bg-white/50 text-slate-500 flex items-center justify-center active:scale-90 transition-all cursor-pointer"
-                >
-                  <SkipForward className="w-3 h-3" />
-                </button>
-              </div>
-
-              <span className="text-[8.5px] text-slate-400 font-mono">03:35</span>
-            </div>
-          </div>
-        </div>
+        <ListenTogetherWidget />
 
         <div className="aspect-square grid grid-cols-2 grid-rows-2 items-center justify-items-center gap-1">
           {topRightApps.map(renderAppButton)}
@@ -349,59 +239,13 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           {bottomLeftApps.map(renderAppButton)}
         </div>
 
-        {/* Photo widget */}
-        <div
-          onClick={handleNextPhoto}
-          className="glass-card rounded-[clamp(20px,4.8vw,28px)] p-[clamp(9px,2.4vw,13px)] aspect-square flex flex-col justify-between overflow-hidden relative shadow-sm group cursor-pointer active:scale-[0.98] transition-all"
-        >
-          {/* Background preview */}
-          <div
-            className="absolute inset-0 transition-all duration-500 opacity-90 group-hover:scale-105"
-            style={{ background: photoPresets[photoIndex].gradient }}
-          />
-          <div className="absolute inset-0 bg-white/20 backdrop-blur-[1px] pointer-events-none" />
-
-          {/* Header */}
-          <div className="relative z-10 flex items-center justify-between shrink-0">
-            <span className="text-[10px] font-bold text-[#587589] bg-white/75 px-2 py-0.5 rounded-full shadow-2xs backdrop-blur-xs flex items-center gap-1">
-              <Camera className="w-2.5 h-2.5 text-pink-500" />
-              <span>相片相框</span>
-            </span>
-
-            <button
-              onClick={handleNextPhoto}
-              title="轻触更换相片"
-              className="w-5.5 h-5.5 rounded-full bg-white/70 hover:bg-white text-[#587589] flex items-center justify-center shadow-xs transition-all active:rotate-180"
-            >
-              <RefreshCw className="w-3 h-3 text-slate-600" />
-            </button>
-          </div>
-
-          {/* Middle: Polaroid style sticker */}
-          <div className="relative z-10 flex flex-col items-center justify-center my-auto min-h-0">
-            <div className="w-[clamp(36px,9.5vw,46px)] h-[clamp(36px,9.5vw,46px)] rounded-[clamp(11px,2.8vw,16px)] bg-white/70 border border-white/85 shadow-xs flex items-center justify-center text-[clamp(18px,4.8vw,24px)] backdrop-blur-md group-hover:scale-105 transition-transform">
-              {photoIndex === 0 ? '🌅' : photoIndex === 1 ? '🌧️' : '🌌'}
-            </div>
-            <span className="text-[10px] text-[#587589] font-bold mt-1">
-              {photoPresets[photoIndex].sticker}
-            </span>
-          </div>
-
-          {/* Bottom */}
-          <div className="relative z-10 flex items-baseline justify-between pt-0.5 border-t border-white/40 shrink-0">
-            <span className="text-[9px] text-[#587589]/85 font-medium truncate max-w-[85px]">
-              {photoPresets[photoIndex].title}
-            </span>
-            <span className="text-[8.5px] text-slate-500 font-mono">
-              点我切换
-            </span>
-          </div>
-        </div>
+        {/* Calendar widget */}
+        <CalendarWidget />
       </div>
     </div>
 
       {/* Floating iOS-style translucent app dock */}
-      <div className="mx-4 mb-[max(10px,env(safe-area-inset-bottom,0px))] w-auto shrink-0 rounded-[28px] border border-white/75 bg-white/45 px-2 py-2 backdrop-blur-2xl shadow-[0_8px_28px_rgba(108,144,168,0.2),inset_0_1px_0_rgba(255,255,255,0.75)] flex items-center justify-around z-20">
+      <div className="mx-4 mb-1.5 w-auto shrink-0 rounded-[28px] border border-white/75 bg-white/45 px-2 py-2 backdrop-blur-2xl shadow-[0_8px_28px_rgba(108,144,168,0.2),inset_0_1px_0_rgba(255,255,255,0.75)] flex items-center justify-around z-20">
         {dockApps.map((dockApp) => (
           <button
             key={dockApp.id}
@@ -431,6 +275,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           </button>
         ))}
       </div>
+      <footer className="shrink-0 pb-1.5 text-center text-[10px] font-mono font-bold tracking-wide text-[#587589]/70">
+        YYphone
+      </footer>
       {isProfileEditorOpen && (
         <ProfileEditor
           profile={userProfile}

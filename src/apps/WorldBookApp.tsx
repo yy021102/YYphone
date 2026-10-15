@@ -1,8 +1,9 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   BookPlus,
   Check,
   Download,
+  Globe2,
   MoreHorizontal,
   Pencil,
   Plus,
@@ -23,6 +24,7 @@ interface WorldBookEntry {
 interface WorldBook {
   id: string;
   name: string;
+  isGlobal?: boolean;
   entries: WorldBookEntry[];
 }
 
@@ -52,7 +54,8 @@ const isWorldBookList = (value: unknown): value is WorldBook[] =>
       typeof (book as WorldBook).id === 'string' &&
       typeof (book as WorldBook).name === 'string' &&
       Array.isArray((book as WorldBook).entries) &&
-      (book as WorldBook).entries.every(isWorldBookEntry)
+      (book as WorldBook).entries.every(isWorldBookEntry) &&
+      ((book as WorldBook).isGlobal === undefined || typeof (book as WorldBook).isGlobal === 'boolean')
   );
 
 const newId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -73,13 +76,19 @@ export const WorldBookApp: React.FC<WorldBookAppProps> = ({ onBack }) => {
   const [editorBookId, setEditorBookId] = useState('');
   const [newBookName, setNewBookName] = useState('');
   const [showNewBook, setShowNewBook] = useState(false);
+  const [newBookGlobal, setNewBookGlobal] = useState(false);
   const [moveTargetBookId, setMoveTargetBookId] = useState('');
   const [message, setMessage] = useState('');
+  const [bookEditor, setBookEditor] = useState<{ id: string; name: string; isGlobal: boolean } | null>(null);
+  const [exportPickerOpen, setExportPickerOpen] = useState(false);
   const [error, setError] = useState('');
   const importInputRef = useRef<HTMLInputElement>(null);
 
   const selectedBook = books.find((book) => book.id === selectedBookId);
 
+  useEffect(() => {
+    if (!showNewBook) setNewBookGlobal(false);
+  }, [showNewBook]);
   const persistBooks = (nextBooks: WorldBook[]): boolean => {
     try {
       writeStoredValue(STORAGE_KEY, nextBooks);
@@ -151,13 +160,29 @@ export const WorldBookApp: React.FC<WorldBookAppProps> = ({ onBack }) => {
       setError('该世界书已存在。');
       return;
     }
-    const book = { id: newId(), name, entries: [] };
+    const book: WorldBook = { id: newId(), name, entries: [], ...(newBookGlobal ? { isGlobal: true } : {}) };
     if (persistBooks([...books, book])) {
       setSelectedBookId(book.id);
       setShowNewBook(false);
       setNewBookName('');
+      setNewBookGlobal(false);
       setMessage('世界书已创建。');
       setError('');
+    }
+  };
+
+  const handleToggleGlobal = () => {
+    if (!selectedBook) return;
+    const nextGlobal = !selectedBook.isGlobal;
+    const nextBooks = books.map((book) =>
+      book.id === selectedBook.id ? { ...book, isGlobal: nextGlobal } : book
+    );
+    if (persistBooks(nextBooks)) {
+      setMessage(
+        nextGlobal
+          ? `「${selectedBook.name}」已设为全局世界书，所有 AI 生成都会默认带上它。`
+          : `「${selectedBook.name}」已取消全局，需在角色中单独关联才会发送。`
+      );
     }
   };
 
@@ -210,7 +235,31 @@ export const WorldBookApp: React.FC<WorldBookAppProps> = ({ onBack }) => {
     }
   };
 
-  const handleExport = () => {
+  const handleSaveBookEditor = () => {
+    if (!bookEditor) return;
+    const name = bookEditor.name.trim();
+    if (!name) {
+      setError('请填写世界书名称。');
+      return;
+    }
+    if (books.some((book) => book.id !== bookEditor.id && book.name.toLocaleLowerCase() === name.toLocaleLowerCase())) {
+      setError('该世界书已存在。');
+      return;
+    }
+    const nextBooks = books.map((book) => {
+      if (book.id !== bookEditor.id) return book;
+      const { isGlobal: _previous, ...rest } = book;
+      return { ...rest, name, ...(bookEditor.isGlobal ? { isGlobal: true } : {}) };
+    });
+    if (persistBooks(nextBooks)) {
+      setBookEditor(null);
+      setMessage(`「${name}」已更新。`);
+      setError('');
+    }
+  };
+
+  const handleExport = (target?: WorldBook) => {
+    const selectedBook = target;
     if (!selectedBook) {
       setError('请先选择要导出的世界书。');
       return;
@@ -362,8 +411,8 @@ export const WorldBookApp: React.FC<WorldBookAppProps> = ({ onBack }) => {
           <button onClick={() => { setMenuOpen(false); importInputRef.current?.click(); }} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-left text-slate-700 hover:bg-sky-50/70 rounded-xl font-medium cursor-pointer">
             <Upload className="w-3.5 h-3.5 text-indigo-500" />导入世界书
           </button>
-          <button onClick={() => { setMenuOpen(false); handleExport(); }} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-left text-slate-700 hover:bg-sky-50/70 rounded-xl font-medium cursor-pointer">
-            <Download className="w-3.5 h-3.5 text-sky-500" />导出当前世界书
+          <button onClick={() => { setMenuOpen(false); setExportPickerOpen(true); setError(''); }} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-left text-slate-700 hover:bg-sky-50/70 rounded-xl font-medium cursor-pointer">
+            <Download className="w-3.5 h-3.5 text-sky-500" />导出世界书
           </button>
           <button
             onClick={() => {
@@ -375,6 +424,16 @@ export const WorldBookApp: React.FC<WorldBookAppProps> = ({ onBack }) => {
           >
             <Pencil className="w-3.5 h-3.5 text-pink-500" />{editingMode ? '完成编辑' : '编辑条目'}
           </button>
+          {selectedBook && (
+            <button onClick={() => { setMenuOpen(false); setBookEditor({ id: selectedBook.id, name: selectedBook.name, isGlobal: !!selectedBook.isGlobal }); setError(''); }} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-left text-slate-700 hover:bg-sky-50/70 rounded-xl font-medium cursor-pointer">
+              <Pencil className="w-3.5 h-3.5 text-sky-500" />编辑当前世界书
+            </button>
+          )}
+          {selectedBook && (
+            <button onClick={() => { setMenuOpen(false); handleToggleGlobal(); }} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-left text-slate-700 hover:bg-sky-50/70 rounded-xl font-medium cursor-pointer">
+              <Globe2 className="w-3.5 h-3.5 text-emerald-500" />{selectedBook.isGlobal ? '取消全局世界书' : '设为全局世界书'}
+            </button>
+          )}
           {selectedBook && (
             <button onClick={() => { setMenuOpen(false); handleDeleteBook(); }} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-left text-rose-500 hover:bg-rose-50 rounded-xl font-medium cursor-pointer">
               <Trash2 className="w-3.5 h-3.5" />删除当前世界书
@@ -409,9 +468,18 @@ export const WorldBookApp: React.FC<WorldBookAppProps> = ({ onBack }) => {
           >
             {books.length === 0 && <option value="">暂无世界书</option>}
             {books.map((book) => (
-              <option key={book.id} value={book.id}>{book.name}</option>
+              <option key={book.id} value={book.id}>{book.isGlobal ? '🌐 ' : ''}{book.name}</option>
             ))}
           </select>
+          {selectedBook && (
+            <button
+              onClick={() => setBookEditor({ id: selectedBook.id, name: selectedBook.name, isGlobal: !!selectedBook.isGlobal })}
+              aria-label="编辑世界书"
+              className="w-10 h-10 shrink-0 rounded-2xl bg-white/65 backdrop-blur-xl border border-white/85 flex items-center justify-center shadow-2xs active:scale-95 transition-transform cursor-pointer"
+            >
+              <Pencil className="w-4 h-4 text-pink-400" />
+            </button>
+          )}
           {selectedBook && (
             <button
               onClick={() => { setShowNewBook(true); setNewBookName(''); setError(''); }}
@@ -422,6 +490,28 @@ export const WorldBookApp: React.FC<WorldBookAppProps> = ({ onBack }) => {
             </button>
           )}
         </div>
+
+        {selectedBook && (
+          <button
+            type="button"
+            role="switch"
+            aria-checked={!!selectedBook.isGlobal}
+            onClick={handleToggleGlobal}
+            className="w-full flex items-center justify-between gap-3 rounded-2xl bg-white/60 backdrop-blur-xl border border-white/85 px-3.5 py-2.5 text-left shadow-2xs cursor-pointer"
+          >
+            <span className="min-w-0">
+              <span className="block text-xs font-bold text-[#2C4A5C]">全局世界书</span>
+              <span className="block text-[10px] text-slate-500 leading-snug">
+                {selectedBook.isGlobal
+                  ? '已开启：本书条目会默认发送到所有 AI 生成中'
+                  : '未开启：仅在角色单独关联时才会加入提示词'}
+              </span>
+            </span>
+            <span className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${selectedBook.isGlobal ? 'bg-emerald-400' : 'bg-slate-300'}`}>
+              <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${selectedBook.isGlobal ? 'left-[18px]' : 'left-0.5'}`} />
+            </span>
+          </button>
+        )}
 
         {editingMode && selectedBook && (
           <div className="bg-white/60 backdrop-blur-xl border border-white/85 rounded-3xl p-3.5 space-y-2.5 shadow-2xs">
@@ -446,7 +536,7 @@ export const WorldBookApp: React.FC<WorldBookAppProps> = ({ onBack }) => {
                     <option key={book.id} value={book.id}>{book.name}</option>
                   ))}
                 </select>
-                <button onClick={handleMoveSelected} disabled={!moveTargetBookId} className="rounded-xl bg-gradient-to-r from-sky-400 to-pink-400 px-3.5 py-1.5 text-[11px] font-bold text-white disabled:opacity-40 cursor-pointer shadow-2xs">
+                <button onClick={handleMoveSelected} disabled={!moveTargetBookId} className="rounded-xl bg-gradient-to-r from-sky-100 to-pink-100 border border-white/80 px-3.5 py-1.5 text-[11px] font-bold text-[#587589] disabled:opacity-40 cursor-pointer shadow-2xs">
                   归类
                 </button>
               </div>
@@ -470,7 +560,7 @@ export const WorldBookApp: React.FC<WorldBookAppProps> = ({ onBack }) => {
                 }
                 className={`w-5 h-5 shrink-0 rounded-full border flex items-center justify-center transition-all ${
                   selectedEntryIds.includes(entry.id)
-                    ? 'bg-gradient-to-r from-sky-400 to-pink-400 border-transparent text-white shadow-2xs'
+                    ? 'bg-gradient-to-r from-sky-100 to-pink-100 border-white/80 text-[#587589] shadow-2xs'
                     : 'border-slate-300 bg-white/70'
                 }`}
               >
@@ -519,7 +609,7 @@ export const WorldBookApp: React.FC<WorldBookAppProps> = ({ onBack }) => {
                   setError('');
                 }
               }}
-              className="mt-2 inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-sky-400 to-pink-400 px-3.5 py-1.5 text-xs font-bold text-white shadow-2xs cursor-pointer active:scale-95 transition-transform"
+              className="mt-2 inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-sky-100 to-pink-100 border border-white/80 px-3.5 py-1.5 text-xs font-bold text-[#587589] shadow-2xs cursor-pointer active:scale-95 transition-transform"
             >
               <Plus className="w-3.5 h-3.5" />
               {selectedBook ? '新增条目' : '新增世界书'}
@@ -570,9 +660,17 @@ export const WorldBookApp: React.FC<WorldBookAppProps> = ({ onBack }) => {
                     className="mt-1 w-full rounded-2xl bg-slate-100/80 border border-slate-200 px-3 py-2 text-xs font-bold outline-none focus:border-sky-400"
                   />
                 </label>
+                <label className="flex items-center gap-2 text-xs font-bold text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={newBookGlobal}
+                    onChange={(event) => setNewBookGlobal(event.target.checked)}
+                  />
+                  设为全局世界书（所有 AI 生成默认发送）
+                </label>
                 <button
                   onClick={handleCreateBook}
-                  className="w-full rounded-2xl bg-gradient-to-r from-sky-400 to-pink-400 py-2.5 text-xs font-bold text-white shadow-2xs cursor-pointer"
+                  className="w-full rounded-2xl bg-gradient-to-r from-sky-100 to-pink-100 border border-white/80 py-2.5 text-xs font-bold text-[#587589] shadow-2xs cursor-pointer"
                 >
                   创建世界书
                 </button>
@@ -639,14 +737,83 @@ export const WorldBookApp: React.FC<WorldBookAppProps> = ({ onBack }) => {
                 </label>
                 <button
                   onClick={handleSaveEntry}
-                  style={{ background: 'linear-gradient(90deg, #8EC5FC 0%, #F5B8D1 100%)' }}
-                  className="w-full rounded-2xl py-2.5 text-xs font-bold text-white shadow-2xs cursor-pointer"
+                  style={{ background: '                  linear-gradient(90deg, #DCEEFD 0%, #FBE1EC 100%)' }}
+                                    className="w-full rounded-2xl border border-white/80 py-2.5 text-xs font-bold text-[#587589] shadow-2xs cursor-pointer"
                 >
                   保存条目
                 </button>
               </div>
             )}
             {error && <p role="alert" className="text-[11px] font-bold text-rose-500">{error}</p>}
+          </div>
+        </div>
+      )}
+
+      {bookEditor && (
+        <div
+          className="absolute inset-0 z-50 flex items-center justify-center bg-slate-900/30 backdrop-blur-xs p-4"
+          onMouseDown={(event) => { if (event.target === event.currentTarget) { setBookEditor(null); setError(''); } }}
+        >
+          <div className="w-full max-w-sm rounded-3xl bg-white/95 backdrop-blur-2xl border border-white p-5 shadow-2xl space-y-3.5 text-slate-700">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-extrabold text-[#2C4A5C]">编辑世界书</h2>
+              <button aria-label="关闭" onClick={() => { setBookEditor(null); setError(''); }} className="w-7 h-7 rounded-full flex items-center justify-center text-slate-500 bg-slate-100 hover:bg-slate-200 cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <label className="block text-xs font-bold text-slate-600">
+              世界书名称
+              <input
+                autoFocus
+                value={bookEditor.name}
+                onChange={(event) => setBookEditor({ ...bookEditor, name: event.target.value })}
+                onKeyDown={(event) => { if (event.key === 'Enter') handleSaveBookEditor(); }}
+                maxLength={80}
+                className="mt-1 w-full rounded-2xl bg-slate-100/80 border border-slate-200 px-3 py-2 text-xs font-bold outline-none focus:border-sky-400"
+              />
+            </label>
+            <label className="flex items-center gap-2 text-xs font-bold text-slate-600">
+              <input
+                type="checkbox"
+                checked={bookEditor.isGlobal}
+                onChange={(event) => setBookEditor({ ...bookEditor, isGlobal: event.target.checked })}
+              />
+              设为全局世界书（所有 AI 生成默认发送）
+            </label>
+            {error && <p role="alert" className="text-[11px] font-bold text-rose-500">{error}</p>}
+            <button
+              onClick={handleSaveBookEditor}
+              className="w-full rounded-2xl bg-gradient-to-r from-sky-100 to-pink-100 border border-white/80 py-2.5 text-xs font-bold text-[#587589] shadow-2xs cursor-pointer"
+            >
+              保存
+            </button>
+          </div>
+        </div>
+      )}
+
+      {exportPickerOpen && (
+        <div
+          className="absolute inset-0 z-50 flex items-center justify-center bg-slate-900/30 backdrop-blur-xs p-4"
+          onMouseDown={(event) => { if (event.target === event.currentTarget) setExportPickerOpen(false); }}
+        >
+          <div className="w-full max-w-sm max-h-[80%] overflow-y-auto rounded-3xl bg-white/95 backdrop-blur-2xl border border-white p-5 shadow-2xl space-y-3 text-slate-700">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-extrabold text-[#2C4A5C]">选择要导出的世界书</h2>
+              <button aria-label="关闭" onClick={() => setExportPickerOpen(false)} className="w-7 h-7 rounded-full flex items-center justify-center text-slate-500 bg-slate-100 hover:bg-slate-200 cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            {books.length === 0 && <p className="text-xs text-slate-400">暂无世界书可导出。</p>}
+            {books.map((book) => (
+              <button
+                key={book.id}
+                onClick={() => { handleExport(book); setExportPickerOpen(false); }}
+                className="w-full flex items-center justify-between gap-2 rounded-2xl bg-gradient-to-r from-sky-50 to-pink-50 border border-white/80 px-3.5 py-2.5 text-left text-xs font-bold text-[#2C4A5C] cursor-pointer active:scale-[0.99]"
+              >
+                <span className="truncate">{book.isGlobal ? '🌐 ' : ''}{book.name}</span>
+                <span className="shrink-0 text-[10px] font-medium text-slate-400">{book.entries.length} 条 · 导出</span>
+              </button>
+            ))}
           </div>
         </div>
       )}

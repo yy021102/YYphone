@@ -3,6 +3,9 @@ import { readAlipayData } from './alipayData';
 import { readSetting, SETTINGS_KEYS } from './settings';
 import { CharacterNpc, getNpcByParticipantId, readCharacterNpcs } from './characterNpcs';
 import { readStorageString } from './localStorage';
+import { buildListenTogetherContext } from './musicPlayback';
+import { buildCalendarContext } from './calendarData';
+import { buildMomentsInjection, MomentsInjection } from './momentsData';
 
 export interface PromptChatMessage {
   id: string;
@@ -19,6 +22,8 @@ export interface PromptChatMessage {
   quantity?: number;
   recipientId?: string;
   payerId?: string;
+  orderCategory?: string;
+  orderMode?: string;
   aiContext?: string;
   pomodoroDetails?: {
     totalMinutes: number;
@@ -69,14 +74,8 @@ interface PromptWorldBookEntry {
 interface PromptWorldBook {
   id: string;
   name: string;
+  isGlobal?: boolean;
   entries: PromptWorldBookEntry[];
-}
-
-interface PromptMoment {
-  author?: string;
-  content?: string;
-  createdAt?: string;
-  time?: string;
 }
 
 export interface BuildPromptOptions {
@@ -84,6 +83,8 @@ export interface BuildPromptOptions {
   currentInput?: string;
   historyLimit?: number;
   regenerate?: boolean;
+  /** Unread moments snapshot; when omitted it is computed here. */
+  momentsInjection?: MomentsInjection;
 }
 
 export type OpenAiMessage = {
@@ -95,7 +96,6 @@ const STORAGE_KEYS = {
   chats: 'yyphone:wechat-chats',
   contacts: 'pocketos:wechat-contacts',
   worldBooks: 'yyphone:world-books',
-  moments: 'yyphone:wechat-moments',
   taobaoProducts: 'yyphone:taobao-market-products',
   characterContextEvents: 'yyphone:character-context-events',
 } as const;
@@ -201,7 +201,17 @@ const formatWorldBookEntries = (
   depth: PromptWorldBookEntry['depth']
 ) => {
   const seen = new Set<string>();
-  return contacts.flatMap((contact) =>
+  const globalEntries = worldBooks
+    .filter((book) => book.isGlobal === true)
+    .flatMap((book) =>
+      book.entries
+        .filter((entry) => entry.depth === depth)
+        .flatMap((entry) => {
+          seen.add(`${book.id}:${entry.id}`);
+          return [`【${book.name} / ${entry.title}】\n${entry.content}`];
+        })
+    );
+  const boundEntries = contacts.flatMap((contact) =>
     contact.worldBooks.flatMap((link) => {
       const book = worldBooks.find((item) => item.id === link.bookId);
       if (!book) return [];
@@ -215,7 +225,8 @@ const formatWorldBookEntries = (
         return [`【${book.name} / ${entry.title}】\n${entry.content}`];
       });
     })
-  ).join('\n\n');
+  );
+  return [...globalEntries, ...boundEntries].join('\n\n');
 };
 
 const isPersonaCollection = (value: unknown): value is PersonaCollection =>
@@ -263,6 +274,11 @@ const isChatConversation = (value: unknown): value is PromptConversation =>
 
 const toMessageContent = (message: PromptChatMessage) => {
   if (message.senderId === 'narrator') return `（旁白：${message.text}）`;
+  if (message.kind === 'pat') return `[拍一拍：${message.text}]`;
+  if (message.kind === 'order') {
+    const from = message.senderId === 'user' ? '玩家' : '你';
+    return `[${message.orderCategory === 'eleme' ? '饿了么外卖' : message.orderCategory === 'xianyu' ? '闲鱼' : '淘宝商品'}卡片：${from}${message.orderMode === 'gift' ? '送出的礼物' : '下单的商品'}「${message.title ?? message.text}」${message.amount ? `，¥${message.amount}` : ''}${message.content ? `，${message.content}` : ''}]`;
+  }
   if (message.kind === 'forum-forward') {
     return [
       `【微信论坛分享卡片${message.source ? ` · ${message.source}` : ''}】`,
@@ -319,12 +335,12 @@ export const buildPrompt = ({
   currentInput,
   historyLimit = 30,
   regenerate = false,
+  momentsInjection,
 }: BuildPromptOptions): OpenAiMessage[] => {
   const chatsValue: unknown = readJson(STORAGE_KEYS.chats, []);
   const contactsValue: unknown = readJson(STORAGE_KEYS.contacts, []);
   const worldBooksValue: unknown = readJson(STORAGE_KEYS.worldBooks, []);
   const personaValue = readSetting<unknown>(SETTINGS_KEYS.personas, null, (_value): _value is unknown => true);
-  const momentsValue: unknown = readJson(STORAGE_KEYS.moments, []);
   const alipayData = readAlipayData();
 
   const chats = Array.isArray(chatsValue) ? chatsValue.filter(isChatConversation) : [];
@@ -405,6 +421,30 @@ export const buildPrompt = ({
   // 5. User Persona.
   messages.push({ role: 'system', content: `玩家设定：\n${getPersonaText(persona)}\n当前聊天补充：${chat.context || '无'}` });
 
+  // 当前环境：仅在玩家正与聊天中的某个角色一起听歌时注入。
+  if (chat.type !== 'observer') {
+    const listenTogetherContext = buildListenTogetherContext(
+      chat.participantIds,
+      (id) => contacts.find((contact) => contact.id === id)?.name
+    );
+    if (listenTogetherContext) messages.push({ role: 'system', content: listenTogetherContext });
+  }
+
+  const calendarContext = buildCalendarContext(
+    chat.participantIds,
+    (id) => contacts.find((contact) => contact.id === id)?.name,
+    chat.type !== 'observer'
+  );
+  if (calendarContext) messages.push({ role: 'system', content: calendarContext });
+
+  // 朋友圈：只注入对聊天中角色尚未读过的动态/评论，已读的不再重复。
+  const unreadMoments = momentsInjection ?? buildMomentsInjection(
+    chat.participantIds,
+    chat.type === 'observer',
+    (id) => contacts.find((contact) => contact.id === id)?.name
+  );
+  if (unreadMoments.text) messages.push({ role: 'system', content: unreadMoments.text });
+
   if (chat.includeLatestThought) {
     const latestThoughtMessage = [...chat.messages].reverse().find(
       (message) =>
@@ -454,6 +494,8 @@ export const buildPrompt = ({
 
   const marketProducts = readJson<unknown>(STORAGE_KEYS.taobaoProducts, []);
   if (Array.isArray(marketProducts)) {
+    const nameToId = new Map(contacts.map((contact) => [contact.name, contact.id]));
+    // 角色赠送的商品只对赠送者可见，其他角色的提示词里不出现，也不暴露赠送者。
     const availableProducts = marketProducts.filter((item): item is Record<string, unknown> =>
       isRecord(item) &&
       typeof item.id === 'string' &&
@@ -461,7 +503,12 @@ export const buildPrompt = ({
       typeof item.title === 'string' &&
       typeof item.desc === 'string' &&
       typeof item.price === 'number'
-    );
+    ).filter((item) => {
+      const ownerId = typeof item.fromCharId === 'string'
+        ? item.fromCharId
+        : typeof item.fromCharName === 'string' ? nameToId.get(item.fromCharName) ?? item.fromCharName : '';
+      return !ownerId || chat.participantIds.includes(ownerId);
+    });
     messages.push({
       role: 'system',
       content: [
@@ -602,27 +649,6 @@ export const buildPrompt = ({
   // 7. World Book - After.
   const afterEntries = formatWorldBookEntries(participants, worldBooks, 'back');
   if (afterEntries) messages.push({ role: 'system', content: `世界书条目 - 深度后：\n${afterEntries}` });
-
-  // 8. Extra context from the latest locally stored moment, when available.
-  const moments = Array.isArray(momentsValue)
-    ? momentsValue.filter((moment): moment is PromptMoment =>
-        isRecord(moment) &&
-        typeof moment.content === 'string' &&
-        (moment.author === undefined || typeof moment.author === 'string') &&
-        (moment.createdAt === undefined || typeof moment.createdAt === 'string') &&
-        (moment.time === undefined || typeof moment.time === 'string')
-      )
-    : [];
-  const latestMoment = [...moments]
-    .sort((left, right) =>
-      (Date.parse(right.createdAt ?? '') || 0) - (Date.parse(left.createdAt ?? '') || 0)
-    )[0];
-  if (latestMoment?.content) {
-    messages.push({
-      role: 'system',
-      content: `朋友圈最近动态（氛围补充）：${latestMoment.author ? `${latestMoment.author}：` : ''}${latestMoment.content}`,
-    });
-  }
 
   // 9. User's current input.
   messages.push({ role: 'user', content: input });

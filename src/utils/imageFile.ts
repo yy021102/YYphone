@@ -1,7 +1,14 @@
 const MAX_IMAGE_BYTES = 100 * 1024;
 const MAX_IMAGE_DIMENSION = 300;
 
-export async function compressImage(file: File): Promise<string> {
+export interface CompressImageOptions {
+  maxDimension?: number;
+  maxBytes?: number;
+}
+
+export async function compressImage(file: File, options: CompressImageOptions = {}): Promise<string> {
+  const maxBytes = options.maxBytes ?? MAX_IMAGE_BYTES;
+  const maxDimension = options.maxDimension ?? MAX_IMAGE_DIMENSION;
   if (!file.type.startsWith('image/')) {
     return Promise.reject(new Error('请选择图片文件。'));
   }
@@ -13,7 +20,7 @@ export async function compressImage(file: File): Promise<string> {
       const image = new Image();
       image.onerror = () => reject(new Error('所选文件不是有效图片。'));
       image.onload = () => {
-        let scale = Math.min(1, MAX_IMAGE_DIMENSION / Math.max(image.width, image.height));
+        let scale = Math.min(1, maxDimension / Math.max(image.width, image.height));
         const canvas = document.createElement('canvas');
         const context = canvas.getContext('2d');
 
@@ -30,18 +37,18 @@ export async function compressImage(file: File): Promise<string> {
           let quality = 0.7;
           let dataUrl = canvas.toDataURL('image/jpeg', quality);
 
-          while (dataUrlBytes(dataUrl) > MAX_IMAGE_BYTES && quality > 0.35) {
+          while (dataUrlBytes(dataUrl) > maxBytes && quality > 0.35) {
             quality = Math.max(0.35, quality - 0.1);
             dataUrl = canvas.toDataURL('image/jpeg', quality);
           }
 
-          if (dataUrlBytes(dataUrl) <= MAX_IMAGE_BYTES) {
+          if (dataUrlBytes(dataUrl) <= maxBytes) {
             resolve(dataUrl);
             return;
           }
 
           if (Math.max(canvas.width, canvas.height) <= 64) {
-            reject(new Error('图片压缩后仍超过 100KB，请选择更简单或更小的图片。'));
+            reject(new Error(`图片压缩后仍超过 ${Math.round(maxBytes / 1024)}KB，请选择更简单或更小的图片。`));
             return;
           }
 

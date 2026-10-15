@@ -1,0 +1,216 @@
+import { readStoredValue, writeStoredValue } from './localStorage';
+
+export const CALENDAR_STORAGE_KEY = 'yyphone:calendar-data';
+export const CALENDAR_EXPORT_FORMAT = 'yyphone-calendar';
+
+export type CalendarEntryKind = 'schedule' | 'todo' | 'birthday' | 'period';
+
+export interface CalendarEntry {
+  id: string;
+  kind: CalendarEntryKind;
+  // YYYY-MM-DD；生日按每年的月日循环，经期为起始日。
+  date: string;
+  endDate?: string;
+  title: string;
+  time?: string;
+  done?: boolean;
+}
+
+export interface CharacterSchedule {
+  id: string;
+  charId: string;
+  date: string;
+  text: string;
+}
+
+export interface CalendarData {
+  entries: CalendarEntry[];
+  visibleCharacterIds: string[];
+  scheduleCharacterIds: string[];
+  schedules: CharacterSchedule[];
+}
+
+export const KIND_LABELS: Record<CalendarEntryKind, string> = {
+  schedule: '日程',
+  todo: '待办',
+  birthday: '生日',
+  period: '经期',
+};
+
+const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const UPCOMING_DAYS = 7;
+
+export const emptyCalendarData = (): CalendarData => ({
+  entries: [],
+  visibleCharacterIds: [],
+  scheduleCharacterIds: [],
+  schedules: [],
+});
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  !!value && typeof value === 'object' && !Array.isArray(value);
+
+const isDateKey = (value: unknown): value is string =>
+  typeof value === 'string' && DATE_PATTERN.test(value);
+
+const isStringList = (value: unknown): value is string[] =>
+  Array.isArray(value) && value.every((item) => typeof item === 'string');
+
+const isEntry = (value: unknown): value is CalendarEntry =>
+  isRecord(value) &&
+  typeof value.id === 'string' &&
+  (value.kind === 'schedule' || value.kind === 'todo' || value.kind === 'birthday' || value.kind === 'period') &&
+  isDateKey(value.date) &&
+  (value.endDate === undefined || isDateKey(value.endDate)) &&
+  typeof value.title === 'string' &&
+  (value.time === undefined || typeof value.time === 'string') &&
+  (value.done === undefined || typeof value.done === 'boolean');
+
+const isSchedule = (value: unknown): value is CharacterSchedule =>
+  isRecord(value) &&
+  typeof value.id === 'string' &&
+  typeof value.charId === 'string' &&
+  isDateKey(value.date) &&
+  typeof value.text === 'string';
+
+export const isCalendarData = (value: unknown): value is CalendarData =>
+  isRecord(value) &&
+  Array.isArray(value.entries) && value.entries.every(isEntry) &&
+  isStringList(value.visibleCharacterIds) &&
+  isStringList(value.scheduleCharacterIds) &&
+  Array.isArray(value.schedules) && value.schedules.every(isSchedule);
+
+export const readCalendarData = (): CalendarData =>
+  readStoredValue(CALENDAR_STORAGE_KEY, emptyCalendarData(), isCalendarData);
+
+export const writeCalendarData = (data: CalendarData) => writeStoredValue(CALENDAR_STORAGE_KEY, data);
+
+const pad = (value: number) => String(value).padStart(2, '0');
+
+export const toDateKey = (date: Date) =>
+  `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+
+export const parseDateKey = (key: string) => {
+  const [year, month, day] = key.split('-').map(Number);
+  return new Date(year, month - 1, day);
+};
+
+export const addDays = (date: Date, days: number) =>
+  new Date(date.getFullYear(), date.getMonth(), date.getDate() + days);
+
+export const weekdayLabel = (key: string) => WEEKDAYS[parseDateKey(key).getDay()];
+
+export const entriesOnDate = (entries: CalendarEntry[], dateKey: string): CalendarEntry[] =>
+  entries.filter((entry) => {
+    if (entry.kind === 'birthday') return entry.date.slice(5) === dateKey.slice(5);
+    if (entry.kind === 'period') {
+      const end = entry.endDate && entry.endDate >= entry.date ? entry.endDate : entry.date;
+      return dateKey >= entry.date && dateKey <= end;
+    }
+    return entry.date === dateKey;
+  });
+
+export const sortEntries = (entries: CalendarEntry[]) =>
+  [...entries].sort((a, b) => (a.time ?? '99:99').localeCompare(b.time ?? '99:99'));
+
+const describeEntry = (entry: CalendarEntry) =>
+  `${entry.time ? `${entry.time} ` : ''}${entry.title}`;
+
+const buildPlayerSection = (data: CalendarData, today: Date): string | null => {
+  const todayKey = toDateKey(today);
+  const lines: string[] = [];
+
+  const todayEntries = sortEntries(entriesOnDate(data.entries, todayKey));
+  const todayLines = [
+    ...todayEntries.filter((entry) => entry.kind === 'schedule').map((entry) => `日程：${describeEntry(entry)}`),
+    ...todayEntries.filter((entry) => entry.kind === 'todo' && !entry.done).map((entry) => `待办：${entry.title}`),
+  ];
+  if (todayLines.length > 0) {
+    lines.push(`今天（${todayKey} ${weekdayLabel(todayKey)}）：`, ...todayLines.map((line) => `- ${line}`));
+  }
+
+  const upcomingLines: string[] = [];
+  for (let offset = 1; offset <= UPCOMING_DAYS; offset += 1) {
+    const day = addDays(today, offset);
+    const key = toDateKey(day);
+    sortEntries(entriesOnDate(data.entries, key))
+      .filter((entry) => entry.kind === 'schedule' || (entry.kind === 'todo' && !entry.done))
+      .forEach((entry) => {
+        upcomingLines.push(
+          `- ${key.slice(5)} ${weekdayLabel(key)}（${offset} 天后）${KIND_LABELS[entry.kind]}：${describeEntry(entry)}`
+        );
+      });
+  }
+  if (upcomingLines.length > 0) lines.push('未来 7 天：', ...upcomingLines);
+
+  const specialLines: string[] = [];
+  data.entries
+    .filter((entry) => entry.kind === 'birthday')
+    .forEach((entry) => {
+      for (let offset = 0; offset <= UPCOMING_DAYS; offset += 1) {
+        const key = toDateKey(addDays(today, offset));
+        if (entry.date.slice(5) === key.slice(5)) {
+          specialLines.push(
+            `- 生日：${entry.title}（${key.slice(5)}，${offset === 0 ? '就是今天' : `${offset} 天后`}）`
+          );
+          break;
+        }
+      }
+    });
+  const windowEnd = toDateKey(addDays(today, UPCOMING_DAYS));
+  data.entries
+    .filter((entry) => entry.kind === 'period')
+    .forEach((entry) => {
+      const end = entry.endDate && entry.endDate >= entry.date ? entry.endDate : entry.date;
+      if (end < todayKey || entry.date > windowEnd) return;
+      const status = entry.date <= todayKey ? '（目前正处于经期）' : '';
+      specialLines.push(
+        `- 经期：${entry.date}${end !== entry.date ? ` ~ ${end}` : ''}${entry.title ? `（${entry.title}）` : ''}${status}`
+      );
+    });
+  if (specialLines.length > 0) lines.push('特殊日期：', ...specialLines);
+
+  return lines.length > 0 ? lines.join('\n') : null;
+};
+
+/**
+ * 生成注入聊天提示词的日历信息。
+ * 只发送今天及未来 7 天的内容，已经过去的日期不再发送；
+ * 玩家日程仅对被勾选“可见”且在当前聊天中的角色可见。
+ */
+export const buildCalendarContext = (
+  participantIds: string[],
+  getName: (id: string) => string | undefined,
+  includePlayerSchedule: boolean,
+  now = new Date()
+): string | null => {
+  const data = readCalendarData();
+  const todayKey = toDateKey(now);
+  const sections: string[] = [];
+
+  if (includePlayerSchedule) {
+    const viewers = data.visibleCharacterIds
+      .filter((id) => participantIds.includes(id))
+      .flatMap((id) => {
+        const name = getName(id);
+        return name ? [name] : [];
+      });
+    const playerSection = viewers.length > 0 ? buildPlayerSection(data, now) : null;
+    if (playerSection) {
+      sections.push(
+        `玩家的日程与日期（仅${viewers.join('、')}知道这些信息，聊天中的其他角色并不知道；请在合适的时候自然地提及或关心，不要生硬复述）：\n${playerSection}`
+      );
+    }
+  }
+
+  const scheduleLines = data.schedules
+    .filter((schedule) => schedule.date === todayKey && schedule.text.trim() && participantIds.includes(schedule.charId))
+    .flatMap((schedule) => {
+      const name = getName(schedule.charId);
+      return name ? [`${name}今天（${todayKey}）的行程：\n${schedule.text.trim()}`] : [];
+    });
+  if (scheduleLines.length > 0) sections.push(scheduleLines.join('\n\n'));
+
+  return sections.length > 0 ? `当前环境（日历）：\n${sections.join('\n\n')}` : null;
+};

@@ -1,4 +1,5 @@
 import { readSetting, SETTINGS_KEYS } from './settings';
+import { withGlobalWorldBooks } from './worldBookPrompt';
 
 interface ApiPreset {
   id: string;
@@ -55,6 +56,7 @@ export const requestConfiguredAiText = async (
   userPrompt: string,
   options: { json?: boolean } = {}
 ) => {
+  systemPrompt = withGlobalWorldBooks(systemPrompt);
   const preset = getActiveApiPreset();
   const endpoint = preset.endpoint.trim().replace(/\/+$/, '');
   const model = preset.model?.trim() || 'gpt-4o-mini';

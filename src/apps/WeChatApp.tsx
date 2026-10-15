@@ -6,8 +6,6 @@ import {
   User,
   Search,
   Plus,
-  Heart,
-  MessageCircle,
   MoreVertical,
   Star,
   Upload,
@@ -28,12 +26,13 @@ import {
   Link,
   Smile,
   Mic,
-  WandSparkles,
+  Archive,
   Phone,
   Pencil,
 } from 'lucide-react';
 import { AppHeader } from '../components/AppHeader';
-import { WECHAT_MOMENTS } from '../data/mockData';
+import { MomentsTab } from '../components/MomentsTab';
+import { ColorWheel, hexToRgba } from '../components/ColorWheel';
 import { PersonaCollection, UserPersona } from '../types';
 import { readStorageString, readStoredValue, writeStorageString, writeStoredValue } from '../utils/localStorage';
 import { readSetting, saveSetting, SETTINGS_KEYS } from '../utils/settings';
@@ -46,6 +45,12 @@ import {
   sendIntimatePayInteraction,
 } from '../utils/alipayData';
 import { appendCharacterContextEvent } from '../utils/characterContext';
+import {
+  applyMomentsAfterChat,
+  buildMomentsInjection,
+  MomentChatAction,
+  MomentsInjection,
+} from '../utils/momentsData';
 import {
   CharacterNpc,
   getNpcByParticipantId,
@@ -85,6 +90,7 @@ interface ContactWorldBookEntry {
 interface ContactWorldBook {
   id: string;
   name: string;
+  isGlobal?: boolean;
   entries: ContactWorldBookEntry[];
 }
 
@@ -117,8 +123,11 @@ interface ChatMessage {
   senderId: string;
   text: string;
   createdAt: string;
-  kind?: 'text' | 'image' | 'voice' | 'sticker' | 'video-call' | 'location' | 'red-packet' | 'transfer' | 'link' | 'forum-forward' | 'pomodoro-share';
-  forumForwardTargetId?: string;
+  kind?: 'text' | 'image' | 'voice' | 'sticker' | 'video-call' | 'location' | 'red-packet' | 'transfer' | 'link' | 'forum-forward' |   'pomodoro-share' | 'pat' | 'order';
+    productEmoji?: string;
+    orderCategory?: 'shopping' | 'eleme' | 'xianyu';
+    orderMode?: 'self' | 'gift';
+    forumForwardTargetId?: string;
   imageUrl?: string;
   title?: string;
   source?: string;
@@ -135,7 +144,7 @@ interface ChatMessage {
 
 interface GeneratedAiMessage {
   text: string;
-  kind?: Exclude<ChatMessage['kind'], 'forum-forward' | 'pomodoro-share'>;
+  kind?: Exclude<ChatMessage['kind'], 'forum-forward' | 'pomodoro-share'> | 'narration';
   title?: string;
   source?: string;
   content?: string;
@@ -143,6 +152,9 @@ interface GeneratedAiMessage {
   quantity?: number;
   recipientId?: string;
   imageUrl?: string;
+  productEmoji?: string;
+  orderCategory?: 'shopping' | 'eleme' | 'xianyu';
+  orderMode?: 'self' | 'gift';
 }
 
 interface PendingShare {
@@ -188,6 +200,8 @@ interface ChatAppearancePreset {
   backgroundUrl: string;
   userBubbleColor?: string;
   characterBubbleColor?: string;
+  userBubbleOpacity?: number;
+  characterBubbleOpacity?: number;
   bubbleCss?: string;
   layoutCss?: string;
   sendIconUrl?: string;
@@ -204,6 +218,8 @@ interface ChatAppearance {
   backgroundUrl: string;
   userBubbleColor: string;
   characterBubbleColor: string;
+  userBubbleOpacity?: number;
+  characterBubbleOpacity?: number;
   bubbleCss?: string;
   layoutCss?: string;
   sendIconUrl?: string;
@@ -212,8 +228,17 @@ interface ChatAppearance {
   bubblePresets?: BubbleCssPreset[];
 }
 
+interface ChatArchive {
+  id: string;
+  name: string;
+  messages: ChatMessage[];
+  updatedAt: string;
+}
+
 interface ChatConversation {
   id: string;
+  archives?: ChatArchive[];
+  activeArchiveId?: string;
   type: ChatType;
   participantIds: string[];
   noteName: string;
@@ -236,6 +261,7 @@ interface ChatConversation {
   replyMessageMin?: number;
   replyMessageMax?: number;
   includeLatestThought?: boolean;
+  fontSize?: number;
 }
 
 const CONTACTS_STORAGE_KEY = 'pocketos:wechat-contacts';
@@ -245,8 +271,10 @@ const CHAT_STICKERS_STORAGE_KEY = 'yyphone:chat-stickers';
 const BASIC_EMOJIS = ['😀', '😂', '🥰', '😍', '😎', '😭', '🥺', '😡', '🤔', '👍', '👎', '❤️', '💕', '🎉', '🙏', '🌹'];
 const DEFAULT_CHAT_APPEARANCE: ChatAppearance = {
   backgroundUrl: '',
-  userBubbleColor: '#d1fae5',
-  characterBubbleColor: '#ffffff',
+  userBubbleColor: '#e3e6eb',
+  characterBubbleColor: '#f1f3f6',
+  userBubbleOpacity: 0.78,
+  characterBubbleOpacity: 0.78,
   bubbleCss: '',
   layoutCss: '',
   sendIconUrl: '',
@@ -362,7 +390,7 @@ const isChatList = (value: unknown): value is ChatConversation[] =>
           typeof message.text === 'string' &&
           typeof message.createdAt === 'string' &&
           (message.kind === undefined ||
-            ['text', 'image', 'voice', 'sticker', 'video-call', 'location', 'red-packet', 'transfer', 'link', 'forum-forward', 'pomodoro-share'].includes(message.kind)) &&
+            ['text', 'image', 'voice', 'sticker', 'video-call', 'location', 'red-packet', 'transfer', 'link', 'forum-forward', 'pomodoro-share', 'pat', 'order'].includes(message.kind)) &&
           (message.forumForwardTargetId === undefined || typeof message.forumForwardTargetId === 'string') &&
           (message.imageUrl === undefined || typeof message.imageUrl === 'string') &&
           (message.title === undefined || typeof message.title === 'string') &&
@@ -565,7 +593,7 @@ const readContactWorldBooks = (): ContactWorldBook[] => {
           ? [{ id: record.id, title: record.title, content: typeof record.content === 'string' ? record.content : '' }]
           : [];
       });
-      return [{ id: book.id, name: book.name, entries }];
+      return [{ id: book.id, name: book.name, isGlobal: book.isGlobal === true, entries }];
     });
   } catch (error) {
     console.error('Could not read world books for contacts.', error);
@@ -587,9 +615,15 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
   const [personaStatus, setPersonaStatus] = useState('');
   const [personaError, setPersonaError] = useState('');
   const [presetNameDraft, setPresetNameDraft] = useState('');
-  const [chatAppearance, setChatAppearance] = useState(() =>
-    readSetting(SETTINGS_KEYS.chatAppearance, DEFAULT_CHAT_APPEARANCE, isChatAppearance)
-  );
+  const [chatAppearance, setChatAppearance] = useState(() => {
+    const stored = readSetting(SETTINGS_KEYS.chatAppearance, DEFAULT_CHAT_APPEARANCE, isChatAppearance);
+    // 旧版默认的绿/白气泡视为未自定义，升级为新的浅灰默认。
+    return {
+      ...stored,
+      userBubbleColor: stored.userBubbleColor.toLowerCase() === '#d1fae5' ? DEFAULT_CHAT_APPEARANCE.userBubbleColor : stored.userBubbleColor,
+      characterBubbleColor: stored.characterBubbleColor.toLowerCase() === '#ffffff' ? DEFAULT_CHAT_APPEARANCE.characterBubbleColor : stored.characterBubbleColor,
+    };
+  });
   const [chatAppearancePresetName, setChatAppearancePresetName] = useState('');
   const [selectedChatAppearancePresetId, setSelectedChatAppearancePresetId] = useState('');
   const [bubbleCssPresetName, setBubbleCssPresetName] = useState('');
@@ -673,6 +707,19 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
   const [stickerDrafts, setStickerDrafts] = useState<ChatSticker[]>([]);
   const stickerUploadRef = useRef<HTMLInputElement>(null);
   const [isGeneratingReply, setIsGeneratingReply] = useState(false);
+  const [selectedMessageId, setSelectedMessageId] = useState('');
+  const [hiddenMessageIds, setHiddenMessageIds] = useState<string[]>([]);
+  const HISTORY_PAGE_SIZE = 15;
+  const [visibleMessageCount, setVisibleMessageCount] = useState(HISTORY_PAGE_SIZE);
+  const [composerPage, setComposerPage] = useState(0);
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [archiveNameDraft, setArchiveNameDraft] = useState('');
+  const [renamingArchive, setRenamingArchive] = useState<{ id: string; name: string } | null>(null);
+
+  useEffect(() => {
+    setVisibleMessageCount(HISTORY_PAGE_SIZE);
+  }, [activeChatId]);
+  const [editingMessage, setEditingMessage] = useState<{ id: string; text: string } | null>(null);
   const [activeThought, setActiveThought] = useState<{ name: string; thought: string } | null>(null);
   const [forumCardPreview, setForumCardPreview] = useState<ChatMessage | null>(null);
 
@@ -770,7 +817,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
     styleElement.dataset.yyphoneChatAppearance = 'true';
     try {
       styleElement.textContent = [
-        '.yy-chat-surface .yy-chat-message-bubble:not(.is-special) { background-color: var(--yy-character-bubble-color); }',
+        '.yy-chat-surface .yy-chat-message-bubble:not(.is-special) { background-color: var(--yy-character-bubble-color); -webkit-backdrop-filter: blur(10px) saturate(1.3); backdrop-filter: blur(10px) saturate(1.3); border: 1px solid rgba(255,255,255,0.55); box-shadow: 0 2px 10px rgba(120,140,170,0.12); }',
         '.yy-chat-surface .yy-chat-message-bubble.is-user:not(.is-special) { background-color: var(--yy-user-bubble-color); }',
         scopeChatCss(chatAppearance.bubbleCss ?? ''),
         scopeChatCss(chatAppearance.layoutCss ?? ''),
@@ -783,8 +830,6 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
     }
     return () => styleElement.remove();
   }, [chatAppearance.bubbleCss, chatAppearance.layoutCss]);
-
-  const moments = WECHAT_MOMENTS;
 
   const savePersonaCollection = (updatedCollection: PersonaCollection) => {
     try {
@@ -954,6 +999,8 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
       backgroundUrl: chatAppearance.backgroundUrl,
       userBubbleColor: chatAppearance.userBubbleColor,
       characterBubbleColor: chatAppearance.characterBubbleColor,
+      userBubbleOpacity: chatAppearance.userBubbleOpacity,
+      characterBubbleOpacity: chatAppearance.characterBubbleOpacity,
       bubbleCss: chatAppearance.bubbleCss ?? '',
       layoutCss: chatAppearance.layoutCss ?? '',
       sendIconUrl: chatAppearance.sendIconUrl ?? '',
@@ -974,6 +1021,8 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
       backgroundUrl: preset.backgroundUrl,
       userBubbleColor: preset.userBubbleColor ?? DEFAULT_CHAT_APPEARANCE.userBubbleColor,
       characterBubbleColor: preset.characterBubbleColor ?? DEFAULT_CHAT_APPEARANCE.characterBubbleColor,
+      userBubbleOpacity: preset.userBubbleOpacity ?? DEFAULT_CHAT_APPEARANCE.userBubbleOpacity,
+      characterBubbleOpacity: preset.characterBubbleOpacity ?? DEFAULT_CHAT_APPEARANCE.characterBubbleOpacity,
       bubbleCss: preset.bubbleCss ?? '',
       layoutCss: preset.layoutCss ?? '',
       sendIconUrl: preset.sendIconUrl ?? '',
@@ -1579,6 +1628,69 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
     return persistChats(nextChats);
   };
 
+  const getChatArchives = (chat: ChatConversation): { archives: ChatArchive[]; activeId: string } => {
+    if (chat.archives?.length && chat.activeArchiveId) {
+      return { archives: chat.archives, activeId: chat.activeArchiveId };
+    }
+    return {
+      archives: [{ id: 'archive-default', name: '存档 1', messages: [], updatedAt: chat.updatedAt }],
+      activeId: 'archive-default',
+    };
+  };
+
+  // 当前存档的消息始终存放在 chat.messages，切换时再回写到对应存档槽位。
+  const switchChatArchive = (chat: ChatConversation, targetId: string, createName?: string) => {
+    const { archives, activeId } = getChatArchives(chat);
+    const now = new Date().toISOString();
+    let nextArchives = archives.map((item) => (item.id === activeId ? { ...item, messages: chat.messages, updatedAt: now } : item));
+    let nextMessages: ChatMessage[];
+    let nextActiveId = targetId;
+    if (createName !== undefined) {
+      nextActiveId = `archive-${Date.now()}`;
+      nextArchives = [...nextArchives, { id: nextActiveId, name: createName.trim() || `存档 ${nextArchives.length + 1}`, messages: [], updatedAt: now }];
+      nextMessages = [];
+    } else {
+      const target = nextArchives.find((item) => item.id === targetId);
+      if (!target) return;
+      nextMessages = target.messages;
+    }
+    const saved = updateChat(chat.id, (item) => ({
+      ...item,
+      archives: nextArchives,
+      activeArchiveId: nextActiveId,
+      messages: nextMessages,
+      updatedAt: now,
+    }));
+    if (saved) {
+      setVisibleMessageCount(HISTORY_PAGE_SIZE);
+      setSelectedMessageId('');
+      setArchiveNameDraft('');
+    }
+  };
+
+  const renameChatArchive = (chat: ChatConversation, archiveId: string, name: string) => {
+    const { archives, activeId } = getChatArchives(chat);
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    updateChat(chat.id, (item) => ({
+      ...item,
+      archives: archives.map((a) => (a.id === archiveId ? { ...a, name: trimmed } : a)),
+      activeArchiveId: activeId,
+    }));
+    setRenamingArchive(null);
+  };
+
+  const deleteChatArchive = (chat: ChatConversation, archiveId: string) => {
+    const { archives, activeId } = getChatArchives(chat);
+    if (archiveId === activeId || archives.length <= 1) return;
+    if (!window.confirm('删除这个存档？其中的聊天记录将无法恢复。')) return;
+    updateChat(chat.id, (item) => ({
+      ...item,
+      archives: archives.filter((a) => a.id !== archiveId),
+      activeArchiveId: activeId,
+    }));
+  };
+
   const startChatLongPress = (chatId: string) => {
     if (pressTimerRef.current) clearTimeout(pressTimerRef.current);
     suppressNextChatClickRef.current = false;
@@ -1686,6 +1798,45 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
       }))
     ) {
       setChatMessageDraft('');
+    }
+  };
+
+  const sendPat = (targetId: string) => {
+    const chat = chats.find((item) => item.id === activeChatId);
+    if (!chat || chat.type === 'observer' || chat.blocked) return;
+    const message: ChatMessage = {
+      id: `message-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      senderId: 'user',
+      kind: 'pat',
+      text: `我拍了拍“${getChatParticipantName(chat, targetId)}”`,
+      createdAt: new Date().toISOString(),
+    };
+    updateChat(chat.id, (current) => ({
+      ...current,
+      messages: [...current.messages, message],
+      updatedAt: message.createdAt,
+    }));
+  };
+
+  const deleteChatMessage = (messageId: string) => {
+    const chat = chats.find((item) => item.id === activeChatId);
+    if (!chat || !window.confirm('删除这条消息？')) return;
+    if (updateChat(chat.id, (current) => ({
+      ...current,
+      messages: current.messages.filter((item) => item.id !== messageId),
+    }))) setSelectedMessageId('');
+  };
+
+  const saveEditedMessage = () => {
+    const chat = chats.find((item) => item.id === activeChatId);
+    const text = editingMessage?.text.trim();
+    if (!chat || !editingMessage || !text) return;
+    if (updateChat(chat.id, (current) => ({
+      ...current,
+      messages: current.messages.map((item) => (item.id === editingMessage.id ? { ...item, text } : item)),
+    }))) {
+      setEditingMessage(null);
+      setSelectedMessageId('');
     }
   };
 
@@ -2042,30 +2193,42 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
     setIsGeneratingReply(true);
     setChatError('');
     const previousReply = chat.messages.at(-1);
-    const replacedReplyBatchId =
-      regenerate && previousReply && previousReply.senderId !== 'user' && previousReply.senderId !== 'narrator'
-        ? previousReply.replyBatchId
-        : undefined;
-    const replacedMessageId =
-      regenerate && previousReply && previousReply.senderId !== 'user' && previousReply.senderId !== 'narrator'
-        ? previousReply.id
-        : undefined;
+    const canReplace = !!previousReply && previousReply.senderId !== 'user' &&
+      (previousReply.senderId !== 'narrator' || !!previousReply.replyBatchId);
+    const replacedReplyBatchId = regenerate && canReplace ? previousReply?.replyBatchId : undefined;
+    const replacedMessageId = regenerate && canReplace ? previousReply?.id : undefined;
+    if (regenerate && previousReply && canReplace) {
+      setHiddenMessageIds(
+        replacedReplyBatchId
+          ? chat.messages.filter((item) => item.replyBatchId === replacedReplyBatchId).map((item) => item.id)
+          : [previousReply.id]
+      );
+    }
     try {
       const currentInput = [...chat.messages].reverse().find((message) => message.senderId === 'user')?.text ?? '';
       const replyRange = getReplyMessageRange(chat);
       const targetReplyCount = replyRange.min + Math.floor(
         Math.random() * (replyRange.max - replyRange.min + 1)
       );
+      const momentsInjection: MomentsInjection = buildMomentsInjection(
+        chat.participantIds,
+        chat.type === 'observer',
+        (id) => contacts.find((item) => item.id === id)?.name
+      );
       const promptMessages = buildPrompt({
         chatId: chat.id,
         currentInput,
         historyLimit: chat.currentChatHistoryCount ?? 200,
         regenerate,
+        momentsInjection,
       });
       const responseInstructions = [
-        `以${chat.type === 'direct' ? `${contact.name}的` : '其中一位角色或 NPC 群成员的'}身份自然回复。只返回 JSON 对象，至少包含 reply、thought、speakerId 字段。reply 必须是恰好 ${targetReplyCount} 条独立消息组成的数组；普通消息可写字符串，也可写对象 {"kind":"消息类型","text":"消息/语音转写/图片描述","title":"可选标题","source":"可选来源","content":"可选摘要","amount":"可选金额","quantity":可选红包个数,"stickerId":"可选表情包ID"}。支持类型：text、image（文字描述图片）、voice（语音转写）、sticker、video-call、location、red-packet、transfer、link。链接请提供 title/source/content；红包和转账必须给正数 amount，收款对象只能是玩家 user，群聊红包可提供 quantity。不要编造图片 URL；image 使用文字图卡，sticker 只能使用下面已存在的表情包 ID。表情包列表：${JSON.stringify(stickers.map(({ id, description }) => ({ id, description })))}。请仅在剧情自然、确有必要时使用附件，普通文字聊天优先，不要为了凑数强行发送附件。${regenerate ? '本次是重生成，不得再次发红包、转账或礼物，以免重复入账。' : '角色发给玩家的红包和转账会直接加入玩家支付宝个人余额，不会扣玩家的钱。可选 gift 字段仅允许 {"existingProductId":"现有商品ID"} 或 {"title":"新商品名","desc":"描述","price":数字,"category":"shopping或eleme","emoji":"emoji"}，只在剧情自然时由主要角色提供；NPC不使用 gift 字段。'}${chat.type === 'group' && chat.allowAgentGroupRename ? '可选 groupTitle 和 groupNicknames 字段，只在情节自然需要时修改群名或昵称。' : ''}群聊的 speakerId 必须从以下成员 ID 中选择：${chatMembers.map((member) => `${member.id}（${member.name}）`).join(', ')}。${chat.type === 'group' && chat.allowAgentGroupRename ? 'groupNicknames 的键只能使用上方成员 ID。' : ''}${chat.type === 'observer' ? '这是旁观群聊，user不在群里；不得生成发给玩家的红包、转账或礼物；根据角色之间的对话和旁白情境继续由群成员发言。' : ''}`,
+        `以${chat.type === 'direct' ? `${contact.name}的` : '其中一位角色或 NPC 群成员的'}身份自然回复。只返回 JSON 对象，至少包含 reply、thought、speakerId 字段。reply 必须是恰好 ${targetReplyCount} 条独立消息组成的数组；普通消息可写字符串，也可写对象 {"kind":"消息类型","text":"消息/语音转写/图片描述","title":"可选标题","source":"可选来源","content":"可选摘要","amount":"可选金额","quantity":可选红包个数,"stickerId":"可选表情包ID"}。支持类型：text、image（文字描述图片）、voice（语音转写）、sticker、video-call、location、red-packet、transfer、link、pat。pat 表示角色拍了拍玩家（类似微信拍一拍，text 可留空或写简短后缀如“的脑袋”），仅在情境自然时偶尔使用。${chat.narratorEnabled || chat.type === 'observer' ? '本对话已开启旁白：可在 reply 中穿插 {"kind":"narration","text":"旁白内容"} 项，旁白用第三人称简短描述角色此刻的动作、表情、神态、衣着或周围氛围，必须控制在 50 字以内（越短越好），不要包含角色台词，也不要替玩家行动；旁白同样计入 reply 条数，通常每轮最多 1 条，且不要全是旁白。' : ''}链接请提供 title/source/content；红包和转账必须给正数 amount，收款对象只能是玩家 user，群聊红包可提供 quantity。不要编造图片 URL；image 使用文字图卡，sticker 只能使用下面已存在的表情包 ID。表情包列表：${JSON.stringify(stickers.map(({ id, description }) => ({ id, description })))}。请仅在剧情自然、确有必要时使用附件，普通文字聊天优先，不要为了凑数强行发送附件。${regenerate ? '本次是重生成，不得再次发红包、转账或礼物，以免重复入账。' : '角色发给玩家的红包和转账会直接加入玩家支付宝个人余额，不会扣玩家的钱。可选 gift 字段仅允许 {"existingProductId":"现有商品ID"} 或 {"title":"新商品名","desc":"描述","price":数字,"category":"shopping或eleme","emoji":"emoji"}，只在剧情自然时由主要角色提供；NPC不使用 gift 字段。'}${chat.type === 'group' && chat.allowAgentGroupRename ? '可选 groupTitle 和 groupNicknames 字段，只在情节自然需要时修改群名或昵称。' : ''}群聊的 speakerId 必须从以下成员 ID 中选择：${chatMembers.map((member) => `${member.id}（${member.name}）`).join(', ')}。${chat.type === 'group' && chat.allowAgentGroupRename ? 'groupNicknames 的键只能使用上方成员 ID。' : ''}${chat.type === 'observer' ? '这是旁观群聊，user不在群里；不得生成发给玩家的红包、转账或礼物；根据角色之间的对话和旁白情境继续由群成员发言。' : ''}`,
         ...(activeCallMode === 'video'
           ? ['当前为视频通话，请在角色的每次回复最前方先写一段用小括号包裹的可视动作描写，再接角色说的话。']
+          : []),
+        ...(momentsInjection.marks.length > 0
+          ? ['上文【朋友圈动态】里有角色尚未读过的朋友圈。可以在 reply 中自然提及；也可以额外返回可选字段 momentActions（最多 3 项）：[{"postId":"朋友圈ID","charId":"主要角色ID","type":"like 或 comment","content":"评论内容（type 为 comment 时必填，不超过 40 字）","replyToName":"可选，被回复者姓名"}]。postId 和 charId 必须来自上文，没有想互动时不要返回该字段。']
           : []),
       ].join('\n');
       promptMessages.splice(promptMessages.length - 1, 0, {
@@ -2132,6 +2295,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
       let generatedGroupTitle: string | undefined;
       let generatedGroupNicknames: Record<string, string> | undefined;
       let generatedGift: Record<string, unknown> | undefined;
+      const momentActions: MomentChatAction[] = [];
       let result: unknown;
       try {
         result = JSON.parse(reply.replace(/^```(?:json)?\s*|\s*```$/g, ''));
@@ -2146,7 +2310,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
         } else if (Array.isArray(record.reply)) {
           const allowedKinds = [
             'text', 'image', 'voice', 'sticker', 'video-call', 'location',
-            'red-packet', 'transfer', 'link',
+            'red-packet', 'transfer', 'link', 'pat', 'narration',
           ] as const;
           replyParts = record.reply.slice(0, targetReplyCount).map((rawPart): GeneratedAiMessage => {
             if (typeof rawPart === 'string') {
@@ -2178,6 +2342,10 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
               message.imageUrl = sticker.imageUrl;
               message.text = text || sticker.description;
             }
+            if (kind === 'narration') {
+              if (!message.text) throw new Error('AI 返回了空旁白，请重试。');
+              message.text = message.text.slice(0, 120);
+            }
             if (kind === 'link' && !message.title) {
               throw new Error('AI 分享链接缺少标题，请重试。');
             }
@@ -2208,6 +2376,30 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
           reply = replyParts.map((part) => part.text).join('\n');
         }
         if (typeof record.thought === 'string') thought = record.thought.trim();
+        if (Array.isArray(record.momentActions) && momentsInjection.marks.length > 0) {
+          record.momentActions.slice(0, 3).forEach((rawAction) => {
+            if (!rawAction || typeof rawAction !== 'object' || Array.isArray(rawAction)) return;
+            const action = rawAction as Record<string, unknown>;
+            const actorId = typeof action.charId === 'string' ? action.charId : speakerId;
+            const actor = chatContacts.find((item) => item.id === actorId) ?? chatContacts[0];
+            const postId = typeof action.postId === 'string' ? action.postId : '';
+            if (!actor || !momentsInjection.marks.some((mark) => mark.postId === postId && mark.charId === actor.id)) return;
+            if (action.type === 'like') {
+              momentActions.push({ postId, charId: actor.id, charName: actor.name, type: 'like' });
+            } else if (action.type === 'comment' && typeof action.content === 'string' && action.content.trim()) {
+              momentActions.push({
+                postId,
+                charId: actor.id,
+                charName: actor.name,
+                type: 'comment',
+                content: action.content.trim().slice(0, 120),
+                ...(typeof action.replyToName === 'string' && action.replyToName.trim()
+                  ? { replyToName: action.replyToName.trim().slice(0, 40) }
+                  : {}),
+              });
+            }
+          });
+        }
         if (record.gift && typeof record.gift === 'object' && !Array.isArray(record.gift)) {
           generatedGift = record.gift as Record<string, unknown>;
         }
@@ -2242,6 +2434,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
         const existingProductId = generatedGift.existingProductId;
         let deliveredTitle = '';
         let deliveredCategory: 'shopping' | 'eleme' | undefined;
+        let deliveredCard: Record<string, unknown> | undefined;
         if (typeof existingProductId === 'string') {
           const existing = storedProducts.find((item) =>
             !!item &&
@@ -2253,6 +2446,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
           if (existing) {
             deliveredTitle = String(existing.title ?? '商品');
             deliveredCategory = existing.category as 'shopping' | 'eleme';
+            deliveredCard = existing;
           }
         } else if (
           typeof generatedGift.title === 'string' &&
@@ -2265,7 +2459,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
           deliveredTitle = generatedGift.title.trim().slice(0, 100);
           deliveredCategory = generatedGift.category;
           const characterName = chatMembers.find((item) => item.id === speakerId)?.name ?? contact.name;
-          storedProducts.unshift({
+          const newProduct = {
             id: `gift-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
             category: deliveredCategory,
             title: deliveredTitle,
@@ -2275,12 +2469,26 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
             store: `${characterName}送你的`,
             badge: '角色赠礼',
             fromCharName: characterName,
-          });
+            fromCharId: speakerId,
+          };
+          storedProducts.unshift(newProduct);
+          deliveredCard = newProduct;
           writeStorageString(marketStorageKey, JSON.stringify(storedProducts));
         }
         if (deliveredTitle && deliveredCategory) {
           const characterName = chatMembers.find((item) => item.id === speakerId)?.name ?? contact.name;
-          replyParts[replyParts.length - 1].text += `（${characterName}已将「${deliveredTitle}」送到你的${deliveredCategory === 'eleme' ? '饿了么' : '淘宝'}。）`;
+          replyParts.push({
+            text: `${characterName}送你「${deliveredTitle}」`,
+            kind: 'order',
+            title: deliveredTitle,
+            content: typeof deliveredCard?.desc === 'string' ? deliveredCard.desc.slice(0, 80) : '',
+            amount: typeof deliveredCard?.price === 'number' ? deliveredCard.price.toFixed(2) : undefined,
+            source: deliveredCategory === 'eleme' ? '已送达你的饿了么' : '已送达你的淘宝',
+            imageUrl: typeof deliveredCard?.imageUrl === 'string' ? deliveredCard.imageUrl : undefined,
+            productEmoji: typeof deliveredCard?.emoji === 'string' ? deliveredCard.emoji : undefined,
+            orderCategory: deliveredCategory,
+            orderMode: 'gift',
+          });
           if (!speakerId.startsWith('npc:')) {
             appendCharacterContextEvent(speakerId, `角色送玩家商品「${deliveredTitle}」，已立即送达。`, 'taobao');
           }
@@ -2293,19 +2501,43 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
       }
       const replyTimestamp = Date.now();
       const replyBatchId = `reply-${replyTimestamp}-${Math.random().toString(36).slice(2, 7)}`;
-      const replyMessages: ChatMessage[] = replyParts.map((part, index) => ({
-        ...part,
-        id: `message-${replyTimestamp}-${Math.random().toString(36).slice(2, 7)}`,
-        replyBatchId,
-        senderId: speakerId,
-        text: activeCallMode === 'video' && !/^\s*[（(].*[）)]/.test(part.text)
-          ? `（${getChatParticipantName(chat, speakerId)}看向镜头，轻轻开口）${part.text}`
-          : part.text,
-        thought: index === replyParts.length - 1 ? thought : '',
-        createdAt: new Date(replyTimestamp + index).toISOString(),
-      }));
+      const keepNarration = chat.narratorEnabled || chat.type === 'observer';
+      const deliverableParts = replyParts.filter((part) => part.kind !== 'narration' || keepNarration);
+      const lastSpokenIndex = deliverableParts.reduce(
+        (found, part, index) => (part.kind === 'narration' ? found : index),
+        deliverableParts.length - 1
+      );
+      const replyMessages: ChatMessage[] = deliverableParts.map((part, index) => {
+        const speakerName = getChatParticipantName(chat, speakerId);
+        const { kind: partKind, ...rest } = part;
+        if (partKind === 'narration') {
+          return {
+            ...rest,
+            id: `message-${replyTimestamp}-${Math.random().toString(36).slice(2, 7)}`,
+            replyBatchId,
+            senderId: 'narrator',
+            thought: '',
+            createdAt: new Date(replyTimestamp + index).toISOString(),
+          };
+        }
+        return {
+          ...part,
+          kind: partKind,
+          id: `message-${replyTimestamp}-${Math.random().toString(36).slice(2, 7)}`,
+          replyBatchId,
+          senderId: speakerId,
+          text: partKind === 'pat'
+            ? `“${speakerName}” 拍了拍你${part.text && part.text.length <= 12 ? ` ${part.text}` : ''}`
+            : activeCallMode === 'video' && !/^\s*[（(].*[）)]/.test(part.text)
+            ? `（${speakerName}看向镜头，轻轻开口）${part.text}`
+            : part.text,
+          thought: index === lastSpokenIndex ? thought : '',
+          createdAt: new Date(replyTimestamp + index).toISOString(),
+        };
+      });
+      if (replyMessages.length === 0) throw new Error('AI 没有返回可显示的消息，请重试。');
       const latestReplyMessage = replyMessages[replyMessages.length - 1];
-      updateChat(chat.id, (current) => ({
+      const replySaved = updateChat(chat.id, (current) => ({
         ...current,
         messages: [
           ...current.messages.filter((item) =>
@@ -2321,10 +2553,13 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
           ? { groupNicknames: { ...(current.groupNicknames ?? {}), ...generatedGroupNicknames } }
           : {}),
       }));
+      // Only now is the reply final, so the delivered moments count as read.
+      if (replySaved) applyMomentsAfterChat(momentsInjection, momentActions);
     } catch (error) {
       console.error('Could not generate AI chat reply.', error);
       setChatError(error instanceof Error ? error.message : 'AI 回复失败，请检查网络与 API 配置。');
     } finally {
+      setHiddenMessageIds([]);
       setIsGeneratingReply(false);
     }
   };
@@ -2417,7 +2652,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
       <AppHeader
         title={
           activeChat
-            ? getChatTitle(activeChat)
+            ? isGeneratingReply ? '对方正在输入...' : getChatTitle(activeChat)
             : activeTab === 'chats'
             ? '微信'
             : activeTab === 'contacts'
@@ -2521,14 +2756,14 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
       />
 
       {/* Main Content Area */}
-      <div className={`flex-1 min-h-0 ${activeChat ? 'overflow-hidden flex flex-col' : 'overflow-y-auto no-scrollbar'}`}>
+      <div className={`flex-1 min-h-0 ${activeChat || activeTab === 'moments' ? 'overflow-hidden flex flex-col' : 'overflow-y-auto no-scrollbar'}`}>
         {/* TAB 1: CHATS */}
         {activeTab === 'chats' && activeChat && (
           <div
             className="yy-chat-surface flex-1 min-h-0 flex flex-col bg-[#F3F6FA]"
             style={{
-              '--yy-user-bubble-color': chatAppearance.userBubbleColor,
-              '--yy-character-bubble-color': chatAppearance.characterBubbleColor,
+              '--yy-user-bubble-color': hexToRgba(chatAppearance.userBubbleColor, chatAppearance.userBubbleOpacity ?? 0.78),
+              '--yy-character-bubble-color': hexToRgba(chatAppearance.characterBubbleColor, chatAppearance.characterBubbleOpacity ?? 0.78),
             } as React.CSSProperties}
           >
             {activeChat.type === 'observer' && (
@@ -2548,13 +2783,72 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
               {activeChat.messages.length === 0 && (
                 <p className="mt-8 text-center text-xs text-slate-400">暂无聊天记录</p>
               )}
-              {activeChat.messages.map((message) => {
+              {(() => {
+                const shownMessages = activeChat.messages.filter((message) => !hiddenMessageIds.includes(message.id));
+                return shownMessages.length > visibleMessageCount ? (
+                  <div className="text-center">
+                    <button
+                      type="button"
+                      onClick={() => setVisibleMessageCount((count) => count + HISTORY_PAGE_SIZE)}
+                      className="rounded-full bg-white/70 px-3 py-1 text-[10px] text-slate-500 shadow-sm"
+                    >
+                      查看历史消息
+                    </button>
+                  </div>
+                ) : null;
+              })()}
+              {activeChat.messages.filter((message) => !hiddenMessageIds.includes(message.id)).slice(-visibleMessageCount).map((message) => {
+                const messageActions = selectedMessageId === message.id && (
+                  <div className={`mt-1 flex gap-1.5 text-[10px] ${message.senderId === 'user' ? 'justify-end' : ''} ${message.senderId === 'narrator' || message.kind === 'pat' ? 'justify-center' : ''}`}>
+                    {message.kind !== 'pat' && !['image', 'sticker', 'red-packet', 'transfer', 'forum-forward', 'pomodoro-share'].includes(message.kind ?? '') && (
+                      <button type="button" onClick={() => setEditingMessage({ id: message.id, text: message.text })} className="rounded-full bg-white/80 px-2.5 py-0.5 text-sky-600 shadow-sm">编辑</button>
+                    )}
+                    <button type="button" onClick={() => deleteChatMessage(message.id)} className="rounded-full bg-white/80 px-2.5 py-0.5 text-rose-500 shadow-sm">删除</button>
+                    {message.senderId !== 'user' && message.senderId !== 'narrator' && activeChat.type !== 'observer' && (
+                      <button type="button" onClick={() => { sendPat(message.senderId); setSelectedMessageId(''); }} className="rounded-full bg-white/80 px-2.5 py-0.5 text-violet-500 shadow-sm">拍一拍</button>
+                    )}
+                  </div>
+                );
+                const editor = editingMessage?.id === message.id && (
+                  <div className="mt-1 flex items-center gap-1.5">
+                    <input
+                      autoFocus
+                      value={editingMessage.text}
+                      onChange={(event) => setEditingMessage({ id: message.id, text: event.target.value })}
+                      aria-label="编辑消息"
+                      className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs outline-none"
+                    />
+                    <button type="button" onClick={saveEditedMessage} className="rounded-lg bg-sky-500 px-2 py-1 text-[10px] text-white">保存</button>
+                    <button type="button" onClick={() => setEditingMessage(null)} className="rounded-lg bg-slate-200 px-2 py-1 text-[10px] text-slate-600">取消</button>
+                  </div>
+                );
                 if (message.senderId === 'narrator') {
                   if (!activeChat.narratorEnabled && activeChat.type !== 'observer') return null;
                   return (
                     <div key={message.id} className="py-1 text-center">
-                      <p className="mb-0.5 text-[9px] font-semibold text-slate-400">旁白</p>
-                      <p className="mx-auto max-w-[90%] text-[10px] leading-relaxed text-slate-400">{message.text}</p>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedMessageId(selectedMessageId === message.id ? '' : message.id)}
+                        className="mx-auto block max-w-[85%] rounded-2xl bg-[#FBE4EC]/90 px-3 py-1 text-center text-[10px] leading-relaxed text-slate-400"
+                      >
+                        {message.text}
+                      </button>
+                      {editor}
+                      {messageActions}
+                    </div>
+                  );
+                }
+                if (message.kind === 'pat') {
+                  return (
+                    <div key={message.id} className="py-1 text-center">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedMessageId(selectedMessageId === message.id ? '' : message.id)}
+                        className="text-[10px] text-slate-400"
+                      >
+                        {message.text}
+                      </button>
+                      {messageActions}
                     </div>
                   );
                 }
@@ -2562,7 +2856,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                 const sender = contacts.find((contact) => contact.id === message.senderId) ??
                   getNpcByParticipantId(characterNpcs, message.senderId);
                 const isShareCard = message.kind === 'forum-forward' || message.kind === 'pomodoro-share';
-                const isSpecialBubble = isShareCard || ['video-call', 'location', 'red-packet', 'transfer', 'link'].includes(message.kind ?? '');
+                const isSpecialBubble = isShareCard || ['video-call', 'location', 'red-packet', 'transfer', 'link', 'order'].includes(message.kind ?? '');
                 return (
                   <div
                     key={message.id}
@@ -2589,16 +2883,12 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                           : sender?.name.trim().charAt(0) || '?'}
                       </button>
                     )}
+                    <div className={`flex max-w-[78%] min-w-0 flex-col ${isUserMessage ? 'items-end' : 'items-start'}`}>
                     <div
-                      className={`yy-chat-message-bubble ${isSpecialBubble ? 'is-special' : ''} ${isUserMessage ? 'is-user text-slate-800' : 'is-character text-slate-700'} max-w-[78%] min-w-[5rem] rounded-2xl px-3 py-2 text-xs leading-relaxed`}
+                      onClick={() => setSelectedMessageId(selectedMessageId === message.id ? '' : message.id)}
+                      style={activeChat.fontSize ? { fontSize: `${activeChat.fontSize}px` } : undefined}
+                      className={`yy-chat-message-bubble ${isSpecialBubble ? 'is-special' : ''} ${isUserMessage ? 'is-user text-slate-800' : 'is-character text-slate-700'} rounded-2xl px-3 py-2 text-xs leading-relaxed`}
                     >
-                      {(activeChat.type === 'group' || !isUserMessage) && (
-                        <p className="mb-1 text-[9px] text-slate-400">
-                          {activeChat.type === 'group'
-                            ? getChatParticipantName(activeChat, message.senderId)
-                            : sender?.name ?? '角色'}
-                        </p>
-                      )}
                       {message.kind === 'video-call' ? (
                         <div className="flex items-center gap-2"><Video className="h-4 w-4" />{message.text}</div>
                       ) : message.kind === 'location' ? (
@@ -2651,6 +2941,30 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                             {message.kind === 'forum-forward' && <span className="ml-auto shrink-0 text-sky-600">查看详情 ›</span>}
                           </div>
                         </button>
+                      ) : message.kind === 'order' ? (
+                        <div className="w-52 overflow-hidden rounded-2xl border border-white/80 bg-gradient-to-br from-sky-50/90 to-pink-50/90 shadow-[0_6px_18px_rgba(125,160,200,0.15)]">
+                          <div className="flex items-center gap-1.5 px-3 pt-2.5 text-[10px] font-semibold text-[#6F8CA0]">
+                            <span>{message.orderCategory === 'eleme' ? '🍱 饿了么' : message.orderCategory === 'xianyu' ? '🐟 闲鱼' : '🛍️ 淘宝'}</span>
+                            <span className="ml-auto rounded-full bg-white/70 px-1.5 py-0.5 text-[9px] text-pink-400">
+                              {message.orderMode === 'gift' ? (message.senderId === 'user' ? '送出的礼物' : '送你的礼物') : '已下单'}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2.5 px-3 py-2.5">
+                            <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-white/80 text-2xl">
+                              {message.imageUrl
+                                ? <img src={message.imageUrl} alt="" className="h-full w-full object-cover" />
+                                : message.productEmoji || '🎁'}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="line-clamp-2 text-[11px] font-bold leading-snug text-[#2C4A5C]">{message.title}</p>
+                              {message.content && <p className="mt-0.5 line-clamp-1 text-[9px] text-slate-400">{message.content}</p>}
+                            </div>
+                          </div>
+                          <div className="flex items-center justify-between border-t border-white/80 px-3 py-1.5 text-[10px]">
+                            <span className="truncate text-slate-400">{message.source}</span>
+                            {message.amount && <span className="shrink-0 font-bold text-[#E882A6]">¥{message.amount}</span>}
+                          </div>
+                        </div>
                       ) : message.kind === 'link' ? (
                         <div className="min-w-40 rounded-xl bg-white/80 p-2.5">
                           <div className="flex items-center gap-1.5 font-semibold"><Link className="h-3.5 w-3.5 text-sky-600" />{message.title}</div>
@@ -2676,6 +2990,9 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                           </div>
                         )
                       ) : message.text}
+                    </div>
+                    {editor}
+                    {messageActions}
                     </div>
                   </div>
                 );
@@ -2736,11 +3053,11 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                 </button>
                 <button
                   type="button"
-                  aria-label="发送语音"
-                  onClick={() => { setVoiceDraft(''); setVoiceModalOpen(true); }}
-                  className="yy-chat-voice h-9 w-9 shrink-0 rounded-full border border-slate-200 bg-white text-slate-600 flex items-center justify-center"
+                  aria-label="打开表情面板"
+                  onClick={() => setEmojiPanelOpen((open) => !open)}
+                  className="yy-chat-emoji h-9 w-9 shrink-0 rounded-full border border-slate-200 bg-white text-slate-600 flex items-center justify-center"
                 >
-                  <Mic className="h-4 w-4" />
+                  <Smile className="h-4 w-4" />
                 </button>
                 <input
                   value={chatMessageDraft}
@@ -2749,14 +3066,6 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                   aria-label="输入聊天消息"
                   className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none"
                 />
-                <button
-                  type="button"
-                  aria-label="打开表情面板"
-                  onClick={() => setEmojiPanelOpen((open) => !open)}
-                  className="yy-chat-emoji h-9 w-9 shrink-0 rounded-full border border-slate-200 bg-white text-slate-600 flex items-center justify-center"
-                >
-                  <Smile className="h-4 w-4" />
-                </button>
                 <button type="submit" aria-label="发送消息" className="yy-chat-send h-9 w-9 rounded-xl flex items-center justify-center" style={{ backgroundColor: '#F0E1F0', color: '#88758A' }}>
                 {chatAppearance.sendIconUrl
                   ? <img src={chatAppearance.sendIconUrl} alt="" className="h-5 w-5 object-contain" />
@@ -2773,7 +3082,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                   ♡
                 </button>
                 {emojiPanelOpen && (
-                  <div className="absolute bottom-full right-2 z-40 mb-2 w-64 rounded-2xl border border-slate-100 bg-white p-3 shadow-xl">
+                  <div className="absolute bottom-full left-2 z-40 mb-2 w-64 rounded-2xl border border-slate-100 bg-white p-3 shadow-xl">
                     <div className="grid grid-cols-8 gap-1">
                       {BASIC_EMOJIS.map((emoji) => (
                         <button key={emoji} type="button" onClick={() => {
@@ -3043,71 +3352,12 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
 
         {/* TAB 3: MOMENTS */}
         {activeTab === 'moments' && (
-          <div className="flex flex-col pb-2">
-            {/* Moments Cover Banner */}
-            <div className="relative h-36 bg-gradient-to-r from-sky-200 via-pink-100 to-blue-200 flex items-end justify-end p-4">
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-bold text-[#2C4A5C] drop-shadow-xs">{personaDraft.name}</span>
-                <div className="w-12 h-12 rounded-2xl bg-white p-0.5 shadow-md">
-                  {personaDraft.avatarUrl ? (
-                    <img
-                      src={personaDraft.avatarUrl}
-                      alt={`${personaDraft.name} 的头像`}
-                      className="w-full h-full rounded-[14px] object-cover"
-                    />
-                  ) : (
-                    <div className="w-full h-full rounded-[14px] bg-gradient-to-tr from-sky-400 to-teal-300 flex items-center justify-center text-white font-bold text-sm">
-                      {personaDraft.name.trim().charAt(0) || '?'}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Moments Feed */}
-            <div className="p-4 space-y-4">
-              {moments.map((item) => (
-                <div key={item.id} className="glass-card rounded-2xl p-3.5 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="w-8 h-8 rounded-xl bg-pink-200 text-pink-700 font-bold flex items-center justify-center text-xs">
-                        {item.avatar}
-                      </div>
-                      <div>
-                        <h4 className="text-xs font-bold text-[#2C4A5C]">{item.author}</h4>
-                        <span className="text-[10px] text-slate-400">{item.time}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <p className="text-xs text-[#2C4A5C] leading-relaxed">
-                    {item.content}
-                  </p>
-
-                  <div className="flex gap-2">
-                    {item.images.map((color, idx) => (
-                      <div
-                        key={idx}
-                        className="w-20 h-20 rounded-xl border border-white/60 shadow-2xs"
-                        style={{ backgroundColor: color }}
-                      />
-                    ))}
-                  </div>
-
-                  <div className="flex items-center justify-end gap-3 pt-1 text-slate-500 text-xs">
-                    <button className="flex items-center gap-1 hover:text-rose-500">
-                      <Heart className="w-3.5 h-3.5" />
-                      <span className="text-[10px] font-mono">{item.likes}</span>
-                    </button>
-                    <button className="flex items-center gap-1 hover:text-sky-500">
-                      <MessageCircle className="w-3.5 h-3.5" />
-                      <span className="text-[10px] font-mono">{item.comments}</span>
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
+          <MomentsTab
+            userName={personaDraft.name}
+            userAvatarUrl={personaDraft.avatarUrl ?? ''}
+            contacts={contacts}
+            npcs={characterNpcs}
+          />
         )}
 
         {/* TAB 4: ME */}
@@ -3274,6 +3524,47 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                   className="mt-1 block max-w-full text-[10px]"
                 />
               </label>
+              {([
+                { title: '我的气泡', colorKey: 'userBubbleColor', opacityKey: 'userBubbleOpacity' },
+                { title: '对方气泡（角色，群聊共用）', colorKey: 'characterBubbleColor', opacityKey: 'characterBubbleOpacity' },
+              ] as const).map(({ title, colorKey, opacityKey }) => (
+                <section key={colorKey} className="space-y-2 rounded-xl border border-white/80 bg-white/50 p-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-[11px] font-bold text-[#2C4A5C]">{title}</h4>
+                    <button
+                      type="button"
+                      onClick={() => updateChatAppearance({ [colorKey]: DEFAULT_CHAT_APPEARANCE[colorKey], [opacityKey]: DEFAULT_CHAT_APPEARANCE[opacityKey] })}
+                      className="text-[10px] text-slate-500 underline"
+                    >
+                      恢复默认
+                    </button>
+                  </div>
+                  <ColorWheel
+                    label={title}
+                    value={chatAppearance[colorKey]}
+                    onChange={(hex) => updateChatAppearance({ [colorKey]: hex })}
+                  />
+                  <label className="block text-[10px] font-semibold text-slate-500">
+                    透明度 {Math.round((chatAppearance[opacityKey] ?? 0.78) * 100)}%
+                    <input
+                      type="range"
+                      min="30"
+                      max="100"
+                      value={Math.round((chatAppearance[opacityKey] ?? 0.78) * 100)}
+                      onChange={(event) => updateChatAppearance({ [opacityKey]: Number(event.target.value) / 100 })}
+                      className="mt-1 w-full"
+                    />
+                  </label>
+                  <div className="flex">
+                    <div
+                      className={`rounded-2xl border border-white/60 px-3 py-2 text-xs text-slate-700 ${colorKey === 'userBubbleColor' ? 'ml-auto' : ''}`}
+                      style={{ backgroundColor: hexToRgba(chatAppearance[colorKey], chatAppearance[opacityKey] ?? 0.78), backdropFilter: 'blur(10px)' }}
+                    >
+                      气泡预览
+                    </div>
+                  </div>
+                </section>
+              ))}
               <section className="space-y-2 rounded-xl border border-white/80 bg-white/50 p-3">
                 <div>
                   <h4 className="text-[11px] font-bold text-[#2C4A5C]">气泡 CSS 美化</h4>
@@ -3382,6 +3673,14 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                     </label>
                     <button type="button" onClick={() => uploadRef.current?.click()} className="w-full rounded-lg bg-slate-100 py-2 text-[10px] font-semibold text-slate-600">
                       本地上传{label}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!chatAppearance[key]}
+                      onClick={() => updateChatAppearance({ [key]: '' })}
+                      className="w-full rounded-lg bg-rose-50 py-2 text-[10px] font-semibold text-rose-500 disabled:opacity-40"
+                    >
+                      恢复默认{label}
                     </button>
                     <input
                       ref={uploadRef}
@@ -3861,6 +4160,32 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
               )}
             </section>
             <section className="space-y-2 rounded-xl bg-slate-50 p-3">
+              <div className="flex items-center justify-between">
+                <p className="text-[11px] font-semibold text-[#2C4A5C]">聊天字体大小</p>
+                <span className="text-[10px] text-slate-500">{chatSettingsDraft.fontSize ?? 12}px</span>
+              </div>
+              <input
+                type="range"
+                min="10"
+                max="20"
+                step="1"
+                value={chatSettingsDraft.fontSize ?? 12}
+                onChange={(event) => setChatSettingsDraft({ ...chatSettingsDraft, fontSize: Number(event.target.value) })}
+                aria-label="聊天字体大小"
+                className="w-full"
+              />
+              <div className="flex items-center justify-between">
+                <p className="text-slate-600" style={{ fontSize: `${chatSettingsDraft.fontSize ?? 12}px` }}>预览：今天天气真好呀</p>
+                <button
+                  type="button"
+                  onClick={() => setChatSettingsDraft({ ...chatSettingsDraft, fontSize: undefined })}
+                  className="shrink-0 rounded-full bg-white px-2.5 py-1 text-[10px] text-slate-500"
+                >
+                  恢复默认
+                </button>
+              </div>
+            </section>
+            <section className="space-y-2 rounded-xl bg-slate-50 p-3">
               <p className="text-[11px] font-semibold text-[#2C4A5C]">角色消息数</p>
               <p className="text-[9px] leading-relaxed text-slate-400">
                 每次生成时随机决定连续消息条数。
@@ -4218,11 +4543,16 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
             </label>
             <div className="space-y-1.5">
               <p className="text-[11px] font-semibold text-[#2C4A5C]">世界书关联</p>
-              {contactWorldBooks.length === 0 ? (
+              {contactWorldBooks.some((book) => book.isGlobal) && (
+                <p className="text-[10px] text-slate-400">
+                  全局世界书（{contactWorldBooks.filter((book) => book.isGlobal).map((book) => book.name).join('、')}）已默认发送，无需关联。
+                </p>
+              )}
+              {contactWorldBooks.filter((book) => !book.isGlobal).length === 0 ? (
                 <p className="text-[10px] text-slate-400">世界书 App 中还没有可关联的世界书。</p>
               ) : (
                 <div className="max-h-36 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50 p-2 space-y-2">
-                  {contactWorldBooks.map((book) => {
+                  {contactWorldBooks.filter((book) => !book.isGlobal).map((book) => {
                     const bookSelected = contactDraft.worldBooks.some(
                       (link) => link.bookId === book.id && !link.entryId
                     );
@@ -4510,6 +4840,72 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
           {chatError && <p role="alert" className="bg-slate-950 px-3 pb-2 text-center text-[10px] text-rose-300">{chatError}</p>}
         </div>
       )}
+      {archiveOpen && activeChat && (() => {
+        const { archives, activeId } = getChatArchives(activeChat);
+        return (
+          <div className="absolute inset-0 z-[70] flex items-center justify-center bg-black/40 p-5 backdrop-blur-sm">
+            <section role="dialog" aria-modal="true" aria-labelledby="archive-title" className="flex max-h-[80%] w-full max-w-sm flex-col gap-3 rounded-3xl bg-white p-5 shadow-2xl">
+              <header className="flex items-center justify-between">
+                <h2 id="archive-title" className="text-base font-bold text-[#2C4A5C]">聊天存档</h2>
+                <button type="button" aria-label="关闭" onClick={() => setArchiveOpen(false)} className="flex h-8 w-8 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100">
+                  <X className="h-4 w-4" />
+                </button>
+              </header>
+              <p className="text-[11px] text-slate-500">每个存档保存一份独立的聊天记录，切换后当前对话会换成该存档的内容。</p>
+              <div className="min-h-0 flex-1 space-y-2 overflow-y-auto">
+                {archives.map((archive) => {
+                  const isActive = archive.id === activeId;
+                  const count = isActive ? activeChat.messages.length : archive.messages.length;
+                  return (
+                    <div key={archive.id} className={`rounded-2xl border p-2.5 ${isActive ? 'border-sky-200 bg-sky-50/70' : 'border-slate-100 bg-slate-50'}`}>
+                      {renamingArchive?.id === archive.id ? (
+                        <div className="flex gap-1.5">
+                          <input
+                            autoFocus
+                            value={renamingArchive.name}
+                            onChange={(event) => setRenamingArchive({ id: archive.id, name: event.target.value })}
+                            aria-label="存档名称"
+                            className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs outline-none"
+                          />
+                          <button type="button" onClick={() => renameChatArchive(activeChat, archive.id, renamingArchive.name)} className="rounded-lg bg-sky-500 px-2 py-1 text-[10px] text-white">保存</button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="truncate text-xs font-semibold text-slate-700">{archive.name}{isActive && <span className="ml-1.5 rounded-full bg-sky-100 px-1.5 py-0.5 text-[9px] text-sky-600">当前</span>}</p>
+                            <p className="text-[10px] text-slate-400">{count} 条消息</p>
+                          </div>
+                          <div className="flex shrink-0 gap-1.5 text-[10px]">
+                            {!isActive && <button type="button" onClick={() => switchChatArchive(activeChat, archive.id)} className="rounded-full bg-white px-2.5 py-1 text-sky-600 shadow-sm">切换</button>}
+                            <button type="button" onClick={() => setRenamingArchive({ id: archive.id, name: archive.name })} className="rounded-full bg-white px-2.5 py-1 text-slate-500 shadow-sm">改名</button>
+                            {!isActive && <button type="button" onClick={() => deleteChatArchive(activeChat, archive.id)} className="rounded-full bg-white px-2.5 py-1 text-rose-500 shadow-sm">删除</button>}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="flex gap-2">
+                <input
+                  value={archiveNameDraft}
+                  onChange={(event) => setArchiveNameDraft(event.target.value)}
+                  placeholder="新存档名称（可留空）"
+                  aria-label="新存档名称"
+                  className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => switchChatArchive(activeChat, '', archiveNameDraft)}
+                  className="shrink-0 rounded-xl bg-gradient-to-r from-[#fbcfe8] to-[#bae6fd] px-3 py-2 text-xs font-bold text-[#2C4A5C]"
+                >
+                  新建存档
+                </button>
+              </div>
+            </section>
+          </div>
+        );
+      })()}
       {voiceModalOpen && activeChat && (
         <div className="absolute inset-0 z-[70] flex items-center justify-center bg-black/40 p-5 backdrop-blur-sm">
           <section role="dialog" aria-modal="true" aria-labelledby="voice-title" className="w-full max-w-sm space-y-3 rounded-3xl bg-white p-5 shadow-2xl">

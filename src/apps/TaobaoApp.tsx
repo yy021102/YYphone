@@ -57,6 +57,7 @@ export interface MarketProduct {
   store?: string;
   badge?: string;
   fromCharName?: string;
+  fromCharId?: string;
 }
 
 // 闲鱼二手商品结构
@@ -587,7 +588,12 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
     }
   };
 
-  const sendCharacterDeliveryNotification = async (charId: string, eventText: string) => {
+  const sendCharacterDeliveryNotification = async (
+    charId: string,
+    eventText: string,
+    card: Record<string, unknown>,
+    requestReply: boolean
+  ) => {
     const character = contacts.find((contact) => contact.id === charId);
     if (!character) throw new Error('找不到要通知的通讯录角色。');
     const rawChats = readStorageString(STORAGE_KEYS.wechatChats);
@@ -604,7 +610,8 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
     const triggerMessage = {
       id: `message-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       senderId: 'user',
-      text: `【系统提示：礼物已立即送达】${eventText} 请以角色身份自然地向玩家发一条感谢或互动消息。`,
+      kind: 'order',
+      ...card,
       createdAt: timestamp,
     };
     if (!chat) {
@@ -632,10 +639,11 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
     chat.messages.push(triggerMessage);
     chat.updatedAt = timestamp;
     writeStorageString(STORAGE_KEYS.wechatChats, JSON.stringify(chats));
+    if (!requestReply) return;
 
     const reply = await requestConfiguredAiText(
       `你正在扮演${character.name}。角色设定：${getCharacterPersona(character.id) || '保持自然、亲切且符合上下文。'}。你刚收到玩家送来的商品，请用微信消息自然感谢或互动。只返回一条简短纯文本消息，不要 JSON。`,
-      triggerMessage.text
+      `【系统提示：礼物已立即送达】${eventText} 请以角色身份自然地向玩家发一条感谢或互动消息。`
     );
     const latestRaw = readStorageString(STORAGE_KEYS.wechatChats);
     const latestChats: unknown = latestRaw ? JSON.parse(latestRaw) : [];
@@ -695,15 +703,33 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
     }
 
     try {
+      const market = marketProducts.find((item) => item.id === checkoutProduct.id);
+      const xianyu = checkoutProduct.type === 'xianyu'
+        ? xianyuItems.find((item) => item.id === checkoutProduct.id)
+        : undefined;
+      const card = {
+        text: `${checkoutProduct.title}`,
+        title: checkoutProduct.title,
+        content: (market?.desc ?? xianyu?.desc ?? '').slice(0, 80),
+        amount: Number(checkoutProduct.price).toFixed(2),
+        source: market?.store ?? (xianyu ? '闲鱼好物' : ''),
+        imageUrl: market?.imageUrl,
+        productEmoji: market?.emoji,
+        orderCategory: checkoutProduct.type,
+        orderMode: buyForWho === 'char' ? 'gift' : 'self',
+      };
       if (buyForWho === 'char') {
         const recipient = contacts.find((contact) => contact.id === targetCharId);
         if (!recipient) throw new Error('找不到收礼角色。');
         const event = `玩家立即送达礼物「${checkoutProduct.title}」（¥${Number(checkoutProduct.price).toFixed(2)}），收礼对象：${recipient.name}。`;
         appendCharacterContextEvent(recipient.id, event, 'taobao');
-        await sendCharacterDeliveryNotification(recipient.id, event);
+        await sendCharacterDeliveryNotification(recipient.id, event, card, true);
       } else {
         const event = `玩家购买了「${checkoutProduct.title}」（¥${Number(checkoutProduct.price).toFixed(2)}），并选择让你知道。`;
-        notifyCharIds.forEach((charId) => appendCharacterContextEvent(charId, event, 'taobao'));
+        for (const charId of notifyCharIds) {
+          appendCharacterContextEvent(charId, event, 'taobao');
+          await sendCharacterDeliveryNotification(charId, event, card, false);
+        }
       }
     } catch (error) {
       console.error('Purchase succeeded, but character notification failed.', error);

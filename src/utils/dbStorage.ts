@@ -1,3 +1,5 @@
+import { clearAudioBlobs } from './audioStorage';
+
 const DATABASE_NAME = 'yyphone_db';
 const STORE_NAME = 'store';
 const DATABASE_VERSION = 1;
@@ -242,6 +244,9 @@ export async function clearDbStorage(): Promise<void> {
   const transaction = database.transaction(STORE_NAME, 'readwrite');
   transaction.objectStore(STORE_NAME).clear();
   await transactionComplete(transaction);
+  await clearAudioBlobs().catch((error: unknown) => {
+    console.warn('Could not clear stored audio files.', error);
+  });
 }
 
 export async function replaceDbStorage(values: Record<string, unknown>): Promise<void> {

@@ -651,15 +651,15 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
 
               {/* 总支出 & 总收入 */}
               <div className="grid grid-cols-2 gap-3">
-                <div className="bg-rose-50/70 border border-rose-100/80 rounded-2xl p-3">
-                  <span className="text-[11px] text-rose-300 font-medium">本月总支出</span>
-                  <p className="text-lg font-extrabold text-rose-400 font-mono mt-0.5">
+                <div className="bg-gradient-to-br from-pink-100/60 to-white/40 backdrop-blur-md border border-white/70 shadow-[0_4px_14px_rgba(244,167,200,0.18)] rounded-2xl p-3">
+                  <span className="text-[11px] text-[#9A7A8C] font-medium">本月总支出</span>
+                  <p className="text-lg font-extrabold text-[#C98CA8] font-mono mt-0.5">
                     - ¥ {monthExpense.toFixed(2)}
                   </p>
                 </div>
-                <div className="bg-emerald-50/70 border border-emerald-100/80 rounded-2xl p-3">
-                  <span className="text-[11px] text-emerald-400 font-medium">本月总收入</span>
-                  <p className="text-lg font-extrabold text-emerald-500 font-mono mt-0.5">
+                <div className="bg-gradient-to-br from-sky-100/60 to-white/40 backdrop-blur-md border border-white/70 shadow-[0_4px_14px_rgba(125,190,230,0.18)] rounded-2xl p-3">
+                  <span className="text-[11px] text-[#6F8CA0] font-medium">本月总收入</span>
+                  <p className="text-lg font-extrabold text-[#6FA6C8] font-mono mt-0.5">
                     + ¥ {monthIncome.toFixed(2)}
                   </p>
                 </div>
