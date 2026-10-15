@@ -22,6 +22,11 @@ import {
   saveSetting,
   SETTINGS_KEYS,
 } from '../utils/settings';
+import {
+  getAllCachedStorageItems,
+  initializeDbStorage,
+  replaceDbStorage,
+} from '../utils/dbStorage';
 
 interface ApiPreset {
   id: string;
@@ -294,16 +299,10 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
     setLockSettingsSaved(saved);
   };
 
-  const handleExportBackup = () => {
+  const handleExportBackup = async () => {
     try {
-      const data: Record<string, string> = {};
-      for (let index = 0; index < window.localStorage.length; index += 1) {
-        const key = window.localStorage.key(index);
-        if (key !== null) {
-          const value = window.localStorage.getItem(key);
-          if (value !== null) data[key] = value;
-        }
-      }
+      await initializeDbStorage();
+      const data = getAllCachedStorageItems();
       const content = JSON.stringify(
         { format: 'yyphone-backup', version: 1, exportedAt: new Date().toISOString(), data },
         null,
@@ -348,26 +347,17 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
       ) {
         throw new Error('备份文件中的数据内容无效。');
       }
+      const backupData = data as Record<string, string>;
       if (!window.confirm('导入将替换当前浏览器中本应用的全部本地数据，确定继续吗？')) return;
 
-      const previousData: Record<string, string> = {};
-      for (let index = 0; index < window.localStorage.length; index += 1) {
-        const key = window.localStorage.key(index);
-        if (key !== null) {
-          const value = window.localStorage.getItem(key);
-          if (value !== null) previousData[key] = value;
-        }
-      }
+      await initializeDbStorage();
+      const previousData = getAllCachedStorageItems();
 
       try {
-        window.localStorage.clear();
-        Object.entries(data).forEach(([key, value]) => window.localStorage.setItem(key, value));
+        await replaceDbStorage(backupData);
       } catch (error) {
         try {
-          window.localStorage.clear();
-          Object.entries(previousData).forEach(([key, value]) =>
-            window.localStorage.setItem(key, value)
-          );
+          await replaceDbStorage(previousData);
         } catch (restoreError) {
           console.error('Could not restore local data after backup import failed.', restoreError);
           throw new Error('导入失败，且恢复原有数据也失败；请勿关闭页面并检查浏览器存储空间。');
@@ -383,12 +373,12 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
     }
   };
 
-  const handleFactoryReset = () => {
+  const handleFactoryReset = async () => {
     if (!window.confirm('恢复出厂设置将永久清除本浏览器中歪歪机的全部本地数据（包括聊天、角色、设置、API 配置和备份），且无法撤销。建议先导出备份。确定继续吗？')) {
       return;
     }
     try {
-      resetAllSettings();
+      await resetAllSettings();
       window.location.reload();
     } catch (error) {
       console.error('Could not reset local app data.', error);
@@ -401,7 +391,7 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
     <div className="flex-1 w-full flex flex-col bg-[#F3F6F8] overflow-hidden">
       <AppHeader title="设置 · 系统配置" onBack={onBack} />
 
-      <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar p-4 space-y-3 pb-[max(env(safe-area-inset-bottom,0px),10px)]">
+      <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar p-4 space-y-3 pb-[env(safe-area-inset-bottom,0px)]">
         <section className="space-y-2">
           <div className="flex items-center gap-1.5 px-1 text-xs font-bold text-[#2C4A5C]">
             <Key className="w-3.5 h-3.5 text-sky-600" />

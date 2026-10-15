@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { Suspense, lazy, useState, useEffect, useRef } from 'react';
 import { AppId, BeautySettings, CustomWallpapers, UserProfile } from './types';
 import {
   INITIAL_USER_PROFILE,
@@ -16,20 +16,20 @@ import { readSetting, saveSetting, SETTINGS_KEYS } from './utils/settings';
 import { StatusBar } from './components/StatusBar';
 import { LockScreen } from './components/LockScreen';
 import { HomeScreen } from './components/HomeScreen';
+import { processPomodoroDeadline } from './utils/pomodoroRuntime';
 
-// App Components
-import { WeChatApp } from './apps/WeChatApp';
-import { PhoneExplorerApp } from './apps/PhoneExplorerApp';
-import { AlipayApp } from './apps/AlipayApp';
-import { TaobaoApp } from './apps/TaobaoApp';
-import { ForumApp } from './apps/ForumApp';
-import { PomodoroApp } from './apps/PomodoroApp';
-import { OfflineModeApp } from './apps/OfflineModeApp';
-import { CoupleSpaceApp } from './apps/CoupleSpaceApp';
-import { SettingsApp } from './apps/SettingsApp';
-import { ThemeCustomizerApp } from './apps/ThemeCustomizerApp';
-import { WorldBookApp } from './apps/WorldBookApp';
-import { MemoryApp } from './apps/MemoryApp';
+const WeChatApp = lazy(() => import('./apps/WeChatApp').then((module) => ({ default: module.WeChatApp })));
+const PhoneExplorerApp = lazy(() => import('./apps/PhoneExplorerApp').then((module) => ({ default: module.PhoneExplorerApp })));
+const AlipayApp = lazy(() => import('./apps/AlipayApp').then((module) => ({ default: module.AlipayApp })));
+const TaobaoApp = lazy(() => import('./apps/TaobaoApp').then((module) => ({ default: module.TaobaoApp })));
+const ForumApp = lazy(() => import('./apps/ForumApp').then((module) => ({ default: module.ForumApp })));
+const PomodoroApp = lazy(() => import('./apps/PomodoroApp').then((module) => ({ default: module.PomodoroApp })));
+const OfflineModeApp = lazy(() => import('./apps/OfflineModeApp').then((module) => ({ default: module.OfflineModeApp })));
+const CoupleSpaceApp = lazy(() => import('./apps/CoupleSpaceApp').then((module) => ({ default: module.CoupleSpaceApp })));
+const SettingsApp = lazy(() => import('./apps/SettingsApp').then((module) => ({ default: module.SettingsApp })));
+const ThemeCustomizerApp = lazy(() => import('./apps/ThemeCustomizerApp').then((module) => ({ default: module.ThemeCustomizerApp })));
+const WorldBookApp = lazy(() => import('./apps/WorldBookApp').then((module) => ({ default: module.WorldBookApp })));
+const MemoryApp = lazy(() => import('./apps/MemoryApp').then((module) => ({ default: module.MemoryApp })));
 
 type LockMode = 'none' | 'lock' | 'password';
 interface LockSettings {
@@ -92,16 +92,40 @@ const isUserProfile = (value: unknown): value is UserProfile => {
     typeof profile.stats.notes === 'number' &&
     typeof profile.stats.coins === 'number' &&
     (profile.avatarUrl === undefined || typeof profile.avatarUrl === 'string') &&
+    (profile.avatarFrameEnabled === undefined || typeof profile.avatarFrameEnabled === 'boolean') &&
     (profile.coverImageUrl === undefined || typeof profile.coverImageUrl === 'string')
   );
 };
 
 export default function App() {
+  useEffect(() => {
+    const checkPomodoroDeadline = () => {
+      try {
+        processPomodoroDeadline();
+      } catch (error) {
+        console.error('Could not update the persistent Pomodoro timer.', error);
+      }
+    };
+    checkPomodoroDeadline();
+    const timer = window.setInterval(checkPomodoroDeadline, 1000);
+    window.addEventListener('focus', checkPomodoroDeadline);
+    window.addEventListener('pageshow', checkPomodoroDeadline);
+    document.addEventListener('visibilitychange', checkPomodoroDeadline);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', checkPomodoroDeadline);
+      window.removeEventListener('pageshow', checkPomodoroDeadline);
+      document.removeEventListener('visibilitychange', checkPomodoroDeadline);
+    };
+  }, []);
+
   const [lockSettings, setLockSettings] = useState<LockSettings>(() =>
     readSetting(SETTINGS_KEYS.lock, DEFAULT_LOCK_SETTINGS, isLockSettings)
   );
   const [isLocked, setIsLocked] = useState(() => lockSettings.mode !== 'none');
   const [activeApp, setActiveApp] = useState<AppId | null>(null);
+  const [showEmergencyDialog, setShowEmergencyDialog] = useState(false);
+  const emergencyTapTimesRef = useRef<number[]>([]);
   const [showStatusBar, setShowStatusBar] = useState(() =>
     readSetting(SETTINGS_KEYS.statusBarVisible, true, (value): value is boolean => typeof value === 'boolean')
   );
@@ -124,10 +148,21 @@ export default function App() {
       wallpapers: legacyWallpapers,
     }, isBeautySettings);
   });
-
   // Clock
   const [timeString, setTimeString] = useState('09:41');
   const [dateString, setDateString] = useState('10月13日 星期二');
+
+  useEffect(() => {
+    if (navigator.storage?.persist) {
+      void navigator.storage.persist().then((granted) => {
+        if (!granted) {
+          console.info('Persistent browser storage was not granted.');
+        }
+      }).catch((error: unknown) => {
+        console.warn('Could not request persistent browser storage.', error);
+      });
+    }
+  }, []);
 
   useEffect(() => {
     const updateTime = () => {
@@ -158,6 +193,25 @@ export default function App() {
 
   const handleBackToHome = () => {
     setActiveApp(null);
+  };
+
+  const handleEmergencyTap = () => {
+    if (showEmergencyDialog) return;
+    const now = Date.now();
+    const recentTaps = emergencyTapTimesRef.current.filter((timestamp) => now - timestamp <= 900);
+    recentTaps.push(now);
+    if (recentTaps.length >= 3) {
+      emergencyTapTimesRef.current = [];
+      setShowEmergencyDialog(true);
+      return;
+    }
+    emergencyTapTimesRef.current = recentTaps;
+  };
+
+  const handleEmergencyReturn = () => {
+    setActiveApp(null);
+    setIsLocked(false);
+    setShowEmergencyDialog(false);
   };
 
   const handleUnlock = () => {
@@ -252,8 +306,9 @@ export default function App() {
         - pb: env(safe-area-inset-bottom) keeps dock above iPhone Home indicator bar
       */}
       <div
+        onPointerDown={handleEmergencyTap}
         className={`w-full md:w-[min(412px,calc(93dvh*9/19.5))] h-[100dvh] md:h-[min(850px,93dvh)] md:rounded-[44px] overflow-hidden relative flex flex-col shadow-[0_25px_80px_rgba(0,0,0,0.7),0_0_0_1px_rgba(255,255,255,0.14)] transition-all ${
-          activeApp
+          activeApp || isLocked
             ? 'p-0'
             : 'pt-[max(env(safe-area-inset-top,0px),0px)] pb-0'
         }`}
@@ -284,7 +339,7 @@ export default function App() {
         )}
 
         {/* Top Status Bar (Only on Desktop / Lockscreen or when enabled, with safe top breathing space) */}
-        {showStatusBar && !activeApp && (
+        {showStatusBar && !activeApp && !isLocked && (
           <div className="relative z-40 pt-1 shrink-0">
             <StatusBar
               time={timeString}
@@ -308,6 +363,13 @@ export default function App() {
           ) : activeApp ? (
             /* Active Sub-App View: Header is safely padded below the notch, back arrow always clickable */
             <div className="w-full h-full flex flex-col overflow-hidden animate-fadeIn">
+              <Suspense
+                fallback={
+                  <div className="flex h-full items-center justify-center text-sm text-slate-500">
+                    正在打开应用…
+                  </div>
+                }
+              >
               {activeApp === 'wechat' && (
                 <WeChatApp
                   onBack={handleBackToHome}
@@ -357,6 +419,7 @@ export default function App() {
               {activeApp === 'memory' && (
                 <MemoryApp onBack={handleBackToHome} />
               )}
+              </Suspense>
             </div>
           ) : (
             /* Desktop / Home Screen (Strictly fitted within 1 screen, never scrolls, square blocks) */
@@ -370,6 +433,35 @@ export default function App() {
             />
           )}
         </div>
+        {showEmergencyDialog && (
+          <div className="absolute inset-0 z-[120] flex items-center justify-center bg-slate-950/35 p-6 backdrop-blur-sm">
+            <section
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="emergency-return-title"
+              className="w-full max-w-xs rounded-3xl border border-white/80 bg-white/95 p-5 text-center shadow-2xl"
+            >
+              <h2 id="emergency-return-title" className="text-sm font-bold text-[#587589]">返回主页？</h2>
+              <p className="mt-2 text-xs leading-relaxed text-slate-500">检测到连续点击屏幕三下。确定要离开当前页面并返回主页吗？</p>
+              <div className="mt-4 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowEmergencyDialog(false)}
+                  className="rounded-xl bg-slate-100 py-2.5 text-xs font-semibold text-slate-600"
+                >
+                  继续停留
+                </button>
+                <button
+                  type="button"
+                  onClick={handleEmergencyReturn}
+                  className="rounded-xl bg-gradient-to-r from-[#9BD2FC] to-[#F7B9D2] py-2.5 text-xs font-bold text-[#456176]"
+                >
+                  返回主页
+                </button>
+              </div>
+            </section>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -33,7 +33,7 @@ export const CoupleSpaceApp: React.FC<CoupleSpaceAppProps> = ({ onBack }) => {
         }
       />
 
-      <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar p-4 space-y-3 pb-[max(env(safe-area-inset-bottom,0px),10px)]">
+      <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar p-4 space-y-3 pb-[env(safe-area-inset-bottom,0px)]">
         {/* Couple Hero Card */}
         <div className="glass-card rounded-3xl p-5 border-pink-100 bg-gradient-to-b from-white/70 via-pink-50/40 to-white/60 relative overflow-hidden text-center space-y-3">
           <div className="flex items-center justify-center gap-6 pt-2">

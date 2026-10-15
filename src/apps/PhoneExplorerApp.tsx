@@ -74,7 +74,7 @@ export const PhoneExplorerApp: React.FC<PhoneExplorerAppProps> = ({ onBack }) =>
       </div>
 
       {/* Main Tab Content */}
-      <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar p-4 pb-[max(env(safe-area-inset-bottom,0px),10px)]">
+      <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar p-4 pb-[env(safe-area-inset-bottom,0px)]">
         {/* PHOTOS */}
         {activeTab === 'photos' && (
           <div className="space-y-3 pb-1">

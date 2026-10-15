@@ -306,7 +306,7 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
         onBack={onBack}
       />
 
-      <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar p-4 space-y-4 pb-[max(env(safe-area-inset-bottom,0px),10px)]">
+      <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar p-4 space-y-4 pb-[env(safe-area-inset-bottom,0px)]">
         <section className="space-y-2.5">
           <div className="flex items-center justify-between px-1 text-xs font-bold text-[#2C4A5C]">
             <span className="flex items-center gap-1.5">

@@ -1,3 +1,5 @@
+import { readStorageString, writeStorageString } from './localStorage';
+
 export interface CharacterContextEvent {
   id: string;
   charId: string;
@@ -13,7 +15,7 @@ export const appendCharacterContextEvent = (
   content: string,
   source: CharacterContextEvent['source']
 ) => {
-  const raw = window.localStorage.getItem(CHARACTER_CONTEXT_STORAGE_KEY);
+  const raw = readStorageString(CHARACTER_CONTEXT_STORAGE_KEY);
   const parsed: unknown = raw ? JSON.parse(raw) : [];
   if (!Array.isArray(parsed)) throw new Error('角色上下文数据格式无效，无法保存互动记录。');
   const events = parsed.filter((event): event is CharacterContextEvent =>
@@ -33,5 +35,5 @@ export const appendCharacterContextEvent = (
     content,
     source,
   });
-  window.localStorage.setItem(CHARACTER_CONTEXT_STORAGE_KEY, JSON.stringify(events));
+  writeStorageString(CHARACTER_CONTEXT_STORAGE_KEY, JSON.stringify(events));
 };

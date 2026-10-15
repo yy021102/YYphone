@@ -1,5 +1,5 @@
 import React from 'react';
-import { ArrowLeft, MoreHorizontal } from 'lucide-react';
+import { ArrowLeft } from 'lucide-react';
 
 interface AppHeaderProps {
   title: string;
@@ -41,16 +41,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
 
       {/* Right action button */}
       <div className="w-10 h-10 -mr-1 flex items-center justify-center">
-        {rightAction ? (
-          rightAction
-        ) : (
-          <button
-            aria-label="更多"
-            className="w-9 h-9 rounded-full flex items-center justify-center text-slate-500 hover:text-slate-700 hover:bg-black/5 transition-colors cursor-pointer"
-          >
-            <MoreHorizontal className="w-4 h-4" />
-          </button>
-        )}
+        {rightAction}
       </div>
     </header>
   );

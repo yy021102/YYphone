@@ -28,6 +28,7 @@ export interface UserProfile {
   handle: string;
   avatarSeed: string;
   avatarUrl?: string;
+  avatarFrameEnabled?: boolean;
   coverImageUrl?: string;
   signature: string;
   level: string;

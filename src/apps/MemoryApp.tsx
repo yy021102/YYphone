@@ -59,7 +59,7 @@ export const MemoryApp: React.FC<MemoryAppProps> = ({ onBack }) => {
       </div>
 
       {/* Main Memory Stream */}
-      <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar p-4 space-y-2.5 pb-[max(env(safe-area-inset-bottom,0px),10px)]">
+      <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar p-4 space-y-2.5 pb-[env(safe-area-inset-bottom,0px)]">
         {/* Memory Capsule Banner */}
         <div className="glass-card rounded-2xl p-4 flex items-center justify-between border-amber-100">
           <div className="flex items-center gap-3">

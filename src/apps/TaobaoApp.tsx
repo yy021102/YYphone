@@ -31,8 +31,9 @@ import {
 } from '../utils/alipayData';
 import { requestConfiguredAiText } from '../utils/aiApi';
 import { appendCharacterContextEvent } from '../utils/characterContext';
-import { readStoredValue, writeStoredValue } from '../utils/localStorage';
+import { readStorageString, readStoredValue, writeStorageString, writeStoredValue } from '../utils/localStorage';
 import { readSetting, saveSetting, SETTINGS_KEYS } from '../utils/settings';
+import { compressImage } from '../utils/imageFile';
 
 interface TaobaoAppProps {
   onBack: () => void;
@@ -333,19 +334,18 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
   }, [activePresetId, themePresets]);
 
   // ==================== 6. 工具函数：本地上传图片转 Base64 ====================
-  const handleLocalImageUpload = (
+  const handleLocalImageUpload = async (
     e: React.ChangeEvent<HTMLInputElement>,
     onSuccess: (base64: string) => void
   ) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      if (ev.target?.result) {
-        onSuccess(String(ev.target.result));
-      }
-    };
-    reader.readAsDataURL(file);
+    try {
+      onSuccess(await compressImage(file));
+    } catch (error) {
+      console.error('Could not compress Taobao image.', error);
+      window.alert(error instanceof Error ? error.message : '图片压缩失败，请重新选择。');
+    }
   };
 
   // ==================== 7. 美化预设切换、保存、删除逻辑 ====================
@@ -590,7 +590,7 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
   const sendCharacterDeliveryNotification = async (charId: string, eventText: string) => {
     const character = contacts.find((contact) => contact.id === charId);
     if (!character) throw new Error('找不到要通知的通讯录角色。');
-    const rawChats = window.localStorage.getItem(STORAGE_KEYS.wechatChats);
+    const rawChats = readStorageString(STORAGE_KEYS.wechatChats);
     const parsedChats: unknown = rawChats ? JSON.parse(rawChats) : [];
     if (!Array.isArray(parsedChats)) throw new Error('微信聊天数据格式无效。');
     const chats = parsedChats as Array<Record<string, unknown>>;
@@ -631,13 +631,13 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
     if (!Array.isArray(chat.messages)) throw new Error('角色微信会话的消息列表格式无效。');
     chat.messages.push(triggerMessage);
     chat.updatedAt = timestamp;
-    window.localStorage.setItem(STORAGE_KEYS.wechatChats, JSON.stringify(chats));
+    writeStorageString(STORAGE_KEYS.wechatChats, JSON.stringify(chats));
 
     const reply = await requestConfiguredAiText(
       `你正在扮演${character.name}。角色设定：${getCharacterPersona(character.id) || '保持自然、亲切且符合上下文。'}。你刚收到玩家送来的商品，请用微信消息自然感谢或互动。只返回一条简短纯文本消息，不要 JSON。`,
       triggerMessage.text
     );
-    const latestRaw = window.localStorage.getItem(STORAGE_KEYS.wechatChats);
+    const latestRaw = readStorageString(STORAGE_KEYS.wechatChats);
     const latestChats: unknown = latestRaw ? JSON.parse(latestRaw) : [];
     if (!Array.isArray(latestChats)) throw new Error('微信聊天数据格式无效，无法保存 AI 回复。');
     const currentChat = (latestChats as Array<Record<string, unknown>>).find((item) => item.id === chat?.id);
@@ -653,7 +653,7 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
       createdAt: replyTimestamp,
     });
     currentChat.updatedAt = replyTimestamp;
-    window.localStorage.setItem(STORAGE_KEYS.wechatChats, JSON.stringify(latestChats));
+    writeStorageString(STORAGE_KEYS.wechatChats, JSON.stringify(latestChats));
   };
 
   // ==================== 9. 结算支付与送礼/通知角色 ====================
@@ -887,7 +887,7 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
       </div>
 
       {/* 主内容滚动区 */}
-      <div className="relative z-10 flex-1 min-h-0 overflow-y-auto no-scrollbar px-4 pt-1 space-y-3 pb-[max(env(safe-area-inset-bottom,0px),20px)]">
+      <div className="relative z-10 flex-1 min-h-0 overflow-y-auto no-scrollbar px-4 pt-1 space-y-3 pb-[env(safe-area-inset-bottom,0px)]">
         {paymentNotice && (
           <div
             role="status"

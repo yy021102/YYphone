@@ -1,4 +1,5 @@
 import { readStoredValue, writeStoredValue } from './localStorage';
+import { clearDbStorage, removeCachedStorageItem } from './dbStorage';
 
 export const SETTINGS_KEYS = {
   userProfile: 'pocketos:user-profile',
@@ -29,10 +30,10 @@ export function saveSetting<T>(key: string, value: T): void {
 }
 
 export function removeSetting(key: string): void {
-  window.localStorage.removeItem(key);
+  removeCachedStorageItem(key);
 }
 
-export function resetAllSettings(): void {
-  window.localStorage.clear();
+export async function resetAllSettings(): Promise<void> {
+  await clearDbStorage();
   window.sessionStorage.clear();
 }

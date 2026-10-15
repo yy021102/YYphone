@@ -1,3 +1,5 @@
+import { readStorageString, writeStorageString } from './localStorage';
+
 export interface IntimatePayCard {
   id: string;
   charId: string;
@@ -118,7 +120,7 @@ const normalizeAlipayData = (value: unknown): AlipayData => {
 
 export const readAlipayData = (): AlipayData => {
   try {
-    const raw = window.localStorage.getItem(ALIPAY_STORAGE_KEY);
+    const raw = readStorageString(ALIPAY_STORAGE_KEY);
     const account = normalizeAlipayData(raw ? JSON.parse(raw) : null);
     const now = today();
     const lastDate = new Date(`${account.lastInterestDate}T00:00:00`);
@@ -141,13 +143,13 @@ export const readAlipayData = (): AlipayData => {
 };
 
 export const writeAlipayData = (data: AlipayData) => {
-  window.localStorage.setItem(ALIPAY_STORAGE_KEY, JSON.stringify(data));
+  writeStorageString(ALIPAY_STORAGE_KEY, JSON.stringify(data));
 };
 
 export const readAlipayContacts = (): AlipayContact[] => {
   try {
     const value: unknown = JSON.parse(
-      window.localStorage.getItem(WECHAT_CONTACTS_STORAGE_KEY) ?? '[]'
+      readStorageString(WECHAT_CONTACTS_STORAGE_KEY) ?? '[]'
     );
     if (!Array.isArray(value)) return [];
     return value.flatMap((contact): AlipayContact[] =>
@@ -195,7 +197,7 @@ const appendIntimatePayMessage = (
   title: string,
   amount: number
 ) => {
-  const chatsRaw = window.localStorage.getItem(WECHAT_CHATS_STORAGE_KEY);
+  const chatsRaw = readStorageString(WECHAT_CHATS_STORAGE_KEY);
   const chatsValue: unknown = chatsRaw ? JSON.parse(chatsRaw) : [];
   if (!Array.isArray(chatsValue)) throw new Error('微信聊天数据格式无效，无法发送亲密付互动消息。');
   const chats = chatsValue as Array<Record<string, unknown>>;
@@ -239,14 +241,14 @@ const appendIntimatePayMessage = (
   }
   conversation.messages.push(message);
   conversation.updatedAt = timestamp;
-  window.localStorage.setItem(WECHAT_CHATS_STORAGE_KEY, JSON.stringify(chats));
+  writeStorageString(WECHAT_CHATS_STORAGE_KEY, JSON.stringify(chats));
 };
 
 export const chargeAlipay = (
   amount: number,
   title: string,
   source: PaymentSource,
-  options: { notifyIntimatePayer?: boolean; recordLedger?: boolean } = {}
+  options: { notifyIntimatePayer?: boolean; recordLedger?: boolean } = { recordLedger: false }
 ): PaymentResult => {
   if (!Number.isFinite(amount) || amount <= 0) throw new Error('支付金额必须大于 0。');
   const data = readAlipayData();
@@ -296,6 +298,19 @@ export const chargeAlipay = (
     writeAlipayData(nextData);
   }
   return { data: nextData, payer };
+};
+
+export const creditAlipay = (amount: number): AlipayData => {
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error('入账金额必须大于 0。');
+  }
+  const data = readAlipayData();
+  const nextData: AlipayData = {
+    ...data,
+    balance: data.balance + amount,
+  };
+  writeAlipayData(nextData);
+  return nextData;
 };
 
 export const sendIntimatePayInteraction = (

@@ -80,7 +80,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 
   const renderAppIcon = (
     iconName: string,
-    className = 'w-6 h-6 text-[#2C4A5C]',
+    className = 'w-6 h-6 text-[#587589]',
     imageUrl?: string
   ) => {
     if (imageUrl) {
@@ -136,7 +136,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             {renderAppIcon(
               app.iconName,
               `w-[clamp(22px,6vw,28px)] h-[clamp(22px,6vw,28px)] ${
-                app.textColor || 'text-[#2C4A5C]'
+                app.textColor || 'text-[#587589]'
               } stroke-[2.2] drop-shadow-xs`,
               appIcons[app.id]
             )}
@@ -151,7 +151,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         )}
       </div>
 
-      <span className="mt-[clamp(2px,0.5vh,4px)] text-[clamp(10px,2.6vw,12px)] font-bold text-[#2C4A5C] tracking-tight truncate max-w-[68px] text-center leading-tight">
+      <span className="mt-[clamp(2px,0.5vh,4px)] text-[clamp(10px,2.6vw,12px)] font-semibold text-[#587589] tracking-tight truncate max-w-[68px] text-center leading-tight">
         {app.name}
       </span>
     </button>
@@ -179,7 +179,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             />
           )}
           <div className="absolute inset-0 opacity-40 bg-[radial-gradient(circle_at_30%_50%,rgba(255,255,255,0.8),transparent_60%)]" />
-          <span className="text-[11px] font-mono font-bold text-[#2C4A5C]/80 relative z-10 tracking-wide">
+          <span className="-translate-y-1 text-[11px] font-mono font-bold text-[#587589]/80 relative z-10 tracking-wide">
             YYphone·歪歪机
           </span>
           <button
@@ -187,7 +187,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             onClick={() => setIsProfileEditorOpen(true)}
             aria-label="编辑资料"
             title="编辑资料"
-            className="flex items-center justify-center w-7 h-7 rounded-full bg-white/80 backdrop-blur-md text-[#2C4A5C] border border-white/75 shadow-2xs relative z-10"
+            className="flex items-center justify-center w-7 h-7 rounded-full bg-white/80 backdrop-blur-md text-[#587589] border border-white/75 shadow-2xs relative z-10"
           >
             <Pencil className="w-3 h-3" />
           </button>
@@ -198,15 +198,25 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           {/* Avatar & Mood pill row */}
           <div className="flex items-end justify-between -mt-5 mb-1">
             <div className="relative">
-              <div className="w-[clamp(44px,11vw,52px)] h-[clamp(44px,11vw,52px)] rounded-[clamp(12px,3vw,16px)] bg-gradient-to-tr from-sky-400 via-teal-300 to-pink-300 p-0.5 shadow-md">
+              <div
+                className={`flex items-center justify-center ${
+                  userProfile.avatarFrameEnabled
+                    ? 'h-[clamp(40px,10vw,46px)] w-[clamp(40px,10vw,46px)] rounded-[38%] p-[4px] shadow-sm'
+                    : 'h-[clamp(40px,10vw,46px)] w-[clamp(40px,10vw,46px)] rounded-[38%]'
+                }`}
+                style={userProfile.avatarFrameEnabled ? {
+                  background: 'linear-gradient(135deg, #f5c9d9 0%, #fff0dc 48%, #cde8f4 100%)',
+                  boxShadow: '0 2px 8px rgba(221, 153, 177, 0.22)',
+                } : undefined}
+              >
                 {userProfile.avatarUrl ? (
                   <img
                     src={userProfile.avatarUrl}
                     alt={`${userProfile.name} 的头像`}
-                    className="w-full h-full rounded-[clamp(10px,2.6vw,14px)] object-cover"
+                    className={`h-full w-full object-cover ${userProfile.avatarFrameEnabled ? 'rounded-[32%] border-2 border-[#fff8ed]' : 'rounded-[inherit]'}`}
                   />
                 ) : (
-                  <div className="w-full h-full rounded-[clamp(10px,2.6vw,14px)] bg-white flex items-center justify-center font-bold text-[#2C4A5C] text-[clamp(15px,3.8vw,18px)] backdrop-blur-sm">
+                  <div className={`flex h-full w-full items-center justify-center bg-white/90 font-bold text-[#587589] text-[clamp(15px,3.8vw,18px)] backdrop-blur-sm ${userProfile.avatarFrameEnabled ? 'rounded-[32%] border-2 border-[#fff8ed]' : 'rounded-[inherit]'}`}>
                     {userProfile.name.trim().charAt(0) || '?'}
                   </div>
                 )}
@@ -214,7 +224,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             </div>
 
             <div className="flex items-center gap-1.5">
-              <span className="text-[10px] font-semibold px-2.5 py-0.5 rounded-lg bg-white/75 text-[#2C4A5C] border border-white/80 shadow-2xs">
+              <span className="text-[10px] font-semibold px-2.5 py-0.5 rounded-lg bg-white/75 text-[#587589] border border-white/80 shadow-2xs">
                 {userProfile.mood}
               </span>
             </div>
@@ -223,7 +233,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           {/* Name & Handle */}
           <div className="flex items-baseline justify-between mb-0.5">
             <div className="flex items-center gap-1.5">
-              <h2 className="text-[clamp(13.5px,3.5vw,16px)] font-bold text-[#2C4A5C] tracking-tight">
+              <h2 className="text-[clamp(13.5px,3.5vw,16px)] font-bold text-[#587589] tracking-tight">
                 {userProfile.name}
               </h2>
             </div>
@@ -233,7 +243,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           </div>
 
           {/* Signature / Bio */}
-          <p className="text-[clamp(10px,2.5vw,11.5px)] text-[#2C4A5C]/85 line-clamp-1 font-normal mb-1.5 leading-snug">
+          <p className="text-[clamp(10px,2.5vw,11.5px)] text-[#587589]/85 line-clamp-1 font-normal mb-1.5 leading-snug">
             {userProfile.signature}
           </p>
 
@@ -252,16 +262,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         </div>
       </div>
 
-      {/* 
-        Section 2: The 2x2 "田字格" Blocks
-        - Distributed evenly in the vertical center
-        - Strictly SQUARE aspect ratio (`aspect-square`) for all 4 blocks
-        - Large, clear icons scaling with clamp()
-      */}
+      {/* Home widgets and app groups retain the 2×2 phone home layout. */}
       <div className="grid grid-cols-2 gap-[clamp(10px,2.6vw,14px)] w-full my-auto shrink-0">
-        {/* ============================== */}
-        {/* 左上区块：桌面小组件 “一起听歌” (Strict Square) */}
-        {/* ============================== */}
+        {/* Music widget */}
         <div className="glass-card rounded-[clamp(20px,4.8vw,28px)] p-[clamp(9px,2.4vw,13px)] aspect-square flex flex-col justify-between overflow-hidden relative shadow-sm">
           {/* Top header */}
           <div className="flex items-center justify-between z-10 shrink-0">
@@ -269,7 +272,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               <div className="w-[clamp(20px,5vw,24px)] h-[clamp(20px,5vw,24px)] rounded-lg bg-sky-100/90 text-sky-700 flex items-center justify-center">
                 <Music2 className="w-3.5 h-3.5" />
               </div>
-              <span className="text-[clamp(11px,2.8vw,13px)] font-bold text-[#2C4A5C]">一起听歌</span>
+              <span className="text-[clamp(11px,2.8vw,13px)] font-bold text-[#587589]">一起听歌</span>
             </div>
             <span className="flex items-center gap-0.5">
               <span className="w-1 h-2 rounded-full bg-sky-400 animate-pulse" />
@@ -295,7 +298,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 
             {/* Title & Artist */}
             <div className="flex-1 min-w-0">
-              <h4 className="text-[clamp(11px,2.8vw,12.5px)] font-bold text-[#2C4A5C] truncate">
+              <h4 className="text-[clamp(11px,2.8vw,12.5px)] font-bold text-[#587589] truncate">
                 浅海微澜与晨光
               </h4>
               <p className="text-[clamp(9px,2.2vw,10.5px)] text-slate-500 truncate mt-0.5">
@@ -317,12 +320,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               <div className="flex items-center gap-1.5">
                 <button
                   onClick={() => setIsPlaying(!isPlaying)}
-                  className="w-[clamp(22px,6vw,28px)] h-[clamp(22px,6vw,28px)] rounded-full bg-white/80 hover:bg-white text-[#2C4A5C] flex items-center justify-center shadow-2xs active:scale-90 transition-all cursor-pointer"
+                  className="w-[clamp(22px,6vw,28px)] h-[clamp(22px,6vw,28px)] rounded-full bg-white/80 hover:bg-white text-[#587589] flex items-center justify-center shadow-2xs active:scale-90 transition-all cursor-pointer"
                 >
                   {isPlaying ? (
-                    <Pause className="w-3 h-3 fill-[#2C4A5C]" />
+                    <Pause className="w-3 h-3 fill-[#587589]" />
                   ) : (
-                    <Play className="w-3 h-3 fill-[#2C4A5C] ml-0.5" />
+                    <Play className="w-3 h-3 fill-[#587589] ml-0.5" />
                   )}
                 </button>
                 <button
@@ -338,23 +341,15 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           </div>
         </div>
 
-        {/* ============================== */}
-        {/* 右上区块：4 个 App (Strict Square, 2x2 Grid) */}
-        {/* ============================== */}
-        <div className="glass-card rounded-[clamp(20px,4.8vw,28px)] p-[clamp(6px,1.8vw,10px)] aspect-square grid grid-cols-2 grid-rows-2 items-center justify-items-center gap-1 overflow-hidden shadow-sm">
+        <div className="aspect-square grid grid-cols-2 grid-rows-2 items-center justify-items-center gap-1">
           {topRightApps.map(renderAppButton)}
         </div>
 
-        {/* ============================== */}
-        {/* 左下区块：4 个 App (Strict Square, 2x2 Grid) */}
-        {/* ============================== */}
-        <div className="glass-card rounded-[clamp(20px,4.8vw,28px)] p-[clamp(6px,1.8vw,10px)] aspect-square grid grid-cols-2 grid-rows-2 items-center justify-items-center gap-1 overflow-hidden shadow-sm">
+        <div className="aspect-square grid grid-cols-2 grid-rows-2 items-center justify-items-center gap-1">
           {bottomLeftApps.map(renderAppButton)}
         </div>
 
-        {/* ============================== */}
-        {/* 右下区块：桌面小组件 “相片相框” (Strict Square) */}
-        {/* ============================== */}
+        {/* Photo widget */}
         <div
           onClick={handleNextPhoto}
           className="glass-card rounded-[clamp(20px,4.8vw,28px)] p-[clamp(9px,2.4vw,13px)] aspect-square flex flex-col justify-between overflow-hidden relative shadow-sm group cursor-pointer active:scale-[0.98] transition-all"
@@ -368,7 +363,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 
           {/* Header */}
           <div className="relative z-10 flex items-center justify-between shrink-0">
-            <span className="text-[10px] font-bold text-[#2C4A5C] bg-white/75 px-2 py-0.5 rounded-full shadow-2xs backdrop-blur-xs flex items-center gap-1">
+            <span className="text-[10px] font-bold text-[#587589] bg-white/75 px-2 py-0.5 rounded-full shadow-2xs backdrop-blur-xs flex items-center gap-1">
               <Camera className="w-2.5 h-2.5 text-pink-500" />
               <span>相片相框</span>
             </span>
@@ -376,7 +371,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             <button
               onClick={handleNextPhoto}
               title="轻触更换相片"
-              className="w-5.5 h-5.5 rounded-full bg-white/70 hover:bg-white text-[#2C4A5C] flex items-center justify-center shadow-xs transition-all active:rotate-180"
+              className="w-5.5 h-5.5 rounded-full bg-white/70 hover:bg-white text-[#587589] flex items-center justify-center shadow-xs transition-all active:rotate-180"
             >
               <RefreshCw className="w-3 h-3 text-slate-600" />
             </button>
@@ -387,14 +382,14 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             <div className="w-[clamp(36px,9.5vw,46px)] h-[clamp(36px,9.5vw,46px)] rounded-[clamp(11px,2.8vw,16px)] bg-white/70 border border-white/85 shadow-xs flex items-center justify-center text-[clamp(18px,4.8vw,24px)] backdrop-blur-md group-hover:scale-105 transition-transform">
               {photoIndex === 0 ? '🌅' : photoIndex === 1 ? '🌧️' : '🌌'}
             </div>
-            <span className="text-[10px] text-[#2C4A5C] font-bold mt-1">
+            <span className="text-[10px] text-[#587589] font-bold mt-1">
               {photoPresets[photoIndex].sticker}
             </span>
           </div>
 
           {/* Bottom */}
           <div className="relative z-10 flex items-baseline justify-between pt-0.5 border-t border-white/40 shrink-0">
-            <span className="text-[9px] text-[#2C4A5C]/85 font-medium truncate max-w-[85px]">
+            <span className="text-[9px] text-[#587589]/85 font-medium truncate max-w-[85px]">
               {photoPresets[photoIndex].title}
             </span>
             <span className="text-[8.5px] text-slate-500 font-mono">
@@ -405,13 +400,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       </div>
     </div>
 
-      {/* 
-        Section 3: Bottom Dock Bar (Firmly attached to screen bottom)
-        Contains 4 apps: 设置, 美化, 世界书, 记忆
-        - Background bleeds to the bottom edge with micro-buffer safe area
-        - No gaps or floating disconnection
-      */}
-      <div className="w-full shrink-0 border-t border-white/60 bg-white/45 backdrop-blur-xl px-2 pt-1.5 pb-[max(env(safe-area-inset-bottom,0px),8px)] flex items-center justify-around shadow-[0_-4px_16px_rgba(180,210,230,0.15)] z-20">
+      {/* Floating iOS-style translucent app dock */}
+      <div className="mx-4 mb-[max(10px,env(safe-area-inset-bottom,0px))] w-auto shrink-0 rounded-[28px] border border-white/75 bg-white/45 px-2 py-2 backdrop-blur-2xl shadow-[0_8px_28px_rgba(108,144,168,0.2),inset_0_1px_0_rgba(255,255,255,0.75)] flex items-center justify-around z-20">
         {dockApps.map((dockApp) => (
           <button
             key={dockApp.id}
@@ -429,13 +419,13 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                 {renderAppIcon(
                   dockApp.iconName,
                   `w-[clamp(22px,5.8vw,26px)] h-[clamp(22px,5.8vw,26px)] ${
-                    dockApp.textColor || 'text-[#2C4A5C]'
+                    dockApp.textColor || 'text-[#587589]'
                   } stroke-[2.2] drop-shadow-xs`,
                   appIcons[dockApp.id]
                 )}
               </div>
             </div>
-            <span className="mt-[clamp(2px,0.4vh,3px)] text-[clamp(10px,2.5vw,11.5px)] font-bold text-[#2C4A5C] leading-tight">
+            <span className="mt-[clamp(2px,0.4vh,3px)] text-[clamp(10px,2.5vw,11.5px)] font-semibold text-[#587589] leading-tight">
               {dockApp.name}
             </span>
           </button>

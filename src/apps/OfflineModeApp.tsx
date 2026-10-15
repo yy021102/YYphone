@@ -64,7 +64,7 @@ export const OfflineModeApp: React.FC<OfflineModeAppProps> = ({ onBack }) => {
         }
       />
 
-      <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar p-4 space-y-3 pb-[max(env(safe-area-inset-bottom,0px),10px)]">
+      <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar p-4 space-y-3 pb-[env(safe-area-inset-bottom,0px)]">
         {/* Ambient Sounds Selector Card */}
         <div className="glass-card rounded-2xl p-4 space-y-3">
           <div className="flex items-center justify-between">

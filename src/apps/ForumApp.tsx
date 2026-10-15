@@ -23,7 +23,8 @@ import {
 import { AppHeader } from '../components/AppHeader';
 import { readAlipayContacts, AlipayContact } from '../utils/alipayData';
 import { requestConfiguredAiText } from '../utils/aiApi';
-import { readStoredValue, writeStoredValue } from '../utils/localStorage';
+import { readStorageString, readStoredValue, writeStoredValue } from '../utils/localStorage';
+import { compressImage } from '../utils/imageFile';
 
 interface ForumAppProps {
   onBack: () => void;
@@ -172,6 +173,7 @@ const FORUM_STORAGE_KEYS = {
   activePresetId: 'yyphone:forum-active-preset-id',
   currentTheme: 'yyphone:forum-current-theme',
   chats: 'yyphone:wechat-chats',
+  forwards: 'yyphone:forum-forwards',
 } as const;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -324,35 +326,48 @@ const selectAllowedCommenters = (
 // Read NPCs defined for actual contacts. Never fabricate placeholder NPCs.
 const loadCharacterNpcs = (contacts: AlipayContact[]): CharacterNpc[] => {
   const byId = new Map(contacts.map((contact) => [contact.id, contact]));
-  const normalizeNpc = (value: unknown, ownerId?: string): CharacterNpc | undefined => {
-    if (!isRecord(value) || typeof value.name !== 'string' || !value.name.trim()) return undefined;
-    const charId = typeof value.charId === 'string'
+  const normalizeNpc = (value: unknown, ownerId?: string): CharacterNpc[] => {
+    if (!isRecord(value) || typeof value.name !== 'string' || !value.name.trim()) return [];
+    const npcName = value.name.trim();
+    const linkedCharIds = Array.isArray(value.linkedCharIds)
+      ? value.linkedCharIds.filter((id): id is string => typeof id === 'string')
+      : [];
+    const legacyCharId = typeof value.charId === 'string'
       ? value.charId
       : typeof value.ownerId === 'string'
         ? value.ownerId
         : ownerId;
-    const owner = charId ? byId.get(charId) : undefined;
-    if (!owner) return undefined;
-    return {
-      id: typeof value.id === 'string' ? value.id : `npc-${charId}-${value.name}`,
-      charId: owner.id,
-      charName: owner.name,
-      name: value.name.trim(),
-      ...(typeof value.relation === 'string' ? { relation: value.relation } : {}),
-    };
+    if (legacyCharId && !linkedCharIds.includes(legacyCharId)) linkedCharIds.push(legacyCharId);
+    return [...new Set(linkedCharIds)].flatMap((charId) => {
+      const owner = byId.get(charId);
+      if (!owner) return [];
+      return [{
+        id: linkedCharIds.length > 1
+          ? `${typeof value.id === 'string' ? value.id : `npc-${charId}-${npcName}`}::${charId}`
+          : typeof value.id === 'string'
+            ? value.id
+            : `npc-${charId}-${npcName}`,
+        charId: owner.id,
+        charName: owner.name,
+        name: npcName,
+        ...(typeof value.relation === 'string' ? { relation: value.relation } : {}),
+      }];
+    });
   };
 
   const result: CharacterNpc[] = [];
   const appendList = (items: unknown, ownerId?: string) => {
     if (!Array.isArray(items)) return;
     items.forEach((item) => {
-      const npc = normalizeNpc(item, ownerId);
-      if (npc && !result.some((existing) => existing.id === npc.id)) result.push(npc);
+      normalizeNpc(item, ownerId).forEach((npc) => {
+        const roleScopedId = `${npc.id}:${npc.charId}`;
+        if (!result.some((existing) => `${existing.id}:${existing.charId}` === roleScopedId)) result.push(npc);
+      });
     });
   };
 
   try {
-    const raw = window.localStorage.getItem('yyphone:character-npcs');
+    const raw = readStorageString('yyphone:character-npcs');
     if (raw) {
       const parsed: unknown = JSON.parse(raw);
       if (Array.isArray(parsed)) {
@@ -512,17 +527,18 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
       : allNpcs.filter((n) => n.charId === selectedCharForPost);
 
   // ==================== 6. 工具与美化预设逻辑 ====================
-  const handleLocalImageUpload = (
+  const handleLocalImageUpload = async (
     e: React.ChangeEvent<HTMLInputElement>,
     onSuccess: (base64: string) => void
   ) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      if (ev.target?.result) onSuccess(String(ev.target.result));
-    };
-    reader.readAsDataURL(file);
+    try {
+      onSuccess(await compressImage(file));
+    } catch (error) {
+      console.error('Could not compress forum image.', error);
+      window.alert(error instanceof Error ? error.message : '图片压缩失败，请重新选择。');
+    }
   };
 
   const handleSelectPreset = (presetId: string) => {
@@ -963,61 +979,36 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
       .join('\n');
 
     try {
-      const rawChats = window.localStorage.getItem(FORUM_STORAGE_KEYS.chats);
-      const parsedChats: unknown = rawChats ? JSON.parse(rawChats) : [];
-      if (!Array.isArray(parsedChats)) throw new Error('微信聊天数据格式无效，无法转发。');
       const now = new Date().toISOString();
-      const chatIndex = parsedChats.findIndex((candidate) =>
-        isRecord(candidate) &&
-        candidate.type === 'direct' &&
-        Array.isArray(candidate.participantIds) &&
-        candidate.participantIds.length === 1 &&
-        candidate.participantIds[0] === forwardTargetCharId &&
-        Array.isArray(candidate.messages)
-      );
       const message = {
         id: `forum-forward-${Date.now()}-${randomHashId()}`,
         senderId: 'user',
         text: aiReadableSummary,
         kind: 'forum-forward',
         forumForwardTargetId: forwardTargetCharId,
+        title: `${postAuthorTag} · ${forwardingPost.title || '论坛帖子'}`,
+        content: `${forwardingPost.content.slice(0, 180)}${forwardingPost.content.length > 180 ? '…' : ''} · ${formattedComments.length} 条评论`,
+        source: `来自 论坛 · ${postBoard?.name ?? activeBoard.name}`,
+        aiContext: aiReadableSummary,
+        forumDetails: {
+          boardName: postBoard?.name ?? activeBoard.name,
+          author: postAuthorTag,
+          title: forwardingPost.title,
+          body: forwardingPost.content,
+          comments: forwardingPost.comments.map((comment) => ({
+            authorName: formatAuthorIdentityForAi(comment),
+            content: comment.content,
+          })),
+        },
         createdAt: now,
       };
-      const chats = [...parsedChats];
-      if (chatIndex >= 0) {
-        const chat = chats[chatIndex];
-        if (!isRecord(chat) || !Array.isArray(chat.messages)) {
-          throw new Error('微信单聊数据格式无效，无法保存转发。');
-        }
-        chats[chatIndex] = {
-          ...chat,
-          messages: [...chat.messages, message],
-          updatedAt: now,
-        };
-      } else {
-        chats.unshift({
-          id: `chat-${Date.now()}-${randomHashId().toLowerCase()}`,
-          type: 'direct',
-          participantIds: [forwardTargetCharId],
-          noteName: '',
-          context: '',
-          narratorEnabled: false,
-          blocked: false,
-          pinned: false,
-          avatars: {},
-          messages: [message],
-          updatedAt: now,
-          groupTitle: '',
-          groupNicknames: {},
-          allowAgentGroupRename: false,
-          attachHistory: false,
-          attachedHistoryContactId: forwardTargetCharId,
-          attachedHistoryCount: 10,
-        });
-      }
-      writeStoredValue(FORUM_STORAGE_KEYS.chats, chats);
+      const queue = readStoredValue<unknown[]>(FORUM_STORAGE_KEYS.forwards, [], Array.isArray);
+      writeStoredValue(FORUM_STORAGE_KEYS.forwards, [
+        ...queue,
+        { targetCharId: forwardTargetCharId, message },
+      ]);
       setNoticeBanner(
-        `已转发给「${targetChar.name}」（已标注你的身份与在场角色真名），去微信点生成即可看 TA 反应！`
+        `已转发给「${targetChar.name}」（已标注你的身份与在场角色真名），进入微信会话后点生成即可看 TA 反应！`
       );
       setForwardingPost(null);
     } catch (error) {
@@ -1150,7 +1141,7 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
       </div>
 
       {/* 主内容滚动区 */}
-      <div className="relative z-10 flex-1 min-h-0 overflow-y-auto no-scrollbar px-4 pt-1 space-y-3 pb-[max(env(safe-area-inset-bottom,0px),20px)]">
+      <div className="relative z-10 flex-1 min-h-0 overflow-y-auto no-scrollbar px-4 pt-1 space-y-3 pb-[env(safe-area-inset-bottom,0px)]">
         {noticeBanner && (
           <div className={`flex items-center justify-between rounded-2xl bg-white/85 backdrop-blur-md border px-3.5 py-2.5 text-[11px] font-bold shadow-2xs ${
             /失败|无效|无法|找不到|请先/.test(noticeBanner)

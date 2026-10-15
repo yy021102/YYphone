@@ -1,6 +1,8 @@
 import { PersonaCollection, UserPersona } from '../types';
 import { readAlipayData } from './alipayData';
 import { readSetting, SETTINGS_KEYS } from './settings';
+import { CharacterNpc, getNpcByParticipantId, readCharacterNpcs } from './characterNpcs';
+import { readStorageString } from './localStorage';
 
 export interface PromptChatMessage {
   id: string;
@@ -10,6 +12,26 @@ export interface PromptChatMessage {
   kind?: string;
   forumForwardTargetId?: string;
   thought?: string;
+  title?: string;
+  content?: string;
+  source?: string;
+  amount?: string;
+  quantity?: number;
+  recipientId?: string;
+  payerId?: string;
+  aiContext?: string;
+  pomodoroDetails?: {
+    totalMinutes: number;
+    sessionCount: number;
+    tasks: string[];
+    companionNames: string[];
+    sessions: Array<{
+      time: string;
+      durationMinutes: number;
+      taskTitle: string;
+      companionCharName: string;
+    }>;
+  };
 }
 
 export interface PromptConversation {
@@ -24,6 +46,9 @@ export interface PromptConversation {
   attachHistory?: boolean;
   attachedHistoryCount?: number;
   attachedHistoryChatIds?: string[];
+  currentChatHistoryCount?: number;
+  attachedHistoryCounts?: Record<string, number>;
+  includeLatestThought?: boolean;
   attachedHistoryContactId?: string;
 }
 
@@ -77,7 +102,7 @@ const STORAGE_KEYS = {
 
 const readJson = <T,>(key: string, fallback: T): T => {
   try {
-    const value = window.localStorage.getItem(key);
+    const value = readStorageString(key);
     return value === null ? fallback : (JSON.parse(value) as T);
   } catch (error) {
     console.error(`Could not read prompt data from localStorage key "${key}".`, error);
@@ -106,7 +131,27 @@ const isPromptChatMessage = (value: unknown): value is PromptChatMessage =>
   typeof value.senderId === 'string' &&
   typeof value.text === 'string' &&
   typeof value.createdAt === 'string' &&
-  (value.forumForwardTargetId === undefined || typeof value.forumForwardTargetId === 'string');
+  (value.forumForwardTargetId === undefined || typeof value.forumForwardTargetId === 'string') &&
+  (value.title === undefined || typeof value.title === 'string') &&
+  (value.content === undefined || typeof value.content === 'string') &&
+  (value.source === undefined || typeof value.source === 'string') &&
+  (value.aiContext === undefined || typeof value.aiContext === 'string') &&
+  (value.pomodoroDetails === undefined ||
+    (isRecord(value.pomodoroDetails) &&
+      typeof value.pomodoroDetails.totalMinutes === 'number' &&
+      typeof value.pomodoroDetails.sessionCount === 'number' &&
+      Array.isArray(value.pomodoroDetails.tasks) &&
+      value.pomodoroDetails.tasks.every((task) => typeof task === 'string') &&
+      Array.isArray(value.pomodoroDetails.companionNames) &&
+      value.pomodoroDetails.companionNames.every((name) => typeof name === 'string') &&
+      Array.isArray(value.pomodoroDetails.sessions) &&
+      value.pomodoroDetails.sessions.every((session) =>
+        isRecord(session) &&
+        typeof session.time === 'string' &&
+        typeof session.durationMinutes === 'number' &&
+        typeof session.taskTitle === 'string' &&
+        typeof session.companionCharName === 'string'
+      )));
 
 const getPersonaText = (persona: UserPersona | undefined) => {
   if (!persona) return '未设置玩家人设。';
@@ -119,11 +164,19 @@ const getPersonaText = (persona: UserPersona | undefined) => {
   ].filter(Boolean).join('\n');
 };
 
-const getConversationTitle = (conversation: PromptConversation, contacts: PromptContact[]) =>
+const getConversationTitle = (
+  conversation: PromptConversation,
+  contacts: PromptContact[],
+  npcs: CharacterNpc[]
+) =>
   conversation.groupTitle?.trim() ||
   conversation.noteName?.trim() ||
   conversation.participantIds
-    .map((id) => contacts.find((contact) => contact.id === id)?.name ?? id)
+    .map((id) =>
+      contacts.find((contact) => contact.id === id)?.name ??
+      getNpcByParticipantId(npcs, id)?.name ??
+      id
+    )
     .join('、') ||
   '未命名聊天';
 
@@ -131,11 +184,13 @@ const getSpeakerName = (
   senderId: string,
   conversation: PromptConversation,
   contacts: PromptContact[],
+  npcs: CharacterNpc[],
   persona: UserPersona | undefined
 ) => {
   if (senderId === 'user') return persona?.name || '玩家';
   if (senderId === 'narrator') return '旁白';
   return conversation.groupNicknames?.[senderId]?.trim() ||
+    getNpcByParticipantId(npcs, senderId)?.name ||
     contacts.find((contact) => contact.id === senderId)?.name ||
     senderId;
 };
@@ -194,16 +249,50 @@ const isChatConversation = (value: unknown): value is PromptConversation =>
       Object.values(value.groupNicknames).every((nickname) => typeof nickname === 'string'))) &&
   (value.attachedHistoryChatIds === undefined ||
     (Array.isArray(value.attachedHistoryChatIds) &&
-      value.attachedHistoryChatIds.every((id) => typeof id === 'string')));
+      value.attachedHistoryChatIds.every((id) => typeof id === 'string'))) &&
+  (value.currentChatHistoryCount === undefined ||
+    (typeof value.currentChatHistoryCount === 'number' &&
+      Number.isInteger(value.currentChatHistoryCount) &&
+      value.currentChatHistoryCount >= 1)) &&
+  (value.attachedHistoryCounts === undefined ||
+    (isRecord(value.attachedHistoryCounts) &&
+      Object.values(value.attachedHistoryCounts).every((count) =>
+        typeof count === 'number' && Number.isInteger(count) && count >= 1
+      ))) &&
+  (value.includeLatestThought === undefined || typeof value.includeLatestThought === 'boolean');
 
 const toMessageContent = (message: PromptChatMessage) => {
   if (message.senderId === 'narrator') return `（旁白：${message.text}）`;
   if (message.kind === 'forum-forward') {
-    return `【论坛转发；玩家身份优先，其次关注其他角色/NPC的真实姓名，不注入其人设；路人通常低优先级，但有趣言论可回应】\n${message.text}`;
+    return [
+      `【微信论坛分享卡片${message.source ? ` · ${message.source}` : ''}】`,
+      `卡片标题：${message.title || '论坛帖子'}`,
+      '请依据帖子完整正文与评论区细节回应；玩家本人身份优先，其次关注其他角色/NPC的真实姓名，不注入其人设；路人通常低优先级，但有趣言论可回应。',
+      message.aiContext || message.text,
+    ].join('\n');
+  }
+  if (message.kind === 'pomodoro-share') {
+    return [
+      `【微信番茄钟战绩分享卡片${message.source ? ` · ${message.source}` : ''}】`,
+      `卡片标题：${message.title || '🍅 今日专注打卡战报'}`,
+      '玩家主动分享了今日专注成果，请针对具体专注时长、任务明细和陪读角色自然回应。',
+      message.aiContext || message.text,
+    ].join('\n');
   }
   if (message.kind === 'sticker') return `[表情包：${message.text}]`;
   if (message.kind === 'voice') return `[语音转写：${message.text}]`;
   if (message.kind === 'image' && !message.text) return '[图片]';
+  if (message.kind === 'video-call') return `[视频通话邀请/状态：${message.text}]`;
+  if (message.kind === 'location') return `[位置分享：${message.text}]`;
+  if (message.kind === 'red-packet') {
+    return `[${message.senderId === 'user' ? '玩家发送' : '角色发送'}红包：¥${message.amount ?? '未知'}${message.quantity ? `，共${message.quantity}个` : ''}；祝福语：${message.text}]`;
+  }
+  if (message.kind === 'transfer') {
+    return `[${message.senderId === 'user' ? '玩家发送' : '角色发送'}转账：¥${message.amount ?? '未知'}${message.recipientId ? `，收款方：${message.recipientId === 'user' ? '玩家' : message.recipientId}` : ''}${message.payerId ? `，由${message.payerId}的亲密付付款` : ''}；说明：${message.text}]`;
+  }
+  if (message.kind === 'link') {
+    return `[分享链接：${message.title || message.text}${message.source ? `；来源：${message.source}` : ''}${message.content ? `；摘要：${message.content}` : ''}]`;
+  }
   return message.text;
 };
 
@@ -245,6 +334,7 @@ export const buildPrompt = ({
   const contacts = Array.isArray(contactsValue)
     ? contactsValue.filter(isPromptContact)
     : [];
+  const characterNpcs = readCharacterNpcs();
   const worldBooks = Array.isArray(worldBooksValue)
     ? worldBooksValue.filter((book): book is PromptWorldBook =>
         isRecord(book) &&
@@ -268,8 +358,12 @@ export const buildPrompt = ({
   const participants = chat.participantIds
     .map((id) => contacts.find((contact) => contact.id === id))
     .filter((contact): contact is PromptContact => !!contact);
-  const recentLimit = Number.isInteger(historyLimit) && historyLimit > 0
-    ? historyLimit
+  const participantNpcs = chat.participantIds
+    .map((id) => getNpcByParticipantId(characterNpcs, id))
+    .filter((npc): npc is CharacterNpc => !!npc);
+  const requestedHistoryLimit = chat.currentChatHistoryCount ?? historyLimit;
+  const recentLimit = Number.isInteger(requestedHistoryLimit) && requestedHistoryLimit > 0
+    ? requestedHistoryLimit
     : 30;
 
   // 1. System base instruction.
@@ -285,7 +379,23 @@ export const buildPrompt = ({
   // 3. Character Persona.
   messages.push({
     role: 'system',
-    content: `角色人设：\n${participants.map((contact) => `姓名：${contact.name}\n设定：${contact.persona}`).join('\n\n') || '当前聊天没有可用角色人设。'}`,
+    content: [
+      `角色人设：\n${participants.map((contact) => `姓名：${contact.name}\n设定：${contact.persona}`).join('\n\n') || '当前聊天没有可用主要角色人设。'}`,
+      ...participants.flatMap((contact) => {
+        const linkedNpcs = characterNpcs.filter((npc) => npc.linkedCharIds.includes(contact.id));
+        if (linkedNpcs.length === 0) return [];
+        return [
+          `主要角色「${contact.name}」身边的关联 NPC（仅供角色了解其存在，不代表 NPC 正在当前聊天发言）：\n${linkedNpcs
+            .map((npc) => `姓名：${npc.name}\n设定：${npc.persona || '未补充设定。'}`)
+            .join('\n\n')}`,
+        ];
+      }),
+      ...(participantNpcs.length > 0
+        ? [`当前群聊中的 NPC 成员（可作为群成员自然参与发言）：\n${participantNpcs
+            .map((npc) => `成员 ID：${`npc:${npc.id}`}\n姓名：${npc.name}\n头像：${npc.avatarUrl || '未设置'}\n设定：${npc.persona || '未补充设定。'}`)
+            .join('\n\n')}`]
+        : []),
+    ].join('\n\n'),
   });
 
   // 4. World Book - Middle.
@@ -294,6 +404,29 @@ export const buildPrompt = ({
 
   // 5. User Persona.
   messages.push({ role: 'system', content: `玩家设定：\n${getPersonaText(persona)}\n当前聊天补充：${chat.context || '无'}` });
+
+  if (chat.includeLatestThought) {
+    const latestThoughtMessage = [...chat.messages].reverse().find(
+      (message) =>
+        message.senderId !== 'user' &&
+        message.senderId !== 'narrator' &&
+        typeof message.thought === 'string' &&
+        message.thought.trim()
+    );
+    if (latestThoughtMessage?.thought) {
+      const thoughtSpeaker = getSpeakerName(
+        latestThoughtMessage.senderId,
+        chat,
+        contacts,
+        characterNpcs,
+        persona
+      );
+      messages.push({
+        role: 'system',
+        content: `最近一轮角色心声（仅作为隐藏的连续性参考，不要复述或告知玩家）：${thoughtSpeaker}：${latestThoughtMessage.thought}`,
+      });
+    }
+  }
 
   const contextEvents = readJson<unknown>(STORAGE_KEYS.characterContextEvents, []);
   if (Array.isArray(contextEvents)) {
@@ -374,7 +507,10 @@ export const buildPrompt = ({
   const input = latestUserMessage?.kind === 'forum-forward' &&
     !canReadForumForward(latestUserMessage, chat, chat)
     ? ''
-    : requestedInput;
+    : latestUserMessage &&
+        (latestUserMessage.kind === 'forum-forward' || latestUserMessage.kind === 'pomodoro-share')
+      ? toMessageContent(latestUserMessage)
+      : requestedInput;
   const previousAssistantMessage = regenerate
     ? [...chat.messages].reverse().find(
         (message) => message.senderId !== 'user' && message.senderId !== 'narrator'
@@ -407,18 +543,21 @@ export const buildPrompt = ({
       ? chats.filter((item) => item.id !== chat.id && item.type === 'direct' &&
           item.participantIds.includes(chat.attachedHistoryContactId!)).map((item) => item.id)
       : []);
-  const attachedLimit = Number.isInteger(chat.attachedHistoryCount) && (chat.attachedHistoryCount ?? 0) > 0
-    ? chat.attachedHistoryCount!
-    : recentLimit;
   const attachedMessages = chat.attachHistory
     ? chats
         .filter((item) => item.id !== chat.id && attachedIds.includes(item.id))
-        .flatMap((conversation) =>
-          conversation.messages
+        .flatMap((conversation) => {
+          const requestedLimit = chat.attachedHistoryCounts?.[conversation.id] ??
+            chat.attachedHistoryCount ??
+            200;
+          const attachedLimit = Number.isInteger(requestedLimit) && requestedLimit > 0
+            ? requestedLimit
+            : 200;
+          return conversation.messages
             .filter((message) => canReadForumForward(message, conversation, chat))
             .slice(-attachedLimit)
-            .map((message) => ({ date: Date.parse(message.createdAt) || 0, message, conversation }))
-        )
+            .map((message) => ({ date: Date.parse(message.createdAt) || 0, message, conversation }));
+        })
     : [];
   const orderedHistory = [...localMessages, ...attachedMessages]
     .sort((left, right) => left.date - right.date);
@@ -440,7 +579,7 @@ export const buildPrompt = ({
       messages.push({
         role: 'system',
         content: [
-          `挂载聊天记录：${getConversationTitle(item.conversation, contacts)}`,
+          `挂载聊天记录：${getConversationTitle(item.conversation, contacts, characterNpcs)}`,
           `聊天类型：${item.conversation.type === 'group' ? '群聊' : item.conversation.type === 'observer' ? '旁观群聊' : '单聊'}`,
           `群聊设定：${item.conversation.context || '无'}`,
           `聊天人员：${attachedParticipants || '无'}`,
@@ -448,8 +587,8 @@ export const buildPrompt = ({
         ].join('\n'),
       });
     }
-    const speaker = getSpeakerName(item.message.senderId, item.conversation, contacts, persona);
-    const title = getConversationTitle(item.conversation, contacts);
+    const speaker = getSpeakerName(item.message.senderId, item.conversation, contacts, characterNpcs, persona);
+    const title = getConversationTitle(item.conversation, contacts, characterNpcs);
     const prefix = item.conversation.id === chat.id ? '' : `[挂载聊天「${title}」] ${speaker}：`;
     const content = item.conversation.id === chat.id
       ? `${speaker}：${toMessageContent(item.message)}`

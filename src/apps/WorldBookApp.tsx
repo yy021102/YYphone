@@ -395,7 +395,7 @@ export const WorldBookApp: React.FC<WorldBookAppProps> = ({ onBack }) => {
         }}
       />
 
-      <div className="relative z-10 flex-1 min-h-0 overflow-y-auto no-scrollbar p-4 space-y-3.5 pb-[max(env(safe-area-inset-bottom,0px),20px)]">
+      <div className="relative z-10 flex-1 min-h-0 overflow-y-auto no-scrollbar p-4 space-y-3.5 pb-[env(safe-area-inset-bottom,0px)]">
         <div className="flex items-center gap-2">
           <select
             value={selectedBookId}

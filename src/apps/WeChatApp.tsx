@@ -23,6 +23,7 @@ import {
   MapPin,
   Gift,
   RefreshCw,
+  Timer,
   Wallet,
   Link,
   Smile,
@@ -34,16 +35,24 @@ import {
 import { AppHeader } from '../components/AppHeader';
 import { WECHAT_MOMENTS } from '../data/mockData';
 import { PersonaCollection, UserPersona } from '../types';
-import { readStoredValue, writeStoredValue } from '../utils/localStorage';
+import { readStorageString, readStoredValue, writeStorageString, writeStoredValue } from '../utils/localStorage';
 import { readSetting, saveSetting, SETTINGS_KEYS } from '../utils/settings';
 import { compressImageFile } from '../utils/imageFile';
 import { buildPrompt } from '../utils/buildPrompt';
 import {
   chargeAlipay,
+  creditAlipay,
   readAlipayData,
   sendIntimatePayInteraction,
 } from '../utils/alipayData';
 import { appendCharacterContextEvent } from '../utils/characterContext';
+import {
+  CharacterNpc,
+  getNpcByParticipantId,
+  npcParticipantId,
+  readCharacterNpcs,
+  writeCharacterNpcs,
+} from '../utils/characterNpcs';
 
 interface WeChatAppProps {
   onBack: () => void;
@@ -64,6 +73,7 @@ interface ContactPersona {
   worldBooks: ContactWorldBookLink[];
   group: string;
   starred: boolean;
+  linkedNpcIds?: string[];
 }
 
 interface ContactWorldBookEntry {
@@ -80,23 +90,77 @@ interface ContactWorldBook {
 
 type ChatType = 'direct' | 'group' | 'observer';
 
+interface ForumCardDetails {
+  boardName: string;
+  author: string;
+  title: string;
+  body: string;
+  comments: Array<{ authorName: string; content: string }>;
+}
+
+interface PomodoroCardDetails {
+  totalMinutes: number;
+  sessionCount: number;
+  tasks: string[];
+  companionNames: string[];
+  sessions: Array<{
+    time: string;
+    durationMinutes: number;
+    taskTitle: string;
+    companionCharName: string;
+  }>;
+}
+
 interface ChatMessage {
   id: string;
+  replyBatchId?: string;
   senderId: string;
   text: string;
   createdAt: string;
-  kind?: 'text' | 'image' | 'voice' | 'sticker' | 'video-call' | 'location' | 'red-packet' | 'transfer' | 'link' | 'forum-forward';
+  kind?: 'text' | 'image' | 'voice' | 'sticker' | 'video-call' | 'location' | 'red-packet' | 'transfer' | 'link' | 'forum-forward' | 'pomodoro-share';
   forumForwardTargetId?: string;
   imageUrl?: string;
   title?: string;
   source?: string;
   content?: string;
+  aiContext?: string;
+  forumDetails?: ForumCardDetails;
+  pomodoroDetails?: PomodoroCardDetails;
   amount?: string;
   quantity?: number;
   recipientId?: string;
   payerId?: string;
   thought?: string;
 }
+
+interface GeneratedAiMessage {
+  text: string;
+  kind?: Exclude<ChatMessage['kind'], 'forum-forward' | 'pomodoro-share'>;
+  title?: string;
+  source?: string;
+  content?: string;
+  amount?: string;
+  quantity?: number;
+  recipientId?: string;
+  imageUrl?: string;
+}
+
+interface PendingShare {
+  targetCharId: string;
+  message: ChatMessage;
+}
+
+const isPendingShareQueue = (value: unknown): value is PendingShare[] =>
+  Array.isArray(value) &&
+  value.every((item) =>
+    !!item &&
+    typeof item === 'object' &&
+    typeof (item as PendingShare).targetCharId === 'string' &&
+    !!(item as PendingShare).message &&
+    typeof (item as PendingShare).message.id === 'string' &&
+    typeof (item as PendingShare).message.text === 'string' &&
+    typeof (item as PendingShare).message.createdAt === 'string'
+  );
 
 interface ChatSticker {
   id: string;
@@ -167,6 +231,11 @@ interface ChatConversation {
   attachedHistoryContactId?: string;
   attachedHistoryCount?: number;
   attachedHistoryChatIds?: string[];
+  currentChatHistoryCount?: number;
+  attachedHistoryCounts?: Record<string, number>;
+  replyMessageMin?: number;
+  replyMessageMax?: number;
+  includeLatestThought?: boolean;
 }
 
 const CONTACTS_STORAGE_KEY = 'pocketos:wechat-contacts';
@@ -185,6 +254,27 @@ const DEFAULT_CHAT_APPEARANCE: ChatAppearance = {
   presets: [],
   bubblePresets: [],
 };
+
+const getDefaultReplyMessageRange = (chat: ChatConversation) => ({
+  min: chat.type === 'direct'
+    ? 1
+    : Math.max(1, chat.participantIds.length + (chat.type === 'group' ? 1 : 0)),
+  max: chat.type === 'direct'
+    ? 6
+    : Math.max(1, (chat.participantIds.length + (chat.type === 'group' ? 1 : 0)) * 2),
+});
+
+const getReplyMessageRange = (chat: ChatConversation) => {
+  const defaults = getDefaultReplyMessageRange(chat);
+  return {
+    min: chat.replyMessageMin ?? defaults.min,
+    max: chat.replyMessageMax ?? defaults.max,
+  };
+};
+
+const getAttachedHistoryCount = (chat: ChatConversation, sourceChatId: string) =>
+  chat.attachedHistoryCounts?.[sourceChatId] ?? chat.attachedHistoryCount ?? 200;
+
 const DEFAULT_PERSONA: UserPersona = {
   id: 'persona-default',
   name: '默认人设',
@@ -232,6 +322,9 @@ const isContactList = (value: unknown): value is ContactPersona[] =>
       typeof contact.persona === 'string' &&
       typeof contact.group === 'string' &&
       typeof contact.starred === 'boolean' &&
+      (contact.linkedNpcIds === undefined ||
+        (Array.isArray(contact.linkedNpcIds) &&
+          contact.linkedNpcIds.every((id: unknown) => typeof id === 'string'))) &&
       Array.isArray(contact.worldBooks) &&
       contact.worldBooks.every(
         (link: ContactWorldBookLink) =>
@@ -264,16 +357,43 @@ const isChatList = (value: unknown): value is ChatConversation[] =>
         (message: ChatMessage) =>
           !!message &&
           typeof message.id === 'string' &&
+          (message.replyBatchId === undefined || typeof message.replyBatchId === 'string') &&
           typeof message.senderId === 'string' &&
           typeof message.text === 'string' &&
           typeof message.createdAt === 'string' &&
           (message.kind === undefined ||
-            ['text', 'image', 'voice', 'sticker', 'video-call', 'location', 'red-packet', 'transfer', 'link', 'forum-forward'].includes(message.kind)) &&
+            ['text', 'image', 'voice', 'sticker', 'video-call', 'location', 'red-packet', 'transfer', 'link', 'forum-forward', 'pomodoro-share'].includes(message.kind)) &&
           (message.forumForwardTargetId === undefined || typeof message.forumForwardTargetId === 'string') &&
           (message.imageUrl === undefined || typeof message.imageUrl === 'string') &&
           (message.title === undefined || typeof message.title === 'string') &&
           (message.source === undefined || typeof message.source === 'string') &&
           (message.content === undefined || typeof message.content === 'string') &&
+          (message.aiContext === undefined || typeof message.aiContext === 'string') &&
+          (message.forumDetails === undefined ||
+            (!!message.forumDetails &&
+              typeof message.forumDetails.boardName === 'string' &&
+              typeof message.forumDetails.author === 'string' &&
+              typeof message.forumDetails.title === 'string' &&
+              typeof message.forumDetails.body === 'string' &&
+              Array.isArray(message.forumDetails.comments) &&
+              message.forumDetails.comments.every((comment) =>
+                typeof comment.authorName === 'string' && typeof comment.content === 'string'
+              ))) &&
+          (message.pomodoroDetails === undefined ||
+            (!!message.pomodoroDetails &&
+              typeof message.pomodoroDetails.totalMinutes === 'number' &&
+              typeof message.pomodoroDetails.sessionCount === 'number' &&
+              Array.isArray(message.pomodoroDetails.tasks) &&
+              message.pomodoroDetails.tasks.every((task) => typeof task === 'string') &&
+              Array.isArray(message.pomodoroDetails.companionNames) &&
+              message.pomodoroDetails.companionNames.every((name) => typeof name === 'string') &&
+              Array.isArray(message.pomodoroDetails.sessions) &&
+              message.pomodoroDetails.sessions.every((session) =>
+                typeof session.time === 'string' &&
+                typeof session.durationMinutes === 'number' &&
+                typeof session.taskTitle === 'string' &&
+                typeof session.companionCharName === 'string'
+              ))) &&
           (message.amount === undefined || typeof message.amount === 'string') &&
           (message.quantity === undefined || typeof message.quantity === 'number') &&
           (message.recipientId === undefined || typeof message.recipientId === 'string') &&
@@ -289,6 +409,14 @@ const isChatList = (value: unknown): value is ChatConversation[] =>
       (chat.attachHistory === undefined || typeof chat.attachHistory === 'boolean') &&
       (chat.attachedHistoryContactId === undefined || typeof chat.attachedHistoryContactId === 'string') &&
       (chat.attachedHistoryCount === undefined || typeof chat.attachedHistoryCount === 'number') &&
+      (chat.currentChatHistoryCount === undefined || typeof chat.currentChatHistoryCount === 'number') &&
+      (chat.attachedHistoryCounts === undefined ||
+        (!!chat.attachedHistoryCounts &&
+          typeof chat.attachedHistoryCounts === 'object' &&
+          Object.values(chat.attachedHistoryCounts).every((count) => typeof count === 'number'))) &&
+      (chat.replyMessageMin === undefined || typeof chat.replyMessageMin === 'number') &&
+      (chat.replyMessageMax === undefined || typeof chat.replyMessageMax === 'number') &&
+      (chat.includeLatestThought === undefined || typeof chat.includeLatestThought === 'boolean') &&
       (chat.attachedHistoryChatIds === undefined ||
         (Array.isArray(chat.attachedHistoryChatIds) &&
           chat.attachedHistoryChatIds.every((id: unknown) => typeof id === 'string'))) &&
@@ -416,7 +544,7 @@ const scopeChatCss = (css: string) => {
 
 const readContactWorldBooks = (): ContactWorldBook[] => {
   try {
-    const raw = window.localStorage.getItem('yyphone:world-books');
+    const raw = readStorageString('yyphone:world-books');
     if (!raw) return [];
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
@@ -478,6 +606,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
   const [contacts, setContacts] = useState(() =>
     readStoredValue(CONTACTS_STORAGE_KEY, [] as ContactPersona[], isContactList)
   );
+  const [characterNpcs, setCharacterNpcs] = useState<CharacterNpc[]>(() => readCharacterNpcs());
   const [contactsMenuOpen, setContactsMenuOpen] = useState(false);
   const [isContactEditorOpen, setIsContactEditorOpen] = useState(false);
   const [contactDraft, setContactDraft] = useState<ContactPersona>({
@@ -489,6 +618,10 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
     group: '',
     starred: false,
   });
+  const [isNewContactDraft, setIsNewContactDraft] = useState(false);
+  const [npcSectionOpen, setNpcSectionOpen] = useState(false);
+  const [npcDraft, setNpcDraft] = useState({ id: '', name: '', avatarUrl: '', persona: '' });
+  const [selectedSharedNpcIds, setSelectedSharedNpcIds] = useState<string[]>([]);
   const [contactWorldBooks, setContactWorldBooks] = useState<ContactWorldBook[]>([]);
   const [contactError, setContactError] = useState('');
   const [activeContactMenuId, setActiveContactMenuId] = useState('');
@@ -541,6 +674,96 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
   const stickerUploadRef = useRef<HTMLInputElement>(null);
   const [isGeneratingReply, setIsGeneratingReply] = useState(false);
   const [activeThought, setActiveThought] = useState<{ name: string; thought: string } | null>(null);
+  const [forumCardPreview, setForumCardPreview] = useState<ChatMessage | null>(null);
+
+  useEffect(() => {
+    const forumQueue = readStoredValue('yyphone:forum-forwards', [] as PendingShare[], isPendingShareQueue);
+    const pomodoroQueue = readStoredValue('yyphone:pomodoro-shares', [] as PendingShare[], isPendingShareQueue);
+    if (forumQueue.length === 0 && pomodoroQueue.length === 0) return;
+
+    const nextChats = readStoredValue(CHATS_STORAGE_KEY, [] as ChatConversation[], isChatList);
+    let didChangeChats = false;
+    const consumeQueue = (queue: PendingShare[]) => {
+      const remaining: PendingShare[] = [];
+      queue.forEach((entry) => {
+        if (!contacts.some((contact) => contact.id === entry.targetCharId)) {
+          remaining.push(entry);
+          return;
+        }
+        let chat = nextChats.find((item) =>
+          item.type === 'direct' &&
+          item.participantIds.length === 1 &&
+          item.participantIds[0] === entry.targetCharId
+        );
+        if (!chat) {
+          const timestamp = entry.message.createdAt;
+          chat = {
+            id: `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            type: 'direct',
+            participantIds: [entry.targetCharId],
+            noteName: '',
+            context: '',
+            narratorEnabled: false,
+            blocked: false,
+            pinned: false,
+            avatars: {},
+            messages: [],
+            updatedAt: timestamp,
+            groupTitle: '',
+            groupNicknames: {},
+            allowAgentGroupRename: false,
+            attachHistory: false,
+            attachedHistoryContactId: entry.targetCharId,
+            attachedHistoryCount: 10,
+            currentChatHistoryCount: 200,
+            attachedHistoryCounts: {},
+            replyMessageMin: 1,
+            replyMessageMax: 6,
+            includeLatestThought: false,
+          };
+          nextChats.unshift(chat);
+        }
+        if (!chat.messages.some((message) => message.id === entry.message.id)) {
+          chat.messages.push(entry.message);
+          chat.updatedAt = entry.message.createdAt;
+          didChangeChats = true;
+        }
+      });
+      return remaining;
+    };
+
+    const remainingForumQueue = consumeQueue(forumQueue);
+    const remainingPomodoroQueue = consumeQueue(pomodoroQueue);
+    if (didChangeChats) {
+      writeStoredValue(CHATS_STORAGE_KEY, nextChats);
+      setChats(nextChats);
+    }
+    if (remainingForumQueue.length !== forumQueue.length) {
+      writeStoredValue('yyphone:forum-forwards', remainingForumQueue);
+    }
+    if (remainingPomodoroQueue.length !== pomodoroQueue.length) {
+      writeStoredValue('yyphone:pomodoro-shares', remainingPomodoroQueue);
+    }
+  }, [activeChatId]);
+
+  useEffect(() => {
+    try {
+      writeCharacterNpcs(characterNpcs, contacts);
+      const contactsWithNpcLinks = contacts.map((contact) => ({
+        ...contact,
+        linkedNpcIds: characterNpcs
+          .filter((npc) => npc.linkedCharIds.includes(contact.id))
+          .map((npc) => npc.id),
+      }));
+      if (JSON.stringify(contactsWithNpcLinks) !== JSON.stringify(contacts)) {
+        writeStoredValue(CONTACTS_STORAGE_KEY, contactsWithNpcLinks);
+        setContacts(contactsWithNpcLinks);
+      }
+    } catch (error) {
+      console.error('Could not synchronize shared NPC storage.', error);
+      setContactError('NPC 数据同步失败，请检查浏览器本地存储空间。');
+    }
+  }, [characterNpcs, contacts]);
 
   useEffect(() => {
     const styleElement = document.createElement('style');
@@ -910,8 +1133,23 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
 
   const persistContacts = (nextContacts: ContactPersona[]) => {
     try {
-      writeStoredValue(CONTACTS_STORAGE_KEY, nextContacts);
-      setContacts(nextContacts);
+      const contactIds = new Set(nextContacts.map((contact) => contact.id));
+      const nextNpcs = characterNpcs
+        .map((npc) => ({
+          ...npc,
+          linkedCharIds: npc.linkedCharIds.filter((id) => contactIds.has(id)),
+        }))
+        .filter((npc) => npc.linkedCharIds.length > 0);
+      const contactsWithNpcLinks = nextContacts.map((contact) => ({
+        ...contact,
+        linkedNpcIds: nextNpcs
+          .filter((npc) => npc.linkedCharIds.includes(contact.id))
+          .map((npc) => npc.id),
+      }));
+      writeCharacterNpcs(nextNpcs, contactsWithNpcLinks);
+      setCharacterNpcs(nextNpcs);
+      writeStoredValue(CONTACTS_STORAGE_KEY, contactsWithNpcLinks);
+      setContacts(contactsWithNpcLinks);
       setContactError('');
       return true;
     } catch (error) {
@@ -923,8 +1161,10 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
 
   const openContactEditor = (contact?: ContactPersona) => {
     setContactWorldBooks(readContactWorldBooks());
+    const draftId = contact?.id ?? `contact-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    setIsNewContactDraft(!contact);
     setContactDraft(contact ? { ...contact, worldBooks: [...contact.worldBooks] } : {
-      id: '',
+      id: draftId,
       avatarUrl: '',
       name: '',
       persona: '',
@@ -932,9 +1172,29 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
       group: '',
       starred: false,
     });
+    setNpcDraft({ id: '', name: '', avatarUrl: '', persona: '' });
+    setSelectedSharedNpcIds([]);
+    setNpcSectionOpen(false);
     setContactError('');
     setIsContactEditorOpen(true);
     setContactsMenuOpen(false);
+  };
+
+  const closeContactEditor = () => {
+    if (isNewContactDraft) {
+      const hasTemporaryLinks = characterNpcs.some((npc) => npc.linkedCharIds.includes(contactDraft.id));
+      if (hasTemporaryLinks) {
+        const updatedNpcs = characterNpcs
+          .map((npc) => ({
+            ...npc,
+            linkedCharIds: npc.linkedCharIds.filter((id) => id !== contactDraft.id),
+          }))
+          .filter((npc) => npc.linkedCharIds.length > 0);
+        persistCharacterNpcs(updatedNpcs);
+      }
+    }
+    setIsContactEditorOpen(false);
+    setIsNewContactDraft(false);
   };
 
   const handleContactAvatarUpload = async (file?: File) => {
@@ -946,6 +1206,20 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
       setContactDraft((draft) => ({ ...draft, avatarUrl }));
     } catch (uploadError) {
       setContactError(uploadError instanceof Error ? uploadError.message : '头像处理失败。');
+    } finally {
+      setIsProcessingAvatar(false);
+    }
+  };
+
+  const handleNpcAvatarUpload = async (file?: File) => {
+    if (!file) return;
+    setIsProcessingAvatar(true);
+    setContactError('');
+    try {
+      const avatarUrl = await compressImageFile(file);
+      setNpcDraft((draft) => ({ ...draft, avatarUrl }));
+    } catch (error) {
+      setContactError(error instanceof Error ? error.message : 'NPC 头像处理失败。');
     } finally {
       setIsProcessingAvatar(false);
     }
@@ -963,13 +1237,99 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
       persona: contactDraft.persona.trim(),
       group: contactDraft.group.trim() || '未分组',
     };
-    const nextContacts = contactDraft.id
-      ? contacts.map((existing) => existing.id === contact.id ? contact : existing)
-      : [...contacts, contact];
+    const nextContacts = isNewContactDraft
+      ? [...contacts, contact]
+      : contacts.map((existing) => existing.id === contact.id ? contact : existing);
     if (persistContacts(nextContacts)) {
+      setIsNewContactDraft(false);
       setIsContactEditorOpen(false);
       setContactError('');
     }
+  };
+
+  const persistCharacterNpcs = (nextNpcs: CharacterNpc[]) => {
+    try {
+      const knownContacts = [
+        ...contacts.filter((contact) => contact.id !== contactDraft.id),
+        ...(contactDraft.id && contactDraft.name.trim()
+          ? [{ id: contactDraft.id, name: contactDraft.name.trim() }]
+          : []),
+      ];
+      writeCharacterNpcs(nextNpcs, knownContacts);
+      setCharacterNpcs(nextNpcs);
+      const linkedContacts = contacts.map((contact) => ({
+        ...contact,
+        linkedNpcIds: nextNpcs
+          .filter((npc) => npc.linkedCharIds.includes(contact.id))
+          .map((npc) => npc.id),
+      }));
+      writeStoredValue(CONTACTS_STORAGE_KEY, linkedContacts);
+      setContacts(linkedContacts);
+      return true;
+    } catch (error) {
+      console.error('Could not save shared character NPCs.', error);
+      setContactError('NPC 数据保存失败，请检查浏览器本地存储空间后重试。');
+      return false;
+    }
+  };
+
+  const saveNpcToCurrentCharacter = () => {
+    if (!npcDraft.name.trim()) {
+      setContactError('请填写 NPC 名称。');
+      return;
+    }
+    const targetCharId = contactDraft.id;
+    const existingNpc = npcDraft.id
+      ? characterNpcs.find((npc) => npc.id === npcDraft.id)
+      : undefined;
+    const npc: CharacterNpc = {
+      id: npcDraft.id || `npc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      name: npcDraft.name.trim(),
+      avatarUrl: npcDraft.avatarUrl.trim(),
+      persona: npcDraft.persona.trim(),
+      linkedCharIds: [...new Set([...(existingNpc?.linkedCharIds ?? []), targetCharId])],
+    };
+    const nextNpcs = existingNpc
+      ? characterNpcs.map((item) => item.id === npc.id ? npc : item)
+      : [...characterNpcs, npc];
+    if (persistCharacterNpcs(nextNpcs)) {
+      setNpcDraft({ id: '', name: '', avatarUrl: '', persona: '' });
+      setContactError('');
+    }
+  };
+
+  const editNpc = (npc: CharacterNpc) => {
+    setNpcDraft({ id: npc.id, name: npc.name, avatarUrl: npc.avatarUrl, persona: npc.persona });
+  };
+
+  const unbindNpcFromCurrentCharacter = (npc: CharacterNpc) => {
+    const linkedCharIds = npc.linkedCharIds.filter((id) => id !== contactDraft.id);
+    const nextNpcs = linkedCharIds.length
+      ? characterNpcs.map((item) => item.id === npc.id ? { ...item, linkedCharIds } : item)
+      : characterNpcs.filter((item) => item.id !== npc.id);
+    persistCharacterNpcs(nextNpcs);
+  };
+
+  const deleteNpc = (npcId: string) => {
+    if (!window.confirm('彻底删除这个 NPC？所有角色的依附关系都会解除。')) return;
+    persistCharacterNpcs(characterNpcs.filter((npc) => npc.id !== npcId));
+    setNpcDraft({ id: '', name: '', avatarUrl: '', persona: '' });
+  };
+
+  const toggleSharedNpc = (npcId: string) => {
+    setSelectedSharedNpcIds((ids) =>
+      ids.includes(npcId) ? ids.filter((id) => id !== npcId) : [...ids, npcId]
+    );
+  };
+
+  const bindSelectedNpcs = () => {
+    if (selectedSharedNpcIds.length === 0) return;
+    const nextNpcs = characterNpcs.map((npc) =>
+      selectedSharedNpcIds.includes(npc.id)
+        ? { ...npc, linkedCharIds: [...new Set([...npc.linkedCharIds, contactDraft.id])] }
+        : npc
+    );
+    if (persistCharacterNpcs(nextNpcs)) setSelectedSharedNpcIds([]);
   };
 
   const handleImportContacts = async (file?: File) => {
@@ -1111,7 +1471,14 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
   };
 
   const contactName = (contactId: string) =>
-    contacts.find((contact) => contact.id === contactId)?.name ?? '已删除的角色';
+    getNpcByParticipantId(characterNpcs, contactId)?.name ??
+    contacts.find((contact) => contact.id === contactId)?.name ??
+    (contactId.startsWith('npc:') ? '已删除的 NPC' : '已删除的角色');
+
+  const participantAvatar = (participantId: string) =>
+    getNpcByParticipantId(characterNpcs, participantId)?.avatarUrl ??
+    contacts.find((contact) => contact.id === participantId)?.avatarUrl ??
+    '';
 
   const getChatTitle = (chat: ChatConversation) => {
     if (chat.type === 'direct') {
@@ -1124,7 +1491,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
 
   const getChatAvatar = (chat: ChatConversation) => {
     if (chat.type === 'direct') {
-      return chat.avatars[chat.participantIds[0]] || contacts.find((item) => item.id === chat.participantIds[0])?.avatarUrl || '';
+      return chat.avatars[chat.participantIds[0]] || participantAvatar(chat.participantIds[0] ?? '');
     }
     return chat.avatars.group ?? '';
   };
@@ -1132,7 +1499,10 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
   const getChatParticipantName = (chat: ChatConversation, participantId: string) => {
     const nickname = chat.groupNicknames?.[participantId]?.trim();
     if (nickname) return nickname;
-    return participantId === 'user' ? personaDraft.name.trim() || '我' : contactName(participantId);
+    const npc = getNpcByParticipantId(characterNpcs, participantId);
+    return participantId === 'user'
+      ? personaDraft.name.trim() || '我'
+      : nickname || (npc ? `${npc.name}（NPC）` : contactName(participantId));
   };
 
   const getAttachedHistoryChatIds = (chat: ChatConversation) => {
@@ -1150,7 +1520,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
   const createConversation = () => {
     const minimumParticipants = chatCreateMode === 'direct' ? 1 : 2;
     if (!chatCreateMode || selectedParticipantIds.length < minimumParticipants) {
-      setChatError(chatCreateMode === 'direct' ? '请选择一位角色。' : '请选择至少两位角色。');
+      setChatError(chatCreateMode === 'direct' ? '请选择一位角色。' : '请选择至少两位角色或 NPC。');
       return;
     }
     if (chatCreateMode === 'direct') {
@@ -1185,6 +1555,15 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
       attachHistory: false,
       attachedHistoryContactId: selectedParticipantIds[0] ?? '',
       attachedHistoryCount: 10,
+      currentChatHistoryCount: 200,
+      attachedHistoryCounts: {},
+      replyMessageMin: chatCreateMode === 'direct'
+        ? 1
+        : selectedParticipantIds.length + (chatCreateMode === 'group' ? 1 : 0),
+      replyMessageMax: chatCreateMode === 'direct'
+        ? 6
+        : (selectedParticipantIds.length + (chatCreateMode === 'group' ? 1 : 0)) * 2,
+      includeLatestThought: false,
     };
     if (persistChats([newChat, ...chats])) {
       setActiveChatId(newChat.id);
@@ -1220,24 +1599,51 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
   };
 
   const openChatSettings = (chat: ChatConversation) => {
-    setChatSettingsDraft({ ...chat, avatars: { ...chat.avatars } });
+    const range = getReplyMessageRange(chat);
+    setChatSettingsDraft({
+      ...chat,
+      avatars: { ...chat.avatars },
+      currentChatHistoryCount: chat.currentChatHistoryCount ?? 200,
+      attachedHistoryCounts: { ...(chat.attachedHistoryCounts ?? {}) },
+      replyMessageMin: range.min,
+      replyMessageMax: range.max,
+      includeLatestThought: chat.includeLatestThought ?? false,
+    });
     setChatSettingsOpen(true);
   };
 
   const saveChatSettings = () => {
     if (!chatSettingsDraft) return;
+    if (chatSettingsDraft.type !== 'direct' && chatSettingsDraft.participantIds.length < 2) {
+      setChatError('群聊至少需要两位角色或 NPC。');
+      return;
+    }
     const attachedHistoryChatIds = getAttachedHistoryChatIds(chatSettingsDraft);
-    if (chatSettingsDraft.attachHistory &&
-      (!Number.isInteger(chatSettingsDraft.attachedHistoryCount) ||
-        (chatSettingsDraft.attachedHistoryCount ?? 0) < 1 ||
-        (chatSettingsDraft.attachedHistoryCount ?? 0) > 1000)
+    const messageRange = getReplyMessageRange(chatSettingsDraft);
+    if (!Number.isInteger(chatSettingsDraft.currentChatHistoryCount) ||
+      (chatSettingsDraft.currentChatHistoryCount ?? 0) < 1 ||
+      (chatSettingsDraft.currentChatHistoryCount ?? 0) > 5000
     ) {
-      setChatError('挂载条数请输入 1 到 1000 之间的整数。');
+      setChatError('本对话聊天记录挂载条数请输入 1 到 5000 之间的整数。');
+      return;
+    }
+    if (messageRange.min < 1 || messageRange.max < messageRange.min || messageRange.max > 100) {
+      setChatError('角色消息数范围请设置为 1 到 100，且最小条数不能大于最大条数。');
+      return;
+    }
+    if (attachedHistoryChatIds.some((id) => {
+      const count = getAttachedHistoryCount(chatSettingsDraft, id);
+      return !Number.isInteger(count) || count < 1 || count > 1000;
+    })) {
+      setChatError('其他聊天记录的挂载条数请输入 1 到 1000 之间的整数。');
       return;
     }
     const savedDraft = {
       ...chatSettingsDraft,
       attachedHistoryChatIds,
+      attachedHistoryCounts: Object.fromEntries(
+        attachedHistoryChatIds.map((id) => [id, getAttachedHistoryCount(chatSettingsDraft, id)])
+      ),
       attachHistory: chatSettingsDraft.attachHistory && attachedHistoryChatIds.length > 0,
     };
     if (updateChat(savedDraft.id, () => savedDraft)) {
@@ -1415,8 +1821,11 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
 
   const submitAttachment = () => {
     if (!attachmentMode) return;
-    if (attachmentMode === 'transfer' && (!activeChat || activeChat.type === 'observer' || activeChat.blocked)) {
-      setChatError('当前会话不可进行转账。');
+    if (
+      (attachmentMode === 'transfer' || attachmentMode === 'red-packet') &&
+      (!activeChat || activeChat.type === 'observer' || activeChat.blocked)
+    ) {
+      setChatError('当前会话不可发送红包或转账。');
       return;
     }
     let saved = false;
@@ -1457,7 +1866,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
         return;
       }
       let intimatePayerId: string | undefined;
-      if (attachmentMode === 'transfer') {
+      {
         const source = attachmentDraft.paymentSelection === 'balance'
           ? { type: 'balance' as const }
           : {
@@ -1467,9 +1876,9 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
         try {
           const payment = chargeAlipay(
             Number(attachmentDraft.amount),
-            `微信转账${attachmentDraft.recipientId ? `给${contactName(attachmentDraft.recipientId)}` : ''}`,
+            `微信${attachmentMode === 'red-packet' ? '红包' : `转账${attachmentDraft.recipientId ? `给${contactName(attachmentDraft.recipientId)}` : ''}`}`,
             source,
-            { notifyIntimatePayer: false }
+            { notifyIntimatePayer: false, recordLedger: false }
           );
           intimatePayerId = payment.payer?.charId;
         } catch (error) {
@@ -1497,7 +1906,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
         try {
           sendIntimatePayInteraction(
             intimatePayerId,
-            `微信转账${attachmentDraft.recipientId ? `给${contactName(attachmentDraft.recipientId)}` : ''}`,
+            `微信${attachmentMode === 'red-packet' ? '红包' : `转账${attachmentDraft.recipientId ? `给${contactName(attachmentDraft.recipientId)}` : ''}`}`,
             Number(attachmentDraft.amount)
           );
           setChats(readStoredValue(CHATS_STORAGE_KEY, [] as ChatConversation[], isChatList));
@@ -1617,29 +2026,44 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
     const chatContacts = chat.participantIds
       .map((participantId) => contacts.find((item) => item.id === participantId))
       .filter((contact): contact is ContactPersona => !!contact);
-    const contact = chatContacts[0];
+    const chatNpcs = chat.participantIds
+      .map((participantId) => getNpcByParticipantId(characterNpcs, participantId))
+      .filter((npc): npc is CharacterNpc => !!npc);
+    const chatMembers: Array<ContactPersona | (CharacterNpc & { group: string; starred: boolean; worldBooks: ContactWorldBookLink[] })> = [
+      ...chatContacts,
+      ...chatNpcs.map((npc) => ({ ...npc, id: npcParticipantId(npc.id), group: '关联 NPC', starred: false, worldBooks: [] })),
+    ];
+    const contact = chatMembers[0];
     if (!contact) {
-      setChatError('此对话关联的角色已不存在，请检查通讯录。');
+      setChatError('此对话关联的角色或 NPC 已不存在，请检查通讯录与 NPC 设置。');
       return;
     }
 
     setIsGeneratingReply(true);
     setChatError('');
     const previousReply = chat.messages.at(-1);
+    const replacedReplyBatchId =
+      regenerate && previousReply && previousReply.senderId !== 'user' && previousReply.senderId !== 'narrator'
+        ? previousReply.replyBatchId
+        : undefined;
     const replacedMessageId =
       regenerate && previousReply && previousReply.senderId !== 'user' && previousReply.senderId !== 'narrator'
         ? previousReply.id
         : undefined;
     try {
       const currentInput = [...chat.messages].reverse().find((message) => message.senderId === 'user')?.text ?? '';
+      const replyRange = getReplyMessageRange(chat);
+      const targetReplyCount = replyRange.min + Math.floor(
+        Math.random() * (replyRange.max - replyRange.min + 1)
+      );
       const promptMessages = buildPrompt({
         chatId: chat.id,
         currentInput,
-        historyLimit: 30,
+        historyLimit: chat.currentChatHistoryCount ?? 200,
         regenerate,
       });
       const responseInstructions = [
-        `以${chat.type === 'direct' ? `${contact.name}的` : '其中一位参与角色的'}身份自然回复。只返回 JSON 对象，至少包含 reply、thought、speakerId 字段。${regenerate ? '本次是重生成，不要重复执行或返回送礼动作。' : '可选 gift 字段只能是 {"existingProductId":"现有商品ID"} 或 {"title":"新商品名","desc":"描述","price":数字,"category":"shopping或eleme","emoji":"emoji"}。gift 仅在角色自然决定送礼或点外卖时提供，可省略；新商品送达后将加入淘宝或饿了么。'}${chat.type === 'group' && chat.allowAgentGroupRename ? '可选 groupTitle 和 groupNicknames 字段，只在情节自然需要时修改群名或昵称。' : ''}群聊的 speakerId 必须从以下 ID 中选择：${chatContacts.map((chatContact) => chatContact.id).join(', ')}。${chat.type === 'group' && chat.allowAgentGroupRename ? 'groupNicknames 的键只能使用上方角色 ID。' : ''}${chat.type === 'observer' ? '这是旁观群聊，user不在群里；根据角色之间的对话和旁白提供的情境，继续以某个角色的身份发言。' : ''}`,
+        `以${chat.type === 'direct' ? `${contact.name}的` : '其中一位角色或 NPC 群成员的'}身份自然回复。只返回 JSON 对象，至少包含 reply、thought、speakerId 字段。reply 必须是恰好 ${targetReplyCount} 条独立消息组成的数组；普通消息可写字符串，也可写对象 {"kind":"消息类型","text":"消息/语音转写/图片描述","title":"可选标题","source":"可选来源","content":"可选摘要","amount":"可选金额","quantity":可选红包个数,"stickerId":"可选表情包ID"}。支持类型：text、image（文字描述图片）、voice（语音转写）、sticker、video-call、location、red-packet、transfer、link。链接请提供 title/source/content；红包和转账必须给正数 amount，收款对象只能是玩家 user，群聊红包可提供 quantity。不要编造图片 URL；image 使用文字图卡，sticker 只能使用下面已存在的表情包 ID。表情包列表：${JSON.stringify(stickers.map(({ id, description }) => ({ id, description })))}。请仅在剧情自然、确有必要时使用附件，普通文字聊天优先，不要为了凑数强行发送附件。${regenerate ? '本次是重生成，不得再次发红包、转账或礼物，以免重复入账。' : '角色发给玩家的红包和转账会直接加入玩家支付宝个人余额，不会扣玩家的钱。可选 gift 字段仅允许 {"existingProductId":"现有商品ID"} 或 {"title":"新商品名","desc":"描述","price":数字,"category":"shopping或eleme","emoji":"emoji"}，只在剧情自然时由主要角色提供；NPC不使用 gift 字段。'}${chat.type === 'group' && chat.allowAgentGroupRename ? '可选 groupTitle 和 groupNicknames 字段，只在情节自然需要时修改群名或昵称。' : ''}群聊的 speakerId 必须从以下成员 ID 中选择：${chatMembers.map((member) => `${member.id}（${member.name}）`).join(', ')}。${chat.type === 'group' && chat.allowAgentGroupRename ? 'groupNicknames 的键只能使用上方成员 ID。' : ''}${chat.type === 'observer' ? '这是旁观群聊，user不在群里；不得生成发给玩家的红包、转账或礼物；根据角色之间的对话和旁白情境继续由群成员发言。' : ''}`,
         ...(activeCallMode === 'video'
           ? ['当前为视频通话，请在角色的每次回复最前方先写一段用小括号包裹的可视动作描写，再接角色说的话。']
           : []),
@@ -1702,47 +2126,117 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
       }
 
       let reply = responseText.trim();
+      let replyParts: GeneratedAiMessage[] = [{ text: reply }];
       let thought = '';
       let speakerId = contact.id;
       let generatedGroupTitle: string | undefined;
       let generatedGroupNicknames: Record<string, string> | undefined;
       let generatedGift: Record<string, unknown> | undefined;
+      let result: unknown;
       try {
-        const result: unknown = JSON.parse(reply.replace(/^```(?:json)?\s*|\s*```$/g, ''));
-        if (result && typeof result === 'object') {
-          const record = result as Record<string, unknown>;
-          if (typeof record.reply === 'string') reply = record.reply.trim();
-          if (typeof record.thought === 'string') thought = record.thought.trim();
-          if (record.gift && typeof record.gift === 'object' && !Array.isArray(record.gift)) {
-            generatedGift = record.gift as Record<string, unknown>;
-          }
-          if (typeof record.speakerId === 'string' && chatContacts.some((item) => item.id === record.speakerId)) {
-            speakerId = record.speakerId;
-          }
-          if (chat.type === 'group' && chat.allowAgentGroupRename) {
-            if (typeof record.groupTitle === 'string' && record.groupTitle.trim()) {
-              generatedGroupTitle = record.groupTitle.trim().slice(0, 80);
-            }
-            if (record.groupNicknames && typeof record.groupNicknames === 'object') {
-              generatedGroupNicknames = Object.fromEntries(
-                Object.entries(record.groupNicknames).flatMap(([id, nickname]) =>
-                  chat.participantIds.includes(id) &&
-                  typeof nickname === 'string' &&
-                  nickname.trim()
-                    ? [[id, nickname.trim().slice(0, 40)]]
-                    : []
-                )
-              );
-            }
-          }
-        }
+        result = JSON.parse(reply.replace(/^```(?:json)?\s*|\s*```$/g, ''));
       } catch {
         // Some compatible endpoints ignore JSON response mode and return plain text.
       }
-      if (!reply) throw new Error('AI 返回了空消息，请检查模型配置后重试。');
-      if (generatedGift && !regenerate) {
+      if (result && typeof result === 'object' && !Array.isArray(result)) {
+        const record = result as Record<string, unknown>;
+        if (typeof record.reply === 'string') {
+          reply = record.reply.trim();
+          replyParts = reply ? [{ text: reply }] : [];
+        } else if (Array.isArray(record.reply)) {
+          const allowedKinds = [
+            'text', 'image', 'voice', 'sticker', 'video-call', 'location',
+            'red-packet', 'transfer', 'link',
+          ] as const;
+          replyParts = record.reply.slice(0, targetReplyCount).map((rawPart): GeneratedAiMessage => {
+            if (typeof rawPart === 'string') {
+              const text = rawPart.trim();
+              if (!text) throw new Error('AI 返回了空消息，请检查模型配置后重试。');
+              return { text };
+            }
+            if (!rawPart || typeof rawPart !== 'object' || Array.isArray(rawPart)) {
+              throw new Error('AI 返回的消息格式无效。');
+            }
+            const part = rawPart as Record<string, unknown>;
+            const kind = typeof part.kind === 'string' && allowedKinds.includes(part.kind as typeof allowedKinds[number])
+              ? part.kind as GeneratedAiMessage['kind']
+              : undefined;
+            if (part.kind !== undefined && !kind) throw new Error(`AI 返回了不支持的消息类型：${String(part.kind)}`);
+            const title = typeof part.title === 'string' ? part.title.trim().slice(0, 120) : undefined;
+            const source = typeof part.source === 'string' ? part.source.trim().slice(0, 120) : undefined;
+            const content = typeof part.content === 'string' ? part.content.trim().slice(0, 1000) : undefined;
+            let text = typeof part.text === 'string'
+              ? part.text.trim().slice(0, 1000)
+              : kind === 'link' ? title ?? '' : content ?? '';
+            const message: GeneratedAiMessage = { text, ...(kind ? { kind } : {}) };
+            if (title) message.title = title;
+            if (source) message.source = source;
+            if (content) message.content = content;
+            if (kind === 'sticker') {
+              const sticker = stickers.find((item) => item.id === part.stickerId);
+              if (!sticker) throw new Error('AI 选择了不存在的表情包，已取消本次回复。');
+              message.imageUrl = sticker.imageUrl;
+              message.text = text || sticker.description;
+            }
+            if (kind === 'link' && !message.title) {
+              throw new Error('AI 分享链接缺少标题，请重试。');
+            }
+            if (kind === 'red-packet' || kind === 'transfer') {
+              const amount = Number(part.amount);
+              if (!Number.isFinite(amount) || amount <= 0 || amount > 1_000_000) {
+                throw new Error('AI 返回的红包或转账金额无效（需大于 0 且不超过 1,000,000 元）。');
+              }
+              if (regenerate || chat.type === 'observer') {
+                throw new Error('重生成或旁观群聊不能再次产生红包/转账。');
+              }
+              message.amount = amount.toFixed(2);
+              message.recipientId = 'user';
+              if (kind === 'red-packet' && part.quantity !== undefined) {
+                const quantity = Number(part.quantity);
+                if (!Number.isInteger(quantity) || quantity < 1 || quantity > 100) {
+                  throw new Error('AI 返回的红包数量无效。');
+                }
+                message.quantity = quantity;
+              }
+              if (!message.text) message.text = kind === 'red-packet' ? '恭喜发财，大吉大利' : '转账给你';
+            }
+            if (!message.text && kind !== 'link') {
+              throw new Error('AI 返回的消息内容为空。');
+            }
+            return message;
+          }).filter((part) => part.text || part.kind === 'link');
+          reply = replyParts.map((part) => part.text).join('\n');
+        }
+        if (typeof record.thought === 'string') thought = record.thought.trim();
+        if (record.gift && typeof record.gift === 'object' && !Array.isArray(record.gift)) {
+          generatedGift = record.gift as Record<string, unknown>;
+        }
+        if (typeof record.speakerId === 'string' && chatMembers.some((item) => item.id === record.speakerId)) {
+          speakerId = record.speakerId;
+        }
+        if (chat.type === 'group' && chat.allowAgentGroupRename) {
+          if (typeof record.groupTitle === 'string' && record.groupTitle.trim()) {
+            generatedGroupTitle = record.groupTitle.trim().slice(0, 80);
+          }
+          if (record.groupNicknames && typeof record.groupNicknames === 'object') {
+            generatedGroupNicknames = Object.fromEntries(
+              Object.entries(record.groupNicknames).flatMap(([id, nickname]) =>
+                chat.participantIds.includes(id) &&
+                typeof nickname === 'string' &&
+                nickname.trim()
+                  ? [[id, nickname.trim().slice(0, 40)]]
+                  : []
+              )
+            );
+          }
+        }
+      }
+      if (replyParts.length === 0 || replyParts.every((part) => !part.text.trim() && !part.kind)) {
+        throw new Error('AI 返回了空消息，请检查模型配置后重试。');
+      }
+      if (generatedGift && !regenerate && !speakerId.startsWith('npc:')) {
         const marketStorageKey = 'yyphone:taobao-market-products';
-        const rawProducts = window.localStorage.getItem(marketStorageKey);
+        const rawProducts = readStorageString(marketStorageKey);
         const storedProducts: unknown = rawProducts ? JSON.parse(rawProducts) : [];
         if (!Array.isArray(storedProducts)) throw new Error('淘宝商品数据格式无效，无法保存角色送达的商品。');
         const existingProductId = generatedGift.existingProductId;
@@ -1770,7 +2264,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
         ) {
           deliveredTitle = generatedGift.title.trim().slice(0, 100);
           deliveredCategory = generatedGift.category;
-          const characterName = chatContacts.find((item) => item.id === speakerId)?.name ?? contact.name;
+          const characterName = chatMembers.find((item) => item.id === speakerId)?.name ?? contact.name;
           storedProducts.unshift({
             id: `gift-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
             category: deliveredCategory,
@@ -1782,31 +2276,46 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
             badge: '角色赠礼',
             fromCharName: characterName,
           });
-          window.localStorage.setItem(marketStorageKey, JSON.stringify(storedProducts));
+          writeStorageString(marketStorageKey, JSON.stringify(storedProducts));
         }
         if (deliveredTitle && deliveredCategory) {
-          const characterName = chatContacts.find((item) => item.id === speakerId)?.name ?? contact.name;
-          reply += `\n\n（${characterName}已将「${deliveredTitle}」送到你的${deliveredCategory === 'eleme' ? '饿了么' : '淘宝'}。）`;
-          appendCharacterContextEvent(speakerId, `角色送玩家商品「${deliveredTitle}」，已立即送达。`, 'taobao');
+          const characterName = chatMembers.find((item) => item.id === speakerId)?.name ?? contact.name;
+          replyParts[replyParts.length - 1].text += `（${characterName}已将「${deliveredTitle}」送到你的${deliveredCategory === 'eleme' ? '饿了么' : '淘宝'}。）`;
+          if (!speakerId.startsWith('npc:')) {
+            appendCharacterContextEvent(speakerId, `角色送玩家商品「${deliveredTitle}」，已立即送达。`, 'taobao');
+          }
         }
       }
-      if (activeCallMode === 'video' && !/^\s*[（(].*[）)]/.test(reply)) {
-        reply = `（${getChatParticipantName(chat, speakerId)}看向镜头，轻轻开口）${reply}`;
+      for (const part of replyParts) {
+        if ((part.kind === 'red-packet' || part.kind === 'transfer') && part.recipientId === 'user') {
+          creditAlipay(Number(part.amount));
+        }
       }
-      const message: ChatMessage = {
-        id: `message-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      const replyTimestamp = Date.now();
+      const replyBatchId = `reply-${replyTimestamp}-${Math.random().toString(36).slice(2, 7)}`;
+      const replyMessages: ChatMessage[] = replyParts.map((part, index) => ({
+        ...part,
+        id: `message-${replyTimestamp}-${Math.random().toString(36).slice(2, 7)}`,
+        replyBatchId,
         senderId: speakerId,
-        text: reply,
-        thought,
-        createdAt: new Date().toISOString(),
-      };
+        text: activeCallMode === 'video' && !/^\s*[（(].*[）)]/.test(part.text)
+          ? `（${getChatParticipantName(chat, speakerId)}看向镜头，轻轻开口）${part.text}`
+          : part.text,
+        thought: index === replyParts.length - 1 ? thought : '',
+        createdAt: new Date(replyTimestamp + index).toISOString(),
+      }));
+      const latestReplyMessage = replyMessages[replyMessages.length - 1];
       updateChat(chat.id, (current) => ({
         ...current,
         messages: [
-          ...current.messages.filter((item) => item.id !== replacedMessageId),
-          message,
+          ...current.messages.filter((item) =>
+            replacedReplyBatchId
+              ? item.replyBatchId !== replacedReplyBatchId
+              : item.id !== replacedMessageId
+          ),
+          ...replyMessages,
         ],
-        updatedAt: message.createdAt,
+        updatedAt: latestReplyMessage.createdAt,
         ...(generatedGroupTitle ? { groupTitle: generatedGroupTitle } : {}),
         ...(generatedGroupNicknames
           ? { groupNicknames: { ...(current.groupNicknames ?? {}), ...generatedGroupNicknames } }
@@ -2050,8 +2559,10 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                   );
                 }
                 const isUserMessage = message.senderId === 'user';
-                const sender = contacts.find((contact) => contact.id === message.senderId);
-                const isSpecialBubble = ['video-call', 'location', 'red-packet', 'transfer', 'link'].includes(message.kind ?? '');
+                const sender = contacts.find((contact) => contact.id === message.senderId) ??
+                  getNpcByParticipantId(characterNpcs, message.senderId);
+                const isShareCard = message.kind === 'forum-forward' || message.kind === 'pomodoro-share';
+                const isSpecialBubble = isShareCard || ['video-call', 'location', 'red-packet', 'transfer', 'link'].includes(message.kind ?? '');
                 return (
                   <div
                     key={message.id}
@@ -2098,6 +2609,9 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                           <p className="mt-2 text-lg font-bold">¥{message.amount}</p>
                           {message.quantity && <p className="text-[10px] opacity-90">共 {message.quantity} 个</p>}
                           <p className="text-[10px] opacity-90">{message.text}</p>
+                          {message.senderId !== 'user' && message.recipientId === 'user' && (
+                            <p className="mt-1 border-t border-white/30 pt-1 text-[9px] opacity-90">已存入支付宝个人余额</p>
+                          )}
                         </div>
                       ) : message.kind === 'transfer' ? (
                         <div className="min-w-36 rounded-xl bg-gradient-to-br from-amber-400 to-orange-500 p-3 text-white">
@@ -2106,7 +2620,37 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                           {message.recipientId && <p className="text-[10px] opacity-90">给 {getChatParticipantName(activeChat, message.recipientId)}</p>}
                           {message.payerId && <p className="text-[10px] opacity-90">由 {contactName(message.payerId)} 的亲密付付款</p>}
                           <p className="text-[10px] opacity-90">{message.text}</p>
+                          {message.senderId !== 'user' && message.recipientId === 'user' && (
+                            <p className="mt-1 border-t border-white/30 pt-1 text-[9px] opacity-90">已存入支付宝个人余额</p>
+                          )}
                         </div>
+                      ) : isShareCard ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (message.kind === 'forum-forward') setForumCardPreview(message);
+                          }}
+                          disabled={message.kind !== 'forum-forward'}
+                          aria-label={message.kind === 'forum-forward' ? `查看论坛分享：${message.title || '帖子'}` : message.title}
+                          className="block w-full min-w-48 max-w-64 overflow-hidden rounded-2xl border border-white/80 bg-white/80 text-left shadow-[0_8px_24px_rgba(79,113,145,0.12)] backdrop-blur-xl disabled:cursor-default"
+                        >
+                          <div className="px-3.5 py-3">
+                            <p className="line-clamp-1 text-[12px] font-bold leading-5 text-[#2C4A5C]">
+                              {message.title || (message.kind === 'pomodoro-share' ? '🍅 今日专注打卡战报' : '论坛分享')}
+                            </p>
+                            <p className="mt-1 line-clamp-3 whitespace-pre-line text-[10px] leading-relaxed text-slate-500">
+                              {message.content || message.text}
+                            </p>
+                          </div>
+                          <div className="mx-3.5 border-t border-slate-200/70" />
+                          <div className="flex items-center gap-1.5 px-3.5 py-2 text-[9px] font-medium text-slate-400">
+                            {message.kind === 'forum-forward'
+                              ? <MessageSquare className="h-3 w-3 text-sky-500" />
+                              : <Timer className="h-3 w-3 text-rose-400" />}
+                            <span className="line-clamp-1">{message.source || (message.kind === 'forum-forward' ? '来自 论坛' : '来自 番茄钟 · 自习室')}</span>
+                            {message.kind === 'forum-forward' && <span className="ml-auto shrink-0 text-sky-600">查看详情 ›</span>}
+                          </div>
+                        </button>
                       ) : message.kind === 'link' ? (
                         <div className="min-w-40 rounded-xl bg-white/80 p-2.5">
                           <div className="flex items-center gap-1.5 font-semibold"><Link className="h-3.5 w-3.5 text-sky-600" />{message.title}</div>
@@ -2157,7 +2701,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                   aria-label="输入旁白"
                   className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none"
                 />
-                <button type="submit" aria-label="发送旁白" className="yy-chat-send flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-teal-600 text-white">
+                <button type="submit" aria-label="发送旁白" className="yy-chat-send flex h-9 w-9 shrink-0 items-center justify-center rounded-xl" style={{ backgroundColor: '#F0E1F0', color: '#88758A' }}>
                   {chatAppearance.sendIconUrl
                     ? <img src={chatAppearance.sendIconUrl} alt="" className="h-5 w-5 object-contain" />
                     : <Send className="h-4 w-4" />}
@@ -2166,11 +2710,10 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                   type="button"
                   disabled={isGeneratingReply}
                   onClick={() => void generateAiReply()}
-                  className="yy-chat-generate h-9 shrink-0 rounded-xl bg-violet-600 px-2.5 text-[11px] font-semibold text-white disabled:opacity-50"
+                  className="yy-chat-generate h-9 w-9 shrink-0 rounded-xl text-lg leading-none disabled:opacity-50"
+                  style={{ backgroundColor: '#EBEBF5', color: '#77778A' }}
                 >
-                  {isGeneratingReply ? '生成中' : chatAppearance.generateIconUrl
-                    ? <img src={chatAppearance.generateIconUrl} alt="生成" className="h-5 w-5 object-contain" />
-                    : '生成'}
+                  ♡
                 </button>
               </form>
             ) : (
@@ -2214,7 +2757,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                 >
                   <Smile className="h-4 w-4" />
                 </button>
-                <button type="submit" aria-label="发送消息"                 className="yy-chat-send h-9 w-9 rounded-xl bg-teal-600 text-white flex items-center justify-center">
+                <button type="submit" aria-label="发送消息" className="yy-chat-send h-9 w-9 rounded-xl flex items-center justify-center" style={{ backgroundColor: '#F0E1F0', color: '#88758A' }}>
                 {chatAppearance.sendIconUrl
                   ? <img src={chatAppearance.sendIconUrl} alt="" className="h-5 w-5 object-contain" />
                   : <Send className="h-4 w-4" />}
@@ -2224,11 +2767,10 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                   aria-label="生成角色回复"
                   disabled={isGeneratingReply}
                   onClick={() => void generateAiReply()}
-                  className="yy-chat-generate h-9 shrink-0 rounded-xl bg-violet-600 px-2.5 text-[11px] font-semibold text-white disabled:opacity-50"
+                  className="yy-chat-generate h-9 w-9 shrink-0 rounded-xl text-lg leading-none disabled:opacity-50"
+                  style={{ backgroundColor: '#EBEBF5', color: '#77778A' }}
                 >
-                  {isGeneratingReply ? '生成中' : chatAppearance.generateIconUrl
-                    ? <img src={chatAppearance.generateIconUrl} alt="生成" className="h-5 w-5 object-contain" />
-                    : '生成'}
+                  ♡
                 </button>
                 {emojiPanelOpen && (
                   <div className="absolute bottom-full right-2 z-40 mb-2 w-64 rounded-2xl border border-slate-100 bg-white p-3 shadow-xl">
@@ -2905,9 +3447,10 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
               </button>
             </header>
             <p className="text-[11px] text-slate-500">
-              {chatCreateMode === 'direct' ? '选择一位通讯录角色。' : '选择至少两位通讯录角色。'}
+              {chatCreateMode === 'direct' ? '选择一位通讯录角色。' : '可选择通讯录角色与依附于角色的 NPC（至少两位）。'}
             </p>
-            <div className="space-y-1">
+            <div className="space-y-1 rounded-2xl border border-white/80 bg-white/65 p-2 backdrop-blur-xl">
+              <p className="px-2 pt-1 text-[10px] font-bold text-slate-400">通讯录角色</p>
               {contacts.map((contact) => (
                 <label key={contact.id} className="flex items-center gap-3 rounded-xl px-2 py-2 hover:bg-slate-50">
                   <input
@@ -2932,9 +3475,43 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                 </label>
               ))}
               {contacts.length === 0 && (
-                <p className="rounded-xl bg-slate-50 p-4 text-center text-xs text-slate-500">通讯录暂无角色，请先添加角色。</p>
+                <p className="rounded-xl p-3 text-center text-xs text-slate-500">通讯录暂无角色，请先添加角色。</p>
               )}
             </div>
+            {chatCreateMode !== 'direct' && (
+              <div className="space-y-1 rounded-2xl border border-pink-100/80 bg-gradient-to-br from-[#9BD2FC]/15 to-[#F7B9D2]/20 p-2 backdrop-blur-xl">
+                <p className="px-2 pt-1 text-[10px] font-bold text-slate-500">关联 NPC</p>
+                {characterNpcs.map((npc) => (
+                  <label key={npc.id} className="flex items-center gap-3 rounded-xl px-2 py-2 hover:bg-white/70">
+                    <input
+                      type="checkbox"
+                      checked={selectedParticipantIds.includes(npcParticipantId(npc.id))}
+                      onChange={() => {
+                        const participantId = npcParticipantId(npc.id);
+                        setSelectedParticipantIds((ids) =>
+                          ids.includes(participantId)
+                            ? ids.filter((id) => id !== participantId)
+                            : [...ids, participantId]
+                        );
+                        setChatError('');
+                      }}
+                    />
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-gradient-to-br from-[#9BD2FC] to-[#F7B9D2] text-xs font-bold text-white">
+                      {npc.avatarUrl
+                        ? <img src={npc.avatarUrl} alt="" className="h-full w-full object-cover" />
+                        : npc.name.charAt(0)}
+                    </div>
+                    <span className="min-w-0 flex-1 truncate text-xs font-semibold text-[#2C4A5C]">{npc.name}</span>
+                    <span className="text-[10px] text-slate-400">
+                      {npc.linkedCharIds.map((id) => contacts.find((contact) => contact.id === id)?.name ?? '已删除角色').join('、')}关联
+                    </span>
+                  </label>
+                ))}
+                {characterNpcs.length === 0 && (
+                  <p className="rounded-xl p-3 text-center text-xs text-slate-400">还没有关联 NPC，可在角色编辑页创建。</p>
+                )}
+              </div>
+            )}
             {chatError && <p role="alert" className="text-[11px] text-rose-600">{chatError}</p>}
             <button onClick={createConversation} className="w-full rounded-xl bg-teal-600 py-2.5 text-sm font-bold text-white">
               创建对话
@@ -2951,6 +3528,49 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                 <X className="h-4 w-4" />
               </button>
             </header>
+            {chatSettingsDraft.type !== 'direct' && (
+              <section className="space-y-2 rounded-2xl border border-sky-100 bg-gradient-to-br from-[#9BD2FC]/15 to-[#F7B9D2]/20 p-3">
+                <p className="text-[11px] font-semibold text-[#2C4A5C]">群成员（角色与关联 NPC）</p>
+                <div className="max-h-44 space-y-1 overflow-y-auto">
+                  {contacts.map((contact) => (
+                    <label key={contact.id} className="flex items-center gap-2 rounded-xl px-2 py-1.5 hover:bg-white/70">
+                      <input
+                        type="checkbox"
+                        checked={chatSettingsDraft.participantIds.includes(contact.id)}
+                        onChange={() => setChatSettingsDraft({
+                          ...chatSettingsDraft,
+                          participantIds: chatSettingsDraft.participantIds.includes(contact.id)
+                            ? chatSettingsDraft.participantIds.filter((id) => id !== contact.id)
+                            : [...chatSettingsDraft.participantIds, contact.id],
+                        })}
+                      />
+                      <span className="text-xs text-slate-700">{contact.name}</span>
+                    </label>
+                  ))}
+                  {characterNpcs.map((npc) => {
+                    const participantId = npcParticipantId(npc.id);
+                    return (
+                      <label key={npc.id} className="flex items-center gap-2 rounded-xl px-2 py-1.5 hover:bg-white/70">
+                        <input
+                          type="checkbox"
+                          checked={chatSettingsDraft.participantIds.includes(participantId)}
+                          onChange={() => setChatSettingsDraft({
+                            ...chatSettingsDraft,
+                            participantIds: chatSettingsDraft.participantIds.includes(participantId)
+                              ? chatSettingsDraft.participantIds.filter((id) => id !== participantId)
+                              : [...chatSettingsDraft.participantIds, participantId],
+                          })}
+                        />
+                        <span className="text-xs text-slate-700">{npc.name}</span>
+                        <span className="ml-auto text-[10px] text-slate-400">
+                          ({npc.linkedCharIds.map((id) => contacts.find((contact) => contact.id === id)?.name ?? '已删除角色').join('、')}关联)
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
             {chatSettingsDraft.type === 'direct' && (
               <label className="block text-[11px] font-semibold text-[#2C4A5C]">
                 备注名（仅自己可见）
@@ -3040,7 +3660,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                 ...chatSettingsDraft.participantIds.map((id) => ({
                   key: id,
                   label: contactName(id),
-                  fallback: contacts.find((contact) => contact.id === id)?.avatarUrl ?? '',
+                  fallback: participantAvatar(id),
                 })),
               ].map(({ key, label, fallback }) => (
                 <div key={key} className="flex items-center gap-2">
@@ -3152,6 +3772,23 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
               </div>
             )}
             <section className="space-y-2 rounded-xl bg-slate-50 p-3">
+              <p className="text-[11px] font-semibold text-[#2C4A5C]">挂载聊天记录</p>
+              <label className="block text-[10px] text-slate-500">
+                本对话聊天记录
+                <input
+                  type="number"
+                  min="1"
+                  max="5000"
+                  step="1"
+                  value={chatSettingsDraft.currentChatHistoryCount ?? 200}
+                  onChange={(event) => setChatSettingsDraft({
+                    ...chatSettingsDraft,
+                    currentChatHistoryCount: event.target.value === '' ? 0 : Number(event.target.value),
+                  })}
+                  className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs outline-none"
+                />
+                <span className="mt-1 block text-[9px] text-slate-400">默认 200 条，最多 5000 条。</span>
+              </label>
               <label className="flex items-center gap-2 text-[11px] font-semibold text-[#2C4A5C]">
                 <input
                   type="checkbox"
@@ -3161,52 +3798,121 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                     attachHistory: event.target.checked,
                   })}
                 />
-                挂载消息页面中的聊天记录
+                挂载其他消息的聊天记录
               </label>
               {chatSettingsDraft.attachHistory && (
                 <>
                   <div className="max-h-44 space-y-1 overflow-y-auto rounded-lg border border-slate-200 bg-white p-2">
-                    {chats.map((conversation) => (
-                      <label key={conversation.id} className="flex items-center gap-2 rounded-md px-1.5 py-1.5 text-[10px] text-slate-600 hover:bg-slate-50">
-                        <input
-                          type="checkbox"
-                          checked={getAttachedHistoryChatIds(chatSettingsDraft).includes(conversation.id)}
-                          onChange={(event) => {
-                            const selectedIds = getAttachedHistoryChatIds(chatSettingsDraft);
-                            const nextIds = event.target.checked
-                              ? [...selectedIds, conversation.id]
-                              : selectedIds.filter((id) => id !== conversation.id);
-                            setChatSettingsDraft({
-                              ...chatSettingsDraft,
-                              attachedHistoryChatIds: nextIds,
-                            });
-                          }}
-                        />
-                        <span className="min-w-0 flex-1 truncate">{getChatTitle(conversation)}</span>
-                        <span className="shrink-0 text-slate-400">{conversation.messages.length} 条</span>
-                      </label>
-                    ))}
-                    {chats.length === 0 && <p className="p-2 text-center text-[10px] text-slate-400">消息列表中还没有聊天记录</p>}
+                    {chats.filter((conversation) => conversation.id !== chatSettingsDraft.id).map((conversation) => {
+                      const selected = getAttachedHistoryChatIds(chatSettingsDraft).includes(conversation.id);
+                      return (
+                        <div key={conversation.id} className="flex items-center gap-2 rounded-md px-1.5 py-1.5 text-[10px] text-slate-600 hover:bg-slate-50">
+                          <label className="flex min-w-0 flex-1 items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={selected}
+                              onChange={(event) => {
+                                const selectedIds = getAttachedHistoryChatIds(chatSettingsDraft);
+                                const nextIds = event.target.checked
+                                  ? [...selectedIds, conversation.id]
+                                  : selectedIds.filter((id) => id !== conversation.id);
+                                setChatSettingsDraft({
+                                  ...chatSettingsDraft,
+                                  attachedHistoryChatIds: nextIds,
+                                  attachedHistoryCounts: {
+                                    ...(chatSettingsDraft.attachedHistoryCounts ?? {}),
+                                    ...(event.target.checked && chatSettingsDraft.attachedHistoryCounts?.[conversation.id] === undefined
+                                      ? { [conversation.id]: 200 }
+                                      : {}),
+                                  },
+                                });
+                              }}
+                            />
+                            <span className="min-w-0 flex-1 truncate">{getChatTitle(conversation)}</span>
+                            <span className="shrink-0 text-slate-400">{conversation.messages.length} 条</span>
+                          </label>
+                          {selected && (
+                            <input
+                              aria-label={`${getChatTitle(conversation)}挂载条数`}
+                              type="number"
+                              min="1"
+                              max="1000"
+                              step="1"
+                              value={getAttachedHistoryCount(chatSettingsDraft, conversation.id)}
+                              onChange={(event) => setChatSettingsDraft({
+                                ...chatSettingsDraft,
+                                attachedHistoryCounts: {
+                                  ...(chatSettingsDraft.attachedHistoryCounts ?? {}),
+                                  [conversation.id]: event.target.value === '' ? 0 : Number(event.target.value),
+                                },
+                              })}
+                              className="w-20 rounded-md border border-slate-200 bg-white px-2 py-1.5 text-[10px] outline-none"
+                            />
+                          )}
+                        </div>
+                      );
+                    })}
+                    {chats.filter((conversation) => conversation.id !== chatSettingsDraft.id).length === 0 && (
+                      <p className="p-2 text-center text-[10px] text-slate-400">消息列表中还没有其他聊天记录</p>
+                    )}
                   </div>
-                  <label className="block text-[10px] text-slate-500">
-                    每个聊天挂载最近多少条
-                    <input
-                      type="number"
-                      min="1"
-                      max="1000"
-                      step="1"
-                      value={chatSettingsDraft.attachedHistoryCount ?? 10}
-                      onChange={(event) => setChatSettingsDraft({
-                        ...chatSettingsDraft,
-                        attachedHistoryCount: event.target.value === '' ? 0 : Number(event.target.value),
-                      })}
-                      className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs outline-none"
-                    />
-                  </label>
-                  <p className="text-[9px] leading-relaxed text-slate-400">可多选任意单聊、群聊或旁观群聊。每个所选对话各取最近指定条数供 AI 参考，不修改原记录。</p>
+                  <p className="text-[9px] leading-relaxed text-slate-400">可多选任意其他单聊、群聊或旁观群聊，并分别设置挂载条数；不会修改原记录。</p>
                 </>
               )}
             </section>
+            <section className="space-y-2 rounded-xl bg-slate-50 p-3">
+              <p className="text-[11px] font-semibold text-[#2C4A5C]">角色消息数</p>
+              <p className="text-[9px] leading-relaxed text-slate-400">
+                每次生成时随机决定连续消息条数。
+                {chatSettingsDraft.type === 'direct'
+                  ? '单聊默认 1–6 条。'
+                  : `群聊默认 ${getDefaultReplyMessageRange(chatSettingsDraft).min}–${getDefaultReplyMessageRange(chatSettingsDraft).max} 条（按群成员数至成员数×2）。`}
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                <label className="text-[10px] text-slate-500">
+                  最少条数
+                  <input
+                    type="number"
+                    min="1"
+                    max="100"
+                    value={chatSettingsDraft.replyMessageMin ?? getReplyMessageRange(chatSettingsDraft).min}
+                    onChange={(event) => setChatSettingsDraft({
+                      ...chatSettingsDraft,
+                      replyMessageMin: event.target.value === '' ? 0 : Number(event.target.value),
+                    })}
+                    className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs outline-none"
+                  />
+                </label>
+                <label className="text-[10px] text-slate-500">
+                  最多条数
+                  <input
+                    type="number"
+                    min="1"
+                    max="100"
+                    value={chatSettingsDraft.replyMessageMax ?? getReplyMessageRange(chatSettingsDraft).max}
+                    onChange={(event) => setChatSettingsDraft({
+                      ...chatSettingsDraft,
+                      replyMessageMax: event.target.value === '' ? 0 : Number(event.target.value),
+                    })}
+                    className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs outline-none"
+                  />
+                </label>
+              </div>
+            </section>
+            <label className="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2.5">
+              <span>
+                <span className="block text-xs font-semibold text-[#2C4A5C]">注入最新一轮的心声</span>
+                <span className="mt-0.5 block text-[9px] text-slate-400">开启后，AI 可参考此对话最近一条角色消息记录的心声。</span>
+              </span>
+              <input
+                type="checkbox"
+                checked={chatSettingsDraft.includeLatestThought ?? false}
+                onChange={(event) => setChatSettingsDraft({
+                  ...chatSettingsDraft,
+                  includeLatestThought: event.target.checked,
+                })}
+              />
+            </label>
             <label className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2.5">
               <span className="text-xs font-semibold text-[#2C4A5C]">旁白</span>
               <input
@@ -3330,7 +4036,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                     className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none"
                   />
                 </label>
-                {attachmentMode === 'transfer' && (
+                {(attachmentMode === 'red-packet' || attachmentMode === 'transfer') && (
                   <label className="block text-[11px] font-semibold text-[#2C4A5C]">
                     扣款方式
                     <select
@@ -3380,7 +4086,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                 {attachmentMode === 'red-packet' && activeChat.type === 'group' && (
                   <p className="text-[10px] text-slate-400">拼手气红包会在群聊中显示总金额和红包个数，仅为模拟卡片。</p>
                 )}
-                <p className="text-[10px] text-slate-400">仅生成聊天中的模拟卡片，不涉及真实支付。</p>
+                <p className="text-[10px] text-slate-400">仅调整本机虚拟钱包或亲密付额度，不会真实支付，也不会写入日常账本。</p>
               </>
             )}
             {attachmentMode === 'link' && (
@@ -3430,7 +4136,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
         <div
           className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-5"
           onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setIsContactEditorOpen(false);
+            if (event.target === event.currentTarget) closeContactEditor();
           }}
         >
           <section
@@ -3441,11 +4147,11 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
           >
             <header className="flex items-center justify-between">
               <h2 id="contact-editor-title" className="text-base font-bold text-[#2C4A5C]">
-                {contactDraft.id ? '编辑角色人设' : '新增角色人设'}
+                {isNewContactDraft ? '新增角色人设' : '编辑角色人设'}
               </h2>
               <button
                 type="button"
-                onClick={() => setIsContactEditorOpen(false)}
+                onClick={closeContactEditor}
                 aria-label="关闭"
                 className="w-8 h-8 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100"
               >
@@ -3553,6 +4259,126 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                 </div>
               )}
             </div>
+            <section className="overflow-hidden rounded-2xl border border-sky-100/90 bg-gradient-to-br from-[#9BD2FC]/20 to-[#F7B9D2]/25 shadow-sm backdrop-blur-xl">
+              <button
+                type="button"
+                onClick={() => setNpcSectionOpen((open) => !open)}
+                aria-expanded={npcSectionOpen}
+                className="flex w-full items-center justify-between px-3.5 py-3 text-left"
+              >
+                <span className="text-[11px] font-bold text-[#2C4A5C]">
+                  关联 NPC
+                  <span className="ml-2 rounded-full bg-white/80 px-2 py-0.5 text-[9px] text-sky-700">
+                    {characterNpcs.filter((npc) => npc.linkedCharIds.includes(contactDraft.id)).length}
+                  </span>
+                </span>
+                <span className="text-xs text-slate-500">{npcSectionOpen ? '收起 −' : '展开 +'}</span>
+              </button>
+              {npcSectionOpen && (
+                <div className="space-y-3 border-t border-white/80 px-3.5 py-3">
+                  <p className="text-[10px] leading-relaxed text-slate-500">
+                    NPC 依附于主要角色，可被多个角色共享，不会单独出现在通讯录或私聊列表。
+                  </p>
+                  <div className="space-y-2">
+                    {characterNpcs
+                      .filter((npc) => npc.linkedCharIds.includes(contactDraft.id))
+                      .map((npc) => (
+                        <div key={npc.id} className="flex items-center gap-2 rounded-xl border border-white/80 bg-white/65 p-2">
+                          <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-gradient-to-br from-[#9BD2FC] to-[#F7B9D2] text-xs font-bold text-white">
+                            {npc.avatarUrl ? <img src={npc.avatarUrl} alt="" className="h-full w-full object-cover" /> : npc.name.charAt(0)}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-xs font-bold text-slate-700">{npc.name}</p>
+                            <p className="truncate text-[9px] text-slate-400">{npc.persona || '暂无设定'}</p>
+                          </div>
+                          <button type="button" onClick={() => editNpc(npc)} className="rounded-lg bg-sky-50 px-2 py-1 text-[9px] font-semibold text-sky-700">编辑</button>
+                          <button type="button" onClick={() => unbindNpcFromCurrentCharacter(npc)} className="rounded-lg bg-white/80 px-2 py-1 text-[9px] font-semibold text-slate-500">解绑</button>
+                          <button type="button" onClick={() => deleteNpc(npc.id)} aria-label={`彻底删除${npc.name}`} className="rounded-lg bg-rose-50 px-2 py-1 text-[9px] font-semibold text-rose-600">删除</button>
+                        </div>
+                      ))}
+                    {characterNpcs.filter((npc) => npc.linkedCharIds.includes(contactDraft.id)).length === 0 && (
+                      <p className="rounded-xl bg-white/50 px-3 py-2 text-center text-[10px] text-slate-400">当前角色还没有关联 NPC。</p>
+                    )}
+                  </div>
+
+                  <div className="space-y-2 rounded-xl border border-white/90 bg-white/60 p-3">
+                    <p className="text-[10px] font-bold text-slate-600">{npcDraft.id ? '编辑 NPC 信息' : '新建并绑定 NPC'}</p>
+                    <div className="flex items-center gap-2">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-gradient-to-br from-[#9BD2FC] to-[#F7B9D2] text-sm font-bold text-white">
+                        {npcDraft.avatarUrl ? <img src={npcDraft.avatarUrl} alt="" className="h-full w-full object-cover" /> : npcDraft.name.charAt(0) || 'NPC'}
+                      </div>
+                      <input
+                        value={npcDraft.avatarUrl}
+                        onChange={(event) => setNpcDraft({ ...npcDraft, avatarUrl: event.target.value })}
+                        placeholder="NPC 头像链接（可选）"
+                        className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white/90 px-3 py-2 text-[10px] outline-none focus:border-sky-300"
+                      />
+                    </div>
+                    <label className="block text-[10px] font-semibold text-slate-500">
+                      本地上传头像
+                      <input
+                        type="file"
+                        accept="image/*"
+                        disabled={isProcessingAvatar}
+                        onChange={(event) => {
+                          void handleNpcAvatarUpload(event.target.files?.[0]);
+                          event.currentTarget.value = '';
+                        }}
+                        className="mt-1 block max-w-full text-[9px]"
+                      />
+                    </label>
+                    <input
+                      value={npcDraft.name}
+                      onChange={(event) => setNpcDraft({ ...npcDraft, name: event.target.value })}
+                      maxLength={80}
+                      placeholder="NPC 名称"
+                      className="w-full rounded-xl border border-slate-200 bg-white/90 px-3 py-2 text-xs outline-none focus:border-sky-300"
+                    />
+                    <textarea
+                      value={npcDraft.persona}
+                      onChange={(event) => setNpcDraft({ ...npcDraft, persona: event.target.value })}
+                      rows={3}
+                      maxLength={5000}
+                      placeholder="NPC 设定、性格、与主要角色的关系"
+                      className="w-full resize-y rounded-xl border border-slate-200 bg-white/90 px-3 py-2 text-[11px] leading-relaxed outline-none focus:border-sky-300"
+                    />
+                    <div className="flex gap-2">
+                      <button type="button" onClick={saveNpcToCurrentCharacter} disabled={isProcessingAvatar} className="flex-1 rounded-xl bg-gradient-to-r from-[#9BD2FC] to-[#F7B9D2] py-2 text-[10px] font-bold text-white disabled:opacity-50">
+                        {npcDraft.id ? '保存 NPC 修改并绑定' : '新建并绑定 NPC'}
+                      </button>
+                      {npcDraft.id && (
+                        <button type="button" onClick={() => setNpcDraft({ id: '', name: '', avatarUrl: '', persona: '' })} className="rounded-xl bg-white px-3 py-2 text-[10px] text-slate-500">
+                          取消
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="space-y-2 rounded-xl border border-white/90 bg-white/60 p-3">
+                    <p className="text-[10px] font-bold text-slate-600">从已有 NPC 中选择（支持多选）</p>
+                    <div className="max-h-32 space-y-1 overflow-y-auto">
+                      {characterNpcs
+                        .filter((npc) => !npc.linkedCharIds.includes(contactDraft.id))
+                        .map((npc) => (
+                          <label key={npc.id} className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-white/80">
+                            <input type="checkbox" checked={selectedSharedNpcIds.includes(npc.id)} onChange={() => toggleSharedNpc(npc.id)} />
+                            <span className="min-w-0 flex-1 truncate text-[10px] text-slate-700">{npc.name}</span>
+                            <span className="text-[9px] text-slate-400">
+                              {npc.linkedCharIds.map((id) => contacts.find((contact) => contact.id === id)?.name ?? (id === contactDraft.id ? contactDraft.name : '角色')).join('、')}关联
+                            </span>
+                          </label>
+                        ))}
+                      {characterNpcs.filter((npc) => !npc.linkedCharIds.includes(contactDraft.id)).length === 0 && (
+                        <p className="py-2 text-center text-[10px] text-slate-400">没有其他可共享的 NPC。</p>
+                      )}
+                    </div>
+                    <button type="button" onClick={bindSelectedNpcs} disabled={selectedSharedNpcIds.length === 0} className="w-full rounded-xl border border-sky-100 bg-white/80 py-2 text-[10px] font-bold text-sky-700 disabled:opacity-40">
+                      绑定所选 NPC（{selectedSharedNpcIds.length}）
+                    </button>
+                  </div>
+                </div>
+              )}
+            </section>
             <label className="block text-[11px] font-semibold text-[#2C4A5C]">
               分组
               <input
@@ -3601,7 +4427,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
       )}
       {activeCallMode && activeChat && (
         <div className="absolute inset-0 z-[80] flex flex-col overflow-hidden bg-slate-950 text-white">
-          <header className="z-10 flex items-center justify-between px-4 py-3">
+          <header className="z-10 flex items-center justify-between px-4 pb-3 pt-[max(env(safe-area-inset-top,0px),16px)]">
             <div>
               <h2 className="text-sm font-bold">{activeCallMode === 'voice' ? '语音通话' : '视频通话'}</h2>
               <p className="text-[10px] text-white/65">{getChatTitle(activeChat)} · 模拟中</p>
@@ -3622,7 +4448,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                   id: activeChat.participantIds[0],
                   name: getChatParticipantName(activeChat, activeChat.participantIds[0] ?? ''),
                   imageUrl: activeChat.participantIds[0]
-                    ? activeChat.avatars[activeChat.participantIds[0]] || contacts.find((item) => item.id === activeChat.participantIds[0])?.avatarUrl || ''
+                    ? activeChat.avatars[activeChat.participantIds[0]] || participantAvatar(activeChat.participantIds[0])
                     : '',
                 },
               ].map((person) => (
@@ -3666,7 +4492,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                 event.preventDefault();
                 sendChatMessage();
               }}
-              className="flex items-center gap-2 bg-slate-950 p-3 pb-[max(env(safe-area-inset-bottom,0px),12px)]"
+              className="flex items-center gap-2 bg-slate-950 p-3 pb-[env(safe-area-inset-bottom,0px)]"
             >
               <input
                 value={chatMessageDraft}
@@ -3721,8 +4547,47 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
           </section>
         </div>
       )}
+      {forumCardPreview && (
+        <div
+          className="absolute inset-0 z-[85] flex items-center justify-center bg-black/40 p-5 backdrop-blur-sm"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setForumCardPreview(null);
+          }}
+        >
+          <section role="dialog" aria-modal="true" aria-labelledby="forum-card-title" className="flex max-h-[85%] w-full max-w-md flex-col overflow-hidden rounded-3xl border border-white/80 bg-white/95 shadow-2xl backdrop-blur-xl">
+            <header className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-200/70 p-4">
+              <div className="min-w-0">
+                <p className="text-[10px] font-semibold text-sky-600">{forumCardPreview.forumDetails?.boardName || forumCardPreview.source || '论坛分享'}</p>
+                <h2 id="forum-card-title" className="mt-1 text-sm font-bold leading-relaxed text-[#2C4A5C]">
+                  {forumCardPreview.forumDetails?.title || forumCardPreview.title || '论坛帖子'}
+                </h2>
+                <p className="mt-1 text-[10px] text-slate-400">{forumCardPreview.forumDetails?.author || ''}</p>
+              </div>
+              <button type="button" aria-label="关闭帖子详情" onClick={() => setForumCardPreview(null)} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100">
+                <X className="h-4 w-4" />
+              </button>
+            </header>
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
+              <article className="whitespace-pre-wrap break-words rounded-2xl bg-slate-50 p-3 text-xs leading-relaxed text-slate-700">
+                {forumCardPreview.forumDetails?.body || forumCardPreview.aiContext || forumCardPreview.text}
+              </article>
+              {forumCardPreview.forumDetails?.comments?.length ? (
+                <section className="space-y-2">
+                  <h3 className="text-[11px] font-bold text-[#2C4A5C]">评论 · {forumCardPreview.forumDetails.comments.length}</h3>
+                  {forumCardPreview.forumDetails.comments.map((comment, index) => (
+                    <article key={`${index}-${comment.authorName}`} className="rounded-xl border border-slate-100 bg-white/80 p-3">
+                      <p className="text-[10px] font-semibold text-sky-700">{comment.authorName}</p>
+                      <p className="mt-1 whitespace-pre-wrap break-words text-[11px] leading-relaxed text-slate-600">{comment.content}</p>
+                    </article>
+                  ))}
+                </section>
+              ) : null}
+            </div>
+          </section>
+        </div>
+      )}
       {/* WeChat Bottom Sub-Tab Bar */}
-      {!activeChat && <div className="glass-nav border-t border-white/60 px-2 pt-1 pb-[max(env(safe-area-inset-bottom,0px),8px)] flex items-center justify-around z-20 shrink-0 mt-auto">
+      {!activeChat && <div className="glass-nav border-t border-white/60 px-2 pt-1 pb-[env(safe-area-inset-bottom,0px)] flex items-center justify-around z-20 shrink-0 mt-auto">
         {[
         { key: 'chats', label: '消息', icon: MessageSquare },
           { key: 'contacts', label: '通讯录', icon: Users },

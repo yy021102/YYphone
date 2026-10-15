@@ -22,6 +22,7 @@ import {
   Plus,
   X,
   Check,
+  Image,
 } from 'lucide-react';
 import { AppHeader } from '../components/AppHeader';
 import {
@@ -33,6 +34,8 @@ import {
   readAlipayData,
   writeAlipayData,
 } from '../utils/alipayData';
+import { readStoredValue, writeStoredValue } from '../utils/localStorage';
+import { compressImageFile } from '../utils/imageFile';
 
 interface AlipayAppProps {
   onBack: () => void;
@@ -40,8 +43,33 @@ interface AlipayAppProps {
 
 type AlipayTab = 'wallet' | 'ledger';
 
+interface AlipayAppearance {
+  wallpaperUrl: string;
+  expenseIcon: string;
+  incomeIcon: string;
+}
+
+const ALIPAY_APPEARANCE_KEY = 'yyphone:alipay-appearance';
+const DEFAULT_ALIPAY_APPEARANCE: AlipayAppearance = {
+  wallpaperUrl: '',
+  expenseIcon: '↗️',
+  incomeIcon: '↙️',
+};
+const isAlipayAppearance = (value: unknown): value is AlipayAppearance =>
+  !!value &&
+  typeof value === 'object' &&
+  typeof (value as AlipayAppearance).wallpaperUrl === 'string' &&
+  typeof (value as AlipayAppearance).expenseIcon === 'string' &&
+  typeof (value as AlipayAppearance).incomeIcon === 'string';
+
 export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
   const [activeTab, setActiveTab] = useState<AlipayTab>('wallet');
+  const [appearance, setAppearance] = useState<AlipayAppearance>(() =>
+    readStoredValue(ALIPAY_APPEARANCE_KEY, DEFAULT_ALIPAY_APPEARANCE, isAlipayAppearance)
+  );
+  const [wallpaperDraft, setWallpaperDraft] = useState(appearance.wallpaperUrl);
+  const [expenseIconDraft, setExpenseIconDraft] = useState(appearance.expenseIcon);
+  const [incomeIconDraft, setIncomeIconDraft] = useState(appearance.incomeIcon);
   const [initialFinanceData] = useState<AlipayData>(() => readAlipayData());
   const [contacts] = useState<AlipayContact[]>(() => readAlipayContacts());
 
@@ -87,6 +115,7 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
   const [tempBudgetInput, setTempBudgetInput] = useState('');
 
   const [showAddLedgerModal, setShowAddLedgerModal] = useState(false); // 铅笔“记一笔”弹窗
+  const [editingLedgerId, setEditingLedgerId] = useState<string | null>(null);
   const [newLedgerTitle, setNewLedgerTitle] = useState('');
   const [newLedgerAmount, setNewLedgerAmount] = useState('');
   const [newLedgerIsExpense, setNewLedgerIsExpense] = useState(true);
@@ -124,6 +153,10 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
     allowedViewers,
     lastInterestDate,
   ]);
+
+  useEffect(() => {
+    writeStoredValue(ALIPAY_APPEARANCE_KEY, appearance);
+  }, [appearance]);
 
   // ==================== 4. 计算逻辑 ====================
   const totalAssets = balance + yuebao;
@@ -228,18 +261,54 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
     if (!newLedgerTitle.trim() || isNaN(val) || val <= 0) return;
     const now = new Date();
     const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-    const newItem: RealLedgerItem = {
-      id: `ledger-${Date.now()}`,
-      title: newLedgerTitle.trim(),
-      amount: val,
-      isExpense: newLedgerIsExpense,
-      date: newLedgerDate || todayStr,
-      time: timeStr,
-    };
-    setLedgerList((prev) => [newItem, ...prev]);
+    if (editingLedgerId) {
+      setLedgerList((prev) => prev.map((item) => item.id === editingLedgerId
+        ? {
+          ...item,
+          title: newLedgerTitle.trim(),
+          amount: val,
+          isExpense: newLedgerIsExpense,
+          date: newLedgerDate || todayStr,
+        }
+        : item));
+    } else {
+      const newItem: RealLedgerItem = {
+        id: `ledger-${Date.now()}`,
+        title: newLedgerTitle.trim(),
+        amount: val,
+        isExpense: newLedgerIsExpense,
+        date: newLedgerDate || todayStr,
+        time: timeStr,
+      };
+      setLedgerList((prev) => [newItem, ...prev]);
+    }
+    setEditingLedgerId(null);
     setNewLedgerTitle('');
     setNewLedgerAmount('');
     setShowAddLedgerModal(false);
+  };
+
+  const openLedgerEditor = (item: RealLedgerItem) => {
+    setEditingLedgerId(item.id);
+    setNewLedgerTitle(item.title);
+    setNewLedgerAmount(String(item.amount));
+    setNewLedgerIsExpense(item.isExpense);
+    setNewLedgerDate(item.date);
+    setShowAddLedgerModal(true);
+  };
+
+  const handleDeleteLedgerItem = (item: RealLedgerItem) => {
+    if (window.confirm(`确定删除「${item.title}」这条记账吗？`)) {
+      setLedgerList((current) => current.filter((entry) => entry.id !== item.id));
+    }
+  };
+
+  const handleSaveAppearance = () => {
+    setAppearance({
+      wallpaperUrl: wallpaperDraft.trim(),
+      expenseIcon: expenseIconDraft.trim() || DEFAULT_ALIPAY_APPEARANCE.expenseIcon,
+      incomeIcon: incomeIconDraft.trim() || DEFAULT_ALIPAY_APPEARANCE.incomeIcon,
+    });
   };
 
   // 导出数据
@@ -269,7 +338,14 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
   };
 
   return (
-    <div className="relative flex-1 w-full flex flex-col bg-gradient-to-b from-[#F2F8FF] via-[#F7F5FC] to-[#FEF3F8] overflow-hidden select-none">
+    <div
+      className="relative flex-1 w-full flex flex-col bg-gradient-to-b from-[#F2F8FF] via-[#F7F5FC] to-[#FEF3F8] overflow-hidden select-none"
+      style={appearance.wallpaperUrl ? {
+        backgroundImage: `linear-gradient(rgba(242,248,255,0.72), rgba(254,243,248,0.72)), url("${appearance.wallpaperUrl}")`,
+        backgroundPosition: 'center',
+        backgroundSize: 'cover',
+      } : undefined}
+    >
       {/* 氛围背景光晕 */}
       <div className="absolute -top-16 -left-16 w-56 h-56 rounded-full bg-sky-200/30 blur-3xl pointer-events-none" />
       <div className="absolute top-1/3 -right-20 w-64 h-64 rounded-full bg-pink-200/25 blur-3xl pointer-events-none" />
@@ -317,7 +393,7 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
       </div>
 
       {/* Main Tab Content */}
-      <div className="relative z-10 flex-1 min-h-0 overflow-y-auto no-scrollbar px-4 pt-1 space-y-4 pb-[max(env(safe-area-inset-bottom,0px),20px)]">
+      <div className="relative z-10 flex-1 min-h-0 overflow-y-auto no-scrollbar px-4 pt-1 space-y-4 pb-[env(safe-area-inset-bottom,0px)]">
         {/* ==================== TAB 1: 我的钱包 (小手机虚拟资产) ==================== */}
         {activeTab === 'wallet' && (
           <div className="space-y-4">
@@ -648,6 +724,10 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
                 {/* 右侧：铅笔记一笔按钮 */}
                 <button
                   onClick={() => {
+                    setEditingLedgerId(null);
+                    setNewLedgerTitle('');
+                    setNewLedgerAmount('');
+                    setNewLedgerIsExpense(true);
                     setNewLedgerDate(todayStr);
                     setShowAddLedgerModal(true);
                   }}
@@ -686,7 +766,7 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
                               : 'bg-gradient-to-br from-emerald-50 to-teal-50/80 text-emerald-500 border-emerald-100/60'
                           }`}
                         >
-                          {t.isExpense ? '支' : '收'}
+                          {t.isExpense ? appearance.expenseIcon : appearance.incomeIcon}
                         </div>
                         <div>
                           <p className="text-xs font-bold text-[#2C4A5C]">{t.title}</p>
@@ -695,15 +775,35 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
                           </span>
                         </div>
                       </div>
-                      <span
-                        className={`text-xs font-extrabold font-mono tabular-nums px-2 py-1 rounded-lg ${
-                          t.isExpense
-                            ? 'text-slate-700 bg-slate-100/60'
-                            : 'text-emerald-500 bg-emerald-50/80'
-                        }`}
-                      >
-                        {t.isExpense ? `- ¥${t.amount.toFixed(2)}` : `+ ¥${t.amount.toFixed(2)}`}
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <span
+                          className={`text-xs font-extrabold font-mono tabular-nums px-2 py-1 rounded-lg ${
+                            t.isExpense
+                              ? 'text-slate-700 bg-slate-100/60'
+                              : 'text-emerald-500 bg-emerald-50/80'
+                          }`}
+                        >
+                          {t.isExpense ? `- ¥${t.amount.toFixed(2)}` : `+ ¥${t.amount.toFixed(2)}`}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => openLedgerEditor(t)}
+                          className="w-7 h-7 rounded-lg bg-sky-50 text-sky-500 flex items-center justify-center"
+                          aria-label={`编辑记账：${t.title}`}
+                          title="编辑"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteLedgerItem(t)}
+                          className="w-7 h-7 rounded-lg bg-rose-50 text-rose-400 flex items-center justify-center"
+                          aria-label={`删除记账：${t.title}`}
+                          title="删除"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -716,14 +816,90 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
       {/* ==================== 弹窗 1：右上角三横杠设置菜单 ==================== */}
       {showMenuModal && (
         <div className="absolute inset-0 z-50 bg-slate-900/25 backdrop-blur-xs flex items-end sm:items-center justify-center p-4">
-          <div className="w-full bg-white/90 backdrop-blur-2xl border border-white rounded-3xl p-5 shadow-xl space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-200">
+          <div className="w-full max-h-[88%] overflow-y-auto no-scrollbar bg-white/90 backdrop-blur-2xl border border-white rounded-3xl p-5 shadow-xl space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-200">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-extrabold text-[#2C4A5C]">支付宝 · 数据与权限管理</h3>
+              <h3 className="text-sm font-extrabold text-[#2C4A5C]">支付宝 · 美化与数据管理</h3>
               <button
                 onClick={() => setShowMenuModal(false)}
                 className="w-7 h-7 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 cursor-pointer"
               >
                 <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* 支付宝专属壁纸与收支图标 */}
+            <div className="space-y-3 bg-gradient-to-br from-sky-50/80 to-pink-50/70 border border-white rounded-2xl p-3.5">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-[#2C4A5C]">
+                <Image className="w-3.5 h-3.5 text-pink-400" />
+                <span>支付宝专属美化</span>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] text-slate-500">页面壁纸图片链接</label>
+                <input
+                  type="url"
+                  value={wallpaperDraft.startsWith('data:') ? '' : wallpaperDraft}
+                  onChange={(event) => setWallpaperDraft(event.target.value)}
+                  placeholder="粘贴壁纸图片 URL，也可从本地上传"
+                  className="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-xs text-slate-600"
+                />
+                <div className="flex items-center gap-2">
+                  <label className="flex flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-sky-100 bg-white/80 px-3 py-2 text-[11px] font-semibold text-sky-600">
+                    <Upload className="w-3.5 h-3.5" />
+                    上传壁纸
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={async (event) => {
+                        const file = event.target.files?.[0];
+                        if (!file) return;
+                        try {
+                          setWallpaperDraft(await compressImageFile(file));
+                        } catch (error) {
+                          alert(error instanceof Error ? error.message : '壁纸处理失败。');
+                        } finally {
+                          event.target.value = '';
+                        }
+                      }}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setWallpaperDraft('')}
+                    className="rounded-xl border border-rose-100 bg-rose-50/80 px-3 py-2 text-[11px] font-semibold text-rose-400"
+                  >
+                    清除壁纸
+                  </button>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <label className="space-y-1 text-[10px] text-slate-500">
+                  支出图标
+                  <input
+                    value={expenseIconDraft}
+                    maxLength={4}
+                    onChange={(event) => setExpenseIconDraft(event.target.value)}
+                    className="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm"
+                    placeholder="例如 🛍️"
+                  />
+                </label>
+                <label className="space-y-1 text-[10px] text-slate-500">
+                  收入图标
+                  <input
+                    value={incomeIconDraft}
+                    maxLength={4}
+                    onChange={(event) => setIncomeIconDraft(event.target.value)}
+                    className="w-full rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-sm"
+                    placeholder="例如 💰"
+                  />
+                </label>
+              </div>
+              <button
+                type="button"
+                onClick={handleSaveAppearance}
+                className="w-full rounded-xl bg-gradient-to-r from-sky-200 to-pink-200 py-2 text-xs font-bold text-slate-700"
+              >
+                保存美化设置
               </button>
             </div>
 
@@ -947,7 +1123,9 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
       {showAddLedgerModal && (
         <div className="absolute inset-0 z-50 bg-slate-900/25 backdrop-blur-xs flex items-center justify-center p-5">
           <div className="w-full bg-white/95 backdrop-blur-2xl border border-white rounded-3xl p-5 shadow-xl space-y-3.5">
-            <h3 className="text-sm font-extrabold text-[#2C4A5C]">记一笔 · 日常收支</h3>
+            <h3 className="text-sm font-extrabold text-[#2C4A5C]">
+              {editingLedgerId ? '编辑记录 · 日常收支' : '记一笔 · 日常收支'}
+            </h3>
 
             {/* 支出 / 收入切换 */}
             <div className="grid grid-cols-2 gap-2 p-1 bg-slate-100 rounded-2xl">
@@ -994,7 +1172,10 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
 
             <div className="flex gap-2 pt-1">
               <button
-                onClick={() => setShowAddLedgerModal(false)}
+                onClick={() => {
+                  setShowAddLedgerModal(false);
+                  setEditingLedgerId(null);
+                }}
                 className="flex-1 py-2 rounded-xl bg-slate-100 text-xs font-bold text-slate-500 cursor-pointer"
               >
                 取消
@@ -1003,7 +1184,7 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
                 onClick={handleAddLedgerItem}
                 className="flex-1 py-2 rounded-xl bg-gradient-to-r from-sky-200 to-pink-200 text-xs font-bold text-slate-700 cursor-pointer"
               >
-                保存记录
+                {editingLedgerId ? '保存修改' : '保存记录'}
               </button>
             </div>
           </div>

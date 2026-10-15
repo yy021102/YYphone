@@ -1,6 +1,7 @@
-const MAX_IMAGE_DATA_URL_LENGTH = 850_000;
+const MAX_IMAGE_BYTES = 100 * 1024;
+const MAX_IMAGE_DIMENSION = 300;
 
-export function compressImageFile(file: File): Promise<string> {
+export async function compressImage(file: File): Promise<string> {
   if (!file.type.startsWith('image/')) {
     return Promise.reject(new Error('请选择图片文件。'));
   }
@@ -12,11 +13,8 @@ export function compressImageFile(file: File): Promise<string> {
       const image = new Image();
       image.onerror = () => reject(new Error('所选文件不是有效图片。'));
       image.onload = () => {
-        const maxDimension = 1400;
-        const scale = Math.min(1, maxDimension / Math.max(image.width, image.height));
+        let scale = Math.min(1, MAX_IMAGE_DIMENSION / Math.max(image.width, image.height));
         const canvas = document.createElement('canvas');
-        canvas.width = Math.max(1, Math.round(image.width * scale));
-        canvas.height = Math.max(1, Math.round(image.height * scale));
         const context = canvas.getContext('2d');
 
         if (!context) {
@@ -24,16 +22,49 @@ export function compressImageFile(file: File): Promise<string> {
           return;
         }
 
-        context.drawImage(image, 0, 0, canvas.width, canvas.height);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
-        if (dataUrl.length > MAX_IMAGE_DATA_URL_LENGTH) {
-          reject(new Error('图片压缩后仍过大，请选择较小的图片。'));
-          return;
+        const render = () => {
+          canvas.width = Math.max(1, Math.round(image.width * scale));
+          canvas.height = Math.max(1, Math.round(image.height * scale));
+          context.clearRect(0, 0, canvas.width, canvas.height);
+          context.drawImage(image, 0, 0, canvas.width, canvas.height);
+          let quality = 0.7;
+          let dataUrl = canvas.toDataURL('image/jpeg', quality);
+
+          while (dataUrlBytes(dataUrl) > MAX_IMAGE_BYTES && quality > 0.35) {
+            quality = Math.max(0.35, quality - 0.1);
+            dataUrl = canvas.toDataURL('image/jpeg', quality);
+          }
+
+          if (dataUrlBytes(dataUrl) <= MAX_IMAGE_BYTES) {
+            resolve(dataUrl);
+            return;
+          }
+
+          if (Math.max(canvas.width, canvas.height) <= 64) {
+            reject(new Error('图片压缩后仍超过 100KB，请选择更简单或更小的图片。'));
+            return;
+          }
+
+          scale *= 0.8;
+          render();
+        };
+
+        try {
+          render();
+        } catch (error) {
+          reject(error instanceof Error ? error : new Error('图片压缩失败。'));
         }
-        resolve(dataUrl);
       };
       image.src = String(reader.result);
     };
     reader.readAsDataURL(file);
   });
 }
+
+const dataUrlBytes = (dataUrl: string) => {
+  const base64 = dataUrl.slice(dataUrl.indexOf(',') + 1);
+  return Math.floor((base64.length * 3) / 4) -
+    (base64.endsWith('==') ? 2 : base64.endsWith('=') ? 1 : 0);
+};
+
+export const compressImageFile = compressImage;

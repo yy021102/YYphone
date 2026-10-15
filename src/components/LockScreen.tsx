@@ -47,7 +47,7 @@ export const LockScreen: React.FC<LockScreenProps> = ({
 
   return (
     <div
-      className="relative w-full h-full flex flex-col justify-between p-6 select-none overflow-hidden transition-all duration-500"
+      className="relative w-full h-full min-h-0 flex flex-col justify-between p-6 select-none overflow-hidden transition-all duration-500"
       style={
         wallpaperImage
           ? {
@@ -65,7 +65,7 @@ export const LockScreen: React.FC<LockScreenProps> = ({
 
       {/* Main Lock Screen content */}
       {!showKeypad ? (
-        <div className="relative z-10 flex flex-col items-center h-full justify-between pt-8 pb-4">
+        <div className="relative z-10 flex flex-col items-center h-full justify-between pt-[max(env(safe-area-inset-top,0px),32px)] pb-[max(env(safe-area-inset-bottom,0px),16px)]">
           {/* Top section: Lock indicator, Time, Date */}
           <div className="flex flex-col items-center">
             <div className="w-8 h-8 rounded-full bg-white/40 backdrop-blur-md border border-white/60 flex items-center justify-center text-[#2C4A5C] mb-3 shadow-sm">
@@ -122,7 +122,7 @@ export const LockScreen: React.FC<LockScreenProps> = ({
         </div>
       ) : (
         /* Keypad Unlock Overlay */
-        <div className="relative z-10 flex flex-col items-center justify-between h-full pt-8 pb-4 animate-fadeIn">
+        <div className="relative z-10 flex flex-col items-center justify-between h-full pt-[max(env(safe-area-inset-top,0px),32px)] pb-[max(env(safe-area-inset-bottom,0px),16px)] animate-fadeIn">
           {/* Top Keypad Header */}
           <div className="flex flex-col items-center text-center">
             <div className="w-10 h-10 rounded-full bg-white/50 backdrop-blur-md border border-white/70 flex items-center justify-center text-[#2C4A5C] mb-3 shadow-sm">

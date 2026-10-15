@@ -182,6 +182,22 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({
         </div>
 
         <div className="space-y-2">
+          <label className="flex items-center justify-between rounded-xl bg-rose-50/70 px-3 py-2.5 text-[11px] font-semibold text-[#617F91]">
+            <span>
+              头像奶油花边框
+              <span className="mt-0.5 block text-[9px] font-normal text-slate-400">开启后显示浅粉色花边；关闭则使用无边框头像。</span>
+            </span>
+            <input
+              type="checkbox"
+              checked={draft.avatarFrameEnabled ?? false}
+              onChange={(event) => {
+                setDraft((current) => ({ ...current, avatarFrameEnabled: event.target.checked }));
+                setStatus('');
+                setError('');
+              }}
+              className="accent-pink-400"
+            />
+          </label>
           <label className="block text-[11px] font-semibold text-[#2C4A5C]">
             头像图片链接
             <input
