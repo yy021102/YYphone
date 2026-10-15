@@ -8,6 +8,7 @@ export interface PromptChatMessage {
   text: string;
   createdAt: string;
   kind?: string;
+  forumForwardTargetId?: string;
   thought?: string;
 }
 
@@ -104,7 +105,8 @@ const isPromptChatMessage = (value: unknown): value is PromptChatMessage =>
   typeof value.id === 'string' &&
   typeof value.senderId === 'string' &&
   typeof value.text === 'string' &&
-  typeof value.createdAt === 'string';
+  typeof value.createdAt === 'string' &&
+  (value.forumForwardTargetId === undefined || typeof value.forumForwardTargetId === 'string');
 
 const getPersonaText = (persona: UserPersona | undefined) => {
   if (!persona) return '未设置玩家人设。';
@@ -196,11 +198,27 @@ const isChatConversation = (value: unknown): value is PromptConversation =>
 
 const toMessageContent = (message: PromptChatMessage) => {
   if (message.senderId === 'narrator') return `（旁白：${message.text}）`;
+  if (message.kind === 'forum-forward') {
+    return `【论坛转发；玩家身份优先，其次关注其他角色/NPC的真实姓名，不注入其人设；路人通常低优先级，但有趣言论可回应】\n${message.text}`;
+  }
   if (message.kind === 'sticker') return `[表情包：${message.text}]`;
   if (message.kind === 'voice') return `[语音转写：${message.text}]`;
   if (message.kind === 'image' && !message.text) return '[图片]';
   return message.text;
 };
+
+const canReadForumForward = (
+  message: PromptChatMessage,
+  sourceChat: PromptConversation,
+  activeChat: PromptConversation
+) => message.kind !== 'forum-forward' || (
+  sourceChat.type === 'direct' &&
+  sourceChat.participantIds.length === 1 &&
+  sourceChat.participantIds[0] === message.forumForwardTargetId &&
+  activeChat.type === 'direct' &&
+  activeChat.participantIds.length === 1 &&
+  activeChat.participantIds[0] === message.forumForwardTargetId
+);
 
 /**
  * Builds an OpenAI Chat Completions messages array from the current local chat data.
@@ -349,17 +367,31 @@ export const buildPrompt = ({
   }
 
   // 6. Recent history, then mounted chat records, merged in chronological order.
-  const input = currentInput ?? [...chat.messages].reverse().find((message) => message.senderId === 'user')?.text ?? '';
+  const requestedInput = currentInput ?? [...chat.messages].reverse().find((message) => message.senderId === 'user')?.text ?? '';
   const latestUserMessage = [...chat.messages].reverse().find(
-    (message) => message.senderId === 'user' && message.text === input
+    (message) => message.senderId === 'user' && message.text === requestedInput
   );
+  const input = latestUserMessage?.kind === 'forum-forward' &&
+    !canReadForumForward(latestUserMessage, chat, chat)
+    ? ''
+    : requestedInput;
   const previousAssistantMessage = regenerate
     ? [...chat.messages].reverse().find(
         (message) => message.senderId !== 'user' && message.senderId !== 'narrator'
       )
     : undefined;
+  if (
+    latestUserMessage?.kind === 'forum-forward' &&
+    canReadForumForward(latestUserMessage, chat, chat)
+  ) {
+    messages.push({
+      role: 'system',
+      content: '玩家主动转发了一条论坛内容给你。玩家本人身份优先级最高；帖子中的其他角色/NPC只提供论坛昵称和真实姓名，不提供其详细人设背景；路人发言正常可见，通常低优先级，但离谱或有趣时可以向玩家吐槽或提问。',
+    });
+  }
   const localMessages = chat.messages
     .filter((message) =>
+      canReadForumForward(message, chat, chat) &&
       message.id !== latestUserMessage?.id &&
       message.id !== previousAssistantMessage?.id
     )
@@ -383,6 +415,7 @@ export const buildPrompt = ({
         .filter((item) => item.id !== chat.id && attachedIds.includes(item.id))
         .flatMap((conversation) =>
           conversation.messages
+            .filter((message) => canReadForumForward(message, conversation, chat))
             .slice(-attachedLimit)
             .map((message) => ({ date: Date.parse(message.createdAt) || 0, message, conversation }))
         )

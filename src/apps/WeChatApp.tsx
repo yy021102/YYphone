@@ -85,7 +85,8 @@ interface ChatMessage {
   senderId: string;
   text: string;
   createdAt: string;
-  kind?: 'text' | 'image' | 'voice' | 'sticker' | 'video-call' | 'location' | 'red-packet' | 'transfer' | 'link';
+  kind?: 'text' | 'image' | 'voice' | 'sticker' | 'video-call' | 'location' | 'red-packet' | 'transfer' | 'link' | 'forum-forward';
+  forumForwardTargetId?: string;
   imageUrl?: string;
   title?: string;
   source?: string;
@@ -267,7 +268,8 @@ const isChatList = (value: unknown): value is ChatConversation[] =>
           typeof message.text === 'string' &&
           typeof message.createdAt === 'string' &&
           (message.kind === undefined ||
-            ['text', 'image', 'voice', 'sticker', 'video-call', 'location', 'red-packet', 'transfer', 'link'].includes(message.kind)) &&
+            ['text', 'image', 'voice', 'sticker', 'video-call', 'location', 'red-packet', 'transfer', 'link', 'forum-forward'].includes(message.kind)) &&
+          (message.forumForwardTargetId === undefined || typeof message.forumForwardTargetId === 'string') &&
           (message.imageUrl === undefined || typeof message.imageUrl === 'string') &&
           (message.title === undefined || typeof message.title === 'string') &&
           (message.source === undefined || typeof message.source === 'string') &&
