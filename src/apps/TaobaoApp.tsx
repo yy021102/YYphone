@@ -23,6 +23,8 @@ import {
 } from 'lucide-react';
 import { AppHeader } from '../components/AppHeader';
 import { showYyError, useErrorDialog } from '../components/ErrorDialog';
+import { addInventoryItem } from '../utils/inventoryData';
+import { upsertContextNote } from '../utils/chatNotes';
 import {
   AlipayContact,
   AlipayData,
@@ -726,6 +728,29 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
       return;
     }
 
+    if (buyForWho === 'self' && checkoutProduct.type !== 'eleme') {
+      try {
+        const boughtMarket = marketProducts.find((item) => item.id === checkoutProduct.id);
+        const boughtXianyu = checkoutProduct.type === 'xianyu'
+          ? xianyuItems.find((item) => item.id === checkoutProduct.id)
+          : undefined;
+        addInventoryItem({
+          kind: 'purchase',
+          title: checkoutProduct.title,
+          desc: (boughtMarket?.desc ?? boughtXianyu?.desc ?? '').slice(0, 200),
+          emoji: boughtMarket?.emoji ?? boughtXianyu?.emoji ?? '🛍️',
+          imageUrl: boughtMarket?.imageUrl ?? boughtXianyu?.imageUrl,
+          price: Number(checkoutProduct.price),
+          // 角色赠送的商品只显示通用来源，不在这里带出赠送者。
+          shop: boughtXianyu
+            ? `闲鱼 · ${boughtXianyu.sellerName}`
+            : boughtMarket?.fromCharName ? '淘宝' : boughtMarket?.store ?? '淘宝',
+        });
+      } catch (error) {
+        console.warn('Could not record purchase in inventory.', error);
+      }
+    }
+
     try {
       const market = marketProducts.find((item) => item.id === checkoutProduct.id);
       const xianyu = checkoutProduct.type === 'xianyu'
@@ -815,14 +840,29 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
       .map((message) => `${message.sender === 'me' ? '玩家' : thread.peerName}：${message.text}`)
       .join('\n');
     const playerIdContext = `玩家闲鱼 ID：${playerProfile.xianyuId || '未设置'}。`;
-    try {
-      if (thread.linkedCharId) {
-        appendCharacterContextEvent(
-          thread.linkedCharId,
-          `闲鱼对话（${thread.isAltAccount ? '小号' : '角色账号'}「${thread.peerName}」）：玩家：${text}`,
-          'xianyu'
-        );
+    // 和角色账号/小号的闲鱼对话，同步成该角色微信聊天里的一条上下文记录（持续更新同一条）
+    const syncXianyuToChat = (messages: Array<{ sender: 'me' | 'peer'; text: string }>) => {
+      if (!thread.linkedCharId) return;
+      try {
+        const speaker = (m: { sender: 'me' | 'peer' }) => (m.sender === 'me' ? '玩家' : thread.peerName);
+        const last = messages[messages.length - 1];
+        upsertContextNote(thread.linkedCharId, {
+          id: `xianyu-thread-${thread.id}`,
+          source: 'xianyu',
+          title: `闲鱼 · ${thread.peerName}`,
+          content: last ? `《${thread.itemTitle}》${speaker(last)}：${last.text}`.slice(0, 70) : `《${thread.itemTitle}》`,
+          detail: [
+            `${thread.isAltAccount ? '你的闲鱼小号' : '你的闲鱼账号'}「${thread.peerName}」与玩家的对话（商品《${thread.itemTitle}》¥${thread.itemPrice}）：`,
+            ...messages.slice(-24).map((m) => `${speaker(m)}：${m.text}`),
+          ].join('\n'),
+          bump: true,
+        });
+      } catch (error) {
+        console.warn('Could not sync Xianyu chat to character context.', error);
       }
+    };
+    try {
+      syncXianyuToChat([...thread.messages, userMessage]);
       const reply = await requestConfiguredAiText(
         linkedCharacter
           ? `你正在闲鱼上扮演角色${linkedCharacter.name}${thread.isAltAccount ? '的小号' : ''}回复买家。角色人设：${getCharacterPersona(linkedCharacter.id) || '自然、可信地交流'}。回复要像真实闲鱼聊天，简洁有生活感，只返回消息正文。`
@@ -844,13 +884,11 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
             : item
         )
       );
-      if (thread.linkedCharId) {
-        appendCharacterContextEvent(
-          thread.linkedCharId,
-          `闲鱼对话（${thread.isAltAccount ? '小号' : '角色账号'}「${thread.peerName}」）：${thread.peerName}：${reply}`,
-          'xianyu'
-        );
-      }
+      syncXianyuToChat([
+        ...thread.messages,
+        userMessage,
+        { sender: 'peer' as const, text: reply },
+      ]);
     } catch (error) {
       console.error('Could not generate Xianyu chat reply.', error);
       setAiError(error instanceof Error ? error.message : '闲鱼 AI 回复失败，请检查 API 配置。');

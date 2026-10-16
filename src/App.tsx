@@ -31,6 +31,7 @@ const SettingsApp = lazy(() => import('./apps/SettingsApp').then((module) => ({ 
 const ThemeCustomizerApp = lazy(() => import('./apps/ThemeCustomizerApp').then((module) => ({ default: module.ThemeCustomizerApp })));
 const WorldBookApp = lazy(() => import('./apps/WorldBookApp').then((module) => ({ default: module.WorldBookApp })));
 const MemoryApp = lazy(() => import('./apps/MemoryApp').then((module) => ({ default: module.MemoryApp })));
+const InventoryApp = lazy(() => import('./apps/InventoryApp').then((module) => ({ default: module.InventoryApp })));
 
 type LockMode = 'none' | 'lock' | 'password';
 interface LockSettings {
@@ -199,9 +200,9 @@ export default function App() {
   const handleEmergencyTap = () => {
     if (showEmergencyDialog) return;
     const now = Date.now();
-    const recentTaps = emergencyTapTimesRef.current.filter((timestamp) => now - timestamp <= 900);
+    const recentTaps = emergencyTapTimesRef.current.filter((timestamp) => now - timestamp <= 1500);
     recentTaps.push(now);
-    if (recentTaps.length >= 3) {
+    if (recentTaps.length >= 5) {
       emergencyTapTimesRef.current = [];
       setShowEmergencyDialog(true);
       return;
@@ -298,7 +299,7 @@ export default function App() {
   };
 
   return (
-    <div className="w-full h-full min-h-[100dvh] bg-[#DFF1FA] md:bg-[#080D14] flex items-center justify-center p-0 md:p-3 overflow-hidden select-none">
+    <div className="fixed inset-0 md:static md:w-full md:h-full md:min-h-[100dvh] bg-[#DFF1FA] md:bg-[#080D14] flex items-center justify-center p-0 md:p-3 overflow-hidden select-none">
       {/* 
         Phone Canvas Container:
         - Exact height: 100dvh (dynamic viewport height) on mobile devices
@@ -308,7 +309,7 @@ export default function App() {
       */}
       <div
         onPointerDown={handleEmergencyTap}
-        className={`w-full md:w-[min(412px,calc(93dvh*9/19.5))] h-[100dvh] md:h-[min(850px,93dvh)] md:rounded-[44px] overflow-hidden relative flex flex-col shadow-[0_25px_80px_rgba(0,0,0,0.7),0_0_0_1px_rgba(255,255,255,0.14)] transition-all ${
+        className={`w-full md:w-[min(412px,calc(93dvh*9/19.5))] h-full md:h-[min(850px,93dvh)] md:rounded-[44px] overflow-hidden relative flex flex-col shadow-[0_25px_80px_rgba(0,0,0,0.7),0_0_0_1px_rgba(255,255,255,0.14)] transition-all ${
           activeApp || isLocked
             ? 'p-0'
             : 'pt-[max(env(safe-area-inset-top,0px),0px)] pb-0'
@@ -420,6 +421,9 @@ export default function App() {
               {activeApp === 'memory' && (
                 <MemoryApp onBack={handleBackToHome} />
               )}
+              {activeApp === 'inventory' && (
+                <InventoryApp onBack={handleBackToHome} />
+              )}
               </Suspense>
             </div>
           ) : (
@@ -443,7 +447,7 @@ export default function App() {
               className="w-full max-w-xs rounded-3xl border border-white/80 bg-white/95 p-5 text-center shadow-2xl"
             >
               <h2 id="emergency-return-title" className="text-sm font-bold text-[#587589]">返回主页？</h2>
-              <p className="mt-2 text-xs leading-relaxed text-slate-500">检测到连续点击屏幕三下。确定要离开当前页面并返回主页吗？</p>
+              <p className="mt-2 text-xs leading-relaxed text-slate-500">检测到连续点击屏幕五下。确定要离开当前页面并返回主页吗？</p>
               <div className="mt-4 grid grid-cols-2 gap-2">
                 <button
                   type="button"

@@ -1,4 +1,5 @@
 import { readStoredValue, writeStoredValue } from './localStorage';
+import { upsertContextNote } from './chatNotes';
 
 export const POMODORO_RUNTIME_KEY = 'yyphone:pomodoro-active-timer';
 export const POMODORO_TASKS_KEY = 'yyphone:pomodoro-tasks';
@@ -38,9 +39,14 @@ interface StoredSession {
 
 interface StoredGreenhouse {
   dewDrops: number;
+  /** 还没凑够 1 滴露水的专注分钟数 */
+  dewProgress?: number;
   pots: Record<string, unknown>;
   specimens: unknown[];
 }
+
+/** 每专注多少分钟换 1 滴露水 */
+export const DEW_MINUTES = 25;
 
 export const DEFAULT_POMODORO_TIMER: PomodoroTimerSnapshot = {
   phase: 'focus',
@@ -143,10 +149,28 @@ export function processPomodoroDeadline(now = Date.now()): PomodoroTimerSnapshot
           !!(value as StoredGreenhouse).pots &&
           Array.isArray((value as StoredGreenhouse).specimens)
       );
+      // 露水按专注时长折算：每累计 DEW_MINUTES 分钟得 1 滴，不满的部分留到下一次。
+      const totalMinutes = (greenhouse.dewProgress ?? 0) + snapshot.focusMinutes;
       writeStoredValue(POMODORO_GREENHOUSE_KEY, {
         ...greenhouse,
-        dewDrops: greenhouse.dewDrops + 1,
+        dewDrops: greenhouse.dewDrops + Math.floor(totalMinutes / DEW_MINUTES),
+        dewProgress: totalMinutes % DEW_MINUTES,
       });
+
+      // 角色陪着一起完成的专注，记进和 TA 的聊天上下文（只记事实，不额外消耗请求）。
+      if (snapshot.companionCharId && snapshot.companionCharId !== 'default_char') {
+        try {
+          upsertContextNote(snapshot.companionCharId, {
+            id: `pomodoro-session-${snapshot.sessionId}`,
+            source: 'pomodoro',
+            title: '番茄钟陪伴',
+            content: `一起专注了 ${snapshot.focusMinutes} 分钟 · ${task?.title ?? '自由专注时光'}`,
+            detail: `你陪玩家用番茄钟一起专注了 ${snapshot.focusMinutes} 分钟，事项：${task?.title ?? '自由专注时光'}。`,
+          });
+        } catch (error) {
+          console.warn('Could not record Pomodoro session in chat context.', error);
+        }
+      }
     }
 
     const updated: PomodoroTimerSnapshot = {

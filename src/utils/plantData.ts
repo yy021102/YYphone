@@ -19,17 +19,38 @@ export const PLANT_SPECIES_LIST: PlantSpecies[] = [
   { id: 'hibiscus', name: '扶桑花', bloomIcon: '🌺', desc: '热烈鲜活的花' },
 ];
 
-export const MAX_PLANT_GROWTH = 180;
-
 export const PLANT_STAGE_NAMES = ['沉睡花种', '破土嫩芽', '青翠枝叶', '含苞待放', '已经盛开'];
 
-export const getPlantStageIndex = (minutes: number) => {
-  if (minutes < 30) return 0;
-  if (minutes < 60) return 1;
-  if (minutes < 120) return 2;
-  if (minutes < MAX_PLANT_GROWTH) return 3;
-  return 4;
+// 成长用“露水滴数”计：种子→嫩芽 10 滴，嫩芽→枝叶 15 滴，枝叶→含苞 20 滴，含苞→盛开 25 滴。
+export const STAGE_DROP_COSTS = [10, 15, 20, 25] as const;
+export const STAGE_START_DROPS = [0, 10, 25, 45] as const;
+export const TOTAL_GROWTH_DROPS = 70;
+
+export const getPlantStageIndex = (drops: number) => {
+  if (drops >= TOTAL_GROWTH_DROPS) return 4;
+  if (drops >= STAGE_START_DROPS[3]) return 3;
+  if (drops >= STAGE_START_DROPS[2]) return 2;
+  if (drops >= STAGE_START_DROPS[1]) return 1;
+  return 0;
 };
+
+/** 距离下一个成长阶段还差几滴；已盛开返回 0。 */
+export const dropsToNextStage = (drops: number) => {
+  const stage = getPlantStageIndex(drops);
+  if (stage >= 4) return 0;
+  const index = stage as 0 | 1 | 2 | 3;
+  return STAGE_START_DROPS[index] + STAGE_DROP_COSTS[index] - drops;
+};
+
+/** 读取花盆已浇的露水滴数；兼容旧版本按“分钟”存的数据（每 30 分钟相当于 1 滴）。 */
+export const readPotDrops = (pot: Record<string, unknown>): number => {
+  if (typeof pot.growthDrops === 'number') return pot.growthDrops;
+  if (typeof pot.growthMinutes === 'number') return Math.round(pot.growthMinutes / 30);
+  return 0;
+};
+
+const localDateKey = (date = new Date()) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 
 const SEEN_KEY = 'yyphone:pomodoro-plant-seen';
 
@@ -66,29 +87,38 @@ export const buildPlantInjection = (
   const speciesName = typeof custom?.name === 'string' ? custom.name : builtin?.name ?? '';
   const speciesDesc = typeof custom?.desc === 'string' ? custom.desc : builtin?.desc ?? '';
   const nickname = typeof pot.nickname === 'string' ? pot.nickname.trim() : '';
-  const growth = typeof pot.growthMinutes === 'number' ? pot.growthMinutes : 0;
+  const drops = readPotDrops(pot);
   const specimens = Array.isArray(greenhouse.specimens)
     ? greenhouse.specimens.filter(isRecord).filter((item) => item.charId === charId)
     : [];
+  // 今天玩家给它浇过几次水（只有日期是今天才算）
+  const wateredToday = pot.wateredDate === localDateKey() && typeof pot.wateredToday === 'number' ? pot.wateredToday : 0;
 
   // 没有任何用户参与痕迹（未命名、未浇水、非自选植物、无标本）时不打扰角色。
-  if (!nickname && growth <= 0 && !custom && specimens.length === 0) return EMPTY_PLANT_INJECTION;
+  if (!nickname && drops <= 0 && !custom && specimens.length === 0) return EMPTY_PLANT_INJECTION;
 
-  const stage = getPlantStageIndex(growth);
-  const fingerprint = [speciesName, nickname, stage, specimens.length].join('|');
+  const stage = getPlantStageIndex(drops);
+  // 指纹只在“阶段/名字/标本变化”或“今天第一次有浇水”时变化，所以角色最多是每个大变化提一次、每天一次浇水情况。
+  const fingerprint = [speciesName, nickname, stage, specimens.length, wateredToday > 0 ? localDateKey() : ''].join('|');
   const seen = readSeen();
   if (seen[charId] === fingerprint) return EMPTY_PLANT_INJECTION;
+  const previous = seen[charId]?.split('|');
+  const majorChange = !previous || previous[0] !== speciesName || previous[1] !== nickname ||
+    previous[2] !== String(stage) || previous[3] !== String(specimens.length);
 
   const displayName = nickname || speciesName || '盆栽';
   const name = nameOf(charId) || '你';
+  const toNext = dropsToNextStage(drops);
   const lines = [
     `【你们一起培育的盆栽】${name}和玩家在番茄钟的温室里一起养着一盆植物：` +
       `名字叫「${displayName}」${nickname && speciesName ? `（品种：${speciesName}）` : ''}` +
       `${speciesDesc ? `，${speciesDesc}` : ''}。` +
-      `目前成长阶段：${stage + 1}/5 ${PLANT_STAGE_NAMES[stage]}（已累计 ${growth}/${MAX_PLANT_GROWTH} 分钟的成长，玩家每完成专注、浇水它就会长大）。` +
-      (specimens.length > 0 ? `你们已经一起养成并收藏了 ${specimens.length} 株标本。` : '') +
-      (seen[charId] ? '这些是自你上次留意以来的新变化。' : ''),
-    '这是你们共同的一件小事：你知道它的名字和长势，聊到相关话题、玩家提起、或你自然想起时可以按人设自然带一句，不必每轮提起，也不要为了提而提。',
+      `目前成长阶段：${stage + 1}/5 ${PLANT_STAGE_NAMES[stage]}（共浇了 ${drops}/${TOTAL_GROWTH_DROPS} 滴露水${toNext > 0 ? `，离下一个阶段还差 ${toNext} 滴` : '，已经盛开，可以采摘了'}）。` +
+      (wateredToday > 0 ? `玩家今天已经给它浇了 ${wateredToday} 次水。` : '') +
+      (specimens.length > 0 ? `你们已经一起养成并收藏了 ${specimens.length} 株标本。` : ''),
+    majorChange
+      ? '它刚刚有了值得一提的变化（成长阶段、名字或收藏）。你可以按人设自然地提一句，之后就当作已经知道的事，不要反复提。'
+      : '这只是让你知道玩家今天照顾了它。不必特意提起；只有玩家提到盆栽、或话题自然相关时才带一句，之后不要反复说。',
   ];
   return { text: lines.join('\n'), marks: [{ charId, fingerprint }] };
 };

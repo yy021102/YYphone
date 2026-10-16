@@ -313,17 +313,32 @@ const toMessageContent = (message: PromptChatMessage) => {
 
 const toBaseMessageContent = (message: PromptChatMessage) => {
   if (message.kind === 'context-note') {
-    return message.source === 'phone-memory'
-      ? [
-          `【你自己的记忆 · ${message.title || '手机内容'}】`,
-          '这是你自己手机里本来就有的内容，是你自己经历过、记得的事，不是玩家刚发来的消息，也不是在质问你；不要直接回应、致谢或点破这条记录，把它当作你本来就记得的事，之后自然融入你的言行。',
-          message.aiContext || message.text,
-        ].join('\n')
-      : [
-          `【${message.title || '线下剧情'}（你和玩家线下亲身经历的事，是你的记忆）】`,
-          '这是一段已经发生过的经历摘要，不是新消息；可以在聊天里自然回味、受其影响，但不要逐条复述，也不要当成刚发生的事去反应。',
-          message.aiContext || message.text,
-        ].join('\n');
+    if (message.source === 'phone-memory') {
+      return [
+        `【你自己的记忆 · ${message.title || '手机内容'}】`,
+        '这是你自己手机里本来就有的内容，是你自己经历过、记得的事，不是玩家刚发来的消息，也不是在质问你；不要直接回应、致谢或点破这条记录，把它当作你本来就记得的事，之后自然融入你的言行。',
+        message.aiContext || message.text,
+      ].join('\n');
+    }
+    if (message.source === 'pomodoro') {
+      return [
+        `【${message.title || '番茄钟陪伴'}（你和玩家一起用番茄钟时发生的事，是你自己经历的）】`,
+        message.aiContext || message.text,
+        '这只是一条记录，不是玩家刚发来的新消息；你说过的话你记得，不要重复同样的话，也不要对这条记录本身再回应。',
+      ].join('\n');
+    }
+    if (message.source === 'xianyu') {
+      return [
+        `【${message.title || '闲鱼对话'}（你在闲鱼上经历的对话，是你自己的经历）】`,
+        message.aiContext || message.text,
+        '这只是一条记录，不是玩家刚在微信里发来的消息；玩家是否知道你的闲鱼身份，以对话里的情况为准，不要擅自点破。',
+      ].join('\n');
+    }
+    return [
+      `【${message.title || '线下剧情'}（你和玩家线下亲身经历的事，是你的记忆）】`,
+      '这是一段已经发生过的经历摘要，不是新消息；可以在聊天里自然回味、受其影响，但不要逐条复述，也不要当成刚发生的事去反应。',
+      message.aiContext || message.text,
+    ].join('\n');
   }
   if (message.senderId === 'narrator') return `（旁白：${message.text}）`;
   if (message.kind === 'pat') return `[拍一拍：${message.text}]`;

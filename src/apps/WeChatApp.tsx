@@ -41,6 +41,9 @@ import { readSetting, saveSetting, SETTINGS_KEYS } from '../utils/settings';
 import { compressImageFile } from '../utils/imageFile';
 import { buildPrompt } from '../utils/buildPrompt';
 import { showYyError, useErrorDialog } from '../components/ErrorDialog';
+import { AvatarFrameEditor } from '../components/AvatarFrameEditor';
+import { CallScreen } from '../components/CallScreen';
+import { AvatarFrameStyle, avatarFrameWrapStyle } from '../utils/avatarFrame';
 import {
   chargeAlipay,
   creditAlipay,
@@ -60,6 +63,7 @@ import { applyPlantSeenAfterChat, buildPlantInjection, PlantInjection } from '..
 import { buildMemoryInjection, markMemoriesRecalled } from '../utils/memoryData';
 import { maybeAutoExtractMemory } from '../utils/memoryAi';
 import { maybeAutoGrowth, maybeAutoJournal } from '../utils/journalAi';
+import { addInventoryItem } from '../utils/inventoryData';
 import {
   applyMomentsAfterChat,
   buildMomentsInjection,
@@ -89,6 +93,8 @@ interface ContactPersona {
   id: string;
   avatarUrl: string;
   name: string;
+  /** 通讯录里显示在名字下面的简介，不发给 AI */
+  bio?: string;
   persona: string;
   worldBooks: ContactWorldBookLink[];
   group: string;
@@ -298,6 +304,8 @@ interface ChatAppearance {
   generateIconUrl?: string;
   presets: ChatAppearancePreset[];
   bubblePresets?: BubbleCssPreset[];
+  userAvatarFrame?: AvatarFrameStyle;
+  characterAvatarFrame?: AvatarFrameStyle;
 }
 
 interface ChatArchive {
@@ -722,6 +730,9 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
   const sendIconUploadRef = useRef<HTMLInputElement>(null);
   const generateIconUploadRef = useRef<HTMLInputElement>(null);
   const [activeCallMode, setActiveCallMode] = useState<'voice' | 'video' | null>(null);
+  const [callStartedAt, setCallStartedAt] = useState('');
+  const [callConnectedAt, setCallConnectedAt] = useState<number | null>(null);
+  const [expandedVoiceIds, setExpandedVoiceIds] = useState<string[]>([]);
   const [callChoiceOpen, setCallChoiceOpen] = useState(false);
   const [isProcessingAvatar, setIsProcessingAvatar] = useState(false);
   const [contacts, setContacts] = useState(() =>
@@ -1414,6 +1425,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
       ...contactDraft,
       id: contactDraft.id || `contact-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       name: contactDraft.name.trim(),
+      bio: contactDraft.bio?.trim() ?? '',
       persona: contactDraft.persona.trim(),
       group: contactDraft.group.trim() || '未分组',
     };
@@ -2372,13 +2384,28 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
 
   const startCall = (mode: 'voice' | 'video') => {
     setActiveCallMode(mode);
+    setCallStartedAt(new Date().toISOString());
+    setCallConnectedAt(null);
     setCallChoiceOpen(false);
     setComposerOpen(false);
     setChatError('');
   };
 
   const endCall = () => {
+    const mode = activeCallMode;
+    // 接通过的通话在聊天里留一条通话记录（和微信一样）；还没接通就挂断则记为已取消
+    if (mode) {
+      const label = mode === 'video' ? '视频通话' : '语音通话';
+      if (callConnectedAt) {
+        const total = Math.max(1, Math.round((Date.now() - callConnectedAt) / 1000));
+        const clock = `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+        saveAttachmentMessage('video-call', `${label} · 通话时长 ${clock}`);
+      } else {
+        saveAttachmentMessage('video-call', `${label} · 已取消`);
+      }
+    }
     setActiveCallMode(null);
+    setCallConnectedAt(null);
     setChatError('');
   };
 
@@ -2632,7 +2659,10 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
       const responseInstructions = [
         `以${chat.type === 'direct' ? `${contact.name}的` : '其中一位角色或 NPC 群成员的'}身份自然回复。只返回 JSON 对象，至少包含 reply、thought、speakerId 字段。thought 是该角色此刻的内心独白：必须用第一人称（“我”），完全符合人设，写出没能说出口的真心话、阴暗面、隐秘的在意、不安或脆弱，细腻、真实、有情绪层次；不得是对剧情的第三人称概括，不要复述 reply 里已经说出口的话，不要写成给玩家的发言，约 40-120 字。reply 必须是恰好 ${targetReplyCount} 条独立消息组成的数组；普通消息可写字符串，也可写对象 {"kind":"消息类型","text":"消息/语音转写/图片描述","title":"可选标题","source":"可选来源","content":"可选摘要","amount":"可选金额","quantity":可选红包个数,"stickerId":"可选表情包ID"}。支持类型：text、image（文字描述图片）、voice（语音转写）、sticker、video-call、location、red-packet、transfer、link、pat。pat 表示角色拍了拍玩家（类似微信拍一拍，text 可留空或写简短后缀如“的脑袋”），仅在情境自然时偶尔使用。${chat.narratorEnabled || chat.type === 'observer' ? '本对话已开启旁白：可在 reply 中穿插 {"kind":"narration","text":"旁白内容"} 项，旁白用第三人称简短描述角色此刻的动作、表情、神态、衣着或周围氛围，必须控制在 50 字以内（越短越好），不要包含角色台词，也不要替玩家行动；旁白同样计入 reply 条数，通常每轮最多 1 条，且不要全是旁白。' : ''}链接请提供 title/source/content；红包和转账必须给正数 amount，收款对象只能是玩家 user，群聊红包可提供 quantity。不要编造图片 URL；image 使用文字图卡。【表情包】玩家导入了一批表情包，你可以像真人聊天一样，根据人设、性格和当下情绪，在合适的时候主动发表情包（比如开心、撒娇、无语、委屈、吐槽时），一般可单独作为一条 {"kind":"sticker","stickerId":"表情包ID"}，也可在文字消息后附带一条；偏活泼的人设可以更常用，内敛冷淡的人设就少用，不要每轮都发，也不要连发多个。表情包不只是表达情绪，也可以用来糊弄回复、反讽、玩梗、做社交缓冲（不知道说什么、尴尬、不想认真回答时）；但不要过度解读表情包的含义，也不要给它强加深意。根据当前对话氛围和人设选择性地发，同一个表情包不要反复发（回看历史，近期发过的就换一个或不发）。只能从下列表情包里选（按分类列出，格式 分类：[ID|名称]，请根据名称含义挑选贴切的）：${stickerPromptList}。${allStickers.length === 0 ? '（目前没有表情包，不要发 sticker。）' : ''}请仅在剧情自然、确有必要时使用附件，普通文字聊天优先，不要为了凑数强行发送附件。${regenerate ? '本次是重生成，不得再次发红包、转账或礼物，以免重复入账。' : '角色发给玩家的红包和转账会直接加入玩家支付宝个人余额，不会扣玩家的钱。可选 gift 字段仅允许 {"existingProductId":"现有商品ID"} 或 {"title":"新商品名","desc":"描述","price":数字,"category":"shopping或eleme","emoji":"emoji"}，只在剧情自然时由主要角色提供；NPC不使用 gift 字段。'}${chat.type === 'group' && chat.allowAgentGroupRename ? '可选 groupTitle 和 groupNicknames 字段，只在情节自然需要时修改群名或昵称。' : ''}群聊的 speakerId 必须从以下成员 ID 中选择：${chatMembers.map((member) => `${member.id}（${member.name}）`).join(', ')}。${chat.type === 'group' && chat.allowAgentGroupRename ? 'groupNicknames 的键只能使用上方成员 ID。' : ''}${chat.type === 'observer' ? '这是旁观群聊，user不在群里；不得生成发给玩家的红包、转账或礼物；根据角色之间的对话和旁白情境继续由群成员发言。' : ''}`,
         ...(activeCallMode === 'video'
-          ? ['当前为视频通话，请在角色的每次回复最前方先写一段用小括号包裹的可视动作描写，再接角色说的话。']
+          ? [`当前为视频通话${callConnectedAt ? `（已通话 ${Math.floor((Date.now() - callConnectedAt) / 60000)} 分钟）` : ''}，请在角色的每次回复最前方先写一段用小括号包裹的可视动作描写，再接角色说的话；通话中说话要口语化、简短，不要发图片、表情包、红包、转账、链接等附件。`]
+          : []),
+        ...(activeCallMode === 'voice'
+          ? [`当前正在语音通话中${callConnectedAt ? `（已通话 ${Math.floor((Date.now() - callConnectedAt) / 60000)} 分钟）` : ''}：你们是在“说话”，请用口语化的短句直接说，像真的在讲话，可以有语气词、停顿、笑声；不要发图片、表情包、红包、转账、链接、位置等附件，也不要括号动作描写；每次回复保持简短。`]
           : []),
         ...(momentsInjection.marks.length > 0
           ? ['上文【朋友圈动态】里有角色尚未读过的朋友圈。可以在 reply 中自然提及；也可以额外返回可选字段 momentActions（最多 3 项）：[{"postId":"朋友圈ID","charId":"主要角色ID","type":"like 或 comment","content":"评论内容（type 为 comment 时必填，不超过 40 字）","replyToName":"可选，被回复者姓名"}]。postId 和 charId 必须来自上文，没有想互动时不要返回该字段。']
@@ -2933,6 +2963,23 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
           });
           if (!speakerId.startsWith('npc:')) {
             appendCharacterContextEvent(speakerId, `角色送玩家商品「${deliveredTitle}」，已立即送达。`, 'taobao');
+          }
+          if (deliveredCategory === 'shopping') {
+            try {
+              addInventoryItem({
+                kind: 'gift',
+                title: deliveredTitle,
+                desc: typeof deliveredCard?.desc === 'string' ? deliveredCard.desc.slice(0, 200) : '',
+                emoji: typeof deliveredCard?.emoji === 'string' ? deliveredCard.emoji : '🎁',
+                imageUrl: typeof deliveredCard?.imageUrl === 'string' ? deliveredCard.imageUrl : undefined,
+                price: typeof deliveredCard?.price === 'number' ? deliveredCard.price : undefined,
+                fromCharId: speakerId.startsWith('npc:') ? undefined : speakerId,
+                fromCharName: characterName,
+                shop: '淘宝',
+              });
+            } catch (error) {
+              console.warn('Could not record gift in inventory.', error);
+            }
           }
         }
       }
@@ -3401,7 +3448,13 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                         className="mx-auto block max-w-[88%] rounded-2xl border border-white/80 bg-gradient-to-br from-pink-50/90 to-sky-50/90 px-3.5 py-2 text-center"
                       >
                         <span className="block text-[10px] font-semibold text-[#6F8CA0]">
-                          {message.source === 'offline' ? `📖 ${message.title} · 已写入记忆` : `🫧 ${message.title}记忆已同步`}
+                          {message.source === 'offline'
+                            ? `📖 ${message.title} · 已写入记忆`
+                            : message.source === 'pomodoro'
+                              ? `⏱️ ${message.title}`
+                              : message.source === 'xianyu'
+                                ? `🐟 ${message.title}`
+                                : `🫧 ${message.title}记忆已同步`}
                         </span>
                         {message.content && (
                           <span className="mt-1 block line-clamp-3 text-[10px] leading-relaxed text-slate-400">{message.content}</span>
@@ -3466,11 +3519,17 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                         type="button"
                         aria-label="双击拍一拍自己"
                         onClick={() => handleAvatarTap('user')}
+                        style={avatarFrameWrapStyle(chatAppearance.userAvatarFrame)}
                         className="yy-chat-avatar h-8 w-8 shrink-0 overflow-hidden rounded-xl bg-sky-100 text-xs font-bold text-sky-800 flex items-center justify-center"
                       >
-                        {(activeChat.avatars.user || personaDraft.avatarUrl)
-                          ? <img src={activeChat.avatars.user || personaDraft.avatarUrl} alt="" className="h-full w-full object-cover" />
-                          : personaDraft.name.trim().charAt(0) || '我'}
+                        <span
+                          className="flex h-full w-full items-center justify-center overflow-hidden rounded-[inherit]"
+                          style={chatAppearance.userAvatarFrame?.enabled ? { borderRadius: `calc(0.75rem - ${chatAppearance.userAvatarFrame.width}px)` } : undefined}
+                        >
+                          {(activeChat.avatars.user || personaDraft.avatarUrl)
+                            ? <img src={activeChat.avatars.user || personaDraft.avatarUrl} alt="" className="h-full w-full object-cover" />
+                            : personaDraft.name.trim().charAt(0) || '我'}
+                        </span>
                       </button>
                     ) : (
                       <button
@@ -3480,11 +3539,17 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                           thought: message.thought || '这条消息没有记录角色心声。',
                         }))}
                         aria-label={`查看${sender?.name ?? '角色'}的心声`}
+                        style={avatarFrameWrapStyle(chatAppearance.characterAvatarFrame)}
                         className="yy-chat-avatar h-8 w-8 shrink-0 overflow-hidden rounded-xl bg-sky-100 text-xs font-bold text-sky-800 flex items-center justify-center"
                       >
-                        {(activeChat.avatars[message.senderId] || sender?.avatarUrl)
-                          ? <img src={activeChat.avatars[message.senderId] || sender?.avatarUrl} alt="" className="h-full w-full object-cover" />
-                          : sender?.name.trim().charAt(0) || '?'}
+                        <span
+                          className="flex h-full w-full items-center justify-center overflow-hidden rounded-[inherit]"
+                          style={chatAppearance.characterAvatarFrame?.enabled ? { borderRadius: `calc(0.75rem - ${chatAppearance.characterAvatarFrame.width}px)` } : undefined}
+                        >
+                          {(activeChat.avatars[message.senderId] || sender?.avatarUrl)
+                            ? <img src={activeChat.avatars[message.senderId] || sender?.avatarUrl} alt="" className="h-full w-full object-cover" />
+                            : sender?.name.trim().charAt(0) || '?'}
+                        </span>
                       </button>
                     )}
                     <div className={`flex max-w-[78%] min-w-0 flex-col ${isUserMessage ? 'items-end' : 'items-start'}`}>
@@ -3503,7 +3568,9 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                         </div>
                       )}
                       {message.kind === 'video-call' ? (
-                        <div className="flex items-center gap-2 rounded-2xl border border-white/80 bg-gradient-to-br from-sky-50/90 to-blue-100/70 px-3 py-2 text-[#4B6F86] shadow-[0_4px_14px_rgba(125,160,200,0.15)]"><Video className="h-4 w-4" />{message.text}</div>
+                        <div className="flex items-center gap-2 rounded-2xl border border-white/80 bg-gradient-to-br from-sky-50/90 to-blue-100/70 px-3 py-2 text-[#4B6F86] shadow-[0_4px_14px_rgba(125,160,200,0.15)]">
+                          {message.text.startsWith('语音通话') ? <Phone className="h-4 w-4" /> : <Video className="h-4 w-4" />}{message.text}
+                        </div>
                       ) : message.kind === 'location' ? (
                         <div className="flex items-center gap-2 rounded-2xl border border-white/80 bg-gradient-to-br from-pink-50/90 to-sky-50/80 px-3 py-2 text-[#6B6F86] shadow-[0_4px_14px_rgba(200,150,180,0.15)]"><MapPin className="h-4 w-4 text-pink-400" />{message.text}</div>
                       ) : message.kind === 'red-packet' ? (
@@ -3662,10 +3729,34 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                         <img src={message.imageUrl} alt={message.text} className="h-24 w-24 rounded-xl object-contain" />
 
                       ) : message.kind === 'voice' ? (
-                        <div className="min-w-32 rounded-xl bg-gradient-to-r from-pink-50/80 to-sky-50/80 px-1 py-0.5">
-                          <div className="flex items-center gap-2 text-[#6F8CA0]"><Mic className="h-4 w-4" /><span className="tracking-[2px] text-pink-300">▂▅▃▇▂</span><span>语音</span></div>
-                          <p className="mt-1 border-t border-slate-200/70 pt-1 text-[10px]">{message.text}</p>
-                        </div>
+                        (() => {
+                          // 微信式语音条：喇叭弧线 + 秒数，点一下展开/收起转写文字
+                          const seconds = Math.min(60, Math.max(1, Math.ceil(message.text.length / 3.5)));
+                          const open = expandedVoiceIds.includes(message.id);
+                          return (
+                            <div>
+                              <button
+                                type="button"
+                                aria-label={open ? '收起语音文字' : '展开语音文字'}
+                                onClick={(event) => {
+                                  if (selectMode) return;
+                                  event.stopPropagation();
+                                  setExpandedVoiceIds((ids) => (ids.includes(message.id) ? ids.filter((id) => id !== message.id) : [...ids, message.id]));
+                                }}
+                                className={`flex items-center gap-2 text-[#6F8CA0] ${isUserMessage ? 'flex-row-reverse' : ''}`}
+                                style={{ minWidth: `${Math.min(150, 48 + seconds * 4)}px` }}
+                              >
+                                <svg viewBox="0 0 24 24" className={`h-4 w-4 shrink-0 ${isUserMessage ? '-scale-x-100' : ''}`} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                                  <path d="M8 9a4.5 4.5 0 0 1 0 6" />
+                                  <path d="M12 6.5a8.5 8.5 0 0 1 0 11" />
+                                  <path d="M16 4a12.5 12.5 0 0 1 0 16" />
+                                </svg>
+                                <span className="text-[12px]">{seconds}″</span>
+                              </button>
+                              {open && <p className="mt-1.5 border-t border-slate-200/60 pt-1.5 text-[11px] leading-relaxed text-slate-600">{message.text}</p>}
+                            </div>
+                          );
+                        })()
                       ) : message.kind === 'image' ? (
                         message.imageUrl ? (
                           <img src={message.imageUrl} alt="聊天图片" className="max-h-52 max-w-full rounded-xl object-contain" />
@@ -4112,8 +4203,8 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                             </span>
                             {contact.starred && <Star className="h-3 w-3 shrink-0 fill-amber-400 text-amber-500" />}
                           </div>
-                          {contact.persona && (
-                            <p className="mt-0.5 truncate text-[10px] text-slate-500">{contact.persona}</p>
+                          {contact.bio?.trim() && (
+                            <p className="mt-0.5 truncate text-[10px] text-slate-500">{contact.bio.trim()}</p>
                           )}
                         </div>
                         {contact.worldBooks.length > 0 && (
@@ -4386,6 +4477,23 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                   </div>
                 </section>
               ))}
+              <AvatarFrameEditor
+                title="我的头像框"
+                description="聊天里我的头像外面的渐变边框。"
+                value={chatAppearance.userAvatarFrame}
+                onChange={(next) => updateChatAppearance({ userAvatarFrame: next })}
+                previewUrl={personaDraft.avatarUrl}
+                previewText={personaDraft.name.trim().charAt(0) || '我'}
+                radiusClass="rounded-xl"
+              />
+              <AvatarFrameEditor
+                title="对方头像框（角色，群聊共用）"
+                description="聊天里角色头像外面的渐变边框。"
+                value={chatAppearance.characterAvatarFrame}
+                onChange={(next) => updateChatAppearance({ characterAvatarFrame: next })}
+                previewText="TA"
+                radiusClass="rounded-xl"
+              />
               <section className="space-y-2 rounded-xl border border-white/80 bg-white/50 p-3">
                 <div>
                   <h4 className="text-[11px] font-bold text-[#2C4A5C]">气泡 CSS 美化</h4>
@@ -5359,6 +5467,19 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
               />
             </label>
             <label className="block text-[11px] font-semibold text-[#2C4A5C]">
+              简介
+              <span className="ml-1 text-[9px] font-normal text-slate-400">仅展示在通讯录名字下面，AI 不会读取，可留空</span>
+              <input
+                value={contactDraft.bio ?? ''}
+                onChange={(event) =>
+                  setContactDraft((draft) => ({ ...draft, bio: event.target.value }))
+                }
+                maxLength={60}
+                placeholder="例如：最爱喝热可可的邻居"
+                className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-sky-400"
+              />
+            </label>
+            <label className="block text-[11px] font-semibold text-[#2C4A5C]">
               人设
               <textarea
                 value={contactDraft.persona}
@@ -5585,91 +5706,38 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
           </section>
         </div>
       )}
-      {activeCallMode && activeChat && (
-        <div className="absolute inset-0 z-[80] flex flex-col overflow-hidden bg-slate-950 text-white">
-          <header className="z-10 flex items-center justify-between px-4 pb-3 pt-[max(env(safe-area-inset-top,0px),16px)]">
-            <div>
-              <h2 className="text-sm font-bold">{activeCallMode === 'voice' ? '语音通话' : '视频通话'}</h2>
-              <p className="text-[10px] text-white/65">{getChatTitle(activeChat)} · 模拟中</p>
-            </div>
-            <button type="button" onClick={endCall} aria-label="结束通话" className="rounded-full bg-rose-600 px-4 py-2 text-xs font-bold">
-              结束
-            </button>
-          </header>
-          {activeCallMode === 'video' && (
-            <div className="relative grid min-h-0 flex-1 grid-rows-2 gap-1 bg-black">
-              {[
-                {
-                  id: 'user',
-                  name: getChatParticipantName(activeChat, 'user'),
-                  imageUrl: activeChat.avatars.user || personaDraft.avatarUrl,
-                },
-                {
-                  id: activeChat.participantIds[0],
-                  name: getChatParticipantName(activeChat, activeChat.participantIds[0] ?? ''),
-                  imageUrl: activeChat.participantIds[0]
-                    ? activeChat.avatars[activeChat.participantIds[0]] || participantAvatar(activeChat.participantIds[0])
-                    : '',
-                },
-              ].map((person) => (
-                <div key={person.id} className="relative flex items-center justify-center overflow-hidden bg-gradient-to-br from-slate-700 to-slate-900">
-                  {person.imageUrl && <img src={person.imageUrl} alt="" className="absolute inset-0 h-full w-full object-cover opacity-65" />}
-                  <div className="relative flex flex-col items-center gap-2 drop-shadow-lg">
-                    {!person.imageUrl && <span className="flex h-24 w-24 items-center justify-center rounded-full bg-white/15 text-3xl font-bold">{person.name.charAt(0) || '?'}</span>}
-                    <span className="rounded-full bg-black/35 px-3 py-1 text-xs font-semibold">{person.name || '角色'}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-          {activeCallMode === 'voice' && (
-            <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 bg-gradient-to-b from-slate-800 to-slate-950">
-              {(() => {
-                const participantId = activeChat.participantIds[0] ?? '';
-                const avatar = activeChat.avatars[participantId] || contacts.find((item) => item.id === participantId)?.avatarUrl || '';
-                return avatar
-                  ? <img src={avatar} alt="" className="h-28 w-28 rounded-full object-cover shadow-xl" />
-                  : <div className="flex h-28 w-28 items-center justify-center rounded-full bg-white/15 text-4xl font-bold">{contactName(participantId).charAt(0)}</div>;
-              })()}
-              <p className="text-lg font-semibold">{getChatTitle(activeChat)}</p>
-              <p className="text-xs text-white/60">语音通话中 · 文字模拟</p>
-              <div className="mt-4 flex gap-4 text-2xl text-white/80"><span>◖</span><span>◖</span><span>◖</span></div>
-            </div>
-          )}
-          <div className="max-h-[34%] space-y-2 overflow-y-auto bg-black/55 p-3">
-            {activeChat.messages.slice(-6).map((message) => (
-              <p key={message.id} className={`rounded-xl px-3 py-2 text-xs leading-relaxed ${message.senderId === 'user' ? 'ml-8 bg-emerald-900/80' : 'mr-8 bg-white/15'}`}>
-                <span className="mb-0.5 block text-[9px] text-white/55">
-                  {message.senderId === 'user' ? getChatParticipantName(activeChat, 'user') : getChatParticipantName(activeChat, message.senderId)}
-                </span>
-                {message.text}
-              </p>
-            ))}
-          </div>
-          {activeChat.type !== 'observer' && !activeChat.blocked && (
-            <form
-              onSubmit={(event) => {
-                event.preventDefault();
-                sendChatMessage();
-              }}
-              className="flex items-center gap-2 bg-slate-950 p-3"
-            >
-              <input
-                value={chatMessageDraft}
-                onChange={(event) => setChatMessageDraft(event.target.value)}
-                placeholder="输入文字模拟语音"
-                aria-label="通话中输入消息"
-                className="min-w-0 flex-1 rounded-xl border border-white/15 bg-white/10 px-3 py-2.5 text-xs text-white outline-none placeholder:text-white/45"
-              />
-              <button type="submit" className="rounded-xl bg-teal-600 px-3 py-2.5 text-xs font-bold">发送</button>
-              <button type="button" disabled={isGeneratingReply} onClick={() => void generateAiReply()} className="rounded-xl bg-violet-600 px-3 py-2.5 text-xs font-bold disabled:opacity-50">
-                {isGeneratingReply ? '生成中' : 'AI 回复'}
-              </button>
-            </form>
-          )}
-          {chatError && <p role="alert" className="bg-slate-950 px-3 pb-2 text-center text-[10px] text-rose-300">{chatError}</p>}
-        </div>
-      )}
+      {activeCallMode && activeChat && (() => {
+        const peerId = activeChat.participantIds[0] ?? '';
+        const callLines = activeChat.messages
+          .filter((message) => message.createdAt >= callStartedAt && message.senderId !== 'narrator' && message.kind !== 'video-call' && message.kind !== 'pat' && message.text)
+          .slice(-8)
+          .map((message) => ({
+            id: message.id,
+            mine: message.senderId === 'user',
+            name: message.senderId === 'user' ? getChatParticipantName(activeChat, 'user') : getChatParticipantName(activeChat, message.senderId),
+            text: message.text,
+          }));
+        return (
+          <CallScreen
+            key={callStartedAt}
+            mode={activeCallMode}
+            peerName={getChatTitle(activeChat)}
+            peerAvatar={activeChat.avatars[peerId] || contacts.find((item) => item.id === peerId)?.avatarUrl || ''}
+            myName={getChatParticipantName(activeChat, 'user')}
+            myAvatar={activeChat.avatars.user || personaDraft.avatarUrl || ''}
+            lines={callLines}
+            draft={chatMessageDraft}
+            onDraftChange={setChatMessageDraft}
+            onSend={sendChatMessage}
+            onGenerate={() => void generateAiReply()}
+            generating={isGeneratingReply}
+            canSend={activeChat.type !== 'observer' && !activeChat.blocked}
+            error={chatError}
+            onConnected={setCallConnectedAt}
+            onEnd={endCall}
+          />
+        );
+      })()}
       {patDialog && activeChat && (
         <div className="absolute inset-0 z-[70] flex items-center justify-center bg-black/40 p-5 backdrop-blur-sm">
           <section role="dialog" aria-modal="true" aria-label="拍一拍" className="w-full max-w-sm space-y-3 rounded-3xl bg-white p-5 shadow-2xl">

@@ -1,6 +1,6 @@
 import { mutateDirectChat } from './coupleSpaceData';
 
-export type ContextNoteSource = 'offline' | 'phone-memory';
+export type ContextNoteSource = 'offline' | 'phone-memory' | 'pomodoro' | 'xianyu';
 
 export interface ContextNoteInput {
   /** 固定 id 时重复调用会更新同一条，而不是新增 */
@@ -12,6 +12,8 @@ export interface ContextNoteInput {
   content?: string;
   /** 给 AI 看的完整内容，会进入聊天上下文和流水账 */
   detail: string;
+  /** 更新已有记录时，把它挪到聊天末尾并刷新时间（用于还在持续发生的事，比如闲鱼对话） */
+  bump?: boolean;
 }
 
 /**
@@ -26,6 +28,10 @@ export const upsertContextNote = (charId: string, note: ContextNoteInput) => {
       existing.content = note.content ?? '';
       existing.aiContext = note.detail;
       existing.text = note.title;
+      if (note.bump) {
+        existing.createdAt = new Date().toISOString();
+        chat.messages = [...chat.messages.filter((message) => message.id !== note.id), existing];
+      }
       return;
     }
     chat.messages.push({

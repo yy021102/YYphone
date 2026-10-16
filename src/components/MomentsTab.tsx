@@ -565,9 +565,11 @@ export const MomentsTab: React.FC<MomentsTabProps> = ({ userName, userAvatarUrl,
                         type="button"
                         onClick={() => void generateInteractions(post)}
                         disabled={!!generatingId}
+                        title="生成评论"
+                        aria-label="生成评论"
                         className="ml-auto inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-sky-100 to-pink-100 px-2.5 py-1 font-bold text-[#587589] disabled:opacity-50 cursor-pointer"
                       >
-                        <Sparkles className="w-3 h-3" />{generatingId === post.id ? '生成中…' : '生成评论'}
+                        <Sparkles className="w-3 h-3" />{generatingId === post.id ? '…' : ''}
                       </button>
                     </div>
                   </div>

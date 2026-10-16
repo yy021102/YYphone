@@ -524,7 +524,7 @@ export const CheckPhoneApp: React.FC<CheckPhoneAppProps> = ({ onBack }) => {
           : 'linear-gradient(180deg, #F5F2F6 0%, #EFF2F7 52%, #EAEFF5 100%)',
       }}
     >
-      <div className="z-20 px-4 pt-2.5 pb-2 flex items-center justify-between bg-white/55 backdrop-blur-xl border-b border-white/80 shrink-0">
+      <div className="z-20 px-4 pt-[max(env(safe-area-inset-top,0px),10px)] pb-2 flex items-center justify-between bg-white/55 backdrop-blur-xl border-b border-white/80 shrink-0">
         <button
           onClick={() => {
             if (selectedWeChatThreadId) {

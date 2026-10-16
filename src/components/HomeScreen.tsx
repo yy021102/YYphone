@@ -14,11 +14,13 @@ import {
   Sparkles,
   MapPin,
   Pencil,
+  Package,
 } from 'lucide-react';
 import { AppIconOverrides, AppId, AppMetadata, UserProfile } from '../types';
 import { ProfileEditor } from './ProfileEditor';
 import { ListenTogetherWidget } from './ListenTogetherWidget';
 import { CalendarWidget } from './CalendarWidget';
+import { frameGradient } from '../utils/avatarFrame';
 
 interface HomeScreenProps {
   userProfile: UserProfile;
@@ -38,6 +40,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   appIcons,
 }) => {
   const [isProfileEditorOpen, setIsProfileEditorOpen] = useState(false);
+  // 新头像框优先；没有时沿用旧的“奶油花边框”开关
+  const frameOn = userProfile.avatarFrame ? userProfile.avatarFrame.enabled : !!userProfile.avatarFrameEnabled;
 
 
   // Top-right 4 apps: 微信, 查手机, 支付宝, 淘宝
@@ -164,23 +168,28 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             <div className="relative">
               <div
                 className={`flex items-center justify-center ${
-                  userProfile.avatarFrameEnabled
-                    ? 'h-[clamp(54px,13.8vw,62px)] w-[clamp(54px,13.8vw,62px)] rounded-[38%] p-[4px] shadow-sm'
+                  frameOn
+                    ? 'h-[clamp(54px,13.8vw,62px)] w-[clamp(54px,13.8vw,62px)] rounded-[38%] shadow-sm'
                     : 'h-[clamp(54px,13.8vw,62px)] w-[clamp(54px,13.8vw,62px)] rounded-[38%]'
                 }`}
-                style={userProfile.avatarFrameEnabled ? {
+                style={frameOn ? (userProfile.avatarFrame ? {
+                  background: frameGradient(userProfile.avatarFrame),
+                  padding: `${userProfile.avatarFrame.width}px`,
+                  boxShadow: '0 2px 8px rgba(160, 175, 200, 0.22)',
+                } : {
                   background: 'linear-gradient(135deg, #f5c9d9 0%, #fff0dc 48%, #cde8f4 100%)',
+                  padding: '4px',
                   boxShadow: '0 2px 8px rgba(221, 153, 177, 0.22)',
-                } : undefined}
+                }) : undefined}
               >
                 {userProfile.avatarUrl ? (
                   <img
                     src={userProfile.avatarUrl}
                     alt={`${userProfile.name} 的头像`}
-                    className={`h-full w-full object-cover ${userProfile.avatarFrameEnabled ? 'rounded-[32%] border-2 border-[#fff8ed]' : 'rounded-[inherit]'}`}
+                    className={`h-full w-full object-cover ${frameOn ? 'rounded-[32%] border-2 border-[#fff8ed]' : 'rounded-[inherit]'}`}
                   />
                 ) : (
-                  <div className={`flex h-full w-full items-center justify-center bg-white/90 font-bold text-[#587589] text-[clamp(20px,5vw,24px)] backdrop-blur-sm ${userProfile.avatarFrameEnabled ? 'rounded-[32%] border-2 border-[#fff8ed]' : 'rounded-[inherit]'}`}>
+                  <div className={`flex h-full w-full items-center justify-center bg-white/90 font-bold text-[#587589] text-[clamp(20px,5vw,24px)] backdrop-blur-sm ${frameOn ? 'rounded-[32%] border-2 border-[#fff8ed]' : 'rounded-[inherit]'}`}>
                     {userProfile.name.trim().charAt(0) || '?'}
                   </div>
                 )}
@@ -206,10 +215,21 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             </span>
           </div>
 
-          {/* Signature / Bio */}
-          <p className="text-[clamp(10px,2.5vw,11.5px)] text-[#587589]/85 line-clamp-1 font-normal mb-1.5 leading-snug">
-            {userProfile.signature}
-          </p>
+          {/* Signature / Bio + 物品小盒子 */}
+          <div className="mb-1.5 flex items-center justify-between gap-2">
+            <p className="min-w-0 flex-1 text-[clamp(10px,2.5vw,11.5px)] text-[#587589]/85 line-clamp-1 font-normal leading-snug">
+              {userProfile.signature}
+            </p>
+            <button
+              type="button"
+              onClick={() => onOpenApp('inventory')}
+              aria-label="物品"
+              title="物品"
+              className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-lg border border-white/80 bg-gradient-to-br from-[#CDE4F7] to-[#F8CFE1] text-[#6F8CA0] shadow-2xs active:scale-90"
+            >
+              <Package className="h-3 w-3" />
+            </button>
+          </div>
 
           {/* Bottom stats row */}
           <div className="pt-1.5 border-t border-white/50 flex items-center justify-between text-[10px] text-slate-600">

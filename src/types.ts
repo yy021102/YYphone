@@ -10,7 +10,8 @@ export type AppId =
   | 'settings'
   | 'customizer'
   | 'world_book'
-  | 'memory';
+  | 'memory'
+  | 'inventory';
 
 export interface AppMetadata {
   id: AppId;
@@ -23,12 +24,24 @@ export interface AppMetadata {
   subtitle?: string;
 }
 
+export interface AvatarFrameStyle {
+  enabled: boolean;
+  /** 渐变的两个颜色 */
+  color1: string;
+  color2: string;
+  /** 渐变角度 0-360 */
+  angle: number;
+  /** 边框粗细（px） */
+  width: number;
+}
+
 export interface UserProfile {
   name: string;
   handle: string;
   avatarSeed: string;
   avatarUrl?: string;
   avatarFrameEnabled?: boolean;
+  avatarFrame?: AvatarFrameStyle;
   coverImageUrl?: string;
   signature: string;
   level: string;

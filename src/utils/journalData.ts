@@ -126,7 +126,7 @@ const describeForSummary = (m: Record<string, unknown>): string => {
   const text = clip(m.text, 300);
   switch (m.kind) {
     case 'context-note':
-      return `${title}${m.source === 'offline' ? '（线下剧情摘要）' : '（手机内容记忆）'}：${clip(m.aiContext, 400) || text}`;
+      return `${title}${m.source === 'offline' ? '（线下剧情摘要）' : m.source === 'phone-memory' ? '（手机内容记忆）' : m.source === 'pomodoro' ? '（番茄钟陪伴）' : '（闲鱼对话）'}：${clip(m.aiContext, 400) || text}`;
     case 'forum-forward':
       return `[玩家分享了论坛帖子「${title}」] ${detail}`;
     case 'pomodoro-share':

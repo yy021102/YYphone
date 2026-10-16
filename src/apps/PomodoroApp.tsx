@@ -33,13 +33,22 @@ import { readAlipayContacts, AlipayContact } from '../utils/alipayData';
 import { readStoredValue, writeStoredValue } from '../utils/localStorage';
 import { compressImage } from '../utils/imageFile';
 import {
+  DEW_MINUTES,
   processPomodoroDeadline,
   readPomodoroTimer,
   savePomodoroTimer,
 } from '../utils/pomodoroRuntime';
-import { MAX_PLANT_GROWTH, PLANT_SPECIES_LIST, PlantSpecies } from '../utils/plantData';
+import {
+  dropsToNextStage,
+  getPlantStageIndex,
+  PLANT_SPECIES_LIST,
+  PlantSpecies,
+  readPotDrops,
+  TOTAL_GROWTH_DROPS,
+} from '../utils/plantData';
 import { requestConfiguredAiText } from '../utils/aiApi';
 import { readCharacterBrief } from '../utils/coupleSpaceData';
+import { upsertContextNote } from '../utils/chatNotes';
 
 interface PomodoroAppProps {
   onBack: () => void;
@@ -99,7 +108,9 @@ export interface CharRankItem {
 export interface CharacterPot {
   charId: string;
   speciesId: string; // 内置品种 id，或 customPlants 里的自定义植物 id
-  growthMinutes: number; // 当前这盆花已浇灌的成长分钟数（满 180 即可开花采摘）
+  growthDrops: number; // 这盆花已浇灌的露水滴数（满 TOTAL_GROWTH_DROPS 滴即可开花采摘）
+  wateredDate?: string; // 最近一次浇水的日期（YYYY-MM-DD）
+  wateredToday?: number; // 那一天浇了几次水，用来让角色知道你今天照顾过它
   lastWaterQuote: string; // 最近一次角色（AI 生成）说的话，为空则不显示
   nickname?: string; // 玩家给这盆植物起的名字
 }
@@ -129,6 +140,7 @@ export interface HarvestedSpecimen {
 // 温室总数据结构
 export interface GreenhouseState {
   dewDrops: number; // 玩家当前拥有的待浇灌露水数量
+  dewProgress?: number; // 还没凑够 1 滴露水的专注分钟数
   pots: Record<string, CharacterPot>; // key 为 charId，每个角色独立一盆花
   specimens: HarvestedSpecimen[]; // 已采摘收集的标本图鉴列表
   customPlants?: CustomPlant[];
@@ -210,7 +222,7 @@ const isGreenhouseState = (value: unknown): value is GreenhouseState =>
     isRecord(pot) &&
     typeof pot.charId === 'string' &&
     typeof pot.speciesId === 'string' &&
-    typeof pot.growthMinutes === 'number' &&
+    (typeof pot.growthDrops === 'number' || typeof pot.growthMinutes === 'number') &&
     typeof pot.lastWaterQuote === 'string'
   ) &&
   Array.isArray(value.specimens) &&
@@ -356,19 +368,25 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
       { dewDrops: 0, pots: {}, specimens: [], customPlants: [] } as GreenhouseState,
       isGreenhouseState
     );
-    // 旧版本写入的预制台词不是角色说的，一次性清掉
-    if (readStoredValue('yyphone:pomodoro-canned-cleared', false, (v): v is boolean => typeof v === 'boolean')) return stored;
+    // 旧版本按“分钟”记成长（每 30 分钟 = 1 滴），统一换算成露水滴数；旧版预制台词和标本文案一并清理
     return {
       ...stored,
       pots: Object.fromEntries(
-        Object.entries(stored.pots).map(([key, pot]) => [key, { ...pot, lastWaterQuote: '' }])
+        Object.entries(stored.pots).map(([key, pot]) => {
+          const { growthMinutes: _legacy, ...rest } = pot as CharacterPot & { growthMinutes?: number };
+          return [key, { ...rest, growthDrops: readPotDrops(pot as unknown as Record<string, unknown>), lastWaterQuote: '' }];
+        })
       ),
       specimens: stored.specimens.map((sp) => ({
         ...sp,
-        commemorativeQuote: `和「${sp.charName}」一起专注 ${MAX_PLANT_GROWTH} 分钟养成。`,
+        commemorativeQuote: /分钟养成/.test(sp.commemorativeQuote)
+          ? `和「${sp.charName}」一起浇灌了 ${TOTAL_GROWTH_DROPS} 滴露水养成。`
+          : sp.commemorativeQuote,
       })),
     };
   });
+  const greenhouseRef = useRef(greenhouse);
+  greenhouseRef.current = greenhouse;
 
   const [showSpecimenModal, setShowSpecimenModal] = useState(false);
   const [isWateringAnim, setIsWateringAnim] = useState(false);
@@ -438,7 +456,7 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
   const currentPot: CharacterPot = greenhouse.pots[activePotKey] || {
     charId: activePotKey,
     speciesId: PLANT_SPECIES_LIST[0].id,
-    growthMinutes: 0,
+    growthDrops: 0,
     lastWaterQuote: '',
   };
   const currentSpecies =
@@ -474,29 +492,33 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
     }
   };
 
-  // 计算当前花盆的 5 个成长阶段
-  const getPotStageInfo = (mins: number, species: PlantSpecies) => {
-    if (mins < 30) {
-      return { icon: '🌰', stageName: '1/5 · 沉睡花种', isBloomed: false, stage: 0 };
+  // 把角色在陪伴时说的话记进和 TA 的微信聊天上下文，让 TA 记得自己在这里说过什么
+  const recordCompanionNote = (charId: string, content: string, detail: string) => {
+    if (!charId || charId === 'default_char') return;
+    try {
+      upsertContextNote(charId, {
+        id: `pomodoro-note-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        source: 'pomodoro',
+        title: '番茄钟陪伴',
+        content,
+        detail,
+      });
+    } catch (error) {
+      console.warn('Could not record Pomodoro companion line in chat context.', error);
     }
-    if (mins < 60) {
-      return { icon: '🌱', stageName: '2/5 · 破土嫩芽', isBloomed: false, stage: 1 };
-    }
-    if (mins < 120) {
-      return { icon: '🌿', stageName: '3/5 · 青翠枝叶', isBloomed: false, stage: 2 };
-    }
-    if (mins < MAX_PLANT_GROWTH) {
-      return { icon: '💐', stageName: '4/5 · 含苞待放', isBloomed: false, stage: 3 };
-    }
-    return {
-      icon: species.bloomIcon,
-      stageName: '5/5 · 已盛开',
-      isBloomed: true,
-      stage: 4,
-    };
   };
 
-  const currentStageInfo = getPotStageInfo(currentPot.growthMinutes, currentSpecies);
+  // 计算当前花盆的 5 个成长阶段（按浇灌的露水滴数）
+  const getPotStageInfo = (drops: number, species: PlantSpecies) => {
+    const stage = getPlantStageIndex(drops);
+    if (stage === 0) return { icon: '🌰', stageName: '1/5 · 沉睡花种', isBloomed: false, stage };
+    if (stage === 1) return { icon: '🌱', stageName: '2/5 · 破土嫩芽', isBloomed: false, stage };
+    if (stage === 2) return { icon: '🌿', stageName: '3/5 · 青翠枝叶', isBloomed: false, stage };
+    if (stage === 3) return { icon: '💐', stageName: '4/5 · 含苞待放', isBloomed: false, stage };
+    return { icon: species.bloomIcon, stageName: '5/5 · 已盛开', isBloomed: true, stage };
+  };
+
+  const currentStageInfo = getPotStageInfo(currentPot.growthDrops, currentSpecies);
 
   const updateActivePot = (patch: Partial<CharacterPot>) => {
     setGreenhouse((prev) => ({
@@ -509,9 +531,9 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
   };
 
   const handleSelectSpecies = (speciesId: string) => {
-    const growing = currentPot.growthMinutes > 0 && !currentStageInfo.isBloomed;
+    const growing = currentPot.growthDrops > 0 && !currentStageInfo.isBloomed;
     if (growing && !window.confirm('换品种会让当前这盆植物的成长从头开始，确定吗？')) return;
-    updateActivePot({ speciesId, growthMinutes: growing ? 0 : currentPot.growthMinutes, lastWaterQuote: '' });
+    updateActivePot({ speciesId, growthDrops: growing ? 0 : currentPot.growthDrops, lastWaterQuote: '' });
     setShowPlantModal(false);
   };
 
@@ -552,7 +574,7 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
   // ==================== 7. 手动浇水 & 开花采摘收录图鉴逻辑 ====================
   const handleWaterPlant = async () => {
     if (greenhouse.dewDrops <= 0) {
-      setNoticeBanner('露水不够啦，每完成一次专注可获得 1 滴露水。');
+      setNoticeBanner(`露水不够啦，每累计专注 ${DEW_MINUTES} 分钟可获得 1 滴露水。`);
       return;
     }
     if (currentStageInfo.isBloomed) {
@@ -563,21 +585,31 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
     setIsWateringAnim(true);
     setTimeout(() => setIsWateringAnim(false), 600);
 
-    const nextMins = Math.min(MAX_PLANT_GROWTH, currentPot.growthMinutes + 30);
+    const nextDrops = currentPot.growthDrops + 1;
     const potKey = activePotKey;
     const basePot = currentPot;
-    const nextStage = getPotStageInfo(nextMins, currentSpecies);
+    const nextStage = getPotStageInfo(nextDrops, currentSpecies);
+    const stageUp = nextStage.stage > currentStageInfo.stage;
+    const today = todayDateStr();
+    const wateredToday = basePot.wateredDate === today ? (basePot.wateredToday ?? 0) + 1 : 1;
 
     setGreenhouse((prev) => ({
       ...prev,
       dewDrops: prev.dewDrops - 1,
       pots: {
         ...prev.pots,
-        [potKey]: { ...basePot, growthMinutes: nextMins },
+        [potKey]: { ...basePot, growthDrops: nextDrops, wateredDate: today, wateredToday },
       },
     }));
 
-    const situation = `你们刚给一盆叫「${currentPlantName}」的植物浇了水，它现在${nextStage.stageName.replace(/^\d\/\d · /, '')}，已累计 ${nextMins}/${MAX_PLANT_GROWTH} 分钟。你对玩家说一句话。`;
+    // 平时浇水不调用 AI（省额度）；只有长到新的成长阶段时，角色才会说一句话。
+    if (!stageUp) {
+      setNoticeBanner(`浇水成功：${nextDrops}/${TOTAL_GROWTH_DROPS} 滴，离下一阶段还差 ${dropsToNextStage(nextDrops)} 滴。`);
+      return;
+    }
+
+    const stageText = nextStage.stageName.replace(/^\d\/\d · /, '');
+    const situation = `你们刚给一盆叫「${currentPlantName}」的植物浇了水，它长大了一步，现在是「${stageText}」（累计 ${nextDrops}/${TOTAL_GROWTH_DROPS} 滴）。你对玩家说一句话。`;
     setIsPlantAiBusy(true);
     const line = await requestCharLine(potKey, situation);
     setIsPlantAiBusy(false);
@@ -585,6 +617,11 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
       setGreenhouse((prev) => prev.pots[potKey]
         ? { ...prev, pots: { ...prev.pots, [potKey]: { ...prev.pots[potKey], lastWaterQuote: line } } }
         : prev);
+      recordCompanionNote(
+        potKey,
+        `「${line}」`,
+        `你们一起给盆栽「${currentPlantName}」浇水，它长到了「${stageText}」（${nextDrops}/${TOTAL_GROWTH_DROPS} 滴）。你当时对玩家说：「${line}」`
+      );
     }
   };
 
@@ -601,7 +638,7 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
       speciesName: currentSpecies.name,
       bloomIcon: currentSpecies.bloomIcon,
       harvestDate: todayDateStr(),
-      commemorativeQuote: `和「${charName}」一起专注 ${MAX_PLANT_GROWTH} 分钟养成。`,
+      commemorativeQuote: `和「${charName}」一起浇灌了 ${TOTAL_GROWTH_DROPS} 滴露水养成。`,
       imageUrl: currentSpecies.imageUrl,
       nickname: currentPot.nickname,
     };
@@ -614,7 +651,7 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
         [activePotKey]: {
           charId: activePotKey,
           speciesId: currentSpecies.id,
-          growthMinutes: 0,
+          growthDrops: 0,
           lastWaterQuote: '',
           nickname: currentPot.nickname,
         },
@@ -652,14 +689,20 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
       lastTimerPhaseRef.current = detail.snapshot.phase;
       applyTimerSnapshot(detail.snapshot);
       if (detail.completedFocus) {
-        setCompanionBubble('专注完成，获得 1 滴露水。');
+        const latestGreenhouse = readStoredValue(
+          POMODORO_STORAGE_KEYS.greenhouse,
+          greenhouseRef.current,
+          isGreenhouseState
+        );
+        const gained = latestGreenhouse.dewDrops - greenhouseRef.current.dewDrops;
+        setCompanionBubble(
+          gained > 0
+            ? `专注完成，获得 ${gained} 滴露水。`
+            : `专注完成，再累计专注 ${DEW_MINUTES - (latestGreenhouse.dewProgress ?? 0)} 分钟可得 1 滴露水。`
+        );
         setRecords(readStoredValue(POMODORO_STORAGE_KEYS.records, [] as PomoSessionRecord[], isRecordList));
         setTasks(readStoredValue(POMODORO_STORAGE_KEYS.tasks, [] as PomoTask[], isTaskList));
-        setGreenhouse(readStoredValue(
-          POMODORO_STORAGE_KEYS.greenhouse,
-          greenhouse,
-          isGreenhouseState
-        ));
+        setGreenhouse(latestGreenhouse);
       } else if (previousPhase === 'rest' && detail.snapshot.phase === 'focus') {
         setCompanionBubble('休息结束，可以开始下一轮专注。');
       }
@@ -690,6 +733,11 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
         if (line) {
           setCharLine(line);
           setCompanionBubble('');
+          recordCompanionNote(
+            charId,
+            `「${line}」`,
+            `${focusing ? '玩家正在专注计时，' : phase === 'rest' && isRunning ? '玩家正在休息，' : ''}悄悄对你说：「${userText}」，你回应：「${line}」`
+          );
         }
         setIsCharReplying(false);
       });
@@ -698,7 +746,7 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
     const notes = {
       pause: '计时已暂停。',
       stop: '计时已结束并重置。',
-      complete_focus: '专注完成，获得 1 滴露水。',
+      complete_focus: '专注完成。',
       start_rest: '休息时间开始。',
     } as const;
     setCompanionBubble(notes[eventType]);
@@ -1621,7 +1669,10 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
                 <div className="flex items-center gap-1.5">
                   <span className="font-bold text-sky-500 flex items-center gap-0.5">
                     <Droplets className="w-3.5 h-3.5" />
-                    <span>露水：{greenhouse.dewDrops} 滴</span>
+                    <span>
+                      露水：{greenhouse.dewDrops} 滴
+                      <span className="ml-1 font-normal text-sky-300">（再专注 {DEW_MINUTES - (greenhouse.dewProgress ?? 0)} 分钟 +1）</span>
+                    </span>
                   </span>
                 </div>
               </div>
@@ -1662,7 +1713,7 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
                     <div className="w-full h-2 rounded-full bg-slate-100/80 overflow-hidden">
                       <div
                         style={{
-                          width: `${Math.min(100, (currentPot.growthMinutes / MAX_PLANT_GROWTH) * 100)}%`,
+                          width: `${Math.min(100, (currentPot.growthDrops / TOTAL_GROWTH_DROPS) * 100)}%`,
                           background: currentTheme.primaryGradient,
                         }}
                         className="h-full rounded-full transition-all duration-500"
@@ -1671,7 +1722,8 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
                     <div className="flex items-center justify-between text-[10px] text-slate-400">
                       <span className="truncate">{currentSpecies.desc}</span>
                       <span className="font-mono text-sky-400 shrink-0 ml-1">
-                        {currentPot.growthMinutes}/{MAX_PLANT_GROWTH}m
+                        {currentPot.growthDrops}/{TOTAL_GROWTH_DROPS} 滴
+                        {!currentStageInfo.isBloomed && ` · 距下一阶段 ${dropsToNextStage(currentPot.growthDrops)} 滴`}
                       </span>
                     </div>
                   </div>
@@ -1720,7 +1772,7 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
                     className="w-full py-2.5 rounded-xl text-white/95 text-xs font-bold flex items-center justify-center gap-1.5 shadow-2xs active:scale-98 transition-transform cursor-pointer"
                   >
                     <Droplets className="w-3.5 h-3.5" />
-                    <span>消耗 1 滴露水浇灌 (+30m)</span>
+                    <span>消耗 1 滴露水浇灌 (+1 滴成长)</span>
                   </button>
                 ) : (
                   <button
@@ -2003,7 +2055,7 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
                 <p className="text-2xl">🌸</p>
                 <p className="text-xs font-bold">还没有收集到植物标本哦~</p>
                 <p className="text-[10px]">
-                  在温室里把花盆浇灌满 {MAX_PLANT_GROWTH}m 成长值即可采摘收入图鉴！
+                  在温室里累计浇灌 {TOTAL_GROWTH_DROPS} 滴露水即可盛开采摘，收入图鉴！
                 </p>
               </div>
             ) : (
