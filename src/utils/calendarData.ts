@@ -158,16 +158,19 @@ const buildPlayerSection = (data: CalendarData, today: Date): string | null => {
         }
       }
     });
-  const windowEnd = toDateKey(addDays(today, UPCOMING_DAYS));
+  const yesterdayKey = toDateKey(addDays(today, -1));
+  // 仅在经期当下注入；刚结束的次日告知一次“已结束”，其余时间（含未来经期）都不发送。
   data.entries
     .filter((entry) => entry.kind === 'period')
     .forEach((entry) => {
       const end = entry.endDate && entry.endDate >= entry.date ? entry.endDate : entry.date;
-      if (end < todayKey || entry.date > windowEnd) return;
-      const status = entry.date <= todayKey ? '（目前正处于经期）' : '';
-      specialLines.push(
-        `- 经期：${entry.date}${end !== entry.date ? ` ~ ${end}` : ''}${entry.title ? `（${entry.title}）` : ''}${status}`
-      );
+      if (entry.date <= todayKey && todayKey <= end) {
+        specialLines.push(
+          `- 玩家目前正处于经期（${entry.date}${end !== entry.date ? ` ~ ${end}` : ''}），可结合人设适度、自然地关心（如身体不适、保暖、饮食、休息），不要频繁提及或过度追问。`
+        );
+      } else if (end === yesterdayKey) {
+        specialLines.push('- 玩家的经期已经结束，不要再把玩家当作处于经期并关心；如情境自然，可简短提一句她恢复了就好。');
+      }
     });
   if (specialLines.length > 0) lines.push('特殊日期：', ...specialLines);
 
@@ -208,7 +211,9 @@ export const buildCalendarContext = (
     .filter((schedule) => schedule.date === todayKey && schedule.text.trim() && participantIds.includes(schedule.charId))
     .flatMap((schedule) => {
       const name = getName(schedule.charId);
-      return name ? [`${name}今天（${todayKey}）的行程：\n${schedule.text.trim()}`] : [];
+      return name
+        ? [`${name}今天（${todayKey}）的行程（现在是 ${pad(now.getHours())}:${pad(now.getMinutes())}，请据此知道自己此刻大概在做什么、接下来要做什么，聊天时自然体现，如正忙、刚忙完、马上要出门，不必逐条复述）：\n${schedule.text.trim()}`]
+        : [];
     });
   if (scheduleLines.length > 0) sections.push(scheduleLines.join('\n\n'));
 

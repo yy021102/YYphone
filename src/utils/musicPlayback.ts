@@ -102,9 +102,27 @@ export const buildListenTogetherContext = (
   const estimated = snapshot.positionSec + elapsed;
   const position = snapshot.durationSec > 0 ? Math.min(estimated, snapshot.durationSec) : estimated;
 
+  const tracks = readStoredValue(MUSIC_TRACKS_KEY, [] as MusicTrack[], isMusicTrackList);
+  const playlist = tracks.length > 0
+    ? `当前播放列表：${tracks.map((track, index) => `${index + 1}.《${track.title}》`).join('、')}。`
+    : '';
+
   return [
     '当前环境：',
-    `玩家正在和${companionName}一起听歌，正在播放《${snapshot.title}》，播放到 ${formatSpokenTime(position)}。`,
+    `玩家正在和${companionName}一起听歌，正在播放《${snapshot.title}》，播放到 ${formatSpokenTime(position)}。${playlist}`,
     `只有${companionName}知道这件事，请${companionName}在合适的时候自然地对此作出回应（例如聊聊这首歌或此刻的氛围），不要生硬复述这条信息。聊天中的其他角色并不知道玩家在听歌，不要让他们提及。`,
-  ].join('\n');
+    tracks.length > 1
+      ? `如果${companionName}想切歌（或玩家请${companionName}换一首），可在返回的 JSON 顶层加入 "musicAction":{"play":"播放列表中的歌名"}，歌名必须来自上面的播放列表；不想切歌时不要包含该字段。`
+      : '',
+  ].filter(Boolean).join('\n');
+};
+
+export const findMusicTrackByTitle = (title: string): MusicTrack | undefined => {
+  const wanted = title.replace(/[《》\s]/g, '').toLowerCase();
+  if (!wanted) return undefined;
+  const tracks = readStoredValue(MUSIC_TRACKS_KEY, [] as MusicTrack[], isMusicTrackList);
+  return (
+    tracks.find((track) => track.title.replace(/\s/g, '').toLowerCase() === wanted) ??
+    tracks.find((track) => track.title.replace(/\s/g, '').toLowerCase().includes(wanted))
+  );
 };

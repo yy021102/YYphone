@@ -304,8 +304,7 @@ export const CalendarWidget: React.FC = () => {
   }).filter((day) => day.entries.length > 0);
   const todaySchedules = data.schedules.filter((schedule) => schedule.date === todayKey);
   const pendingCount =
-    entriesOnDate(data.entries, todayKey).filter((entry) => (entry.kind === 'todo' || entry.kind === 'schedule') && !entry.done).length +
-    todaySchedules.length;
+    entriesOnDate(data.entries, todayKey).filter((entry) => (entry.kind === 'todo' || entry.kind === 'schedule') && !entry.done).length;
 
   const inputClass =
     'w-full rounded-xl bg-slate-100/80 border border-slate-200 px-3 py-2 text-xs outline-none focus:border-sky-400';

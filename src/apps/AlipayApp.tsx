@@ -25,6 +25,7 @@ import {
   Image,
 } from 'lucide-react';
 import { AppHeader } from '../components/AppHeader';
+import { showYyError, useErrorDialog } from '../components/ErrorDialog';
 import {
   AlipayContact,
   AlipayData,
@@ -125,6 +126,7 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
   const [intimateLimitDraft, setIntimateLimitDraft] = useState('');
   const [intimateNoteDraft, setIntimateNoteDraft] = useState('');
   const [intimateError, setIntimateError] = useState('');
+  useErrorDialog(intimateError);
 
   useEffect(() => {
     try {
@@ -393,7 +395,7 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
       </div>
 
       {/* Main Tab Content */}
-      <div className="relative z-10 flex-1 min-h-0 overflow-y-auto no-scrollbar px-4 pt-1 space-y-4 pb-[env(safe-area-inset-bottom,0px)]">
+      <div className="relative z-10 flex-1 min-h-0 overflow-y-auto no-scrollbar px-4 pt-1 space-y-4">
         {/* ==================== TAB 1: 我的钱包 (小手机虚拟资产) ==================== */}
         {activeTab === 'wallet' && (
           <div className="space-y-4">
@@ -856,7 +858,7 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
                         try {
                           setWallpaperDraft(await compressImageFile(file));
                         } catch (error) {
-                          alert(error instanceof Error ? error.message : '壁纸处理失败。');
+                          showYyError(error instanceof Error ? error.message : '壁纸处理失败。', '壁纸处理失败');
                         } finally {
                           event.target.value = '';
                         }
@@ -987,7 +989,7 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
                         }
                         setShowMenuModal(false);
                       } catch {
-                        alert('导入文件格式有误');
+                        showYyError('导入文件格式有误', '导入失败');
                       }
                     };
                     reader.readAsText(file);

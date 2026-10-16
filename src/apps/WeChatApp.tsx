@@ -33,18 +33,33 @@ import {
 import { AppHeader } from '../components/AppHeader';
 import { MomentsTab } from '../components/MomentsTab';
 import { ColorWheel, hexToRgba } from '../components/ColorWheel';
+import { musicPlayer } from '../utils/musicPlayer';
+import { findMusicTrackByTitle, readMusicPlaybackSnapshot } from '../utils/musicPlayback';
 import { PersonaCollection, UserPersona } from '../types';
 import { readStorageString, readStoredValue, writeStorageString, writeStoredValue } from '../utils/localStorage';
 import { readSetting, saveSetting, SETTINGS_KEYS } from '../utils/settings';
 import { compressImageFile } from '../utils/imageFile';
 import { buildPrompt } from '../utils/buildPrompt';
+import { showYyError, useErrorDialog } from '../components/ErrorDialog';
 import {
   chargeAlipay,
   creditAlipay,
   readAlipayData,
   sendIntimatePayInteraction,
 } from '../utils/alipayData';
-import { appendCharacterContextEvent } from '../utils/characterContext';
+import { appendCharacterContextEvent, readPendingHighPriorityEvents } from '../utils/characterContext';
+import {
+  applyCoupleSeenAfterChat,
+  buildCoupleSpaceInjection,
+  CoupleInjection,
+  localDateString,
+  readCoupleSpaces,
+  updateCoupleSpace,
+} from '../utils/coupleSpaceData';
+import { applyPlantSeenAfterChat, buildPlantInjection, PlantInjection } from '../utils/plantData';
+import { buildMemoryInjection, markMemoriesRecalled } from '../utils/memoryData';
+import { maybeAutoExtractMemory } from '../utils/memoryAi';
+import { maybeAutoGrowth, maybeAutoJournal } from '../utils/journalAi';
 import {
   applyMomentsAfterChat,
   buildMomentsInjection,
@@ -117,13 +132,40 @@ interface PomodoroCardDetails {
   }>;
 }
 
+const TIMESTAMP_GAP_MS = 10 * 60 * 1000;
+
+const shouldShowTimestamp = (previous: string | undefined, current: string) => {
+  const currentTime = Date.parse(current);
+  if (Number.isNaN(currentTime)) return false;
+  if (!previous) return true;
+  const previousTime = Date.parse(previous);
+  return Number.isNaN(previousTime) || currentTime - previousTime >= TIMESTAMP_GAP_MS;
+};
+
+const formatChatTimestamp = (value: string) => {
+  const date = new Date(value);
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const clock = `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  const dayStart = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const dayDiff = Math.round((dayStart(now) - dayStart(date)) / 86400000);
+  if (dayDiff === 0) return clock;
+  if (dayDiff === 1) return `昨天 ${clock}`;
+  if (dayDiff > 1 && dayDiff < 7) return `${['周日', '周一', '周二', '周三', '周四', '周五', '周六'][date.getDay()]} ${clock}`;
+  if (date.getFullYear() === now.getFullYear()) return `${date.getMonth() + 1}月${date.getDate()}日 ${clock}`;
+  return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日 ${clock}`;
+};
+
 interface ChatMessage {
   id: string;
   replyBatchId?: string;
   senderId: string;
   text: string;
   createdAt: string;
-  kind?: 'text' | 'image' | 'voice' | 'sticker' | 'video-call' | 'location' | 'red-packet' | 'transfer' | 'link' | 'forum-forward' |   'pomodoro-share' | 'pat' | 'order';
+  kind?: 'text' | 'image' | 'voice' | 'sticker' | 'video-call' | 'location' | 'red-packet' | 'transfer' | 'link' | 'forum-forward' |     'pomodoro-share' |   'pat' | 'order' | 'couple-invite' | 'phone-share' | 'context-note';
+        shareMode?: 'found' | 'memory';
+      inviteFrom?: 'user' | 'char';
+      inviteStatus?: 'pending' | 'accepted' | 'declined' | 'withdrawn';
     productEmoji?: string;
     orderCategory?: 'shopping' | 'eleme' | 'xianyu';
     orderMode?: 'self' | 'gift';
@@ -140,11 +182,16 @@ interface ChatMessage {
   recipientId?: string;
   payerId?: string;
   thought?: string;
+  replyTo?: { id: string; senderName: string; text: string };
+  reactions?: Array<{ by: string; emoji: string }>;
 }
+
+const MESSAGE_REACTIONS = ['🥰', '😋', '🥺', '❤️', '😔', '😡', '🤣', '😥'] as const;
 
 interface GeneratedAiMessage {
   text: string;
-  kind?: Exclude<ChatMessage['kind'], 'forum-forward' | 'pomodoro-share'> | 'narration';
+  quoteText?: string;
+  kind?: Exclude<ChatMessage['kind'], 'forum-forward' | 'pomodoro-share' | 'couple-invite' | 'phone-share' | 'context-note'> | 'narration';
   title?: string;
   source?: string;
   content?: string;
@@ -178,7 +225,32 @@ interface ChatSticker {
   id: string;
   imageUrl: string;
   description: string;
+  category?: string;
 }
+
+const DEFAULT_STICKER_CATEGORY = '默认';
+const BUILTIN_STICKER_DATA: Array<[string, string, string]> = [
+  ['萌', '小猫爱心', 'https://i.postimg.cc/W1mM4Mxc/IMG-3839.gif'],
+  ['萌', '大眼睛注视', 'https://i.postimg.cc/prnjM8D2/IMG-3838.gif'],
+  ['萌', '哭哭', 'https://i.postimg.cc/fRs85TNt/IMG-3840.gif'],
+  ['萌', '记下了', 'https://i.postimg.cc/fW05N0zP/IMG-3841.gif'],
+  ['萌', '悲愤！', 'https://i.postimg.cc/6Q3L18bD/IMG-3847.gif'],
+  ['萌', '思考一下', 'https://i.postimg.cc/fWX7FnCG/IMG-3849.png'],
+  ['萌', '问号', 'https://i.postimg.cc/GmMvYchw/IMG-3842.gif'],
+  ['萌', '萌到无人能敌', 'https://i.postimg.cc/28rWKqV2/IMG-3848.gif'],
+  ['抽象', '这个世界有病吧', 'https://i.postimg.cc/2yw1DwVJ/IMG-3828.jpg'],
+  ['抽象', '豆包优化一下我的人生', 'https://i.postimg.cc/bYTrdmw1/IMG-3827.jpg'],
+  ['抽象', '生活真是爽歪歪', 'https://i.postimg.cc/y8S7hj76/IMG-3835.jpg'],
+  ['抽象', '干嘛', 'https://i.postimg.cc/fyrhmtPP/IMG-3837.jpg'],
+  ['抽象', '屏幕有水是我的泪', 'https://i.postimg.cc/Fsw4KS0t/IMG-3830.jpg'],
+];
+const BUILTIN_STICKERS: ChatSticker[] = BUILTIN_STICKER_DATA.map(([category, description, imageUrl], index) => ({
+  id: `builtin-${index + 1}`,
+  imageUrl,
+  description,
+  category,
+}));
+const CHAT_STICKER_CATEGORIES_KEY = 'yyphone:chat-sticker-categories';
 
 interface ApiPreset {
   id: string;
@@ -362,7 +434,20 @@ const isContactList = (value: unknown): value is ContactPersona[] =>
       )
   );
 
+// 宽松校验：单条异常数据不应导致整个聊天列表被判无效而“被清空”。
 const isChatList = (value: unknown): value is ChatConversation[] =>
+  Array.isArray(value) &&
+  value.every(
+    (chat) =>
+      !!chat &&
+      typeof chat === 'object' &&
+      typeof chat.id === 'string' &&
+      Array.isArray(chat.participantIds) &&
+      Array.isArray(chat.messages) &&
+      chat.messages.every((message: unknown) => !!message && typeof message === 'object' && typeof (message as ChatMessage).id === 'string')
+  );
+
+export const isStrictChatList = (value: unknown): value is ChatConversation[] =>
   Array.isArray(value) &&
   value.every(
     (chat) =>
@@ -390,7 +475,7 @@ const isChatList = (value: unknown): value is ChatConversation[] =>
           typeof message.text === 'string' &&
           typeof message.createdAt === 'string' &&
           (message.kind === undefined ||
-            ['text', 'image', 'voice', 'sticker', 'video-call', 'location', 'red-packet', 'transfer', 'link', 'forum-forward', 'pomodoro-share', 'pat', 'order'].includes(message.kind)) &&
+            ['text', 'image', 'voice', 'sticker', 'video-call', 'location', 'red-packet', 'transfer', 'link', 'forum-forward', 'pomodoro-share', 'pat', 'order', 'couple-invite', 'phone-share', 'context-note'].includes(message.kind)) &&
           (message.forumForwardTargetId === undefined || typeof message.forumForwardTargetId === 'string') &&
           (message.imageUrl === undefined || typeof message.imageUrl === 'string') &&
           (message.title === undefined || typeof message.title === 'string') &&
@@ -614,6 +699,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
   const [personaDraft, setPersonaDraft] = useState(selectedPersona);
   const [personaStatus, setPersonaStatus] = useState('');
   const [personaError, setPersonaError] = useState('');
+  useErrorDialog(personaError);
   const [presetNameDraft, setPresetNameDraft] = useState('');
   const [chatAppearance, setChatAppearance] = useState(() => {
     const stored = readSetting(SETTINGS_KEYS.chatAppearance, DEFAULT_CHAT_APPEARANCE, isChatAppearance);
@@ -630,6 +716,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
   const [selectedBubbleCssPresetId, setSelectedBubbleCssPresetId] = useState('');
   const [chatAppearanceMessage, setChatAppearanceMessage] = useState('');
   const [chatAppearanceError, setChatAppearanceError] = useState('');
+  useErrorDialog(chatAppearanceError);
   const chatAppearanceImportRef = useRef<HTMLInputElement>(null);
   const bubbleCssImportRef = useRef<HTMLInputElement>(null);
   const sendIconUploadRef = useRef<HTMLInputElement>(null);
@@ -658,8 +745,10 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
   const [selectedSharedNpcIds, setSelectedSharedNpcIds] = useState<string[]>([]);
   const [contactWorldBooks, setContactWorldBooks] = useState<ContactWorldBook[]>([]);
   const [contactError, setContactError] = useState('');
+  useErrorDialog(contactError);
   const [activeContactMenuId, setActiveContactMenuId] = useState('');
   const [importError, setImportError] = useState('');
+  useErrorDialog(importError, '导入失败');
   const contactImportRef = useRef<HTMLInputElement>(null);
   const pressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const suppressNextChatClickRef = useRef(false);
@@ -670,6 +759,12 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
   const [chatCreateMode, setChatCreateMode] = useState<ChatType | null>(null);
   const [selectedParticipantIds, setSelectedParticipantIds] = useState<string[]>([]);
   const [chatError, setChatError] = useState('');
+  useEffect(() => {
+    if (chatError) {
+      showYyError(chatError);
+      setChatError('');
+    }
+  }, [chatError]);
   const [activeChatId, setActiveChatId] = useState('');
   const [chatSettingsOpen, setChatSettingsOpen] = useState(false);
   const [chatSettingsDraft, setChatSettingsDraft] = useState<ChatConversation | null>(null);
@@ -705,20 +800,56 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
     readStoredValue(CHAT_STICKERS_STORAGE_KEY, [] as ChatSticker[], isChatStickerList)
   );
   const [stickerDrafts, setStickerDrafts] = useState<ChatSticker[]>([]);
+  const [extraStickerCategories, setExtraStickerCategories] = useState<string[]>(() =>
+    readStoredValue(CHAT_STICKER_CATEGORIES_KEY, [] as string[], (v): v is string[] => Array.isArray(v) && v.every((x) => typeof x === 'string'))
+  );
+  const [stickerCategory, setStickerCategory] = useState(DEFAULT_STICKER_CATEGORY);
+  const [stickerManageOpen, setStickerManageOpen] = useState(false);
+  const [stickerImportText, setStickerImportText] = useState('');
+  const [stickerNewCategory, setStickerNewCategory] = useState('');
+  const [stickerNotice, setStickerNotice] = useState('');
   const stickerUploadRef = useRef<HTMLInputElement>(null);
   const [isGeneratingReply, setIsGeneratingReply] = useState(false);
   const [selectedMessageId, setSelectedMessageId] = useState('');
+  const [reactionMenuId, setReactionMenuId] = useState('');
+  const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
   const [hiddenMessageIds, setHiddenMessageIds] = useState<string[]>([]);
   const HISTORY_PAGE_SIZE = 15;
   const [visibleMessageCount, setVisibleMessageCount] = useState(HISTORY_PAGE_SIZE);
   const [composerPage, setComposerPage] = useState(0);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [forwardOpen, setForwardOpen] = useState(false);
+  const [forwardTargetIds, setForwardTargetIds] = useState<string[]>([]);
+  const [patDialog, setPatDialog] = useState<{ targetId: string; suffix: string } | null>(null);
+  const messagePressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const suppressMessageClickRef = useRef(false);
+  const lastAvatarTapRef = useRef<{ id: string; time: number }>({ id: '', time: 0 });
+  const avatarTapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [archiveNameDraft, setArchiveNameDraft] = useState('');
   const [renamingArchive, setRenamingArchive] = useState<{ id: string; name: string } | null>(null);
 
   useEffect(() => {
     setVisibleMessageCount(HISTORY_PAGE_SIZE);
+    setSelectMode(false);
+    setSelectedIds([]);
   }, [activeChatId]);
+
+  const chatScrollRef = useRef<HTMLDivElement>(null);
+  const composerTouchStartX = useRef(0);
+  const activeMessageCount = chats.find((chat) => chat.id === activeChatId)?.messages.length ?? 0;
+  useEffect(() => {
+    if (!activeChatId) return;
+    const scrollToBottom = () => {
+      const element = chatScrollRef.current;
+      if (element) element.scrollTop = element.scrollHeight;
+    };
+    scrollToBottom();
+    // 图片/卡片等内容渲染后高度会变化，稍后再补一次。
+    const timer = window.setTimeout(scrollToBottom, 120);
+    return () => window.clearTimeout(timer);
+  }, [activeChatId, activeMessageCount]);
   const [editingMessage, setEditingMessage] = useState<{ id: string; text: string } | null>(null);
   const [activeThought, setActiveThought] = useState<{ name: string; thought: string } | null>(null);
   const [forumCardPreview, setForumCardPreview] = useState<ChatMessage | null>(null);
@@ -1758,7 +1889,13 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
       ),
       attachHistory: chatSettingsDraft.attachHistory && attachedHistoryChatIds.length > 0,
     };
-    if (updateChat(savedDraft.id, () => savedDraft)) {
+    if (updateChat(savedDraft.id, (current) => ({
+      ...savedDraft,
+      messages: current.messages,
+      archives: current.archives,
+      activeArchiveId: current.activeArchiveId,
+      updatedAt: current.updatedAt,
+    }))) {
       setChatSettingsOpen(false);
       setChatSettingsDraft(null);
     }
@@ -1789,6 +1926,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
       senderId: 'user',
       text,
       createdAt: new Date().toISOString(),
+      ...(replyingTo ? { replyTo: makeReplyRef(chat, replyingTo) } : {}),
     };
     if (
       updateChat(chat.id, (current) => ({
@@ -1798,17 +1936,41 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
       }))
     ) {
       setChatMessageDraft('');
+      setReplyingTo(null);
     }
   };
 
-  const sendPat = (targetId: string) => {
+  const makeReplyRef = (chat: ChatConversation, target: ChatMessage) => ({
+    id: target.id,
+    senderName: target.senderId === 'user' ? (personaDraft.name.trim() || '我') : getChatParticipantName(chat, target.senderId),
+    text: describeMessageBrief(target).slice(0, 60),
+  });
+
+  // 同一人对同一条消息只保留一个表情，再点同一个表情则取消（参考 iMessage）
+  const toggleReaction = (messageId: string, emoji: string) => {
+    const chat = chats.find((item) => item.id === activeChatId);
+    if (!chat) return;
+    updateChat(chat.id, (current) => ({
+      ...current,
+      messages: current.messages.map((item) => {
+        if (item.id !== messageId) return item;
+        const others = (item.reactions ?? []).filter((reaction) => reaction.by !== 'user');
+        const mine = (item.reactions ?? []).find((reaction) => reaction.by === 'user');
+        return { ...item, reactions: mine?.emoji === emoji ? others : [...others, { by: 'user', emoji }] };
+      }),
+    }));
+    setReactionMenuId('');
+  };
+
+  const sendPat = (targetId: string, suffix = '') => {
     const chat = chats.find((item) => item.id === activeChatId);
     if (!chat || chat.type === 'observer' || chat.blocked) return;
+    const targetName = targetId === 'user' ? '自己' : `“${getChatParticipantName(chat, targetId)}”`;
     const message: ChatMessage = {
       id: `message-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       senderId: 'user',
       kind: 'pat',
-      text: `我拍了拍“${getChatParticipantName(chat, targetId)}”`,
+      text: `我拍了拍${targetName}${suffix.trim()}`,
       createdAt: new Date().toISOString(),
     };
     updateChat(chat.id, (current) => ({
@@ -1816,6 +1978,126 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
       messages: [...current.messages, message],
       updatedAt: message.createdAt,
     }));
+  };
+
+  // 双击头像拍一拍；单击角色头像仍查看心声（延迟判断以区分单双击）。
+  const handleAvatarTap = (targetId: string, onSingleTap?: () => void) => {
+    const now = Date.now();
+    const last = lastAvatarTapRef.current;
+    if (avatarTapTimerRef.current) clearTimeout(avatarTapTimerRef.current);
+    if (last.id === targetId && now - last.time < 320) {
+      lastAvatarTapRef.current = { id: '', time: 0 };
+      if (activeChat?.type !== 'observer') setPatDialog({ targetId, suffix: '' });
+      return;
+    }
+    lastAvatarTapRef.current = { id: targetId, time: now };
+    if (onSingleTap) avatarTapTimerRef.current = setTimeout(onSingleTap, 330);
+  };
+
+  const describeMessageBrief = (message: ChatMessage) => {
+    switch (message.kind) {
+      case 'image': return '[图片]';
+      case 'sticker': return `[表情]${message.text}`;
+      case 'voice': return `[语音]${message.text}`;
+      case 'red-packet': return `[红包]¥${message.amount ?? ''}`;
+      case 'transfer': return `[转账]¥${message.amount ?? ''}`;
+      case 'location': return `[位置]${message.text}`;
+      case 'video-call': return `[通话]${message.text}`;
+      case 'order': return `[订单]${message.title ?? message.text}`;
+      case 'couple-invite': return '[情侣空间邀请]';
+      case 'phone-share': return '[手机内容转发]';
+      case 'context-note': return `[记忆]${message.title ?? ''}`;
+      case 'link': case 'forum-forward': case 'pomodoro-share': return `[链接]${message.title ?? message.text}`;
+      default: return message.text;
+    }
+  };
+
+  const exitSelectMode = () => {
+    setSelectMode(false);
+    setSelectedIds([]);
+    setForwardOpen(false);
+    setForwardTargetIds([]);
+  };
+
+  const toggleSelectedMessage = (messageId: string) =>
+    setSelectedIds((ids) => (ids.includes(messageId) ? ids.filter((id) => id !== messageId) : [...ids, messageId]));
+
+  const openMessageMenu = (messageId: string) => {
+    suppressMessageClickRef.current = true;
+    setReactionMenuId(messageId);
+    setSelectedMessageId('');
+  };
+
+  const messagePress = (messageId: string) => ({
+    onTouchStart: () => {
+      if (messagePressTimerRef.current) clearTimeout(messagePressTimerRef.current);
+      suppressMessageClickRef.current = false;
+      messagePressTimerRef.current = setTimeout(() => openMessageMenu(messageId), 550);
+    },
+    onTouchEnd: () => { if (messagePressTimerRef.current) clearTimeout(messagePressTimerRef.current); },
+    onTouchMove: () => { if (messagePressTimerRef.current) clearTimeout(messagePressTimerRef.current); },
+    onContextMenu: (event: React.MouseEvent) => {
+      event.preventDefault();
+      openMessageMenu(messageId);
+    },
+  });
+
+  const handleMessageTap = (messageId: string) => {
+    if (suppressMessageClickRef.current) {
+      suppressMessageClickRef.current = false;
+      return;
+    }
+    if (selectMode) {
+      toggleSelectedMessage(messageId);
+      return;
+    }
+    setSelectedMessageId(selectedMessageId === messageId ? '' : messageId);
+  };
+
+  const deleteSelectedMessages = () => {
+    const chat = chats.find((item) => item.id === activeChatId);
+    if (!chat || selectedIds.length === 0) return;
+    if (!window.confirm(`删除选中的 ${selectedIds.length} 条消息？`)) return;
+    if (updateChat(chat.id, (current) => ({
+      ...current,
+      messages: current.messages.filter((item) => !selectedIds.includes(item.id)),
+    }))) exitSelectMode();
+  };
+
+  const forwardSelectedMessages = () => {
+    const chat = chats.find((item) => item.id === activeChatId);
+    if (!chat || selectedIds.length === 0 || forwardTargetIds.length === 0) return;
+    const picked = chat.messages.filter((item) => selectedIds.includes(item.id));
+    const now = new Date().toISOString();
+    const newId = () => `message-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const speakerName = (message: ChatMessage) =>
+      message.senderId === 'user' ? (personaDraft.name.trim() || '我') : getChatParticipantName(chat, message.senderId);
+    const buildForward = (): ChatMessage => {
+      if (picked.length === 1 && picked[0].senderId !== 'narrator') {
+        const { thought: _thought, replyBatchId: _batch, ...rest } = picked[0];
+        return { ...rest, id: newId(), senderId: 'user', createdAt: now };
+      }
+      return {
+        id: newId(),
+        senderId: 'user',
+        kind: 'link',
+        text: '聊天记录',
+        title: `${getChatTitle(chat)}的聊天记录`,
+        content: picked.map((item) => `${speakerName(item)}：${describeMessageBrief(item)}`).join('\n'),
+        source: '转发的聊天记录',
+        createdAt: now,
+      };
+    };
+    let allSaved = true;
+    forwardTargetIds.forEach((targetId) => {
+      const message = buildForward();
+      if (!updateChat(targetId, (current) => ({
+        ...current,
+        messages: [...current.messages, message],
+        updatedAt: now,
+      }))) allSaved = false;
+    });
+    if (allSaved) exitSelectMode();
   };
 
   const deleteChatMessage = (messageId: string) => {
@@ -2144,7 +2426,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
       setChatError('请为每个表情包填写简短介绍。');
       return;
     }
-    const nextStickers = [...stickers, { ...sticker, description: sticker.description.trim() }];
+    const nextStickers = [...stickers, { ...sticker, description: sticker.description.trim(), category: stickerCategory }];
     try {
       writeStoredValue(CHAT_STICKERS_STORAGE_KEY, nextStickers);
       setStickers(nextStickers);
@@ -2154,6 +2436,83 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
       console.error('Could not save chat sticker.', error);
       setChatError('表情包保存失败，本地存储空间可能不足，请选择更小的图片。');
     }
+  };
+
+  const allStickers = [...BUILTIN_STICKERS, ...stickers];
+
+  const stickerCategories = Array.from(new Set([
+    DEFAULT_STICKER_CATEGORY,
+    ...extraStickerCategories,
+    ...allStickers.map((item) => item.category || DEFAULT_STICKER_CATEGORY),
+  ]));
+  const stickersInCategory = allStickers.filter((item) => (item.category || DEFAULT_STICKER_CATEGORY) === stickerCategory);
+
+  const persistStickers = (next: ChatSticker[]) => {
+    try {
+      writeStoredValue(CHAT_STICKERS_STORAGE_KEY, next);
+      setStickers(next);
+      return true;
+    } catch (error) {
+      console.error('Could not save chat stickers.', error);
+      setChatError('表情包保存失败，本地存储空间可能不足。');
+      return false;
+    }
+  };
+
+  const importStickerLines = () => {
+    const added: ChatSticker[] = [];
+    let skipped = 0;
+    stickerImportText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).forEach((line) => {
+      const match = line.match(/^(.+?)\s*[:：]\s*((?:https?:\/\/|data:)\S+)$/);
+      if (!match) { skipped += 1; return; }
+      const name = match[1].trim();
+      const url = match[2].trim();
+      const exists = [...stickers, ...added].some((item) =>
+        item.imageUrl === url && item.description === name && (item.category || DEFAULT_STICKER_CATEGORY) === stickerCategory);
+      if (exists) { skipped += 1; return; }
+      added.push({
+        id: `sticker-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        imageUrl: url,
+        description: name,
+        category: stickerCategory,
+      });
+    });
+    if (added.length && persistStickers([...stickers, ...added])) setStickerImportText('');
+    setStickerNotice(`导入 ${added.length} 个${skipped ? `，跳过 ${skipped} 行（格式不对或重复）` : ''}`);
+  };
+
+  const exportStickerCategory = async () => {
+    const text = stickersInCategory
+      .filter((item) => !item.imageUrl.startsWith('blob:'))
+      .map((item) => `${item.description}: ${item.imageUrl}`)
+      .join('\n');
+    setStickerImportText(text);
+    try {
+      await navigator.clipboard.writeText(text);
+      setStickerNotice(`已导出「${stickerCategory}」${stickersInCategory.length} 个并复制到剪贴板`);
+    } catch {
+      setStickerNotice('已导出到下方文本框，请手动复制');
+    }
+  };
+
+  const addStickerCategory = () => {
+    const name = stickerNewCategory.trim().slice(0, 12);
+    if (!name || stickerCategories.includes(name)) return;
+    const next = [...extraStickerCategories, name];
+    writeStoredValue(CHAT_STICKER_CATEGORIES_KEY, next);
+    setExtraStickerCategories(next);
+    setStickerCategory(name);
+    setStickerNewCategory('');
+  };
+
+  const deleteStickerCategory = () => {
+    if (stickerCategory === DEFAULT_STICKER_CATEGORY) return;
+    if (!window.confirm(`删除分类「${stickerCategory}」及其中 ${stickersInCategory.length} 个表情包？`)) return;
+    const next = extraStickerCategories.filter((name) => name !== stickerCategory);
+    writeStoredValue(CHAT_STICKER_CATEGORIES_KEY, next);
+    setExtraStickerCategories(next);
+    persistStickers(stickers.filter((item) => (item.category || DEFAULT_STICKER_CATEGORY) !== stickerCategory));
+    setStickerCategory(DEFAULT_STICKER_CATEGORY);
   };
 
   const generateAiReply = async (regenerate = false) => {
@@ -2215,26 +2574,84 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
         chat.type === 'observer',
         (id) => contacts.find((item) => item.id === id)?.name
       );
+      const coupleCharId = chat.type === 'direct' && chat.participantIds.length === 1 && !chat.participantIds[0].startsWith('npc:')
+        ? chat.participantIds[0]
+        : '';
+      const allowCharInvite = !!coupleCharId &&
+        !regenerate &&
+        chat.messages.filter((item) => item.senderId !== 'narrator').length >= 20 &&
+        readPendingHighPriorityEvents([coupleCharId], 'couple').length === 0 &&
+        !chat.messages.some(
+          (item) => item.kind === 'couple-invite' && Date.now() - (Date.parse(item.createdAt) || 0) < 3 * 24 * 3600 * 1000
+        );
+      const coupleInjection: CoupleInjection = buildCoupleSpaceInjection(
+        chat.participantIds,
+        chat.type,
+        (id) => contacts.find((item) => item.id === id)?.name,
+        allowCharInvite
+      );
+      const plantInjection: PlantInjection = buildPlantInjection(
+        chat.participantIds,
+        chat.type,
+        (id) => contacts.find((item) => item.id === id)?.name
+      );
+      const memoryQuery = chat.messages
+        .filter((item) => item.senderId !== 'narrator' && item.kind !== 'pat' && item.text)
+        .slice(-3)
+        .map((item) => item.text)
+        .join('\n')
+        .slice(-400);
+      const memoryInjection = await buildMemoryInjection(
+        chat.participantIds.filter((id) => !id.startsWith('npc:')),
+        chat.type,
+        memoryQuery,
+        (id) => contacts.find((item) => item.id === id)?.name
+      );
+      const couplePendingCharId =
+        chat.type === 'direct' && chat.participantIds.length === 1 &&
+        readCoupleSpaces()[chat.participantIds[0]]?.bindStatus === 'pending_char'
+          ? chat.participantIds[0]
+          : '';
       const promptMessages = buildPrompt({
         chatId: chat.id,
         currentInput,
         historyLimit: chat.currentChatHistoryCount ?? 200,
         regenerate,
         momentsInjection,
+        coupleInjection,
+        plantInjection,
+        memoryInjection,
       });
+      const stickerPromptList = Array.from(new Set(allStickers.map((item) => item.category || DEFAULT_STICKER_CATEGORY)))
+        .map((category) => `${category}：${allStickers
+          .filter((item) => (item.category || DEFAULT_STICKER_CATEGORY) === category)
+          .slice(0, 60)
+          .map((item) => `[${item.id}|${item.description}]`)
+          .join('')}`)
+        .join('；');
       const responseInstructions = [
-        `以${chat.type === 'direct' ? `${contact.name}的` : '其中一位角色或 NPC 群成员的'}身份自然回复。只返回 JSON 对象，至少包含 reply、thought、speakerId 字段。reply 必须是恰好 ${targetReplyCount} 条独立消息组成的数组；普通消息可写字符串，也可写对象 {"kind":"消息类型","text":"消息/语音转写/图片描述","title":"可选标题","source":"可选来源","content":"可选摘要","amount":"可选金额","quantity":可选红包个数,"stickerId":"可选表情包ID"}。支持类型：text、image（文字描述图片）、voice（语音转写）、sticker、video-call、location、red-packet、transfer、link、pat。pat 表示角色拍了拍玩家（类似微信拍一拍，text 可留空或写简短后缀如“的脑袋”），仅在情境自然时偶尔使用。${chat.narratorEnabled || chat.type === 'observer' ? '本对话已开启旁白：可在 reply 中穿插 {"kind":"narration","text":"旁白内容"} 项，旁白用第三人称简短描述角色此刻的动作、表情、神态、衣着或周围氛围，必须控制在 50 字以内（越短越好），不要包含角色台词，也不要替玩家行动；旁白同样计入 reply 条数，通常每轮最多 1 条，且不要全是旁白。' : ''}链接请提供 title/source/content；红包和转账必须给正数 amount，收款对象只能是玩家 user，群聊红包可提供 quantity。不要编造图片 URL；image 使用文字图卡，sticker 只能使用下面已存在的表情包 ID。表情包列表：${JSON.stringify(stickers.map(({ id, description }) => ({ id, description })))}。请仅在剧情自然、确有必要时使用附件，普通文字聊天优先，不要为了凑数强行发送附件。${regenerate ? '本次是重生成，不得再次发红包、转账或礼物，以免重复入账。' : '角色发给玩家的红包和转账会直接加入玩家支付宝个人余额，不会扣玩家的钱。可选 gift 字段仅允许 {"existingProductId":"现有商品ID"} 或 {"title":"新商品名","desc":"描述","price":数字,"category":"shopping或eleme","emoji":"emoji"}，只在剧情自然时由主要角色提供；NPC不使用 gift 字段。'}${chat.type === 'group' && chat.allowAgentGroupRename ? '可选 groupTitle 和 groupNicknames 字段，只在情节自然需要时修改群名或昵称。' : ''}群聊的 speakerId 必须从以下成员 ID 中选择：${chatMembers.map((member) => `${member.id}（${member.name}）`).join(', ')}。${chat.type === 'group' && chat.allowAgentGroupRename ? 'groupNicknames 的键只能使用上方成员 ID。' : ''}${chat.type === 'observer' ? '这是旁观群聊，user不在群里；不得生成发给玩家的红包、转账或礼物；根据角色之间的对话和旁白情境继续由群成员发言。' : ''}`,
+        `以${chat.type === 'direct' ? `${contact.name}的` : '其中一位角色或 NPC 群成员的'}身份自然回复。只返回 JSON 对象，至少包含 reply、thought、speakerId 字段。thought 是该角色此刻的内心独白：必须用第一人称（“我”），完全符合人设，写出没能说出口的真心话、阴暗面、隐秘的在意、不安或脆弱，细腻、真实、有情绪层次；不得是对剧情的第三人称概括，不要复述 reply 里已经说出口的话，不要写成给玩家的发言，约 40-120 字。reply 必须是恰好 ${targetReplyCount} 条独立消息组成的数组；普通消息可写字符串，也可写对象 {"kind":"消息类型","text":"消息/语音转写/图片描述","title":"可选标题","source":"可选来源","content":"可选摘要","amount":"可选金额","quantity":可选红包个数,"stickerId":"可选表情包ID"}。支持类型：text、image（文字描述图片）、voice（语音转写）、sticker、video-call、location、red-packet、transfer、link、pat。pat 表示角色拍了拍玩家（类似微信拍一拍，text 可留空或写简短后缀如“的脑袋”），仅在情境自然时偶尔使用。${chat.narratorEnabled || chat.type === 'observer' ? '本对话已开启旁白：可在 reply 中穿插 {"kind":"narration","text":"旁白内容"} 项，旁白用第三人称简短描述角色此刻的动作、表情、神态、衣着或周围氛围，必须控制在 50 字以内（越短越好），不要包含角色台词，也不要替玩家行动；旁白同样计入 reply 条数，通常每轮最多 1 条，且不要全是旁白。' : ''}链接请提供 title/source/content；红包和转账必须给正数 amount，收款对象只能是玩家 user，群聊红包可提供 quantity。不要编造图片 URL；image 使用文字图卡。【表情包】玩家导入了一批表情包，你可以像真人聊天一样，根据人设、性格和当下情绪，在合适的时候主动发表情包（比如开心、撒娇、无语、委屈、吐槽时），一般可单独作为一条 {"kind":"sticker","stickerId":"表情包ID"}，也可在文字消息后附带一条；偏活泼的人设可以更常用，内敛冷淡的人设就少用，不要每轮都发，也不要连发多个。表情包不只是表达情绪，也可以用来糊弄回复、反讽、玩梗、做社交缓冲（不知道说什么、尴尬、不想认真回答时）；但不要过度解读表情包的含义，也不要给它强加深意。根据当前对话氛围和人设选择性地发，同一个表情包不要反复发（回看历史，近期发过的就换一个或不发）。只能从下列表情包里选（按分类列出，格式 分类：[ID|名称]，请根据名称含义挑选贴切的）：${stickerPromptList}。${allStickers.length === 0 ? '（目前没有表情包，不要发 sticker。）' : ''}请仅在剧情自然、确有必要时使用附件，普通文字聊天优先，不要为了凑数强行发送附件。${regenerate ? '本次是重生成，不得再次发红包、转账或礼物，以免重复入账。' : '角色发给玩家的红包和转账会直接加入玩家支付宝个人余额，不会扣玩家的钱。可选 gift 字段仅允许 {"existingProductId":"现有商品ID"} 或 {"title":"新商品名","desc":"描述","price":数字,"category":"shopping或eleme","emoji":"emoji"}，只在剧情自然时由主要角色提供；NPC不使用 gift 字段。'}${chat.type === 'group' && chat.allowAgentGroupRename ? '可选 groupTitle 和 groupNicknames 字段，只在情节自然需要时修改群名或昵称。' : ''}群聊的 speakerId 必须从以下成员 ID 中选择：${chatMembers.map((member) => `${member.id}（${member.name}）`).join(', ')}。${chat.type === 'group' && chat.allowAgentGroupRename ? 'groupNicknames 的键只能使用上方成员 ID。' : ''}${chat.type === 'observer' ? '这是旁观群聊，user不在群里；不得生成发给玩家的红包、转账或礼物；根据角色之间的对话和旁白情境继续由群成员发言。' : ''}`,
         ...(activeCallMode === 'video'
           ? ['当前为视频通话，请在角色的每次回复最前方先写一段用小括号包裹的可视动作描写，再接角色说的话。']
           : []),
         ...(momentsInjection.marks.length > 0
           ? ['上文【朋友圈动态】里有角色尚未读过的朋友圈。可以在 reply 中自然提及；也可以额外返回可选字段 momentActions（最多 3 项）：[{"postId":"朋友圈ID","charId":"主要角色ID","type":"like 或 comment","content":"评论内容（type 为 comment 时必填，不超过 40 字）","replyToName":"可选，被回复者姓名"}]。postId 和 charId 必须来自上文，没有想互动时不要返回该字段。']
           : []),
+        ...(couplePendingCharId
+          ? ['玩家向你发来了情侣空间邀请（见上文）。请根据人设与你们的关系自行决定：同意则额外返回字段 "coupleSpaceAction":"accept"，婉拒则返回 "coupleSpaceAction":"decline"；并在 reply 中自然地表态。不要返回其他值。']
+          : []),
+        ...(allowCharInvite
+          ? ['如果你决定主动邀请玩家开通情侣空间（见上文【情侣空间】说明），请额外返回 "coupleSpaceAction":"invite"；否则不要返回该字段。']
+          : []),
       ].join('\n');
       promptMessages.splice(promptMessages.length - 1, 0, {
         role: 'system',
         content: responseInstructions,
       });
+      writeStorageString(
+        `yyphone:last-prompt:${chat.id}`,
+        promptMessages.map((message) => `【${message.role}】\n${message.content}`).join('\n\n────────\n\n')
+      );
 
       const endpoint = apiPreset.endpoint.trim().replace(/\/+$/, '');
       const model = apiPreset.model?.trim() || 'gpt-4o-mini';
@@ -2291,11 +2708,13 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
       let reply = responseText.trim();
       let replyParts: GeneratedAiMessage[] = [{ text: reply }];
       let thought = '';
+      let aiReaction: { emoji: string; target: string } | null = null;
       let speakerId = contact.id;
       let generatedGroupTitle: string | undefined;
       let generatedGroupNicknames: Record<string, string> | undefined;
       let generatedGift: Record<string, unknown> | undefined;
       const momentActions: MomentChatAction[] = [];
+      let coupleDecision: 'accept' | 'decline' | 'invite' | null = null;
       let result: unknown;
       try {
         result = JSON.parse(reply.replace(/^```(?:json)?\s*|\s*```$/g, ''));
@@ -2334,10 +2753,12 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
               : kind === 'link' ? title ?? '' : content ?? '';
             const message: GeneratedAiMessage = { text, ...(kind ? { kind } : {}) };
             if (title) message.title = title;
+            if (typeof part.quote === 'string' && part.quote.trim()) message.quoteText = part.quote.trim().slice(0, 80);
             if (source) message.source = source;
             if (content) message.content = content;
             if (kind === 'sticker') {
-              const sticker = stickers.find((item) => item.id === part.stickerId);
+              const sticker = allStickers.find((item) => item.id === part.stickerId)
+                ?? allStickers.find((item) => item.description === (part.stickerId ?? part.text));
               if (!sticker) throw new Error('AI 选择了不存在的表情包，已取消本次回复。');
               message.imageUrl = sticker.imageUrl;
               message.text = text || sticker.description;
@@ -2376,6 +2797,21 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
           reply = replyParts.map((part) => part.text).join('\n');
         }
         if (typeof record.thought === 'string') thought = record.thought.trim();
+        if (record.reaction && typeof record.reaction === 'object' && !Array.isArray(record.reaction)) {
+          const raw = record.reaction as Record<string, unknown>;
+          if (typeof raw.emoji === 'string' && (MESSAGE_REACTIONS as readonly string[]).includes(raw.emoji)) {
+            aiReaction = { emoji: raw.emoji, target: typeof raw.target === 'string' ? raw.target.trim().slice(0, 80) : '' };
+          }
+        }
+        if (record.musicAction && typeof record.musicAction === 'object' && !Array.isArray(record.musicAction)) {
+          const wantedTitle = (record.musicAction as Record<string, unknown>).play;
+          const snapshot = readMusicPlaybackSnapshot();
+          const trackToPlay = typeof wantedTitle === 'string' ? findMusicTrackByTitle(wantedTitle) : undefined;
+          // 仅当“一起听”正开启且所选角色在本聊天中时，才允许切歌。
+          if (trackToPlay && snapshot?.isPlaying && snapshot.togetherEnabled && chat.participantIds.includes(snapshot.companionId)) {
+            musicPlayer.selectTrack(trackToPlay.id);
+          }
+        }
         if (Array.isArray(record.momentActions) && momentsInjection.marks.length > 0) {
           record.momentActions.slice(0, 3).forEach((rawAction) => {
             if (!rawAction || typeof rawAction !== 'object' || Array.isArray(rawAction)) return;
@@ -2399,6 +2835,12 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
               });
             }
           });
+        }
+        if (couplePendingCharId && (record.coupleSpaceAction === 'accept' || record.coupleSpaceAction === 'decline')) {
+          coupleDecision = record.coupleSpaceAction;
+        }
+        if (allowCharInvite && record.coupleSpaceAction === 'invite') {
+          coupleDecision = 'invite';
         }
         if (record.gift && typeof record.gift === 'object' && !Array.isArray(record.gift)) {
           generatedGift = record.gift as Record<string, unknown>;
@@ -2509,7 +2951,13 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
       );
       const replyMessages: ChatMessage[] = deliverableParts.map((part, index) => {
         const speakerName = getChatParticipantName(chat, speakerId);
-        const { kind: partKind, ...rest } = part;
+        const { kind: partKind, quoteText, ...rest } = part;
+        const quoted = quoteText
+          ? [...chat.messages].reverse().slice(0, 40).find(
+              (item) => item.senderId !== 'narrator' && item.kind !== 'pat' && item.text &&
+                (item.text.includes(quoteText) || quoteText.includes(item.text))
+            )
+          : undefined;
         if (partKind === 'narration') {
           return {
             ...rest,
@@ -2521,8 +2969,9 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
           };
         }
         return {
-          ...part,
+          ...rest,
           kind: partKind,
+          ...(quoted ? { replyTo: makeReplyRef(chat, quoted) } : {}),
           id: `message-${replyTimestamp}-${Math.random().toString(36).slice(2, 7)}`,
           replyBatchId,
           senderId: speakerId,
@@ -2537,6 +2986,13 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
       });
       if (replyMessages.length === 0) throw new Error('AI 没有返回可显示的消息，请重试。');
       const latestReplyMessage = replyMessages[replyMessages.length - 1];
+      // 角色只能给玩家的消息贴表情：默认贴最近一条，或按 target 文字匹配
+      const reactionTargetId = aiReaction && chat.type !== 'observer'
+        ? ([...chat.messages].reverse().slice(0, 20).find(
+            (item) => item.senderId === 'user' && item.kind !== 'pat' &&
+              (!aiReaction!.target || (item.text && (item.text.includes(aiReaction!.target) || aiReaction!.target.includes(item.text))))
+          ) ?? [...chat.messages].reverse().find((item) => item.senderId === 'user' && item.kind !== 'pat'))?.id
+        : undefined;
       const replySaved = updateChat(chat.id, (current) => ({
         ...current,
         messages: [
@@ -2544,7 +3000,11 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
             replacedReplyBatchId
               ? item.replyBatchId !== replacedReplyBatchId
               : item.id !== replacedMessageId
-          ),
+          ).map((item) => {
+            if (!aiReaction || item.id !== reactionTargetId) return item;
+            const others = (item.reactions ?? []).filter((reaction) => reaction.by !== speakerId);
+            return { ...item, reactions: [...others, { by: speakerId, emoji: aiReaction.emoji }] };
+          }),
           ...replyMessages,
         ],
         updatedAt: latestReplyMessage.createdAt,
@@ -2555,6 +3015,60 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
       }));
       // Only now is the reply final, so the delivered moments count as read.
       if (replySaved) applyMomentsAfterChat(momentsInjection, momentActions);
+      if (replySaved) {
+        applyCoupleSeenAfterChat(coupleInjection);
+        applyPlantSeenAfterChat(plantInjection);
+        markMemoriesRecalled(memoryInjection.ids);
+        void maybeAutoExtractMemory(chat.participantIds, chat.type);
+        void maybeAutoJournal(chat.participantIds, chat.type).then(() => maybeAutoGrowth(chat.participantIds, chat.type));
+      }
+      if (replySaved && coupleCharId && coupleDecision === 'invite') {
+        const inviteTime = new Date().toISOString();
+        const spaceNow = readCoupleSpaces()[coupleCharId];
+        if (!spaceNow || spaceNow.bindStatus === 'unbound') {
+          updateCoupleSpace(coupleCharId, (space) => ({
+            ...space,
+            bindStatus: 'pending_user',
+            inviteMessage: `「${contact.name}」向你发来了情侣空间绑定邀请，快去微信里回应吧。`,
+          }));
+          updateChat(chat.id, (current) => ({
+            ...current,
+            messages: [
+              ...current.messages,
+              {
+                id: `message-${Date.now()}-invite`,
+                senderId: coupleCharId,
+                text: '情侣空间邀请',
+                kind: 'couple-invite',
+                title: `${contact.name}邀请你开通情侣空间`,
+                inviteFrom: 'char',
+                inviteStatus: 'pending',
+                createdAt: inviteTime,
+              },
+            ],
+          }));
+        }
+      }
+      if (replySaved && couplePendingCharId && coupleDecision && coupleDecision !== 'invite') {
+        const accepted = coupleDecision === 'accept';
+        updateCoupleSpace(couplePendingCharId, (space) =>
+          space.bindStatus === 'pending_char'
+            ? {
+                ...space,
+                bindStatus: accepted ? 'bound' : 'unbound',
+                ...(accepted ? { startDate: localDateString() } : {}),
+              }
+            : space
+        );
+        updateChat(chat.id, (current) => ({
+          ...current,
+          messages: current.messages.map((item) =>
+            item.kind === 'couple-invite' && item.inviteStatus === 'pending'
+              ? { ...item, inviteStatus: accepted ? 'accepted' : 'declined' }
+              : item
+          ),
+        }));
+      }
     } catch (error) {
       console.error('Could not generate AI chat reply.', error);
       setChatError(error instanceof Error ? error.message : 'AI 回复失败，请检查网络与 API 配置。');
@@ -2772,6 +3286,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
               </p>
             )}
             <div
+              ref={chatScrollRef}
               className="flex-1 min-h-0 overflow-y-auto no-scrollbar p-3 space-y-3"
               style={chatAppearance.backgroundUrl ? {
                 backgroundImage: `linear-gradient(rgba(243,246,250,.38), rgba(243,246,250,.38)), url("${chatAppearance.backgroundUrl}")`,
@@ -2797,7 +3312,14 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                   </div>
                 ) : null;
               })()}
-              {activeChat.messages.filter((message) => !hiddenMessageIds.includes(message.id)).slice(-visibleMessageCount).map((message) => {
+              {activeChat.messages.filter((message) => !hiddenMessageIds.includes(message.id)).slice(-visibleMessageCount).flatMap((message, messageIndex, visibleList) => {
+                const previousMessage = visibleList[messageIndex - 1];
+                const divider = shouldShowTimestamp(previousMessage?.createdAt, message.createdAt) ? (
+                  <div key={`time-${message.id}`} className="py-1 text-center text-[10px] text-slate-400">
+                    {formatChatTimestamp(message.createdAt)}
+                  </div>
+                ) : null;
+                const rendered = (() => {
                 const messageActions = selectedMessageId === message.id && (
                   <div className={`mt-1 flex gap-1.5 text-[10px] ${message.senderId === 'user' ? 'justify-end' : ''} ${message.senderId === 'narrator' || message.kind === 'pat' ? 'justify-center' : ''}`}>
                     {message.kind !== 'pat' && !['image', 'sticker', 'red-packet', 'transfer', 'forum-forward', 'pomodoro-share'].includes(message.kind ?? '') && (
@@ -2807,6 +3329,52 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                     {message.senderId !== 'user' && message.senderId !== 'narrator' && activeChat.type !== 'observer' && (
                       <button type="button" onClick={() => { sendPat(message.senderId); setSelectedMessageId(''); }} className="rounded-full bg-white/80 px-2.5 py-0.5 text-violet-500 shadow-sm">拍一拍</button>
                     )}
+                  </div>
+                );
+                const richMenu = reactionMenuId === message.id && (
+                  <div className={`mb-1 flex flex-col gap-1 ${message.senderId === 'user' ? 'items-end' : 'items-start'}`}>
+                    {message.senderId !== 'narrator' && message.kind !== 'pat' && (
+                      <div className="flex items-center gap-0.5 rounded-full border border-white/80 bg-white/85 px-1.5 py-1 shadow-[0_6px_18px_rgba(125,150,185,0.22)] backdrop-blur-xl">
+                        {MESSAGE_REACTIONS.map((emoji) => (
+                          <button
+                            key={emoji}
+                            type="button"
+                            aria-label={`贴表情${emoji}`}
+                            onClick={() => toggleReaction(message.id, emoji)}
+                            className={`h-7 w-7 rounded-full text-base leading-none transition-transform active:scale-90 ${
+                              message.reactions?.some((item) => item.by === 'user' && item.emoji === emoji) ? 'bg-sky-100' : ''
+                            }`}
+                          >
+                            {emoji}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <div className="flex items-center gap-1 text-[10px]">
+                      {message.senderId !== 'narrator' && message.kind !== 'pat' && activeChat.type !== 'observer' && (
+                        <button
+                          type="button"
+                          onClick={() => { setReplyingTo(message); setReactionMenuId(''); }}
+                          className="rounded-full bg-white/85 px-2.5 py-1 text-slate-500 shadow-sm"
+                        >
+                          引用
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => { setReactionMenuId(''); setSelectMode(true); setSelectedIds([message.id]); }}
+                        className="rounded-full bg-white/85 px-2.5 py-1 text-slate-500 shadow-sm"
+                      >
+                        多选
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setReactionMenuId('')}
+                        className="rounded-full bg-white/60 px-2.5 py-1 text-slate-400 shadow-sm"
+                      >
+                        关闭
+                      </button>
+                    </div>
                   </div>
                 );
                 const editor = editingMessage?.id === message.id && (
@@ -2822,13 +3390,36 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                     <button type="button" onClick={() => setEditingMessage(null)} className="rounded-lg bg-slate-200 px-2 py-1 text-[10px] text-slate-600">取消</button>
                   </div>
                 );
+                if (message.kind === 'context-note') {
+                  return (
+                    <div key={message.id} className="py-1.5 text-center">
+                      {richMenu}
+                      <button
+                        type="button"
+                        onClick={() => handleMessageTap(message.id)}
+                        {...messagePress(message.id)}
+                        className="mx-auto block max-w-[88%] rounded-2xl border border-white/80 bg-gradient-to-br from-pink-50/90 to-sky-50/90 px-3.5 py-2 text-center"
+                      >
+                        <span className="block text-[10px] font-semibold text-[#6F8CA0]">
+                          {message.source === 'offline' ? `📖 ${message.title} · 已写入记忆` : `🫧 ${message.title}记忆已同步`}
+                        </span>
+                        {message.content && (
+                          <span className="mt-1 block line-clamp-3 text-[10px] leading-relaxed text-slate-400">{message.content}</span>
+                        )}
+                      </button>
+                      {messageActions}
+                    </div>
+                  );
+                }
                 if (message.senderId === 'narrator') {
                   if (!activeChat.narratorEnabled && activeChat.type !== 'observer') return null;
                   return (
                     <div key={message.id} className="py-1 text-center">
+                      {richMenu}
                       <button
                         type="button"
-                        onClick={() => setSelectedMessageId(selectedMessageId === message.id ? '' : message.id)}
+                        onClick={() => handleMessageTap(message.id)}
+                        {...messagePress(message.id)}
                         className="mx-auto block max-w-[85%] rounded-2xl bg-[#FBE4EC]/90 px-3 py-1 text-center text-[10px] leading-relaxed text-slate-400"
                       >
                         {message.text}
@@ -2841,9 +3432,11 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                 if (message.kind === 'pat') {
                   return (
                     <div key={message.id} className="py-1 text-center">
+                      {richMenu}
                       <button
                         type="button"
-                        onClick={() => setSelectedMessageId(selectedMessageId === message.id ? '' : message.id)}
+                        onClick={() => handleMessageTap(message.id)}
+                        {...messagePress(message.id)}
                         className="text-[10px] text-slate-400"
                       >
                         {message.text}
@@ -2856,25 +3449,36 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                 const sender = contacts.find((contact) => contact.id === message.senderId) ??
                   getNpcByParticipantId(characterNpcs, message.senderId);
                 const isShareCard = message.kind === 'forum-forward' || message.kind === 'pomodoro-share';
-                const isSpecialBubble = isShareCard || ['video-call', 'location', 'red-packet', 'transfer', 'link', 'order'].includes(message.kind ?? '');
+                const isSpecialBubble = isShareCard || ['video-call', 'location', 'red-packet', 'transfer', 'link', 'order', 'couple-invite', 'phone-share'].includes(message.kind ?? '');
                 return (
                   <div
                     key={message.id}
-                    className={`yy-chat-message-row flex items-start gap-2 ${isUserMessage ? 'is-user flex-row-reverse' : 'is-character'}`}
+                    onClick={selectMode ? (event) => { if (event.target === event.currentTarget) handleMessageTap(message.id); } : undefined}
+                    className={`yy-chat-message-row flex items-start gap-2 ${selectMode ? 'relative pl-7' : ''} ${isUserMessage ? 'is-user flex-row-reverse' : 'is-character'}`}
                   >
+                    {selectMode && (
+                      <span className={`absolute left-0 top-2 flex h-5 w-5 items-center justify-center rounded-full border text-[10px] ${selectedIds.includes(message.id) ? 'border-transparent bg-gradient-to-br from-pink-300 to-sky-300 text-white' : 'border-slate-300 bg-white/70'}`}>
+                        {selectedIds.includes(message.id) ? '✓' : ''}
+                      </span>
+                    )}
                     {isUserMessage ? (
-                      <div className="yy-chat-avatar h-8 w-8 shrink-0 overflow-hidden rounded-xl bg-sky-100 text-xs font-bold text-sky-800 flex items-center justify-center">
+                      <button
+                        type="button"
+                        aria-label="双击拍一拍自己"
+                        onClick={() => handleAvatarTap('user')}
+                        className="yy-chat-avatar h-8 w-8 shrink-0 overflow-hidden rounded-xl bg-sky-100 text-xs font-bold text-sky-800 flex items-center justify-center"
+                      >
                         {(activeChat.avatars.user || personaDraft.avatarUrl)
                           ? <img src={activeChat.avatars.user || personaDraft.avatarUrl} alt="" className="h-full w-full object-cover" />
                           : personaDraft.name.trim().charAt(0) || '我'}
-                      </div>
+                      </button>
                     ) : (
                       <button
                         type="button"
-                        onClick={() => setActiveThought({
+                        onClick={() => handleAvatarTap(message.senderId, () => setActiveThought({
                           name: sender?.name ?? '角色',
                           thought: message.thought || '这条消息没有记录角色心声。',
-                        })}
+                        }))}
                         aria-label={`查看${sender?.name ?? '角色'}的心声`}
                         className="yy-chat-avatar h-8 w-8 shrink-0 overflow-hidden rounded-xl bg-sky-100 text-xs font-bold text-sky-800 flex items-center justify-center"
                       >
@@ -2884,34 +3488,43 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                       </button>
                     )}
                     <div className={`flex max-w-[78%] min-w-0 flex-col ${isUserMessage ? 'items-end' : 'items-start'}`}>
+                    {richMenu}
+                    <div className="relative max-w-full">
                     <div
-                      onClick={() => setSelectedMessageId(selectedMessageId === message.id ? '' : message.id)}
+                      onClick={() => handleMessageTap(message.id)}
+                      {...messagePress(message.id)}
                       style={activeChat.fontSize ? { fontSize: `${activeChat.fontSize}px` } : undefined}
                       className={`yy-chat-message-bubble ${isSpecialBubble ? 'is-special' : ''} ${isUserMessage ? 'is-user text-slate-800' : 'is-character text-slate-700'} rounded-2xl px-3 py-2 text-xs leading-relaxed`}
                     >
+                      {message.replyTo && (
+                        <div className="mb-1.5 rounded-lg border-l-2 border-sky-200/80 bg-white/55 px-2 py-1 text-[10px] leading-snug text-slate-400">
+                          <span className="font-semibold text-slate-500">{message.replyTo.senderName}</span>
+                          <p className="line-clamp-2">{message.replyTo.text}</p>
+                        </div>
+                      )}
                       {message.kind === 'video-call' ? (
-                        <div className="flex items-center gap-2"><Video className="h-4 w-4" />{message.text}</div>
+                        <div className="flex items-center gap-2 rounded-2xl border border-white/80 bg-gradient-to-br from-sky-50/90 to-blue-100/70 px-3 py-2 text-[#4B6F86] shadow-[0_4px_14px_rgba(125,160,200,0.15)]"><Video className="h-4 w-4" />{message.text}</div>
                       ) : message.kind === 'location' ? (
-                        <div className="flex items-center gap-2"><MapPin className="h-4 w-4 text-rose-500" />{message.text}</div>
+                        <div className="flex items-center gap-2 rounded-2xl border border-white/80 bg-gradient-to-br from-pink-50/90 to-sky-50/80 px-3 py-2 text-[#6B6F86] shadow-[0_4px_14px_rgba(200,150,180,0.15)]"><MapPin className="h-4 w-4 text-pink-400" />{message.text}</div>
                       ) : message.kind === 'red-packet' ? (
-                        <div className="min-w-36 rounded-xl bg-gradient-to-br from-orange-400 to-rose-500 p-3 text-white">
-                          <div className="flex items-center gap-2 font-semibold"><Gift className="h-5 w-5" />{activeChat.type === 'group' ? '拼手气红包' : '微信红包'}</div>
+                        <div className="min-w-36 rounded-2xl border border-white/80 bg-gradient-to-br from-pink-100/95 to-rose-50/90 p-3 text-[#9A5568] shadow-[0_6px_18px_rgba(240,150,180,0.22)]">
+                          <div className="flex items-center gap-2 font-semibold"><Gift className="h-5 w-5 text-pink-400" />{activeChat.type === 'group' ? '拼手气红包' : '微信红包'}</div>
                           <p className="mt-2 text-lg font-bold">¥{message.amount}</p>
-                          {message.quantity && <p className="text-[10px] opacity-90">共 {message.quantity} 个</p>}
-                          <p className="text-[10px] opacity-90">{message.text}</p>
+                          {message.quantity && <p className="text-[10px] opacity-80">共 {message.quantity} 个</p>}
+                          <p className="text-[10px] opacity-80">{message.text}</p>
                           {message.senderId !== 'user' && message.recipientId === 'user' && (
-                            <p className="mt-1 border-t border-white/30 pt-1 text-[9px] opacity-90">已存入支付宝个人余额</p>
+                            <p className="mt-1 border-t border-pink-200/70 pt-1 text-[9px] opacity-80">已存入支付宝个人余额</p>
                           )}
                         </div>
                       ) : message.kind === 'transfer' ? (
-                        <div className="min-w-36 rounded-xl bg-gradient-to-br from-amber-400 to-orange-500 p-3 text-white">
-                          <div className="flex items-center gap-2 font-semibold"><Wallet className="h-5 w-5" />微信转账</div>
+                        <div className="min-w-36 rounded-2xl border border-white/80 bg-gradient-to-br from-sky-100/95 to-indigo-50/90 p-3 text-[#3F6783] shadow-[0_6px_18px_rgba(125,170,220,0.22)]">
+                          <div className="flex items-center gap-2 font-semibold"><Wallet className="h-5 w-5 text-sky-400" />微信转账</div>
                           <p className="mt-2 text-lg font-bold">¥{message.amount}</p>
-                          {message.recipientId && <p className="text-[10px] opacity-90">给 {getChatParticipantName(activeChat, message.recipientId)}</p>}
-                          {message.payerId && <p className="text-[10px] opacity-90">由 {contactName(message.payerId)} 的亲密付付款</p>}
-                          <p className="text-[10px] opacity-90">{message.text}</p>
+                          {message.recipientId && <p className="text-[10px] opacity-80">给 {getChatParticipantName(activeChat, message.recipientId)}</p>}
+                          {message.payerId && <p className="text-[10px] opacity-80">由 {contactName(message.payerId)} 的亲密付付款</p>}
+                          <p className="text-[10px] opacity-80">{message.text}</p>
                           {message.senderId !== 'user' && message.recipientId === 'user' && (
-                            <p className="mt-1 border-t border-white/30 pt-1 text-[9px] opacity-90">已存入支付宝个人余额</p>
+                            <p className="mt-1 border-t border-sky-200/70 pt-1 text-[9px] opacity-80">已存入支付宝个人余额</p>
                           )}
                         </div>
                       ) : isShareCard ? (
@@ -2965,6 +3578,80 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                             {message.amount && <span className="shrink-0 font-bold text-[#E882A6]">¥{message.amount}</span>}
                           </div>
                         </div>
+                      ) : message.kind === 'phone-share' ? (
+                        <div className="w-52 overflow-hidden rounded-2xl border border-white/80 bg-gradient-to-br from-sky-50/90 to-pink-50/90 shadow-[0_6px_18px_rgba(125,160,200,0.15)]">
+                          <div className="px-3 pt-2.5 text-[10px] font-semibold text-[#6F8CA0]">
+                            {message.shareMode === 'memory' ? '🫧 TA的记忆' : '📱 我查到的手机内容'}
+                          </div>
+                          <p className="px-3 pt-1.5 text-[11px] font-bold leading-snug text-[#2C4A5C]">{message.title}</p>
+                          {message.content && <p className="line-clamp-3 px-3 py-1.5 text-[10px] leading-snug text-slate-500">{message.content}</p>}
+                          <div className="border-t border-white/80 px-3 py-1.5 text-[9px] text-slate-400">{message.source}</div>
+                        </div>
+                      ) : message.kind === 'couple-invite' ? (
+                        <div className="w-52 overflow-hidden rounded-2xl border border-white/80 bg-gradient-to-br from-pink-50/90 to-sky-50/90 shadow-[0_6px_18px_rgba(125,160,200,0.15)]">
+                          <div className="px-3 pt-2.5 text-[10px] font-semibold text-[#6F8CA0]">💞 情侣空间邀请</div>
+                          <p className="px-3 py-2 text-[11px] font-bold leading-snug text-[#2C4A5C]">
+                            {message.title || '邀请你开通情侣空间'}
+                          </p>
+                          <div className="border-t border-white/80 px-3 py-2 text-[10px]">
+                            {message.inviteStatus === 'pending' && message.inviteFrom === 'char' ? (
+                              <div className="flex gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const chatId = activeChat?.id;
+                                    const charId = activeChat?.participantIds[0];
+                                    if (!chatId || !charId) return;
+                                    updateCoupleSpace(charId, (space) => ({
+                                      ...space,
+                                      bindStatus: 'bound',
+                                      startDate: localDateString(),
+                                    }));
+                                    updateChat(chatId, (current) => ({
+                                      ...current,
+                                      messages: [
+                                        ...current.messages.map((item) =>
+                                          item.id === message.id ? { ...item, inviteStatus: 'accepted' as const } : item
+                                        ),
+                                        {
+                                          id: `message-${Date.now()}-couple`,
+                                          senderId: 'user',
+                                          text: '我同意啦，我们一起开通情侣空间吧 💞',
+                                          createdAt: new Date().toISOString(),
+                                        },
+                                      ],
+                                    }));
+                                  }}
+                                  className="flex-1 rounded-full bg-gradient-to-r from-[#E8A9BE] to-[#9FC4E2] py-1 font-bold text-white"
+                                >
+                                  同意
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const chatId = activeChat?.id;
+                                    const charId = activeChat?.participantIds[0];
+                                    if (!chatId || !charId) return;
+                                    updateCoupleSpace(charId, (space) => ({ ...space, bindStatus: 'unbound' }));
+                                    updateChat(chatId, (current) => ({
+                                      ...current,
+                                      messages: current.messages.map((item) =>
+                                        item.id === message.id ? { ...item, inviteStatus: 'declined' as const } : item
+                                      ),
+                                    }));
+                                  }}
+                                  className="rounded-full bg-white/80 px-3 py-1 text-slate-400"
+                                >
+                                  婉拒
+                                </button>
+                              </div>
+                            ) : (
+                              <span className="text-slate-400">
+                                {message.inviteStatus === 'accepted' ? '已同意 · 空间已开通' : message.inviteStatus === 'declined' ? '已婉拒' : message.inviteStatus === 'withdrawn' ? '已撤回' : '等待对方回应'}
+                              </span>
+                            )}
+                          </div>
+                        </div>
                       ) : message.kind === 'link' ? (
                         <div className="min-w-40 rounded-xl bg-white/80 p-2.5">
                           <div className="flex items-center gap-1.5 font-semibold"><Link className="h-3.5 w-3.5 text-sky-600" />{message.title}</div>
@@ -2972,13 +3659,11 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                           {message.source && <p className="mt-1 text-[9px] text-slate-400">{message.source}</p>}
                         </div>
                       ) : message.kind === 'sticker' && message.imageUrl ? (
-                        <div className="space-y-1">
-                          <img src={message.imageUrl} alt={message.text} className="h-24 w-24 rounded-xl object-contain" />
-                          <p className="text-[10px] text-slate-500">{message.text}</p>
-                        </div>
+                        <img src={message.imageUrl} alt={message.text} className="h-24 w-24 rounded-xl object-contain" />
+
                       ) : message.kind === 'voice' ? (
-                        <div className="min-w-32">
-                          <div className="flex items-center gap-2"><Mic className="h-4 w-4" /><span className="tracking-[2px]">▂▅▃▇▂</span><span>语音</span></div>
+                        <div className="min-w-32 rounded-xl bg-gradient-to-r from-pink-50/80 to-sky-50/80 px-1 py-0.5">
+                          <div className="flex items-center gap-2 text-[#6F8CA0]"><Mic className="h-4 w-4" /><span className="tracking-[2px] text-pink-300">▂▅▃▇▂</span><span>语音</span></div>
                           <p className="mt-1 border-t border-slate-200/70 pt-1 text-[10px]">{message.text}</p>
                         </div>
                       ) : message.kind === 'image' ? (
@@ -2991,14 +3676,52 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                         )
                       ) : message.text}
                     </div>
+                    {message.reactions && message.reactions.length > 0 && (
+                      <div className={`absolute -top-3 flex gap-0.5 ${isUserMessage ? '-left-2' : '-right-2'}`}>
+                        {message.reactions.map((reaction) => (
+                          <span
+                            key={`${reaction.by}-${reaction.emoji}`}
+                            className="rounded-full border border-white/90 bg-white/90 px-1 py-0.5 text-[11px] leading-none shadow-[0_2px_8px_rgba(125,150,185,0.25)]"
+                          >
+                            {reaction.emoji}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    </div>
                     {editor}
                     {messageActions}
                     </div>
                   </div>
                 );
+                })();
+                return [divider, rendered];
               })}
             </div>
-            {activeChat.blocked ? (
+            {selectMode ? (
+              <div className="flex items-center justify-between gap-2 border-t border-white/70 bg-white/80 p-3">
+                <button type="button" onClick={exitSelectMode} className="rounded-xl bg-slate-100 px-3 py-2 text-xs text-slate-600">取消</button>
+                <span className="text-[11px] text-slate-500">已选 {selectedIds.length} 条</span>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    disabled={selectedIds.length === 0}
+                    onClick={() => { setForwardTargetIds([]); setForwardOpen(true); }}
+                    className="rounded-xl bg-gradient-to-r from-[#fbcfe8] to-[#bae6fd] px-3 py-2 text-xs font-bold text-[#2C4A5C] disabled:opacity-40"
+                  >
+                    转发
+                  </button>
+                  <button
+                    type="button"
+                    disabled={selectedIds.length === 0}
+                    onClick={deleteSelectedMessages}
+                    className="rounded-xl bg-rose-50 px-3 py-2 text-xs font-bold text-rose-500 disabled:opacity-40"
+                  >
+                    删除
+                  </button>
+                </div>
+              </div>
+            ) : activeChat.blocked ? (
               <p className="border-t border-slate-200 bg-white/70 p-3 text-center text-xs text-rose-600">
                 此对话已拉黑，无法发送消息。
               </p>
@@ -3034,6 +3757,16 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                 </button>
               </form>
             ) : (
+              <>
+              {replyingTo && (
+                <div className="flex items-center gap-2 border-t border-white/70 bg-white/70 px-3 pt-2 text-[10px] text-slate-400">
+                  <span className="h-6 w-0.5 shrink-0 rounded-full bg-sky-200" />
+                  <p className="min-w-0 flex-1 truncate">
+                    回复 <span className="font-semibold text-slate-500">{makeReplyRef(activeChat, replyingTo).senderName}</span>：{describeMessageBrief(replyingTo)}
+                  </p>
+                  <button type="button" aria-label="取消引用" onClick={() => setReplyingTo(null)} className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-slate-400">✕</button>
+                </div>
+              )}
               <form
                 onSubmit={(event) => {
                   event.preventDefault();
@@ -3064,13 +3797,9 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                   onChange={(event) => setChatMessageDraft(event.target.value)}
                   placeholder="输入消息"
                   aria-label="输入聊天消息"
+                  enterKeyHint="send"
                   className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none"
                 />
-                <button type="submit" aria-label="发送消息" className="yy-chat-send h-9 w-9 rounded-xl flex items-center justify-center" style={{ backgroundColor: '#F0E1F0', color: '#88758A' }}>
-                {chatAppearance.sendIconUrl
-                  ? <img src={chatAppearance.sendIconUrl} alt="" className="h-5 w-5 object-contain" />
-                  : <Send className="h-4 w-4" />}
-                </button>
                 <button
                   type="button"
                   aria-label="生成角色回复"
@@ -3082,68 +3811,160 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                   ♡
                 </button>
                 {emojiPanelOpen && (
-                  <div className="absolute bottom-full left-2 z-40 mb-2 w-64 rounded-2xl border border-slate-100 bg-white p-3 shadow-xl">
-                    <div className="grid grid-cols-8 gap-1">
-                      {BASIC_EMOJIS.map((emoji) => (
-                        <button key={emoji} type="button" onClick={() => {
-                          if (saveAttachmentMessage('text', emoji)) setEmojiPanelOpen(false);
-                        }} className="rounded-lg py-1 text-lg hover:bg-slate-100" aria-label={`发送${emoji}`}>{emoji}</button>
-                      ))}
+                  <div className="absolute bottom-full left-2 right-2 z-40 mb-2 rounded-2xl border border-white/80 bg-gradient-to-b from-white/95 to-[#f4f8fc]/95 p-2.5 shadow-xl backdrop-blur">
+                    <div className="flex items-center gap-1.5">
+                      <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto">
+                        {stickerCategories.map((name) => (
+                          <button
+                            key={name}
+                            type="button"
+                            onClick={() => setStickerCategory(name)}
+                            className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] ${stickerCategory === name ? 'bg-gradient-to-r from-pink-100 to-sky-100 font-semibold text-[#6F7F8E]' : 'text-slate-400'}`}
+                          >
+                            {name}
+                          </button>
+                        ))}
+                      </div>
+                      <button type="button" onClick={() => setStickerManageOpen((open) => !open)} className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-[10px] text-slate-500">
+                        {stickerManageOpen ? '返回' : '管理'}
+                      </button>
                     </div>
-                    <div className="my-2 border-t border-slate-100" />
-                    <div className="grid max-h-32 grid-cols-4 gap-2 overflow-y-auto">
-                      {stickers.map((sticker) => (
-                        <button key={sticker.id} type="button" onClick={() => sendSticker(sticker)} className="rounded-lg p-1 hover:bg-slate-100">
-                          <img src={sticker.imageUrl} alt={sticker.description} className="mx-auto h-10 w-10 object-contain" />
-                          <span className="block truncate text-[9px] text-slate-500">{sticker.description}</span>
-                        </button>
-                      ))}
-                      {stickerDrafts.map((sticker) => (
-                        <div key={sticker.id} className="col-span-4 flex items-center gap-2 rounded-lg bg-slate-50 p-1.5">
-                          <img src={sticker.imageUrl} alt="" className="h-9 w-9 object-contain" />
-                          <input
-                            value={sticker.description}
-                            onChange={(event) => setStickerDrafts((drafts) => drafts.map((item) =>
-                              item.id === sticker.id ? { ...item, description: event.target.value } : item
-                            ))}
-                            placeholder="必填：简短介绍"
-                            aria-label="表情包介绍"
-                            className="min-w-0 flex-1 rounded-md border border-slate-200 px-2 py-1 text-[10px] outline-none"
-                          />
-                          <button type="button" onClick={() => saveSticker(sticker)} className="text-[10px] font-semibold text-teal-700">保存</button>
+                    {!stickerManageOpen ? (
+                      <div className="mt-2 grid h-44 grid-cols-4 content-start gap-x-1 gap-y-2 overflow-y-auto">
+                        {stickersInCategory.map((sticker) => (
+                          <button key={sticker.id} type="button" onClick={() => sendSticker(sticker)} className="rounded-lg p-1 hover:bg-slate-100 active:scale-95">
+                            <img src={sticker.imageUrl} alt={sticker.description} className="mx-auto h-14 w-14 object-contain" />
+                            <span className="mt-0.5 block truncate text-[9px] text-slate-500">{sticker.description}</span>
+                          </button>
+                        ))}
+                        {stickersInCategory.length === 0 && (
+                          <p className="col-span-4 pt-12 text-center text-[11px] text-slate-400">这个分类还没有表情包，点右上「管理」导入吧</p>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="mt-2 h-44 space-y-2 overflow-y-auto text-[10px]">
+                        <p className="text-slate-400">当前分类：{stickerCategory}。一行一个，格式「名称: 图片链接」（英文冒号+空格）。</p>
+                        <textarea
+                          value={stickerImportText}
+                          onChange={(event) => setStickerImportText(event.target.value)}
+                          placeholder={'开心: https://example.com/a.png\n委屈: https://example.com/b.gif'}
+                          aria-label="批量导入表情包"
+                          className="h-16 w-full resize-none rounded-lg border border-slate-200 bg-white/80 p-2 outline-none"
+                        />
+                        <div className="flex flex-wrap gap-1.5">
+                          <button type="button" onClick={importStickerLines} className="rounded-lg bg-gradient-to-r from-pink-100 to-sky-100 px-3 py-1.5 font-semibold text-[#6F7F8E]">导入到此分类</button>
+                          <button type="button" onClick={() => void exportStickerCategory()} className="rounded-lg bg-slate-100 px-3 py-1.5 text-slate-500">导出此分类</button>
+                          <button type="button" onClick={() => stickerUploadRef.current?.click()} disabled={isProcessingChatImage} className="rounded-lg bg-slate-100 px-3 py-1.5 text-slate-500">
+                            {isProcessingChatImage ? '压缩中…' : '上传本地图片'}
+                          </button>
                         </div>
-                      ))}
-                    </div>
-                    <button type="button" onClick={() => stickerUploadRef.current?.click()} disabled={isProcessingChatImage} className="mt-2 w-full rounded-lg bg-slate-100 py-2 text-[10px] font-semibold text-slate-600">
-                      {isProcessingChatImage ? '正在压缩…' : '上传表情包（可多选）'}
-                    </button>
+                        {stickerNotice && <p className="text-pink-400">{stickerNotice}</p>}
+                        {stickerDrafts.map((sticker) => (
+                          <div key={sticker.id} className="flex items-center gap-2 rounded-lg bg-slate-50 p-1.5">
+                            <img src={sticker.imageUrl} alt="" className="h-9 w-9 object-contain" />
+                            <input
+                              value={sticker.description}
+                              onChange={(event) => setStickerDrafts((drafts) => drafts.map((item) =>
+                                item.id === sticker.id ? { ...item, description: event.target.value } : item
+                              ))}
+                              placeholder="必填：表情包名称"
+                              aria-label="表情包名称"
+                              className="min-w-0 flex-1 rounded-md border border-slate-200 px-2 py-1 outline-none"
+                            />
+                            <button type="button" onClick={() => saveSticker(sticker)} className="font-semibold text-[#6F7F8E]">保存</button>
+                          </div>
+                        ))}
+                        <div className="flex gap-1.5">
+                          <input
+                            value={stickerNewCategory}
+                            onChange={(event) => setStickerNewCategory(event.target.value)}
+                            placeholder="新分类名称"
+                            aria-label="新分类名称"
+                            className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white/80 px-2 py-1.5 outline-none"
+                          />
+                          <button type="button" onClick={addStickerCategory} className="rounded-lg bg-slate-100 px-3 py-1.5 text-slate-500">新建分类</button>
+                          {stickerCategory !== DEFAULT_STICKER_CATEGORY && !BUILTIN_STICKERS.some((item) => item.category === stickerCategory) && (
+                            <button type="button" onClick={deleteStickerCategory} className="rounded-lg bg-rose-50 px-3 py-1.5 text-rose-400">删除分类</button>
+                          )}
+                        </div>
+                        {stickersInCategory.length > 0 && (
+                          <div className="flex flex-wrap gap-1">
+                            {stickersInCategory.map((sticker) => (
+                              <span key={sticker.id} className="flex items-center gap-1 rounded-full bg-slate-50 px-2 py-0.5 text-slate-500">
+                                {sticker.description}
+                                {!sticker.id.startsWith('builtin-') && (
+                                <button
+                                  type="button"
+                                  aria-label={`删除${sticker.description}`}
+                                  onClick={() => persistStickers(stickers.filter((item) => item.id !== sticker.id))}
+                                  className="text-rose-300"
+                                >×</button>
+                                )}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
                 {composerOpen && (
-                  <div className="absolute bottom-full left-0 right-0 z-30 grid grid-cols-4 gap-y-4 border-t border-slate-100 bg-white/95 px-4 py-4 shadow-[0_-8px_20px_rgba(15,23,42,0.08)]">
+                  <div
+                    className="absolute bottom-full left-0 right-0 z-30 border-t border-white/70 bg-gradient-to-b from-white/95 to-[#f4f8fc]/95 px-4 pb-2 pt-4 shadow-[0_-8px_20px_rgba(15,23,42,0.08)]"
+                    onTouchStart={(event) => { composerTouchStartX.current = event.touches[0].clientX; }}
+                    onTouchEnd={(event) => {
+                      const deltaX = event.changedTouches[0].clientX - composerTouchStartX.current;
+                      if (Math.abs(deltaX) > 40) setComposerPage(deltaX < 0 ? 1 : 0);
+                    }}
+                  >
+                    <div className="grid min-h-[132px] grid-cols-4 content-start gap-y-4">
                     {([
-                      { title: '照片', icon: ImagePlus, run: () => openAttachment('photo') },
-                      { title: '拍摄', icon: Camera, run: () => openAttachment('camera') },
-                      { title: '视频通话', icon: Video, run: () => {
+                      { page: 0, title: '照片', icon: ImagePlus, run: () => openAttachment('photo') },
+                      { page: 0, title: '拍摄', icon: Camera, run: () => openAttachment('camera') },
+                      { page: 0, title: '视频通话', icon: Video, run: () => {
                         setComposerOpen(false);
                         setCallChoiceOpen(true);
                       } },
-                      { title: '位置', icon: MapPin, run: () => openAttachment('location') },
-                      { title: '红包', icon: Gift, run: () => openAttachment('red-packet') },
-                      { title: '重新生成', icon: RefreshCw, run: handleRegenerate },
-                      { title: '转账', icon: Wallet, run: () => openAttachment('transfer') },
-                      { title: '链接', icon: Link, run: () => openAttachment('link') },
-                    ]).map(({ title, icon: Icon, run }) => (
+                      { page: 0, title: '位置', icon: MapPin, run: () => openAttachment('location') },
+                      { page: 0, title: '红包', icon: Gift, run: () => openAttachment('red-packet') },
+                      { page: 0, title: '重新生成', icon: RefreshCw, run: handleRegenerate },
+                      { page: 0, title: '转账', icon: Wallet, run: () => openAttachment('transfer') },
+                      { page: 0, title: '链接', icon: Link, run: () => openAttachment('link') },
+                      { page: 1, title: '语音', icon: Mic, run: () => {
+                        setComposerOpen(false);
+                        setVoiceDraft('');
+                        setVoiceModalOpen(true);
+                      } },
+                      { page: 1, title: '聊天存档', icon: Archive, run: () => {
+                        setComposerOpen(false);
+                        setArchiveOpen(true);
+                      } },
+                    ]).filter((item) => item.page === composerPage).map(({ title, icon: Icon, run }) => (
                       <button key={title} type="button" onClick={run} className="flex flex-col items-center gap-1.5 text-[10px] text-slate-600">
-                        <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-100">
+                        <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-pink-50 to-sky-50 text-[#6F8CA0] shadow-sm">
                           <Icon className="h-5 w-5" />
                         </span>
                         {title}
                       </button>
                     ))}
+                    </div>
+                    <div className="mt-1 flex items-center justify-center gap-1">
+                      {[0, 1].map((page) => (
+                        <button
+                          key={page}
+                          type="button"
+                          aria-label={`第${page + 1}页`}
+                          onClick={() => setComposerPage(page)}
+                          className="flex h-6 w-8 items-center justify-center"
+                        >
+                          <span className={`h-1.5 rounded-full transition-all ${composerPage === page ? 'w-4 bg-[#9DB8CC]' : 'w-1.5 bg-slate-300'}`} />
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 )}
               </form>
+              </>
             )}
             <input
               ref={attachmentInputRef}
@@ -4160,6 +4981,15 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
               )}
             </section>
             <section className="space-y-2 rounded-xl bg-slate-50 p-3">
+              <p className="text-[11px] font-semibold text-[#2C4A5C]">上一轮发送给 AI 的提示词</p>
+              <details className="text-[10px] text-slate-500">
+                <summary className="cursor-pointer">点击展开（只读，生成一次后才有内容）</summary>
+                <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-white p-2 text-[10px] leading-relaxed text-slate-600">
+                  {readStorageString(`yyphone:last-prompt:${chatSettingsDraft.id}`) || '还没有生成过回复。'}
+                </pre>
+              </details>
+            </section>
+            <section className="space-y-2 rounded-xl bg-slate-50 p-3">
               <div className="flex items-center justify-between">
                 <p className="text-[11px] font-semibold text-[#2C4A5C]">聊天字体大小</p>
                 <span className="text-[10px] text-slate-500">{chatSettingsDraft.fontSize ?? 12}px</span>
@@ -4822,7 +5652,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                 event.preventDefault();
                 sendChatMessage();
               }}
-              className="flex items-center gap-2 bg-slate-950 p-3 pb-[env(safe-area-inset-bottom,0px)]"
+              className="flex items-center gap-2 bg-slate-950 p-3"
             >
               <input
                 value={chatMessageDraft}
@@ -4838,6 +5668,71 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
             </form>
           )}
           {chatError && <p role="alert" className="bg-slate-950 px-3 pb-2 text-center text-[10px] text-rose-300">{chatError}</p>}
+        </div>
+      )}
+      {patDialog && activeChat && (
+        <div className="absolute inset-0 z-[70] flex items-center justify-center bg-black/40 p-5 backdrop-blur-sm">
+          <section role="dialog" aria-modal="true" aria-label="拍一拍" className="w-full max-w-sm space-y-3 rounded-3xl bg-white p-5 shadow-2xl">
+            <h2 className="text-base font-bold text-[#2C4A5C]">
+              拍一拍{patDialog.targetId === 'user' ? '自己' : `“${getChatParticipantName(activeChat, patDialog.targetId)}”`}
+            </h2>
+            <input
+              autoFocus
+              value={patDialog.suffix}
+              onChange={(event) => setPatDialog({ ...patDialog, suffix: event.target.value })}
+              maxLength={20}
+              placeholder="可选后缀，如：的脑袋"
+              aria-label="拍一拍后缀"
+              className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs outline-none"
+            />
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setPatDialog(null)} className="flex-1 rounded-xl bg-slate-100 py-2.5 text-xs text-slate-600">取消</button>
+              <button
+                type="button"
+                onClick={() => { sendPat(patDialog.targetId, patDialog.suffix); setPatDialog(null); }}
+                className="flex-1 rounded-xl bg-gradient-to-r from-[#fbcfe8] to-[#bae6fd] py-2.5 text-xs font-bold text-[#2C4A5C]"
+              >
+                拍一拍
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+      {forwardOpen && activeChat && (
+        <div className="absolute inset-0 z-[70] flex items-center justify-center bg-black/40 p-5 backdrop-blur-sm">
+          <section role="dialog" aria-modal="true" aria-label="转发到" className="flex max-h-[80%] w-full max-w-sm flex-col gap-3 rounded-3xl bg-white p-5 shadow-2xl">
+            <h2 className="text-base font-bold text-[#2C4A5C]">转发到（可多选）</h2>
+            <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto">
+              {chats.filter((chat) => chat.id !== activeChat.id && chat.type !== 'observer' && !chat.blocked).map((chat) => {
+                const checked = forwardTargetIds.includes(chat.id);
+                return (
+                  <button
+                    key={chat.id}
+                    type="button"
+                    onClick={() => setForwardTargetIds((ids) => (checked ? ids.filter((id) => id !== chat.id) : [...ids, chat.id]))}
+                    className={`flex w-full items-center gap-2 rounded-xl border px-3 py-2 text-left text-xs ${checked ? 'border-sky-200 bg-sky-50' : 'border-slate-100 bg-slate-50'}`}
+                  >
+                    <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border text-[9px] ${checked ? 'border-transparent bg-sky-400 text-white' : 'border-slate-300'}`}>{checked ? '✓' : ''}</span>
+                    <span className="truncate">{getChatTitle(chat)}</span>
+                  </button>
+                );
+              })}
+              {chats.filter((chat) => chat.id !== activeChat.id && chat.type !== 'observer' && !chat.blocked).length === 0 && (
+                <p className="py-4 text-center text-xs text-slate-400">没有其他可转发的对话</p>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setForwardOpen(false)} className="flex-1 rounded-xl bg-slate-100 py-2.5 text-xs text-slate-600">取消</button>
+              <button
+                type="button"
+                disabled={forwardTargetIds.length === 0}
+                onClick={forwardSelectedMessages}
+                className="flex-1 rounded-xl bg-gradient-to-r from-[#fbcfe8] to-[#bae6fd] py-2.5 text-xs font-bold text-[#2C4A5C] disabled:opacity-40"
+              >
+                转发{forwardTargetIds.length > 0 ? `（${forwardTargetIds.length}）` : ''}
+              </button>
+            </div>
+          </section>
         </div>
       )}
       {archiveOpen && activeChat && (() => {
@@ -4983,7 +5878,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
         </div>
       )}
       {/* WeChat Bottom Sub-Tab Bar */}
-      {!activeChat && <div className="glass-nav border-t border-white/60 px-2 pt-1 pb-[env(safe-area-inset-bottom,0px)] flex items-center justify-around z-20 shrink-0 mt-auto">
+      {!activeChat && <div className="glass-nav border-t border-white/60 px-2 pt-1 pb-1 flex items-center justify-around z-20 shrink-0 mt-auto">
         {[
         { key: 'chats', label: '消息', icon: MessageSquare },
           { key: 'contacts', label: '通讯录', icon: Users },

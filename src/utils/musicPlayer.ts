@@ -116,6 +116,17 @@ const getAudio = () => {
     setState({ isPlaying: false, currentTime: element.currentTime });
     saveSnapshot();
   });
+  element.addEventListener('ended', () => {
+    // 列表循环：播完自动下一首；只有一首时重新播放这一首。
+    const tracks = state.tracks;
+    if (tracks.length === 0) return;
+    if (tracks.length === 1) {
+      element.currentTime = 0;
+      void element.play().catch(() => undefined);
+      return;
+    }
+    musicPlayer.next();
+  });
   element.addEventListener('seeked', () => {
     setState({ currentTime: element.currentTime });
     saveSnapshot();

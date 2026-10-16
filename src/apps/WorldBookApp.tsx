@@ -12,6 +12,7 @@ import {
   X,
 } from 'lucide-react';
 import { AppHeader } from '../components/AppHeader';
+import { useErrorDialog } from '../components/ErrorDialog';
 import { readStoredValue, writeStoredValue } from '../utils/localStorage';
 
 interface WorldBookEntry {
@@ -82,6 +83,7 @@ export const WorldBookApp: React.FC<WorldBookAppProps> = ({ onBack }) => {
   const [bookEditor, setBookEditor] = useState<{ id: string; name: string; isGlobal: boolean } | null>(null);
   const [exportPickerOpen, setExportPickerOpen] = useState(false);
   const [error, setError] = useState('');
+  useErrorDialog(error);
   const importInputRef = useRef<HTMLInputElement>(null);
 
   const selectedBook = books.find((book) => book.id === selectedBookId);
@@ -454,7 +456,7 @@ export const WorldBookApp: React.FC<WorldBookAppProps> = ({ onBack }) => {
         }}
       />
 
-      <div className="relative z-10 flex-1 min-h-0 overflow-y-auto no-scrollbar p-4 space-y-3.5 pb-[env(safe-area-inset-bottom,0px)]">
+      <div className="relative z-10 flex-1 min-h-0 overflow-y-auto no-scrollbar p-4 space-y-3.5">
         <div className="flex items-center gap-2">
           <select
             value={selectedBookId}

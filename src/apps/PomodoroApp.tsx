@@ -28,6 +28,7 @@ import {
   User,
 } from 'lucide-react';
 import { AppHeader } from '../components/AppHeader';
+import { showYyError } from '../components/ErrorDialog';
 import { readAlipayContacts, AlipayContact } from '../utils/alipayData';
 import { readStoredValue, writeStoredValue } from '../utils/localStorage';
 import { compressImage } from '../utils/imageFile';
@@ -36,6 +37,9 @@ import {
   readPomodoroTimer,
   savePomodoroTimer,
 } from '../utils/pomodoroRuntime';
+import { MAX_PLANT_GROWTH, PLANT_SPECIES_LIST, PlantSpecies } from '../utils/plantData';
+import { requestConfiguredAiText } from '../utils/aiApi';
+import { readCharacterBrief } from '../utils/coupleSpaceData';
 
 interface PomodoroAppProps {
   onBack: () => void;
@@ -43,7 +47,19 @@ interface PomodoroAppProps {
 
 type PomoTab = 'timer' | 'tasks' | 'rank' | 'stats';
 type TimerPhase = 'focus' | 'rest';
-type NoiseType = 'off' | 'wind' | 'rain' | 'deep' | 'custom';
+type NoiseTrack = { id: string; name: string; url: string; builtin?: boolean };
+const BUILTIN_RAIN_TRACK: NoiseTrack = {
+  id: 'builtin-rain',
+  name: '🌧️ 雨声',
+  url: 'http://music.163.com/song/media/outer/url?id=5023467.mp3',
+  builtin: true,
+};
+const isNoiseTrackList = (value: unknown): value is NoiseTrack[] =>
+  Array.isArray(value) &&
+  value.every((item) => !!item && typeof item === 'object' &&
+    typeof (item as NoiseTrack).id === 'string' &&
+    typeof (item as NoiseTrack).name === 'string' &&
+    typeof (item as NoiseTrack).url === 'string');
 
 // 任务结构
 export interface PomoTask {
@@ -79,29 +95,21 @@ export interface CharRankItem {
   statusText: string;
 }
 
-// 植物品种定义
-export interface PlantSpecies {
-  id: string;
-  name: string;
-  bloomIcon: string;
-  desc: string;
-}
-
-const PLANT_SPECIES_LIST: PlantSpecies[] = [
-  { id: 'sakura', name: '绯色小樱花', bloomIcon: '🌸', desc: '春风吹过自习桌时盛开的粉白樱花' },
-  { id: 'sunflower', name: '暖阳向日葵', bloomIcon: '🌻', desc: '永远朝着阳光与目标生长的金色花朵' },
-  { id: 'tulip', name: '粉雾郁金香', bloomIcon: '🌷', desc: '安静温柔地见证你们每一次专注的时光' },
-  { id: 'rose', name: '星河红玫瑰', bloomIcon: '🌹', desc: '用耐心与偏爱一滴滴浇灌出的浪漫' },
-  { id: 'clover', name: '幸运四叶草', bloomIcon: '🍀', desc: '据说努力的人一定能收获这株小幸运' },
-  { id: 'hibiscus', name: '夏夜扶桑花', bloomIcon: '🌺', desc: '热烈而鲜活，记录每一次不放弃的坚持' },
-];
-
 // 每个角色专属的花盆进度
 export interface CharacterPot {
   charId: string;
-  speciesId: string;
+  speciesId: string; // 内置品种 id，或 customPlants 里的自定义植物 id
   growthMinutes: number; // 当前这盆花已浇灌的成长分钟数（满 180 即可开花采摘）
-  lastWaterQuote: string; // 最近一次浇水时角色的互动语
+  lastWaterQuote: string; // 最近一次角色（AI 生成）说的话，为空则不显示
+  nickname?: string; // 玩家给这盆植物起的名字
+}
+
+// 玩家自己上传的植物
+export interface CustomPlant {
+  id: string;
+  name: string;
+  imageUrl: string;
+  desc: string;
 }
 
 // 采摘后的植物标本图鉴项
@@ -114,6 +122,8 @@ export interface HarvestedSpecimen {
   bloomIcon: string;
   harvestDate: string;
   commemorativeQuote: string;
+  imageUrl?: string;
+  nickname?: string;
 }
 
 // 温室总数据结构
@@ -121,6 +131,7 @@ export interface GreenhouseState {
   dewDrops: number; // 玩家当前拥有的待浇灌露水数量
   pots: Record<string, CharacterPot>; // key 为 charId，每个角色独立一盆花
   specimens: HarvestedSpecimen[]; // 已采摘收集的标本图鉴列表
+  customPlants?: CustomPlant[];
 }
 
 // 番茄钟专属美化预设
@@ -145,12 +156,11 @@ const DEFAULT_POMO_PRESET: PomoThemePreset = {
   timerCardBgUrl: '',
   primaryGradient: 'linear-gradient(90deg, #8EC5FC 0%, #F5B8D1 100%)',
   cardBg: 'rgba(255, 255, 255, 0.74)',
-  textColor: '#3A5064',
+  textColor: '#7A8B9A',
   cardRadius: '24px',
   customCss: '/* 可在此自定义番茄钟附加样式 */',
 };
 
-const MAX_PLANT_GROWTH = 180; // 每盆花满 180 成长值（浇 6 滴露水）即可盛开采摘
 const todayDateStr = () => new Date().toISOString().slice(0, 10);
 
 const POMODORO_STORAGE_KEYS = {
@@ -162,6 +172,7 @@ const POMODORO_STORAGE_KEYS = {
   activePresetId: 'yyphone:pomodoro-active-preset-id',
   currentTheme: 'yyphone:pomodoro-current-theme',
   shares: 'yyphone:pomodoro-shares',
+  noiseTracks: 'yyphone:pomodoro-noise-tracks',
 } as const;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -261,9 +272,11 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
       typeof value === 'string'
     )
   );
-  const [currentTheme, setCurrentTheme] = useState<PomoThemePreset>(() =>
-    readStoredValue(POMODORO_STORAGE_KEYS.currentTheme, DEFAULT_POMO_PRESET, isThemePreset)
-  );
+  const [currentTheme, setCurrentTheme] = useState<PomoThemePreset>(() => {
+    const stored = readStoredValue(POMODORO_STORAGE_KEYS.currentTheme, DEFAULT_POMO_PRESET, isThemePreset);
+    // 旧版默认的深色文字改成柔和色，用户自定义过的颜色保持不变
+    return stored.textColor === '#3A5064' ? { ...stored, textColor: DEFAULT_POMO_PRESET.textColor } : stored;
+  });
   const [newPresetName, setNewPresetName] = useState<string>('');
   const [showTopMenu, setShowTopMenu] = useState(false);
   const [menuTab, setMenuTab] = useState<'theme' | 'data'>('theme');
@@ -277,18 +290,23 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
   const [activeTaskId, setActiveTaskId] = useState<string>(initialTimer.activeTaskId);
   const lastTimerPhaseRef = useRef<TimerPhase>(initialTimer.phase);
 
-  const [companionBubble, setCompanionBubble] = useState<string>(
-    '准备好开始专注了吗？我就在旁边陪着你，专注完还能一起去温室浇花哦~'
-  );
+  // companionBubble 只放系统提示；角色的话（charLine）只来自 AI 生成
+  const [companionBubble, setCompanionBubble] = useState<string>('');
+  const [charLine, setCharLine] = useState<string>('');
   const [chatToCharInput, setChatToCharInput] = useState<string>('');
   const [isCharReplying, setIsCharReplying] = useState<boolean>(false);
 
   // ==================== 4. 内置免链接白噪音合成器 ====================
-  const [noiseType, setNoiseType] = useState<NoiseType>('off');
+  const [noiseTracks, setNoiseTracks] = useState<NoiseTrack[]>(() => [
+    BUILTIN_RAIN_TRACK,
+    ...readStoredValue<NoiseTrack[]>(POMODORO_STORAGE_KEYS.noiseTracks, [], isNoiseTrackList),
+  ]);
+  const [noiseIndex, setNoiseIndex] = useState(-1);
+  const noiseTracksRef = useRef<NoiseTrack[]>(noiseTracks);
+  const noiseIndexRef = useRef(-1);
   const [customAudioUrl, setCustomAudioUrl] = useState<string>('');
+  const [customAudioName, setCustomAudioName] = useState<string>('');
   const [showNoiseModal, setShowNoiseModal] = useState(false);
-  const audioCtxRef = useRef<AudioContext | null>(null);
-  const noiseNodeRef = useRef<AudioNode | null>(null);
   const customAudioRef = useRef<HTMLAudioElement | null>(null);
 
   // ==================== 5. 任务列表状态 ====================
@@ -300,7 +318,7 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
       category: 'daily',
       focusMinutes: 25,
       restMinutes: 5,
-      completedCount: 1,
+      completedCount: 0,
       isDoneToday: false,
     },
     {
@@ -332,41 +350,42 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
   );
   const [selectedDateStr, setSelectedDateStr] = useState<string>(() => todayDateStr());
 
-  const [greenhouse, setGreenhouse] = useState<GreenhouseState>(() => readStoredValue(
-    POMODORO_STORAGE_KEYS.greenhouse,
-    (() => {
-    const initialPots: Record<string, CharacterPot> = {};
-    contacts.forEach((c, idx) => {
-      const sp = PLANT_SPECIES_LIST[idx % PLANT_SPECIES_LIST.length];
-      initialPots[c.id] = {
-        charId: c.id,
-        speciesId: sp.id,
-        growthMinutes: idx === 0 ? 60 : 0,
-        lastWaterQuote: `这是我和你一起种下的「${sp.name}」，每次专注完记得来给它浇水呀。`,
-      };
-    });
+  const [greenhouse, setGreenhouse] = useState<GreenhouseState>(() => {
+    const stored = readStoredValue(
+      POMODORO_STORAGE_KEYS.greenhouse,
+      { dewDrops: 0, pots: {}, specimens: [], customPlants: [] } as GreenhouseState,
+      isGreenhouseState
+    );
+    // 旧版本写入的预制台词不是角色说的，一次性清掉
+    if (readStoredValue('yyphone:pomodoro-canned-cleared', false, (v): v is boolean => typeof v === 'boolean')) return stored;
     return {
-      dewDrops: 3, // 初始送 3 滴露水方便玩家体验手动浇水
-      pots: initialPots,
-      specimens: [],
+      ...stored,
+      pots: Object.fromEntries(
+        Object.entries(stored.pots).map(([key, pot]) => [key, { ...pot, lastWaterQuote: '' }])
+      ),
+      specimens: stored.specimens.map((sp) => ({
+        ...sp,
+        commemorativeQuote: `和「${sp.charName}」一起专注 ${MAX_PLANT_GROWTH} 分钟养成。`,
+      })),
     };
-    })(),
-    isGreenhouseState
-  ));
+  });
 
   const [showSpecimenModal, setShowSpecimenModal] = useState(false);
   const [isWateringAnim, setIsWateringAnim] = useState(false);
 
-  // 角色虚拟专注排行榜
+  // 角色专注排行榜：只保存真实数据，由「刷新角色状态」调用 AI 按人设生成
   const [rankList, setRankList] = useState<CharRankItem[]>(() => {
-    const initialRankList: CharRankItem[] = contacts.map((c, i) => ({
+    const initialRankList: CharRankItem[] = contacts.map((c) => ({
       id: `rank-${c.id}`,
       charId: c.id,
       name: c.name,
-      todayMinutes: i === 0 ? 140 : 45,
-      statusText: i === 0 ? '正在专注处理公务，效率拉满' : '刚泡了一杯咖啡准备开始',
+      todayMinutes: 0,
+      statusText: '',
     }));
-    return readStoredValue(POMODORO_STORAGE_KEYS.rankList, initialRankList, isRankList);
+    const stored = readStoredValue(POMODORO_STORAGE_KEYS.rankList, initialRankList, isRankList);
+    if (readStoredValue('yyphone:pomodoro-canned-cleared', false, (v): v is boolean => typeof v === 'boolean')) return stored;
+    writeStoredValue('yyphone:pomodoro-canned-cleared', true);
+    return stored.map((item) => ({ ...item, todayMinutes: 0, statusText: '' }));
   });
   const [isRefreshingRank, setIsRefreshingRank] = useState(false);
 
@@ -402,48 +421,142 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
     writeStoredValue(POMODORO_STORAGE_KEYS.currentTheme, currentTheme);
   }, [currentTheme]);
 
-  // 获取当前陪伴角色对应的专属花盆（若无则动态初始化一盆）
+  // 获取当前陪伴角色对应的专属花盆（未种植时只是内存里的空盆，玩家操作后才会落盘）
   const activePotKey = companionChar?.id || 'default_char';
+  const customPlants = greenhouse.customPlants ?? [];
+  const allSpecies: PlantSpecies[] = [
+    ...PLANT_SPECIES_LIST,
+    ...customPlants.map((plant) => ({
+      id: plant.id,
+      name: plant.name,
+      bloomIcon: '🌼',
+      desc: plant.desc,
+      imageUrl: plant.imageUrl,
+      isCustom: true,
+    })),
+  ];
   const currentPot: CharacterPot = greenhouse.pots[activePotKey] || {
     charId: activePotKey,
     speciesId: PLANT_SPECIES_LIST[0].id,
     growthMinutes: 0,
-    lastWaterQuote: '刚埋下了一颗新种子，快去完成专注攒露水浇灌它吧~',
+    lastWaterQuote: '',
   };
   const currentSpecies =
-    PLANT_SPECIES_LIST.find((s) => s.id === currentPot.speciesId) || PLANT_SPECIES_LIST[0];
+    allSpecies.find((s) => s.id === currentPot.speciesId) || PLANT_SPECIES_LIST[0];
+  const currentPlantName = currentPot.nickname?.trim() || currentSpecies.name;
+
+  const [showPlantModal, setShowPlantModal] = useState(false);
+  const [plantNameDraft, setPlantNameDraft] = useState('');
+  const [newPlantName, setNewPlantName] = useState('');
+  const [newPlantImage, setNewPlantImage] = useState('');
+  const [isPlantAiBusy, setIsPlantAiBusy] = useState(false);
+  useEffect(() => {
+    setPlantNameDraft('');
+  }, [activePotKey]);
+
+  // 让角色按人设说一句话；失败时返回空串，不编造台词
+  const requestCharLine = async (charId: string, situation: string): Promise<string> => {
+    if (!charId || charId === 'default_char') return '';
+    try {
+      const brief = readCharacterBrief(charId);
+      const system = [
+        `你正在扮演「${brief.name}」，此刻在和玩家一起用番茄钟自习、一起养一盆植物。`,
+        `角色设定：${brief.persona || '保持自然、符合上下文。'}`,
+        brief.recentChat ? `你们最近的聊天（仅供把握语气）：\n${brief.recentChat}` : '',
+        '用第一人称、符合人设的口吻说一两句话，像真人聊天，口语化、少用标点、不用套话、不要旁白和动作描写、不要用引号。只输出这句话本身。',
+      ].filter(Boolean).join('\n');
+      const text = await requestConfiguredAiText(system, situation);
+      return text.trim().replace(/^["“「]|["”」]$/g, '').slice(0, 120);
+    } catch (error) {
+      console.error('Could not generate Pomodoro character line.', error);
+      setNoticeBanner('角色暂时没有回应，请检查 AI 接口设置后再试。');
+      return '';
+    }
+  };
 
   // 计算当前花盆的 5 个成长阶段
   const getPotStageInfo = (mins: number, species: PlantSpecies) => {
     if (mins < 30) {
-      return { icon: '🌰', stageName: '1/5 · 沉睡花种', isBloomed: false };
+      return { icon: '🌰', stageName: '1/5 · 沉睡花种', isBloomed: false, stage: 0 };
     }
     if (mins < 60) {
-      return { icon: '🌱', stageName: '2/5 · 破土嫩芽', isBloomed: false };
+      return { icon: '🌱', stageName: '2/5 · 破土嫩芽', isBloomed: false, stage: 1 };
     }
     if (mins < 120) {
-      return { icon: '🌿', stageName: '3/5 · 青翠枝叶', isBloomed: false };
+      return { icon: '🌿', stageName: '3/5 · 青翠枝叶', isBloomed: false, stage: 2 };
     }
     if (mins < MAX_PLANT_GROWTH) {
-      return { icon: '💐', stageName: '4/5 · 含苞待放', isBloomed: false };
+      return { icon: '💐', stageName: '4/5 · 含苞待放', isBloomed: false, stage: 3 };
     }
     return {
       icon: species.bloomIcon,
-      stageName: `5/5 · ${species.name}已盛开`,
+      stageName: '5/5 · 已盛开',
       isBloomed: true,
+      stage: 4,
     };
   };
 
   const currentStageInfo = getPotStageInfo(currentPot.growthMinutes, currentSpecies);
 
+  const updateActivePot = (patch: Partial<CharacterPot>) => {
+    setGreenhouse((prev) => ({
+      ...prev,
+      pots: {
+        ...prev.pots,
+        [activePotKey]: { ...(prev.pots[activePotKey] || currentPot), ...patch },
+      },
+    }));
+  };
+
+  const handleSelectSpecies = (speciesId: string) => {
+    const growing = currentPot.growthMinutes > 0 && !currentStageInfo.isBloomed;
+    if (growing && !window.confirm('换品种会让当前这盆植物的成长从头开始，确定吗？')) return;
+    updateActivePot({ speciesId, growthMinutes: growing ? 0 : currentPot.growthMinutes, lastWaterQuote: '' });
+    setShowPlantModal(false);
+  };
+
+  const handleAddCustomPlant = () => {
+    const name = newPlantName.trim();
+    if (!name || !newPlantImage) {
+      setNoticeBanner('请先填写植物名字并上传一张图片。');
+      return;
+    }
+    const plant: CustomPlant = {
+      id: `custom-${Date.now()}`,
+      name,
+      imageUrl: newPlantImage,
+      desc: '玩家自己带来的植物',
+    };
+    setGreenhouse((prev) => ({ ...prev, customPlants: [...(prev.customPlants ?? []), plant] }));
+    setNewPlantName('');
+    setNewPlantImage('');
+    setNoticeBanner(`已添加「${name}」，可以在下方选为这盆植物。`);
+  };
+
+  const handleDeleteCustomPlant = (plantId: string) => {
+    if (Object.values(greenhouse.pots).some((pot) => pot.speciesId === plantId)) {
+      setNoticeBanner('这个植物正在被某个花盆使用，先换成别的品种再删除。');
+      return;
+    }
+    setGreenhouse((prev) => ({
+      ...prev,
+      customPlants: (prev.customPlants ?? []).filter((plant) => plant.id !== plantId),
+    }));
+  };
+
+  const handleSavePlantName = () => {
+    updateActivePot({ nickname: plantNameDraft.trim() });
+    setNoticeBanner(plantNameDraft.trim() ? `这盆植物现在叫「${plantNameDraft.trim()}」。` : '已清除植物昵称。');
+  };
+
   // ==================== 7. 手动浇水 & 开花采摘收录图鉴逻辑 ====================
-  const handleWaterPlant = () => {
+  const handleWaterPlant = async () => {
     if (greenhouse.dewDrops <= 0) {
-      setNoticeBanner('露水不够啦！每完成一次专注即可获得 1 滴专注露水哦~');
+      setNoticeBanner('露水不够啦，每完成一次专注可获得 1 滴露水。');
       return;
     }
     if (currentStageInfo.isBloomed) {
-      setNoticeBanner(`这盆「${currentSpecies.name}」已经完全盛开啦，快点击采摘收入标本图鉴吧！`);
+      setNoticeBanner(`「${currentPlantName}」已经盛开，可以采摘收入标本图鉴了。`);
       return;
     }
 
@@ -451,37 +564,34 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
     setTimeout(() => setIsWateringAnim(false), 600);
 
     const nextMins = Math.min(MAX_PLANT_GROWTH, currentPot.growthMinutes + 30);
-    const charName = companionChar?.name || 'TA';
-
-    const waterQuotes = [
-      `${charName}递给你小水壶：“今天又坚持专注了，你看它的叶子是不是更绿了一点？”`,
-      `${charName}弯腰看了看花盆：“照这个速度，我们很快就能看到「${currentSpecies.name}」开花了。”`,
-      `${charName}笑着揉了揉你的头发：“奖励你一朵小红花，剩下的露水都喂给它吧~”`,
-      `露水落在叶片上亮晶晶的，${charName}在旁边认真记录下了你们今天的培育进度。`,
-    ];
-    const nextQuote =
-      nextMins >= MAX_PLANT_GROWTH
-        ? `哇！在${charName}和你的共同培育下，「${currentSpecies.name}」彻底盛开了！快把它采摘进标本图鉴吧 ✨`
-        : waterQuotes[Math.floor(Math.random() * waterQuotes.length)];
+    const potKey = activePotKey;
+    const basePot = currentPot;
+    const nextStage = getPotStageInfo(nextMins, currentSpecies);
 
     setGreenhouse((prev) => ({
       ...prev,
       dewDrops: prev.dewDrops - 1,
       pots: {
         ...prev.pots,
-        [activePotKey]: {
-          ...currentPot,
-          growthMinutes: nextMins,
-          lastWaterQuote: nextQuote,
-        },
+        [potKey]: { ...basePot, growthMinutes: nextMins },
       },
     }));
+
+    const situation = `你们刚给一盆叫「${currentPlantName}」的植物浇了水，它现在${nextStage.stageName.replace(/^\d\/\d · /, '')}，已累计 ${nextMins}/${MAX_PLANT_GROWTH} 分钟。你对玩家说一句话。`;
+    setIsPlantAiBusy(true);
+    const line = await requestCharLine(potKey, situation);
+    setIsPlantAiBusy(false);
+    if (line) {
+      setGreenhouse((prev) => prev.pots[potKey]
+        ? { ...prev, pots: { ...prev.pots, [potKey]: { ...prev.pots[potKey], lastWaterQuote: line } } }
+        : prev);
+    }
   };
 
-  // 采摘已盛开的花朵收入标本图鉴，并开启下一颗新种子
+  // 采摘已盛开的花朵收入标本图鉴；花盆清空，由玩家自己重新选择下一株
   const handleHarvestAndNewSeed = () => {
     if (!currentStageInfo.isBloomed) return;
-    const charName = companionChar?.name || '神秘同桌';
+    const charName = companionChar?.name || '同桌';
 
     const newSpecimen: HarvestedSpecimen = {
       id: `spec-${Date.now()}`,
@@ -491,13 +601,10 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
       speciesName: currentSpecies.name,
       bloomIcon: currentSpecies.bloomIcon,
       harvestDate: todayDateStr(),
-      commemorativeQuote: `由你与「${charName}」共同倾注 180 分钟专注时光培育盛开。`,
+      commemorativeQuote: `和「${charName}」一起专注 ${MAX_PLANT_GROWTH} 分钟养成。`,
+      imageUrl: currentSpecies.imageUrl,
+      nickname: currentPot.nickname,
     };
-
-    // 随机抽取下一颗不同品种的种子
-    const otherSpecies = PLANT_SPECIES_LIST.filter((s) => s.id !== currentSpecies.id);
-    const nextSpecies =
-      otherSpecies[Math.floor(Math.random() * otherSpecies.length)] || PLANT_SPECIES_LIST[0];
 
     setGreenhouse((prev) => ({
       ...prev,
@@ -506,16 +613,15 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
         ...prev.pots,
         [activePotKey]: {
           charId: activePotKey,
-          speciesId: nextSpecies.id,
+          speciesId: currentSpecies.id,
           growthMinutes: 0,
-          lastWaterQuote: `已经把上一盆花做成永恒标本啦！现在我们换上了新的「${nextSpecies.name}」花种，继续加油吧~`,
+          lastWaterQuote: '',
+          nickname: currentPot.nickname,
         },
       },
     }));
 
-    setNoticeBanner(
-      `🎉 已将盛开的「${currentSpecies.name}」收入标本图鉴，并为你和${charName}换上了新花种「${nextSpecies.name}」！`
-    );
+    setNoticeBanner(`已将「${currentPlantName}」收入标本图鉴，花盆已重新种下一颗种子，也可以在「选择植物」里换品种。`);
   };
 
   // ==================== 8. 真实时间戳倒计时逻辑 ====================
@@ -546,7 +652,7 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
       lastTimerPhaseRef.current = detail.snapshot.phase;
       applyTimerSnapshot(detail.snapshot);
       if (detail.completedFocus) {
-        setCompanionBubble('太棒了！专注完成，已获得 1 滴专注露水。休息一下再继续吧！');
+        setCompanionBubble('专注完成，获得 1 滴露水。');
         setRecords(readStoredValue(POMODORO_STORAGE_KEYS.records, [] as PomoSessionRecord[], isRecordList));
         setTasks(readStoredValue(POMODORO_STORAGE_KEYS.tasks, [] as PomoTask[], isTaskList));
         setGreenhouse(readStoredValue(
@@ -555,7 +661,7 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
           isGreenhouseState
         ));
       } else if (previousPhase === 'rest' && detail.snapshot.phase === 'focus') {
-        setCompanionBubble('休息时间结束啦！精神恢复了吗？随时可以开启下一轮专注~');
+        setCompanionBubble('休息结束，可以开始下一轮专注。');
       }
     };
     refresh();
@@ -571,28 +677,31 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
     eventType: 'pause' | 'stop' | 'complete_focus' | 'start_rest' | 'user_poke',
     userText?: string
   ) => {
-    const charName = companionChar?.name || 'TA';
-    setIsCharReplying(true);
-    setTimeout(() => {
-      if (eventType === 'pause') {
-        setCompanionBubble(`怎么暂停啦？是不是累了，喝口水喘口气再继续吧，${charName}在这等你。`);
-      } else if (eventType === 'stop') {
-        setCompanionBubble(`提前结束了吗？没关系，休息好了我们随时重新开始~`);
-      } else if (eventType === 'complete_focus') {
-        setCompanionBubble(
-          `太棒了！完整的专注时间达成 ✨ 获得了 1 滴专注露水，快去「排行/温室」给我们的花浇水吧！`
-        );
-      } else if (eventType === 'start_rest') {
-        setCompanionBubble(`现在是休息时间~ 伸个懒腰，现在可以光明正大找我聊天啦！`);
-      } else if (eventType === 'user_poke') {
-        setCompanionBubble(
-          isRunning && phase === 'focus'
-            ? `抓包！针对你刚刚说的「${userText}」——专心点，等倒计时结束我再好好回你！`
-            : `收到你的消息啦：「${userText}」，休息时间陪你聊个痛快~`
-        );
+    if (eventType === 'user_poke') {
+      const charId = companionChar?.id ?? '';
+      if (!charId) {
+        setCompanionBubble('还没有绑定陪伴角色。');
+        return;
       }
-      setIsCharReplying(false);
-    }, 350);
+      setIsCharReplying(true);
+      const focusing = isRunning && phase === 'focus';
+      const situation = `${focusing ? '玩家正在专注计时中，' : phase === 'rest' && isRunning ? '玩家正在休息时间，' : '玩家目前没在计时，'}偷偷对你说：「${userText}」。请回应他。`;
+      void requestCharLine(charId, situation).then((line) => {
+        if (line) {
+          setCharLine(line);
+          setCompanionBubble('');
+        }
+        setIsCharReplying(false);
+      });
+      return;
+    }
+    const notes = {
+      pause: '计时已暂停。',
+      stop: '计时已结束并重置。',
+      complete_focus: '专注完成，获得 1 滴露水。',
+      start_rest: '休息时间开始。',
+    } as const;
+    setCompanionBubble(notes[eventType]);
   };
 
   const handleStartTimer = () => {
@@ -613,7 +722,7 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
     });
     setIsRunning(true);
     if (phase === 'focus') {
-      setCompanionBubble(`已开启专注模式！把手机放一旁安心忙吧，我帮你看着时间~`);
+      setCompanionBubble('专注已开始。');
     } else {
       triggerAiCompanionMessage('start_rest');
     }
@@ -673,78 +782,91 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
     triggerAiCompanionMessage('user_poke', txt);
   };
 
-  // ==================== 9. 免链接纯代码白噪音发生器 ====================
+  // ==================== 9. 白噪音：内置雨声 + 自定义音频列表，支持轮播 ====================
   const stopAllNoise = () => {
-    if (noiseNodeRef.current) {
-      try {
-        noiseNodeRef.current.disconnect();
-      } catch {
-        // ignore
-      }
-      noiseNodeRef.current = null;
-    }
     if (customAudioRef.current) {
       customAudioRef.current.pause();
     }
   };
 
-  const handleSelectNoise = (type: NoiseType) => {
-    stopAllNoise();
-    setNoiseType(type);
-    if (type === 'off') return;
-
-    if (type === 'custom') {
-      if (customAudioUrl.trim()) {
-        if (!customAudioRef.current) {
-          customAudioRef.current = new Audio();
-          customAudioRef.current.loop = true;
+  const playTrackAt = (index: number) => {
+    const list = noiseTracksRef.current;
+    if (list.length === 0) return;
+    const safeIndex = ((index % list.length) + list.length) % list.length;
+    if (!customAudioRef.current) {
+      const audio = new Audio();
+      // 只有一首时循环本曲；多首时播完自动切到下一首
+      audio.onended = () => {
+        const tracks = noiseTracksRef.current;
+        if (tracks.length <= 1) {
+          audio.currentTime = 0;
+          audio.play().catch(() => {});
+        } else {
+          playTrackAt(noiseIndexRef.current + 1);
         }
-        customAudioRef.current.src = customAudioUrl.trim();
-        customAudioRef.current.play().catch(() => {});
-      }
-      return;
+      };
+      audio.onerror = () => {
+        const tracks = noiseTracksRef.current;
+        if (tracks.length > 1 && noiseIndexRef.current >= 0) {
+          setNoticeBanner('这首白噪音加载失败，已跳到下一首。');
+          playTrackAt(noiseIndexRef.current + 1);
+        } else {
+          setNoticeBanner('白噪音加载失败，请检查链接。');
+          setNoiseIndex(-1);
+        }
+      };
+      customAudioRef.current = audio;
     }
+    noiseIndexRef.current = safeIndex;
+    setNoiseIndex(safeIndex);
+    customAudioRef.current.src = list[safeIndex].url;
+    customAudioRef.current.play().catch(() => {});
+  };
 
-    try {
-      const AudioContextClass =
-        window.AudioContext ||
-        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      if (!audioCtxRef.current) {
-        audioCtxRef.current = new AudioContextClass();
-      }
-      const ctx = audioCtxRef.current;
-      if (ctx.state === 'suspended') ctx.resume();
+  const handleStopNoise = () => {
+    stopAllNoise();
+    noiseIndexRef.current = -1;
+    setNoiseIndex(-1);
+  };
 
-      const bufferSize = ctx.sampleRate * 2;
-      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-      const output = buffer.getChannelData(0);
-      let lastOut = 0.0;
-      for (let i = 0; i < bufferSize; i++) {
-        const white = Math.random() * 2 - 1;
-        output[i] = (lastOut + 0.02 * white) / 1.02;
-        lastOut = output[i];
-        output[i] *= 0.18;
-      }
+  const handleAddNoiseTrack = () => {
+    const url = customAudioUrl.trim();
+    if (!url) return;
+    const track: NoiseTrack = {
+      id: `noise-${Date.now()}`,
+      name: customAudioName.trim() || `自定义音频 ${noiseTracks.length}`,
+      url,
+    };
+    setNoiseTracks((prev) => [...prev, track]);
+    setCustomAudioUrl('');
+    setCustomAudioName('');
+  };
 
-      const whiteNoise = ctx.createBufferSource();
-      whiteNoise.buffer = buffer;
-      whiteNoise.loop = true;
-
-      const filter = ctx.createBiquadFilter();
-      filter.type = 'lowpass';
-      filter.frequency.value = type === 'deep' ? 220 : type === 'wind' ? 520 : 950;
-
-      whiteNoise.connect(filter);
-      filter.connect(ctx.destination);
-      whiteNoise.start(0);
-      noiseNodeRef.current = filter;
-    } catch {
-      // ignore
+  const handleDeleteNoiseTrack = (trackId: string) => {
+    const removeIndex = noiseTracks.findIndex((track) => track.id === trackId);
+    if (removeIndex <= 0) return;
+    if (removeIndex === noiseIndex) {
+      handleStopNoise();
+    } else if (removeIndex < noiseIndex) {
+      noiseIndexRef.current = noiseIndex - 1;
+      setNoiseIndex(noiseIndex - 1);
     }
+    setNoiseTracks((prev) => prev.filter((track) => track.id !== trackId));
   };
 
   useEffect(() => {
-    return () => stopAllNoise();
+    noiseTracksRef.current = noiseTracks;
+    writeStoredValue(POMODORO_STORAGE_KEYS.noiseTracks, noiseTracks.filter((track) => !track.builtin));
+  }, [noiseTracks]);
+
+  useEffect(() => {
+    return () => {
+      if (customAudioRef.current) {
+        customAudioRef.current.onended = null;
+        customAudioRef.current.onerror = null;
+        customAudioRef.current.pause();
+      }
+    };
   }, []);
 
   // ==================== 10. 任务增删改与一键带入计时 ====================
@@ -827,7 +949,7 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
     setIsRunning(false);
     setRemainingSeconds(task.focusMinutes * 60);
     setActiveTab('timer');
-    setCompanionBubble(`已切换到任务「${task.title}」，专注 ${task.focusMinutes} 分钟，开始吧！`);
+    setCompanionBubble(`已切换到任务「${task.title}」。`);
   };
 
   // ==================== 11. 角色专注排行榜生成与互动 ====================
@@ -835,8 +957,14 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
     .filter((r) => r.dateStr === todayDateStr())
     .reduce((sum, r) => sum + r.durationMinutes, 0);
 
+  // 角色的分钟数 = 今天玩家在其陪伴下真实完成的专注分钟数
   const combinedRankings: CharRankItem[] = [
-    ...rankList,
+    ...rankList.map((item) => ({
+      ...item,
+      todayMinutes: records
+        .filter((r) => r.dateStr === todayDateStr() && r.companionCharName === item.name)
+        .reduce((sum, r) => sum + r.durationMinutes, 0),
+    })),
     {
       id: 'rank-player',
       name: '我 (玩家)',
@@ -846,34 +974,33 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
     },
   ].sort((a, b) => b.todayMinutes - a.todayMinutes);
 
-  const handleRefreshAiRank = () => {
+  const handleRefreshAiRank = async () => {
+    if (isRefreshingRank || contacts.length === 0) return;
     setIsRefreshingRank(true);
-    setTimeout(() => {
-      const statuses = [
-        '正在书房认真看资料，手机调了静音',
-        '刚忙完手头的工作，准备冲杯手冲咖啡',
-        '窝在沙发上看书，不小心困得直点头',
-        '全神贯注推进计划中，今日状态极佳',
-      ];
-      setRankList(
-        contacts.map((c, idx) => ({
-          id: `rank-${c.id}`,
-          charId: c.id,
-          name: c.name,
-          todayMinutes: Math.floor(20 + Math.random() * 180),
-          statusText: statuses[(idx + Math.floor(Math.random() * statuses.length)) % statuses.length],
-        }))
+    const hour = new Date().getHours();
+    const results = await Promise.all(contacts.map(async (c) => {
+      const line = await requestCharLine(
+        c.id,
+        `现在是${hour}点。用一句话（30字内）说说你此刻正在做什么、状态如何，要符合你的人设和现在的时间，不要提到番茄钟排名。`
       );
-      setIsRefreshingRank(false);
-    }, 450);
+      return [c.id, line] as const;
+    }));
+    const lines = new Map(results);
+    setRankList(contacts.map((c) => ({
+      id: `rank-${c.id}`,
+      charId: c.id,
+      name: c.name,
+      todayMinutes: 0,
+      statusText: lines.get(c.id) || rankList.find((item) => item.charId === c.id)?.statusText || '',
+    })));
+    setIsRefreshingRank(false);
   };
 
   const handleInteractRankChar = (item: CharRankItem, myMinutes: number) => {
-    const isHigherThanMe = item.todayMinutes > myMinutes;
-    const actionLabel = isHigherThanMe ? '膜拜了一下卷王' : '向对方炫耀了你的自习排名';
-    setNoticeBanner(
-      `已${actionLabel}「${item.name}」（今日排行榜战况已同步至 TA 的记忆，可去微信聊起此事）！`
-    );
+    const text = item.todayMinutes > myMinutes
+      ? `「${item.name}」今天陪你的时间比你自己的专注还多。`
+      : `你今天的专注 ${myMinutes} 分钟，「${item.name}」陪读 ${item.todayMinutes} 分钟。`;
+    setNoticeBanner(text);
   };
 
   // ==================== 12. 统计计算与多选角色分享 ====================
@@ -953,7 +1080,7 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
       onSuccess(await compressImage(file));
     } catch (error) {
       console.error('Could not compress Pomodoro image.', error);
-      window.alert(error instanceof Error ? error.message : '图片压缩失败，请重新选择。');
+      showYyError(error instanceof Error ? error.message : '图片压缩失败，请重新选择。', '图片处理失败');
     }
   };
 
@@ -1021,6 +1148,22 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
       }}
     >
       {currentTheme.customCss && <style>{currentTheme.customCss}</style>}
+      <style>{`
+        .pomo-custom-scope .font-extrabold { font-weight: 600; }
+        .pomo-custom-scope .font-bold { font-weight: 500; }
+        .pomo-custom-scope .text-slate-700, .pomo-custom-scope .text-slate-800 { color: #7d8b99; }
+        .pomo-custom-scope .text-slate-600 { color: #8b98a5; }
+        .pomo-custom-scope .text-slate-500 { color: #9aa6b2; }
+        .pomo-custom-scope .text-slate-400 { color: #b3bcc6; }
+        .pomo-custom-scope .text-sky-600, .pomo-custom-scope .text-sky-500 { color: #8fb3d0; }
+        .pomo-custom-scope .text-sky-400 { color: #a9c6dc; }
+        .pomo-custom-scope .text-pink-500, .pomo-custom-scope .text-pink-400, .pomo-custom-scope .text-rose-500, .pomo-custom-scope .text-rose-400 { color: #d9a5b8; }
+        .pomo-custom-scope .text-emerald-600, .pomo-custom-scope .text-emerald-500 { color: #9cc4b0; }
+        .pomo-custom-scope .text-amber-400, .pomo-custom-scope .text-indigo-400 { color: #d9c49a; }
+        .pomo-custom-scope .bg-sky-400 { background-color: #b5d3ea; }
+        .pomo-custom-scope .bg-pink-400 { background-color: #efbfce; }
+        .pomo-custom-scope .bg-amber-400, .pomo-custom-scope .bg-amber-600\\/70 { background-color: #ecd9b0; }
+      `}</style>
 
       {!currentTheme.wallpaperUrl && (
         <>
@@ -1072,7 +1215,7 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
       </div>
 
       {/* 主内容滚动区 */}
-      <div className="relative z-10 flex-1 min-h-0 overflow-y-auto no-scrollbar px-4 pt-1 space-y-3 pb-[env(safe-area-inset-bottom,0px)]">
+      <div className="relative z-10 flex-1 min-h-0 overflow-y-auto no-scrollbar px-4 pt-1 space-y-3">
         {noticeBanner && (
           <div className="flex items-center justify-between rounded-2xl bg-white/85 backdrop-blur-md border border-emerald-200 px-3.5 py-2.5 text-[11px] font-bold text-emerald-600 shadow-2xs">
             <span>{noticeBanner}</span>
@@ -1100,8 +1243,8 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
                       <span className="text-xs font-extrabold">
                         陪伴角色：{companionChar?.name || '暂未绑定'}
                       </span>
-                      <span className="text-[9px] bg-pink-50 text-pink-500 px-1.5 py-0.2 rounded-full font-bold">
-                        同桌陪读中
+                      <span className="text-[9px] bg-pink-50/70 text-pink-400 px-1.5 py-0.2 rounded-full font-bold">
+                        陪读中
                       </span>
                     </div>
                   </div>
@@ -1120,7 +1263,8 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
                       companionCharName: found?.name ?? '',
                     });
                     if (found) {
-                      setCompanionBubble(`换我来陪你专注啦，我们的专属花盆也在温室里等着浇水哦！`);
+                      setCharLine('');
+                      setCompanionBubble('');
                     }
                   }}
                   className="px-2.5 py-1 rounded-xl bg-white/80 border border-sky-100 text-[11px] font-bold text-sky-600 outline-none cursor-pointer"
@@ -1137,8 +1281,19 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
                 </select>
               </div>
 
-              <div className="bg-white/80 border border-white rounded-2xl p-3 text-xs leading-relaxed text-slate-700 shadow-2xs">
-                {isCharReplying ? '对方正在看你并输入中...' : companionBubble}
+              <div className="bg-white/70 border border-white rounded-2xl p-3 text-xs leading-relaxed text-slate-600 shadow-2xs">
+                {isCharReplying ? (
+                  <span className="text-slate-400">正在输入...</span>
+                ) : companionBubble ? (
+                  <span className="text-slate-400">{companionBubble}</span>
+                ) : charLine ? (
+                  <span>
+                    <span className="text-slate-400">{companionChar?.name || 'TA'}：</span>
+                    {charLine}
+                  </span>
+                ) : (
+                  <span className="text-slate-400">和 TA 说句话，TA 会按自己的性格回你。</span>
+                )}
               </div>
 
               <div className="flex items-center gap-2">
@@ -1149,7 +1304,7 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
                   onKeyDown={(e) => e.key === 'Enter' && handleSendChatToCompanion()}
                   placeholder={
                     isRunning && phase === 'focus'
-                      ? '偷偷和 TA 说话（会被抓包开小差哦）...'
+                      ? '偷偷和 TA 说话...'
                       : '和陪读的 TA 说句话...'
                   }
                   className="flex-1 px-3 py-1.5 rounded-xl bg-white/90 border border-slate-200/80 text-xs outline-none focus:border-sky-300"
@@ -1239,26 +1394,18 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
                   <button
                     onClick={() => setShowNoiseModal(true)}
                     className={`px-2.5 py-1.5 rounded-xl text-[11px] font-bold flex items-center gap-1 border cursor-pointer ${
-                      noiseType !== 'off'
+                      noiseIndex >= 0
                         ? 'bg-sky-100 text-sky-600 border-sky-200'
                         : 'bg-white/80 text-slate-500 border-white'
                     }`}
                   >
-                    {noiseType !== 'off' ? (
+                    {noiseIndex >= 0 ? (
                       <Volume2 className="w-3.5 h-3.5 animate-pulse" />
                     ) : (
                       <VolumeX className="w-3.5 h-3.5" />
                     )}
                     <span>
-                      {noiseType === 'off'
-                        ? '白噪音'
-                        : noiseType === 'wind'
-                        ? '微风中'
-                        : noiseType === 'rain'
-                        ? '细雨中'
-                        : noiseType === 'deep'
-                        ? '深海中'
-                        : '音乐中'}
+                      {noiseIndex >= 0 ? (noiseTracks[noiseIndex]?.name ?? '白噪音') : '白噪音'}
                     </span>
                   </button>
 
@@ -1480,27 +1627,39 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
               </div>
 
               {/* 花盆中央展示区 */}
-              <div className="bg-gradient-to-r from-sky-50/70 via-white/85 to-pink-50/70 p-3.5 rounded-2xl border border-white space-y-2.5">
+              <div className="bg-gradient-to-r from-sky-50/50 via-white/70 to-pink-50/50 p-3.5 rounded-2xl border border-white space-y-2.5">
                 <div className="flex items-center gap-3.5">
                   <div
-                    className={`w-16 h-16 rounded-2xl bg-white shadow-2xs flex items-center justify-center text-4xl shrink-0 transition-transform duration-300 ${
-                      isWateringAnim ? 'scale-115' : ''
+                    className={`w-16 h-16 rounded-2xl bg-white/80 shadow-2xs flex items-center justify-center text-4xl shrink-0 overflow-hidden transition-transform duration-300 ${
+                      isWateringAnim ? 'scale-110' : ''
                     }`}
                   >
-                    {currentStageInfo.icon}
+                    {currentSpecies.imageUrl ? (
+                      <img
+                        src={currentSpecies.imageUrl}
+                        alt={currentPlantName}
+                        style={{ opacity: 0.45 + currentStageInfo.stage * 0.14 }}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      currentStageInfo.icon
+                    )}
                   </div>
                   <div className="space-y-1 flex-1 min-w-0">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-extrabold text-[#2C4A5C]">
-                        品种：{currentSpecies.name}
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="text-xs font-bold text-slate-600 truncate">
+                        {currentPlantName}
+                        {currentPot.nickname?.trim() && (
+                          <span className="text-slate-400 font-normal"> · {currentSpecies.name}</span>
+                        )}
                       </span>
-                      <span className="text-[10px] font-bold text-pink-500 bg-pink-50 px-2 py-0.5 rounded-full">
+                      <span className="text-[10px] font-bold text-pink-400 bg-pink-50/70 px-2 py-0.5 rounded-full shrink-0">
                         {currentStageInfo.stageName}
                       </span>
                     </div>
 
                     {/* 成长进度条 */}
-                    <div className="w-full h-2 rounded-full bg-slate-100 overflow-hidden">
+                    <div className="w-full h-2 rounded-full bg-slate-100/80 overflow-hidden">
                       <div
                         style={{
                           width: `${Math.min(100, (currentPot.growthMinutes / MAX_PLANT_GROWTH) * 100)}%`,
@@ -1510,36 +1669,66 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
                       />
                     </div>
                     <div className="flex items-center justify-between text-[10px] text-slate-400">
-                      <span>{currentSpecies.desc}</span>
-                      <span className="font-mono font-bold text-sky-600 shrink-0 ml-1">
+                      <span className="truncate">{currentSpecies.desc}</span>
+                      <span className="font-mono text-sky-400 shrink-0 ml-1">
                         {currentPot.growthMinutes}/{MAX_PLANT_GROWTH}m
                       </span>
                     </div>
                   </div>
                 </div>
 
-                {/* 角色浇水互动气泡语 */}
-                <div className="bg-white/90 rounded-xl px-3 py-2 text-[11px] text-slate-600 border border-sky-100/80 leading-relaxed">
-                  💬 {currentPot.lastWaterQuote}
+                <div className="flex items-center gap-2">
+                  <input
+                    value={plantNameDraft}
+                    onChange={(e) => setPlantNameDraft(e.target.value)}
+                    placeholder={currentPot.nickname?.trim() ? `现在叫「${currentPot.nickname.trim()}」` : '给它起个名字'}
+                    maxLength={12}
+                    className="flex-1 min-w-0 px-3 py-1.5 rounded-xl bg-white/80 border border-slate-200/70 text-[11px] outline-none focus:border-sky-200"
+                  />
+                  <button
+                    onClick={handleSavePlantName}
+                    className="px-2.5 py-1.5 rounded-xl bg-white/80 border border-slate-200/70 text-[11px] text-slate-500 cursor-pointer"
+                  >
+                    命名
+                  </button>
+                  <button
+                    onClick={() => setShowPlantModal(true)}
+                    className="px-2.5 py-1.5 rounded-xl bg-white/80 border border-slate-200/70 text-[11px] text-slate-500 cursor-pointer"
+                  >
+                    选择植物
+                  </button>
                 </div>
+
+                {(currentPot.lastWaterQuote || isPlantAiBusy) && (
+                  <div className="bg-white/70 rounded-xl px-3 py-2 text-[11px] text-slate-500 border border-white leading-relaxed">
+                    {isPlantAiBusy ? (
+                      <span className="text-slate-400">正在输入...</span>
+                    ) : (
+                      <span>
+                        <span className="text-slate-400">{companionChar?.name || 'TA'}：</span>
+                        {currentPot.lastWaterQuote}
+                      </span>
+                    )}
+                  </div>
+                )}
 
                 {/* 手动浇水按钮 / 盛开后采摘收入图鉴按钮 */}
                 {!currentStageInfo.isBloomed ? (
                   <button
                     onClick={handleWaterPlant}
                     style={{ background: currentTheme.primaryGradient }}
-                    className="w-full py-2.5 rounded-xl text-white text-xs font-extrabold flex items-center justify-center gap-1.5 shadow-2xs active:scale-98 transition-transform cursor-pointer"
+                    className="w-full py-2.5 rounded-xl text-white/95 text-xs font-bold flex items-center justify-center gap-1.5 shadow-2xs active:scale-98 transition-transform cursor-pointer"
                   >
                     <Droplets className="w-3.5 h-3.5" />
-                    <span>消耗 1 滴露水手动浇灌 (+30m 成长值)</span>
+                    <span>消耗 1 滴露水浇灌 (+30m)</span>
                   </button>
                 ) : (
                   <button
                     onClick={handleHarvestAndNewSeed}
-                    className="w-full py-2.5 rounded-xl bg-gradient-to-r from-amber-400 to-pink-400 text-white text-xs font-extrabold flex items-center justify-center gap-1.5 shadow-2xs active:scale-98 transition-transform cursor-pointer"
+                    className="w-full py-2.5 rounded-xl bg-gradient-to-r from-amber-200 to-pink-200 text-amber-800/70 text-xs font-bold flex items-center justify-center gap-1.5 shadow-2xs active:scale-98 transition-transform cursor-pointer"
                   >
                     <Sparkles className="w-3.5 h-3.5" />
-                    <span>✨ 花已盛开！采摘收录进标本图鉴 & 领新花种</span>
+                    <span>已盛开，采摘收入标本图鉴</span>
                   </button>
                 )}
               </div>
@@ -1557,7 +1746,7 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
                     <span>今日自习室专注排行</span>
                   </h4>
                   <p className="text-[10px] opacity-60 mt-0.5">
-                    点击互动可将当前名次同步至角色记忆
+                    今日陪读分钟数为真实记录；状态由角色按人设生成
                   </p>
                 </div>
 
@@ -1712,6 +1901,86 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
         )}
       </div>
 
+      {/* ==================== 弹窗：选择植物 / 添加自定义植物 ==================== */}
+      {showPlantModal && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-900/20 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-sm bg-white/95 backdrop-blur-2xl border border-white rounded-3xl p-5 shadow-xl space-y-3.5 max-h-[88%] overflow-y-auto text-slate-600">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold">选择植物</h3>
+              <button
+                onClick={() => setShowPlantModal(false)}
+                className="w-7 h-7 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2">
+              {allSpecies.map((species) => (
+                <div key={species.id} className="relative">
+                  <button
+                    onClick={() => handleSelectSpecies(species.id)}
+                    className={`w-full p-2 rounded-2xl border flex flex-col items-center gap-1 cursor-pointer ${
+                      species.id === currentSpecies.id ? 'border-sky-200 bg-sky-50/60' : 'border-slate-100 bg-white/70'
+                    }`}
+                  >
+                    <span className="w-10 h-10 rounded-xl bg-white/80 flex items-center justify-center text-2xl overflow-hidden">
+                      {species.imageUrl ? (
+                        <img src={species.imageUrl} alt={species.name} className="w-full h-full object-cover" />
+                      ) : (
+                        species.bloomIcon
+                      )}
+                    </span>
+                    <span className="text-[10px] text-slate-500 truncate w-full text-center">{species.name}</span>
+                  </button>
+                  {species.isCustom && (
+                    <button
+                      onClick={() => handleDeleteCustomPlant(species.id)}
+                      className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-slate-200 text-slate-500 flex items-center justify-center cursor-pointer"
+                    >
+                      <X className="w-2.5 h-2.5" />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <div className="space-y-2 pt-2 border-t border-slate-100">
+              <p className="text-[11px] text-slate-400">添加自己的植物（上传图片并取名）</p>
+              <div className="flex items-center gap-2">
+                <label className="w-12 h-12 rounded-xl bg-white/80 border border-dashed border-slate-200 flex items-center justify-center overflow-hidden cursor-pointer shrink-0">
+                  {newPlantImage ? (
+                    <img src={newPlantImage} alt="新植物" className="w-full h-full object-cover" />
+                  ) : (
+                    <Upload className="w-4 h-4 text-slate-300" />
+                  )}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => handleLocalImageUpload(e, setNewPlantImage)}
+                  />
+                </label>
+                <input
+                  value={newPlantName}
+                  onChange={(e) => setNewPlantName(e.target.value)}
+                  placeholder="植物的名字"
+                  maxLength={12}
+                  className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-white/80 border border-slate-200/70 text-xs outline-none focus:border-sky-200"
+                />
+                <button
+                  onClick={handleAddCustomPlant}
+                  style={{ background: currentTheme.primaryGradient }}
+                  className="px-3 py-2 rounded-xl text-white/95 text-xs cursor-pointer"
+                >
+                  添加
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ==================== 弹窗 0：植物标本图鉴收集册弹窗 ==================== */}
       {showSpecimenModal && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-900/30 p-4 backdrop-blur-xs">
@@ -1744,19 +2013,23 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
                     key={sp.id}
                     className="p-3.5 rounded-2xl bg-gradient-to-r from-sky-50/60 to-pink-50/60 border border-white flex items-center gap-3 shadow-2xs"
                   >
-                    <div className="w-12 h-12 rounded-2xl bg-white flex items-center justify-center text-2xl shrink-0 shadow-2xs">
-                      {sp.bloomIcon}
+                    <div className="w-12 h-12 rounded-2xl bg-white/80 flex items-center justify-center text-2xl shrink-0 shadow-2xs overflow-hidden">
+                      {sp.imageUrl ? (
+                        <img src={sp.imageUrl} alt={sp.speciesName} className="w-full h-full object-cover" />
+                      ) : (
+                        sp.bloomIcon
+                      )}
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center justify-between">
-                        <span className="text-xs font-extrabold text-[#2C4A5C]">
-                          {sp.speciesName}
+                        <span className="text-xs font-bold text-slate-600">
+                          {sp.nickname?.trim() ? `${sp.nickname.trim()} · ${sp.speciesName}` : sp.speciesName}
                         </span>
                         <span className="text-[10px] font-mono text-slate-400">
                           {sp.harvestDate}
                         </span>
                       </div>
-                      <span className="text-[10px] text-pink-500 font-bold block mt-0.5">
+                      <span className="text-[10px] text-pink-400 block mt-0.5">
                         共同培育人：{sp.charName}
                       </span>
                       <p className="text-[10px] text-slate-500 mt-0.5 leading-relaxed">
@@ -1843,7 +2116,7 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-900/30 p-4 backdrop-blur-xs">
           <div className="w-full max-w-sm bg-white/95 backdrop-blur-2xl border border-white rounded-3xl p-5 shadow-xl space-y-3.5 text-slate-700">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-extrabold">专注环境白噪音（内置免链接）</h3>
+              <h3 className="text-sm font-extrabold">专注环境白噪音</h3>
               <button
                 onClick={() => setShowNoiseModal(false)}
                 className="w-7 h-7 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 cursor-pointer"
@@ -1852,29 +2125,64 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
               </button>
             </div>
 
-            <div className="grid grid-cols-2 gap-2">
-              {[
-                { key: 'off', label: '🔇 关闭白噪音' },
-                { key: 'wind', label: '🍃 林间微风 (内置)' },
-                { key: 'rain', label: '🌧️ 窗外细雨 (内置)' },
-                { key: 'deep', label: '🌊 深海低频 (内置)' },
-              ].map((item) => (
-                <button
-                  key={item.key}
-                  onClick={() => handleSelectNoise(item.key as NoiseType)}
-                  className={`py-2.5 px-3 rounded-2xl text-xs font-bold border cursor-pointer ${
-                    noiseType === item.key
-                      ? 'bg-sky-400 text-white border-transparent shadow-2xs'
-                      : 'bg-slate-50 text-slate-600 border-slate-200'
+            <div className="space-y-1.5 max-h-52 overflow-y-auto">
+              {noiseTracks.map((track, index) => (
+                <div
+                  key={track.id}
+                  className={`flex items-center gap-2 py-2 px-3 rounded-2xl border ${
+                    noiseIndex === index ? 'bg-sky-50/70 border-sky-200' : 'bg-slate-50 border-slate-100'
                   }`}
                 >
-                  {item.label}
-                </button>
+                  <button
+                    onClick={() => (noiseIndex === index ? handleStopNoise() : playTrackAt(index))}
+                    className="flex-1 min-w-0 text-left text-xs font-bold text-slate-600 truncate cursor-pointer"
+                  >
+                    {noiseIndex === index ? '▶ ' : ''}
+                    {track.name}
+                  </button>
+                  {!track.builtin && (
+                    <button
+                      onClick={() => handleDeleteNoiseTrack(track.id)}
+                      className="text-slate-400 cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
               ))}
             </div>
 
+            <div className="flex items-center justify-between gap-2">
+              <button
+                onClick={() => playTrackAt(noiseIndex < 0 ? noiseTracks.length - 1 : noiseIndex - 1)}
+                className="px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-[11px] text-slate-500 cursor-pointer"
+              >
+                上一首
+              </button>
+              <button
+                onClick={() => (noiseIndex >= 0 ? handleStopNoise() : playTrackAt(0))}
+                className="flex-1 py-1.5 rounded-xl bg-sky-100 text-sky-600 text-[11px] font-bold cursor-pointer"
+              >
+                {noiseIndex >= 0 ? '停止' : '播放'}
+              </button>
+              <button
+                onClick={() => playTrackAt(noiseIndex + 1)}
+                className="px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-[11px] text-slate-500 cursor-pointer"
+              >
+                下一首
+              </button>
+            </div>
+            <p className="text-[10px] text-slate-400">多首时播完自动轮播下一首，只有一首时循环播放。</p>
+
             <div className="space-y-1.5 bg-sky-50/60 p-3 rounded-2xl border border-sky-100">
-              <span className="text-[11px] font-bold block">自定义音频直链（选填）</span>
+              <span className="text-[11px] font-bold block">添加自定义音频直链</span>
+              <input
+                type="text"
+                placeholder="名称（选填）"
+                value={customAudioName}
+                onChange={(e) => setCustomAudioName(e.target.value)}
+                className="w-full px-2.5 py-1.5 rounded-xl bg-white border border-slate-200 text-[11px]"
+              />
               <div className="flex gap-1.5">
                 <input
                   type="text"
@@ -1884,10 +2192,10 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
                   className="flex-1 px-2.5 py-1.5 rounded-xl bg-white border border-slate-200 text-[11px]"
                 />
                 <button
-                  onClick={() => handleSelectNoise('custom')}
+                  onClick={handleAddNoiseTrack}
                   className="px-3 py-1.5 rounded-xl bg-sky-400 text-white text-[11px] font-bold cursor-pointer"
                 >
-                  播放
+                  添加
                 </button>
               </div>
             </div>
@@ -2235,7 +2543,7 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
                           if (Array.isArray(data.themePresets)) setThemePresets(data.themePresets);
                           setShowTopMenu(false);
                         } catch {
-                          alert('导入文件格式有误');
+                          showYyError('导入文件格式有误', '导入失败');
                         }
                       };
                       reader.readAsText(file);

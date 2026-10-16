@@ -54,7 +54,7 @@ const readOpenAiContent = (payload: unknown) => {
 export const requestConfiguredAiText = async (
   systemPrompt: string,
   userPrompt: string,
-  options: { json?: boolean } = {}
+  options: { json?: boolean; temperature?: number; maxTokens?: number } = {}
 ) => {
   systemPrompt = withGlobalWorldBooks(systemPrompt);
   const preset = getActiveApiPreset();
@@ -73,7 +73,15 @@ export const requestConfiguredAiText = async (
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: systemPrompt }] },
         contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
-        ...(options.json ? { generationConfig: { responseMimeType: 'application/json' } } : {}),
+        ...(options.json || options.temperature !== undefined || options.maxTokens !== undefined
+          ? {
+              generationConfig: {
+                ...(options.json ? { responseMimeType: 'application/json' } : {}),
+                ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
+                ...(options.maxTokens !== undefined ? { maxOutputTokens: options.maxTokens } : {}),
+              },
+            }
+          : {}),
       }),
     });
     if (!response.ok) throw new Error(`AI 请求失败（HTTP ${response.status}）：${await response.text()}`);
@@ -99,6 +107,8 @@ export const requestConfiguredAiText = async (
           { role: 'user', content: userPrompt },
         ],
         ...(options.json ? { response_format: { type: 'json_object' } } : {}),
+        ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
+        ...(options.maxTokens !== undefined ? { max_tokens: options.maxTokens } : {}),
       }),
     });
     if (!response.ok) throw new Error(`AI 请求失败（HTTP ${response.status}）：${await response.text()}`);

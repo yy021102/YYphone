@@ -17,9 +17,10 @@ import { StatusBar } from './components/StatusBar';
 import { LockScreen } from './components/LockScreen';
 import { HomeScreen } from './components/HomeScreen';
 import { processPomodoroDeadline } from './utils/pomodoroRuntime';
+import { ErrorDialogHost } from './components/ErrorDialog';
 
 const WeChatApp = lazy(() => import('./apps/WeChatApp').then((module) => ({ default: module.WeChatApp })));
-const PhoneExplorerApp = lazy(() => import('./apps/PhoneExplorerApp').then((module) => ({ default: module.PhoneExplorerApp })));
+const PhoneExplorerApp = lazy(() => import('./apps/PhoneExplorerApp').then((module) => ({ default: module.CheckPhoneApp })));
 const AlipayApp = lazy(() => import('./apps/AlipayApp').then((module) => ({ default: module.AlipayApp })));
 const TaobaoApp = lazy(() => import('./apps/TaobaoApp').then((module) => ({ default: module.TaobaoApp })));
 const ForumApp = lazy(() => import('./apps/ForumApp').then((module) => ({ default: module.ForumApp })));
@@ -462,6 +463,7 @@ export default function App() {
             </section>
           </div>
         )}
+        <ErrorDialogHost />
       </div>
     </div>
   );

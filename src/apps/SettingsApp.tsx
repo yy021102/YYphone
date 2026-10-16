@@ -15,6 +15,7 @@ import {
   Upload,
 } from 'lucide-react';
 import { AppHeader } from '../components/AppHeader';
+import { useErrorDialog } from '../components/ErrorDialog';
 import {
   readSetting,
   removeSetting,
@@ -78,6 +79,7 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
   const [passwordDraft, setPasswordDraft] = useState(lockSettings.password);
   const [lockSettingsSaved, setLockSettingsSaved] = useState(false);
   const [lockSettingsError, setLockSettingsError] = useState('');
+  useErrorDialog(lockSettingsError);
   const [apiPresets, setApiPresets] = useState(() =>
     readSetting(SETTINGS_KEYS.apiPresets, [] as ApiPreset[], isApiPresetList)
   );
@@ -100,9 +102,12 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
   const [isLoadingApiModels, setIsLoadingApiModels] = useState(false);
   const [apiMessage, setApiMessage] = useState('');
   const [apiError, setApiError] = useState('');
+  useErrorDialog(apiError, 'API 配置出错了');
   const [backupMessage, setBackupMessage] = useState('');
   const [backupError, setBackupError] = useState('');
+  useErrorDialog(backupError, '备份出错了');
   const [statusBarError, setStatusBarError] = useState('');
+  useErrorDialog(statusBarError);
 
   const persistApiPresets = (nextPresets: ApiPreset[]): boolean => {
     try {
@@ -391,7 +396,7 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
     <div className="flex-1 w-full flex flex-col bg-[#F3F6F8] overflow-hidden">
       <AppHeader title="设置 · 系统配置" onBack={onBack} />
 
-      <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar p-4 space-y-3 pb-[env(safe-area-inset-bottom,0px)]">
+      <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar p-4 space-y-3">
         <section className="space-y-2">
           <div className="flex items-center gap-1.5 px-1 text-xs font-bold text-[#2C4A5C]">
             <Key className="w-3.5 h-3.5 text-sky-600" />

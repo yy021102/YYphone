@@ -21,6 +21,7 @@ import {
   Save,
 } from 'lucide-react';
 import { AppHeader } from '../components/AppHeader';
+import { showYyError } from '../components/ErrorDialog';
 import { readAlipayContacts, AlipayContact } from '../utils/alipayData';
 import { requestConfiguredAiText } from '../utils/aiApi';
 import { readStorageString, readStoredValue, writeStoredValue } from '../utils/localStorage';
@@ -537,7 +538,7 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
       onSuccess(await compressImage(file));
     } catch (error) {
       console.error('Could not compress forum image.', error);
-      window.alert(error instanceof Error ? error.message : '图片压缩失败，请重新选择。');
+      showYyError(error instanceof Error ? error.message : '图片压缩失败，请重新选择。', '图片处理失败');
     }
   };
 
@@ -616,7 +617,7 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
 
   const handleDeleteBoard = (boardId: string) => {
     if (boards.length <= 1) {
-      alert('至少需要保留一个论坛板块哦~');
+      showYyError('至少需要保留一个论坛板块哦~', '小提示');
       return;
     }
     const nextBoards = boards.filter((b) => b.id !== boardId);
@@ -1141,7 +1142,7 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
       </div>
 
       {/* 主内容滚动区 */}
-      <div className="relative z-10 flex-1 min-h-0 overflow-y-auto no-scrollbar px-4 pt-1 space-y-3 pb-[env(safe-area-inset-bottom,0px)]">
+      <div className="relative z-10 flex-1 min-h-0 overflow-y-auto no-scrollbar px-4 pt-1 space-y-3">
         {noticeBanner && (
           <div className={`flex items-center justify-between rounded-2xl bg-white/85 backdrop-blur-md border px-3.5 py-2.5 text-[11px] font-bold shadow-2xs ${
             /失败|无效|无法|找不到|请先/.test(noticeBanner)
@@ -2312,7 +2313,7 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
                           if (isForumThemePreset(data.currentTheme)) setCurrentTheme(data.currentTheme);
                           setShowTopMenu(false);
                         } catch {
-                          alert('导入格式有误');
+                          showYyError('导入格式有误', '导入失败');
                         }
                       };
                       reader.readAsText(file);
