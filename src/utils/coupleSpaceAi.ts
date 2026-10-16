@@ -1,6 +1,6 @@
 import { requestConfiguredAiText } from './aiApi';
 import type { CharacterCoupleSpace } from '../apps/CoupleSpaceApp';
-import { readCharacterBrief } from './coupleSpaceData';
+import { localDateString, readCharacterBrief } from './coupleSpaceData';
 
 export interface MoodChoice {
   id: string;
@@ -25,7 +25,9 @@ const request = async (charId: string, userName: string, task: string, schema: s
   const system = [
     `你正在扮演「${brief.name}」，正在和恋人「${userName}」共用一个微信里的情侣空间小应用。`,
     `角色设定：${brief.persona || '保持自然、亲切、符合上下文。'}`,
-    brief.recentChat ? `你们最近的聊天（仅供把握语气和近况）：\n${brief.recentChat}` : '',
+    brief.recentChat
+      ? `你们最近微信里的最新聊天（由旧到新，共 ${brief.recentChat.split('\n').length} 条；写作时自然承接这些近况和情绪，不要无视）：\n${brief.recentChat}`
+      : '',
     '要求：完全以该角色的口吻与性格写作，像真人一样自然、有生活感和小情绪，不要套话；内容简短；不要提到自己是 AI。',
     `只返回一个 JSON 对象，格式：${schema}`,
   ].filter(Boolean).join('\n');
@@ -55,12 +57,15 @@ export const generateCharMood = async (
 };
 
 export const generateCharDiary = async (charId: string, userName: string, space: CharacterCoupleSpace) => {
-  const recentUser = space.diaries.find((entry) => entry.author === 'user');
+  const todayUser = space.diaries.find((entry) => entry.author === 'user' && entry.dateStr === localDateString());
+  const recentUser = todayUser ?? space.diaries.find((entry) => entry.author === 'user');
   const data = await request(
     charId,
     userName,
-    `请写一篇今天的交换日记，标题 15 字以内，正文 60~200 字。${
-      recentUser ? `玩家最近写的日记《${recentUser.title}》：${recentUser.content.slice(0, 200)}，可以自然呼应。` : ''
+    `请写一篇今天的交换日记（只写一篇），标题 15 字以内，正文 60~200 字。${
+      recentUser
+        ? `玩家${todayUser ? '今天' : '最近'}写的日记《${recentUser.title}》：${recentUser.content.slice(0, 300)}。你的日记里要有一部分内容明确呼应玩家日记里提到的事或心情（用你自己的视角回应，不要复述原文），其余部分写你自己的一天。`
+        : ''
     }`,
     '{"title":"标题","content":"正文"}'
   );

@@ -24,7 +24,7 @@ import {
 import { AppHeader } from '../components/AppHeader';
 import { showYyError, useErrorDialog } from '../components/ErrorDialog';
 import { addInventoryItem } from '../utils/inventoryData';
-import { upsertContextNote } from '../utils/chatNotes';
+import { removeContextNote, upsertContextNote } from '../utils/chatNotes';
 import {
   AlipayContact,
   AlipayData,
@@ -89,6 +89,8 @@ export interface XianyuChatThread {
   linkedCharId?: string;
   isAltAccount?: boolean;
   isPlayerItem?: boolean;
+  /** 是否把这段对话同步进对应角色的微信聊天上下文（默认同步） */
+  shareWithChar?: boolean;
   messages: {
     id: string;
     sender: 'me' | 'peer';
@@ -533,16 +535,17 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
       // 每位角色只发布一件；仅选了一位角色时，再补 2 件路人闲置。
       const passerbyCount = chosenChars.length === 0 ? 3 : chosenChars.length === 1 ? 2 : 0;
 
+      const REALISM_RULES = '【硬性要求】所有商品都必须是现实中真实存在、正常销售的普通商品或常见外卖（日用品、服饰、数码配件、食品饮料、文具、家居、书籍、美妆、运动户外、餐饮等），名称、规格和价格符合当前真实市场行情；禁止虚构的魔法/科幻/奇幻物品，禁止荒诞离奇、违法违规、成人情趣、药品处方、危险品或涉政内容，禁止“灵魂”“时间”“量子”这类抽象概念商品；标题和描述朴实可信，像真实商家发布的，不要夸张的营销腔；价格用人民币、合理的数字。';
       const systemPrompt = activeTab === 'xianyu'
-        ? '你是闲鱼二手卖家文案编辑，按要求为不同卖家上架真实自然的中文二手闲置商品。'
-        : '你是虚拟商城商品编辑，生成符合板块且真实自然的中文商品。';
+        ? `你是闲鱼二手卖家文案编辑，按要求为不同卖家上架真实自然的中文二手闲置商品。${REALISM_RULES}`
+        : `你是商城商品编辑，生成符合板块且真实自然的中文商品。${REALISM_RULES}`;
       const userPrompt = activeTab === 'xianyu'
         ? `生成闲鱼二手闲置商品，文案像真实卖家发布，包含成色、转卖原因或交易语气。${
           chosenChars.length > 0
             ? `以下每位角色各发布恰好 1 件符合其人设与生活习惯的闲置（用其小号出售，sellerId 写角色 ID）：${chosenChars.map((char) => `[ID:${char.id}] ${char.name}，人设：${getCharacterPersona(char.id) || '自然生活化'}`).join('；')}。`
             : ''
         }${passerbyCount > 0 ? `另外生成 ${passerbyCount} 件普通路人卖家的闲置（sellerId 固定写 "passerby"，不得关联任何通讯录角色）。` : ''}只返回 JSON：{"products":[{"sellerId":"角色ID或passerby","title":"标题","desc":"描述","price":数字,"freeShipping":true或false,"emoji":"契合商品的emoji"}]}。`
-        : `为${activeTab === 'shopping' ? '淘宝购物' : '饿了么外卖'}板块生成 2 到 3 件符合板块主题的虚拟商品。只返回 JSON：{"products":[{"title":"标题","desc":"描述","price":数字,"emoji":"契合商品的emoji"}]}。`;
+        : `为${activeTab === 'shopping' ? '淘宝购物' : '饿了么外卖'}板块生成 2 到 3 件符合板块主题的${activeTab === 'shopping' ? '真实常见商品（例如保温杯、帆布包、耳机、笔记本、护手霜这一类）' : '真实常见的外卖餐品（例如奶茶、炒饭、麻辣烫、汉堡、水果沙拉这一类）'}。只返回 JSON：{"products":[{"title":"标题","desc":"描述","price":数字,"emoji":"契合商品的emoji"}]}。`;
       const content = await requestConfiguredAiText(systemPrompt, userPrompt, { json: true });
       const parsed: unknown = JSON.parse(content);
       const rawProducts = Array.isArray(parsed)
@@ -814,6 +817,66 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
     setActiveThreadId(newThread.id);
   };
 
+  // 和角色账号/小号的闲鱼对话，同步成该角色微信聊天里的一条上下文记录（持续更新同一条）；
+  // 玩家关闭“同步角色记忆”后不再同步。
+  const syncXianyuToChat = (
+    thread: XianyuChatThread,
+    messages: Array<{ sender: 'me' | 'peer'; text: string }>
+  ) => {
+    if (!thread.linkedCharId || thread.shareWithChar === false) return;
+    const noteId = `xianyu-thread-${thread.id}`;
+    try {
+      if (messages.length === 0) {
+        removeContextNote(thread.linkedCharId, noteId);
+        return;
+      }
+      const speaker = (m: { sender: 'me' | 'peer' }) => (m.sender === 'me' ? '玩家' : thread.peerName);
+      const last = messages[messages.length - 1];
+      upsertContextNote(thread.linkedCharId, {
+        id: noteId,
+        source: 'xianyu',
+        title: `闲鱼 · ${thread.peerName}`,
+        content: `《${thread.itemTitle}》${speaker(last)}：${last.text}`.slice(0, 70),
+        detail: [
+          `${thread.isAltAccount ? '你的闲鱼小号' : '你的闲鱼账号'}「${thread.peerName}」与玩家的对话（商品《${thread.itemTitle}》¥${thread.itemPrice}）：`,
+          ...messages.slice(-24).map((m) => `${speaker(m)}：${m.text}`),
+        ].join('\n'),
+        bump: true,
+      });
+    } catch (error) {
+      console.warn('Could not sync Xianyu chat to character context.', error);
+    }
+  };
+
+  const removeXianyuNote = (thread: XianyuChatThread) => {
+    if (!thread.linkedCharId) return;
+    try {
+      removeContextNote(thread.linkedCharId, `xianyu-thread-${thread.id}`);
+    } catch (error) {
+      console.warn('Could not remove Xianyu chat from character context.', error);
+    }
+  };
+
+  const toggleXianyuShare = (thread: XianyuChatThread) => {
+    const next = thread.shareWithChar === false;
+    setXianyuThreads((prev) => prev.map((t) => (t.id === thread.id ? { ...t, shareWithChar: next } : t)));
+    if (next) syncXianyuToChat({ ...thread, shareWithChar: true }, thread.messages);
+    else removeXianyuNote(thread);
+  };
+
+  const deleteXianyuThread = (thread: XianyuChatThread) => {
+    if (!window.confirm(`删除和「${thread.peerName}」的对话？${thread.linkedCharId ? '它在角色聊天上下文里的记录也会一起删除。' : ''}`)) return;
+    removeXianyuNote(thread);
+    setXianyuThreads((prev) => prev.filter((t) => t.id !== thread.id));
+    if (activeThreadId === thread.id) setActiveThreadId(null);
+  };
+
+  const deleteXianyuMessage = (thread: XianyuChatThread, messageId: string) => {
+    const remaining = thread.messages.filter((m) => m.id !== messageId);
+    setXianyuThreads((prev) => prev.map((t) => (t.id === thread.id ? { ...t, messages: remaining } : t)));
+    syncXianyuToChat(thread, remaining);
+  };
+
   const handleSendXianyuMessage = async () => {
     if (!chatInput.trim() || !activeThreadId || isXianyuReplying) return;
     const thread = xianyuThreads.find((item) => item.id === activeThreadId);
@@ -840,29 +903,8 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
       .map((message) => `${message.sender === 'me' ? '玩家' : thread.peerName}：${message.text}`)
       .join('\n');
     const playerIdContext = `玩家闲鱼 ID：${playerProfile.xianyuId || '未设置'}。`;
-    // 和角色账号/小号的闲鱼对话，同步成该角色微信聊天里的一条上下文记录（持续更新同一条）
-    const syncXianyuToChat = (messages: Array<{ sender: 'me' | 'peer'; text: string }>) => {
-      if (!thread.linkedCharId) return;
-      try {
-        const speaker = (m: { sender: 'me' | 'peer' }) => (m.sender === 'me' ? '玩家' : thread.peerName);
-        const last = messages[messages.length - 1];
-        upsertContextNote(thread.linkedCharId, {
-          id: `xianyu-thread-${thread.id}`,
-          source: 'xianyu',
-          title: `闲鱼 · ${thread.peerName}`,
-          content: last ? `《${thread.itemTitle}》${speaker(last)}：${last.text}`.slice(0, 70) : `《${thread.itemTitle}》`,
-          detail: [
-            `${thread.isAltAccount ? '你的闲鱼小号' : '你的闲鱼账号'}「${thread.peerName}」与玩家的对话（商品《${thread.itemTitle}》¥${thread.itemPrice}）：`,
-            ...messages.slice(-24).map((m) => `${speaker(m)}：${m.text}`),
-          ].join('\n'),
-          bump: true,
-        });
-      } catch (error) {
-        console.warn('Could not sync Xianyu chat to character context.', error);
-      }
-    };
     try {
-      syncXianyuToChat([...thread.messages, userMessage]);
+      syncXianyuToChat(thread, [...thread.messages, userMessage]);
       const reply = await requestConfiguredAiText(
         linkedCharacter
           ? `你正在闲鱼上扮演角色${linkedCharacter.name}${thread.isAltAccount ? '的小号' : ''}回复买家。角色人设：${getCharacterPersona(linkedCharacter.id) || '自然、可信地交流'}。回复要像真实闲鱼聊天，简洁有生活感，只返回消息正文。`
@@ -884,7 +926,7 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
             : item
         )
       );
-      syncXianyuToChat([
+      syncXianyuToChat(thread, [
         ...thread.messages,
         userMessage,
         { sender: 'peer' as const, text: reply },
@@ -1348,21 +1390,34 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
                         <p className="text-xs font-extrabold flex items-center gap-1.5">
                           <span>@{activeThread.peerName}</span>
                           {activeThread.linkedCharId && (
-                            <span className="text-[9px] bg-pink-50 text-pink-500 px-1.5 py-0.5 rounded-full">
-                              已连通角色记忆
-                            </span>
+                            <button
+                              type="button"
+                              onClick={() => toggleXianyuShare(activeThread)}
+                              className={`cursor-pointer rounded-full px-1.5 py-0.5 text-[9px] ${activeThread.shareWithChar === false ? 'bg-slate-100 text-slate-400' : 'bg-pink-50 text-pink-500'}`}
+                            >
+                              {activeThread.shareWithChar === false ? '未连通角色记忆（点击开启）' : '已连通角色记忆（点击关闭）'}
+                            </button>
                           )}
                         </p>
                         <p className="text-[10px] opacity-60">
                           宝贝：{activeThread.itemTitle} (¥{activeThread.itemPrice})
                         </p>
                       </div>
-                      <button
-                        onClick={() => setActiveThreadId(null)}
-                        className="text-[11px] text-sky-500 font-bold bg-sky-50 px-2.5 py-1 rounded-full cursor-pointer"
-                      >
-                        返回
-                      </button>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => deleteXianyuThread(activeThread)}
+                          aria-label="删除这段对话"
+                          className="text-[11px] text-rose-400 font-bold bg-rose-50 px-2.5 py-1 rounded-full cursor-pointer"
+                        >
+                          删除
+                        </button>
+                        <button
+                          onClick={() => setActiveThreadId(null)}
+                          className="text-[11px] text-sky-500 font-bold bg-sky-50 px-2.5 py-1 rounded-full cursor-pointer"
+                        >
+                          返回
+                        </button>
+                      </div>
                     </div>
 
                     <div className="space-y-2 max-h-56 overflow-y-auto py-1">
@@ -1387,7 +1442,17 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
                           >
                             {m.text}
                           </div>
-                          <span className="text-[9px] opacity-45 mt-0.5 px-1">{m.time}</span>
+                          <span className="mt-0.5 flex items-center gap-1.5 px-1 text-[9px] opacity-45">
+                            {m.time}
+                            <button
+                              type="button"
+                              aria-label="删除这条消息"
+                              onClick={() => deleteXianyuMessage(activeThread, m.id)}
+                              className="cursor-pointer text-rose-400 opacity-80"
+                            >
+                              删除
+                            </button>
+                          </span>
                         </div>
                       ))}
                     </div>
@@ -1444,9 +1509,22 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
                             {t.messages[t.messages.length - 1]?.text}
                           </p>
                         </div>
-                        <span className="text-[10px] font-bold text-sky-500 bg-sky-50 px-2.5 py-1 rounded-full">
-                          查看
-                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            aria-label="删除对话"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              deleteXianyuThread(t);
+                            }}
+                            className="text-[10px] font-bold text-rose-400 bg-rose-50 px-2.5 py-1 rounded-full cursor-pointer"
+                          >
+                            删除
+                          </button>
+                          <span className="text-[10px] font-bold text-sky-500 bg-sky-50 px-2.5 py-1 rounded-full">
+                            查看
+                          </span>
+                        </div>
                       </div>
                     ))}
                   </div>

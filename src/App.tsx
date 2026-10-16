@@ -189,6 +189,17 @@ export default function App() {
   const currentWallpaper =
     WALLPAPERS.find((w) => w.id === beautySettings.wallpaperId) || WALLPAPERS[0];
 
+  // 让 html/body 的底色和小手机壁纸一致：即使浏览器栏、安全区或动态视口让页面露出一条边，
+  // 看到的也是壁纸而不是别的颜色。
+  useEffect(() => {
+    const homeImage = beautySettings.wallpapers.homeScreen;
+    const background = homeImage
+      ? `url("${homeImage}") center / cover no-repeat`
+      : currentWallpaper.style;
+    document.documentElement.style.background = background;
+    document.body.style.background = background;
+  }, [beautySettings.wallpapers.homeScreen, currentWallpaper.style]);
+
   const handleOpenApp = (appId: AppId) => {
     setActiveApp(appId);
   };
@@ -299,7 +310,7 @@ export default function App() {
   };
 
   return (
-    <div className="fixed inset-0 md:static md:w-full md:h-full md:min-h-[100dvh] bg-[#DFF1FA] md:bg-[#080D14] flex items-center justify-center p-0 md:p-3 overflow-hidden select-none">
+    <div className="fixed inset-0 md:static md:w-full md:h-full md:min-h-[100dvh] md:bg-[#080D14] flex items-center justify-center p-0 md:p-3 overflow-hidden select-none">
       {/* 
         Phone Canvas Container:
         - Exact height: 100dvh (dynamic viewport height) on mobile devices

@@ -368,7 +368,7 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
             <ImageIcon className="w-3.5 h-3.5 text-sky-500" />
             <span>锁屏</span>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-3 gap-2">
             {WALLPAPERS.map((wallpaper) => {
               const isSelected = activeWallpaperId === wallpaper.id;
               return (
@@ -383,29 +383,26 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
                       setError('壁纸保存失败。');
                     }
                   }}
-                  className={`glass-card rounded-2xl overflow-hidden text-left transition-all border ${
+                  className={`glass-card rounded-xl overflow-hidden text-left transition-all border ${
                     isSelected
-                      ? 'border-sky-500 ring-2 ring-sky-300 shadow-md scale-[1.02]'
+                      ? 'border-sky-500 ring-2 ring-sky-300 shadow-md'
                       : 'border-white/60 hover:border-sky-300'
                   }`}
                 >
                   <div
-                    className="h-28 relative p-2.5 flex flex-col justify-between"
+                    className="h-14 relative p-1.5 flex flex-col justify-between"
                     style={{ background: wallpaper.style }}
                   >
                     <div className="flex justify-end">
                       {isSelected && (
-                        <span className="w-5 h-5 rounded-full bg-sky-600 text-white flex items-center justify-center shadow-xs">
-                          <Check className="w-3 h-3 stroke-[3]" />
+                        <span className="w-4 h-4 rounded-full bg-sky-600 text-white flex items-center justify-center shadow-xs">
+                          <Check className="w-2.5 h-2.5 stroke-[3]" />
                         </span>
                       )}
                     </div>
-                    <span className="text-[10px] font-bold text-[#2C4A5C] bg-white/70 px-2 py-0.5 rounded-md w-fit shadow-2xs backdrop-blur-xs">
-                      {wallpaper.name}
-                    </span>
                   </div>
-                  <div className="p-2.5 bg-white/60">
-                    <p className="text-[10px] text-slate-500 truncate">{wallpaper.description}</p>
+                  <div className="px-1.5 py-1 bg-white/60">
+                    <p className="text-[10px] font-bold text-[#2C4A5C] truncate">{wallpaper.name}</p>
                   </div>
                 </button>
               );

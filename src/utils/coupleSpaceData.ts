@@ -5,6 +5,7 @@ import {
 } from './characterContext';
 import { readStorageString, readStoredValue, writeStorageString, writeStoredValue } from './localStorage';
 import { readSetting, SETTINGS_KEYS } from './settings';
+import { readDirectMessages } from './journalData';
 
 export const COUPLE_SPACES_STORAGE_KEY = 'yyphone:couple-spaces';
 const CHATS_STORAGE_KEY = 'yyphone:wechat-chats';
@@ -94,22 +95,19 @@ const readJsonArray = (key: string): Array<Record<string, unknown>> => {
   }
 };
 
-/** 角色人设 + 与玩家最近几句微信对话，供情侣空间的 AI 生成使用。 */
+/** 角色人设 + 与玩家最近 5 条真实微信聊天，供情侣空间等 AI 生成使用。 */
 export const readCharacterBrief = (charId: string) => {
   const contact = readJsonArray(CONTACTS_STORAGE_KEY).find((item) => item.id === charId);
-  const chat = readJsonArray(CHATS_STORAGE_KEY).find(
-    (item) =>
-      item.type === 'direct' &&
-      Array.isArray(item.participantIds) &&
-      item.participantIds.length === 1 &&
-      item.participantIds[0] === charId
-  );
-  const messages = Array.isArray(chat?.messages) ? (chat.messages as unknown[]).filter(isRecord) : [];
   const name = typeof contact?.name === 'string' ? contact.name : '角色';
-  const recent = messages
-    .filter((message) => message.senderId !== 'narrator' && typeof message.text === 'string' && message.text)
-    .slice(-8)
-    .map((message) => `${message.senderId === 'user' ? '玩家' : name}：${String(message.text).slice(0, 80)}`);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const recent = readDirectMessages(charId)
+    .filter((message) => !message.note)
+    .slice(-5)
+    .map((message) => {
+      const time = new Date(message.createdAt);
+      const stamp = Number.isNaN(time.getTime()) ? '' : `[${time.getMonth() + 1}/${time.getDate()} ${pad(time.getHours())}:${pad(time.getMinutes())}] `;
+      return `${stamp}${message.senderId === 'user' ? '玩家' : name}：${message.text.slice(0, 120)}`;
+    });
   return {
     name,
     persona: typeof contact?.persona === 'string' ? contact.persona : '',

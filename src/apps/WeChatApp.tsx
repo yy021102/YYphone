@@ -2678,11 +2678,6 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
         role: 'system',
         content: responseInstructions,
       });
-      writeStorageString(
-        `yyphone:last-prompt:${chat.id}`,
-        promptMessages.map((message) => `【${message.role}】\n${message.content}`).join('\n\n────────\n\n')
-      );
-
       const endpoint = apiPreset.endpoint.trim().replace(/\/+$/, '');
       const model = apiPreset.model?.trim() || 'gpt-4o-mini';
       let responseText: string;
@@ -3052,14 +3047,24 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
             const others = (item.reactions ?? []).filter((reaction) => reaction.by !== speakerId);
             return { ...item, reactions: [...others, { by: speakerId, emoji: aiReaction.emoji }] };
           }),
-          ...replyMessages,
+          replyMessages[0],
         ],
-        updatedAt: latestReplyMessage.createdAt,
+        updatedAt: replyMessages[0].createdAt,
         ...(generatedGroupTitle ? { groupTitle: generatedGroupTitle } : {}),
         ...(generatedGroupNicknames
           ? { groupNicknames: { ...(current.groupNicknames ?? {}), ...generatedGroupNicknames } }
           : {}),
       }));
+      // 逐条出现：updateChat 每次都读写存储，即使中途离开聊天页也会把剩余消息补完。
+      for (const message of replyMessages.slice(1)) {
+        const length = (message.text ?? '').length;
+        await new Promise((resolve) => setTimeout(resolve, 500 + Math.min(1300, length * 40)));
+        updateChat(chat.id, (current) => ({
+          ...current,
+          messages: [...current.messages, message],
+          updatedAt: message.createdAt,
+        }));
+      }
       // Only now is the reply final, so the delivered moments count as read.
       if (replySaved) applyMomentsAfterChat(momentsInjection, momentActions);
       if (replySaved) {
@@ -3265,6 +3270,8 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
         }
       />
       {!activeChat && activeTab === 'chats' && chatCreateMenuOpen && (
+        <>
+        <div className="absolute inset-0 z-30" onClick={() => setChatCreateMenuOpen(false)} aria-hidden="true" />
         <div className="absolute top-12 right-3 z-40 w-44 rounded-2xl bg-white/95 shadow-xl border border-white p-1.5">
           {([
             ['direct', '发起聊天'],
@@ -3285,8 +3292,11 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
             </button>
           ))}
         </div>
+        </>
       )}
       {activeTab === 'contacts' && contactsMenuOpen && (
+        <>
+        <div className="absolute inset-0 z-30" onClick={() => setContactsMenuOpen(false)} aria-hidden="true" />
         <div className="absolute top-12 right-3 z-40 w-40 rounded-2xl bg-white/95 shadow-xl border border-white p-1.5">
           <button
             onClick={() => openContactEditor()}
@@ -3304,6 +3314,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
             <Upload className="w-4 h-4" />导入角色
           </button>
         </div>
+        </>
       )}
       <input
         ref={contactImportRef}
@@ -5087,15 +5098,6 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({ onBack }) => {
                   <p className="text-[9px] leading-relaxed text-slate-400">可多选任意其他单聊、群聊或旁观群聊，并分别设置挂载条数；不会修改原记录。</p>
                 </>
               )}
-            </section>
-            <section className="space-y-2 rounded-xl bg-slate-50 p-3">
-              <p className="text-[11px] font-semibold text-[#2C4A5C]">上一轮发送给 AI 的提示词</p>
-              <details className="text-[10px] text-slate-500">
-                <summary className="cursor-pointer">点击展开（只读，生成一次后才有内容）</summary>
-                <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-white p-2 text-[10px] leading-relaxed text-slate-600">
-                  {readStorageString(`yyphone:last-prompt:${chatSettingsDraft.id}`) || '还没有生成过回复。'}
-                </pre>
-              </details>
             </section>
             <section className="space-y-2 rounded-xl bg-slate-50 p-3">
               <div className="flex items-center justify-between">

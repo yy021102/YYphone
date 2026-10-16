@@ -117,17 +117,63 @@ export const sortEntries = (entries: CalendarEntry[]) =>
 const describeEntry = (entry: CalendarEntry) =>
   `${entry.time ? `${entry.time} ` : ''}${entry.title}`;
 
+const formatSpan = (minutes: number) => {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return h > 0 ? `${h}小时${m > 0 ? `${m}分钟` : ''}` : `${m}分钟`;
+};
+
+/** 从日程的 time 字段，或标题里的“下午3点半 / 15:30 / 晚上8点”这类说法里推断开始时间（分钟数）。 */
+const inferStartMinutes = (entry: CalendarEntry): number | null => {
+  const direct = entry.time ? /^(\d{1,2}):(\d{2})/.exec(entry.time) : null;
+  if (direct) return Number(direct[1]) * 60 + Number(direct[2]);
+  const text = entry.title;
+  const clock = /(凌晨|早上|早晨|上午|中午|下午|傍晚|晚上|夜里)?\s*(\d{1,2})\s*(?:[:：]|点|时)\s*(半|\d{1,2})?/.exec(text);
+  if (clock) {
+    let hour = Number(clock[2]);
+    const period = clock[1];
+    if ((period === '下午' || period === '傍晚' || period === '晚上' || period === '夜里') && hour < 12) hour += 12;
+    if (period === '中午' && hour < 11) hour += 12;
+    if (hour > 24) return null;
+    const minute = clock[3] === '半' ? 30 : clock[3] ? Number(clock[3]) : 0;
+    return hour * 60 + minute;
+  }
+  // 只说了大概时段
+  if (/凌晨/.test(text)) return 1 * 60;
+  if (/早上|早晨|上午/.test(text)) return 8 * 60;
+  if (/中午/.test(text)) return 12 * 60;
+  if (/下午/.test(text)) return 14 * 60;
+  if (/傍晚/.test(text)) return 17 * 60 + 30;
+  if (/晚上|夜里/.test(text)) return 19 * 60 + 30;
+  return null;
+};
+
+/** 今天的日程，标注它相对“现在”是还没开始、刚开始还是已经过去，避免角色把还没发生的事当成已经发生。 */
+const describeTodayEntry = (entry: CalendarEntry, now: Date) => {
+  const base = describeEntry(entry);
+  const start = inferStartMinutes(entry);
+  if (start === null) return base;
+  const diff = start - (now.getHours() * 60 + now.getMinutes());
+  if (diff > 0) return `${base}（还没开始，还有${formatSpan(diff)}）`;
+  if (diff >= -90) return `${base}（已经开始约${formatSpan(-diff) === '0分钟' ? '一会儿' : formatSpan(-diff)}，可能还在进行）`;
+  return `${base}（已经过去${formatSpan(-diff)}）`;
+};
+
 const buildPlayerSection = (data: CalendarData, today: Date): string | null => {
   const todayKey = toDateKey(today);
   const lines: string[] = [];
 
   const todayEntries = sortEntries(entriesOnDate(data.entries, todayKey));
   const todayLines = [
-    ...todayEntries.filter((entry) => entry.kind === 'schedule').map((entry) => `日程：${describeEntry(entry)}`),
+    ...todayEntries.filter((entry) => entry.kind === 'schedule').map((entry) => `日程：${describeTodayEntry(entry, today)}`),
     ...todayEntries.filter((entry) => entry.kind === 'todo' && !entry.done).map((entry) => `待办：${entry.title}`),
   ];
   if (todayLines.length > 0) {
-    lines.push(`今天（${todayKey} ${weekdayLabel(todayKey)}）：`, ...todayLines.map((line) => `- ${line}`));
+    lines.push(
+      `今天（${todayKey} ${weekdayLabel(todayKey)}，现在是 ${pad(today.getHours())}:${pad(today.getMinutes())}）：`,
+      '（每条日程后面标注了它相对现在的状态。标注“还没开始”的事情还没有发生，不要说成已经发生，也不要问感受或结果，可以期待、提醒或随口聊聊；只有“已经过去”的才能问进行得怎么样。）',
+      ...todayLines.map((line) => `- ${line}`)
+    );
   }
 
   const upcomingLines: string[] = [];
@@ -212,7 +258,7 @@ export const buildCalendarContext = (
     .flatMap((schedule) => {
       const name = getName(schedule.charId);
       return name
-        ? [`${name}今天（${todayKey}）的行程（现在是 ${pad(now.getHours())}:${pad(now.getMinutes())}，请据此知道自己此刻大概在做什么、接下来要做什么，聊天时自然体现，如正忙、刚忙完、马上要出门，不必逐条复述）：\n${schedule.text.trim()}`]
+        ? [`${name}今天（${todayKey}）的行程（现在是 ${pad(now.getHours())}:${pad(now.getMinutes())}，请据此知道自己此刻大概在做什么、接下来要做什么，聊天时自然体现，如正忙、刚忙完、马上要出门，不必逐条复述；比现在时间更晚的安排还没有发生，不要当成已经做过）：\n${schedule.text.trim()}`]
         : [];
     });
   if (scheduleLines.length > 0) sections.push(scheduleLines.join('\n\n'));

@@ -643,7 +643,7 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
     messages.push({
       role: 'system',
       content: [
-        '情节礼物规则：当角色在剧情合适时，可以自然地送玩家一件现有淘宝/饿了么商品，或提出一件新商品/外卖并立即送达；不必每次都送。',
+        '情节礼物规则：当角色在剧情合适时，可以自然地送玩家一件现有淘宝/饿了么商品，或提出一件新商品/外卖并立即送达；不必每次都送。新商品必须是现实中真实存在、正常销售的普通商品或常见外卖，价格合理，不要虚构奇幻、荒诞或不合常理的物品。',
         `现有可送商品：${JSON.stringify(availableProducts.map(({ id, category, title, desc, price, emoji }) => ({ id, category, title, desc, price, emoji })))}`,
         '若要送现有商品，在 JSON 回复中增加 gift: {"existingProductId":"商品ID"}；若要现场生成，增加 gift: {"title":"商品名","desc":"商品描述","price":价格数字,"category":"shopping或eleme","emoji":"合适emoji"}。不得虚构 existingProductId。',
       ].join('\n'),
