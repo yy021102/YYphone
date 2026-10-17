@@ -310,7 +310,7 @@ export default function App() {
   };
 
   return (
-    <div className="fixed inset-0 md:static md:w-full md:h-full md:min-h-[100dvh] md:bg-[#080D14] flex items-center justify-center p-0 md:p-3 overflow-hidden select-none">
+    <div className="h-[100vh] w-full md:h-auto md:static md:w-full md:min-h-[100vh] md:bg-[#080D14] flex items-center justify-center p-0 md:p-3 overflow-hidden select-none">
       {/* 
         Phone Canvas Container:
         - Exact height: 100dvh (dynamic viewport height) on mobile devices
@@ -320,7 +320,7 @@ export default function App() {
       */}
       <div
         onPointerDown={handleEmergencyTap}
-        className={`w-full md:w-[min(412px,calc(93dvh*9/19.5))] h-full md:h-[min(850px,93dvh)] md:rounded-[44px] overflow-hidden relative flex flex-col shadow-[0_25px_80px_rgba(0,0,0,0.7),0_0_0_1px_rgba(255,255,255,0.14)] transition-all ${
+        className={`w-full md:w-[min(412px,calc(93vh*9/19.5))] h-full md:h-[min(850px,93vh)] md:rounded-[44px] overflow-hidden relative flex flex-col shadow-[0_25px_80px_rgba(0,0,0,0.7),0_0_0_1px_rgba(255,255,255,0.14)] transition-all ${
           activeApp || isLocked
             ? 'p-0'
             : 'pt-[max(env(safe-area-inset-top,0px),0px)] pb-0'
