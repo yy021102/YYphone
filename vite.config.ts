@@ -6,9 +6,11 @@ import {defineConfig} from 'vite';
 import {VitePWA} from 'vite-plugin-pwa';
 
 const projectRoot = path.dirname(fileURLToPath(import.meta.url));
+const repositoryName = process.env.GITHUB_REPOSITORY?.split('/')[1];
 
 export default defineConfig(() => {
   return {
+    base: repositoryName ? `/${repositoryName}/` : '/',
     plugins: [
       react(),
       tailwindcss(),
