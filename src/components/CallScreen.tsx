@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { Mic, MicOff, PhoneOff, Send, Sparkles, Video, VideoOff, Volume2, VolumeX } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Mic, MicOff, Phone, PhoneOff, Send, Sparkles, Video, VideoOff, Volume2, VolumeX } from 'lucide-react';
 
 export interface CallLine {
   id: string;
@@ -9,6 +9,8 @@ export interface CallLine {
 }
 
 interface CallScreenProps {
+  incoming?: boolean;
+  onMissed?: () => void;
   mode: 'voice' | 'video';
   peerName: string;
   peerAvatar: string;
@@ -32,6 +34,8 @@ const formatDuration = (seconds: number) =>
 
 /** 语音 / 视频通话页：先“呼叫”，对方接听后开始计时；对话仍然是文字，会记进聊天。 */
 export const CallScreen: React.FC<CallScreenProps> = ({
+  incoming = false,
+  onMissed,
   mode,
   peerName,
   peerAvatar,
@@ -54,9 +58,12 @@ export const CallScreen: React.FC<CallScreenProps> = ({
   const [muted, setMuted] = useState(false);
   const [speakerOn, setSpeakerOn] = useState(true);
   const [cameraOff, setCameraOff] = useState(false);
+  const missedHandler = useRef(onMissed);
+  useEffect(() => { missedHandler.current = onMissed; }, [onMissed]);
 
   // 呼叫 1.5~2.5 秒后“对方接听”
   useEffect(() => {
+    if (incoming) return;
     const timer = window.setTimeout(() => {
       const now = Date.now();
       setConnectedAt(now);
@@ -66,6 +73,12 @@ export const CallScreen: React.FC<CallScreenProps> = ({
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (!incoming || connectedAt !== null) return;
+    const timer = window.setTimeout(() => missedHandler.current?.(), 45_000);
+    return () => window.clearTimeout(timer);
+  }, [incoming, connectedAt]);
 
   useEffect(() => {
     if (connectedAt === null) return undefined;
@@ -80,7 +93,7 @@ export const CallScreen: React.FC<CallScreenProps> = ({
   const connected = connectedAt !== null;
   const video = mode === 'video';
   const hintText = !connected
-    ? `正在等待${peerName}接听…`
+    ? incoming ? `${peerName}邀请你${video ? '视频' : '语音'}通话` : `正在等待${peerName}接听…`
     : showConnectedHint
       ? `${peerName}已接听`
       : formatDuration(seconds);
@@ -104,7 +117,7 @@ export const CallScreen: React.FC<CallScreenProps> = ({
         <div>
           <h2 className="text-sm font-bold">{video ? '视频通话' : '语音通话'}</h2>
           <p className={`text-[10px] ${video ? 'text-white/70' : 'text-slate-400'}`}>
-            {connected ? `通话中 ${formatDuration(seconds)}` : '呼叫中'}
+            {connected ? `通话中 ${formatDuration(seconds)}` : incoming ? '来电邀请' : '呼叫中'}
           </p>
         </div>
         {video && (
@@ -152,7 +165,7 @@ export const CallScreen: React.FC<CallScreenProps> = ({
 
       {error && <p role="alert" className="relative z-10 px-4 pb-1 text-center text-[10px] text-rose-400">{error}</p>}
 
-      {canSend && (
+      {canSend && (!incoming || connected) && (
         <form
           onSubmit={(event) => {
             event.preventDefault();
@@ -191,23 +204,39 @@ export const CallScreen: React.FC<CallScreenProps> = ({
       )}
 
       <div className="relative z-10 flex items-center justify-center gap-7 pb-[max(env(safe-area-inset-bottom,0px),18px)] pt-2">
-        <button
+        {(!incoming || connected) && <button
           type="button"
           onClick={() => setMuted((value) => !value)}
           aria-label={muted ? '取消静音' : '静音'}
           className={`flex h-12 w-12 items-center justify-center rounded-full border backdrop-blur-md ${muted ? 'border-white bg-white text-slate-500' : video ? 'border-white/40 bg-black/25 text-white' : 'border-white bg-white/60 text-slate-500'}`}
         >
           {muted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
-        </button>
+        </button>}
+        {incoming && !connected && (
+          <button
+            type="button"
+            aria-label="接通来电"
+            onClick={() => {
+              const now = Date.now();
+              setConnectedAt(now);
+              setShowConnectedHint(true);
+              onConnected(now);
+            }}
+            className="flex h-16 w-16 flex-col items-center justify-center gap-1 rounded-full bg-emerald-400 text-white shadow-lg shadow-emerald-400/30 active:scale-95"
+          >
+            {video ? <Video className="h-6 w-6" /> : <Phone className="h-6 w-6" />}
+            <span className="text-[10px]">接通</span>
+          </button>
+        )}
         <button
           type="button"
           onClick={onEnd}
-          aria-label="挂断"
+          aria-label={incoming && !connected ? '拒绝来电' : '挂断'}
           className="flex h-16 w-16 items-center justify-center rounded-full bg-[#f26f86] text-white shadow-lg active:scale-95"
         >
           <PhoneOff className="h-6 w-6" />
         </button>
-        {video ? (
+        {(!incoming || connected) && (video ? (
           <button
             type="button"
             onClick={() => setCameraOff((value) => !value)}
@@ -225,7 +254,7 @@ export const CallScreen: React.FC<CallScreenProps> = ({
           >
             {speakerOn ? <Volume2 className="h-5 w-5" /> : <VolumeX className="h-5 w-5" />}
           </button>
-        )}
+        ))}
       </div>
     </div>
   );

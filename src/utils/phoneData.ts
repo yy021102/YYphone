@@ -71,8 +71,9 @@ export const readRecentMoneyEvents = (charId: string): string => {
     const when = typeof message.createdAt === 'string' ? message.createdAt.slice(0, 16).replace('T', ' ') : '';
     const label = kind === 'red-packet' ? '红包' : kind === 'transfer' ? '转账' : message.orderMode === 'gift' ? '送礼物' : '下单商品';
     const amount = typeof message.amount === 'string' || typeof message.amount === 'number' ? `¥${message.amount}` : '';
+    const status = kind === 'order' ? '' : message.paymentStatus === 'pending' ? '（待收款，未到账）' : message.paymentStatus === 'returned' ? '（已退回，未到账）' : message.senderId !== 'user' ? '（已领取/收款）' : '（已发出）';
     const text = typeof message.title === 'string' && message.title ? message.title : typeof message.text === 'string' ? message.text : '';
-    lines.push(`${when} ${from}${label} ${amount} ${text}`.trim());
+    lines.push(`${when} ${from}${label} ${amount}${status} ${text}`.trim());
   }
   return lines.slice(-15).join('\n');
 };

@@ -4,10 +4,13 @@ import { clearDbStorage, removeCachedStorageItem } from './dbStorage';
 export const SETTINGS_KEYS = {
   userProfile: 'pocketos:user-profile',
   beauty: 'yyphone:beauty-settings',
+  font: 'yyphone:font-settings',
+  chatRuntime: 'yyphone:chat-runtime',
   lock: 'yyphone:lock-settings',
   statusBarVisible: 'yyphone:show-status-bar',
   apiPresets: 'yyphone:api-presets',
   activeApiPreset: 'yyphone:active-api-preset',
+  apiConfigExpanded: 'yyphone:api-config-expanded',
   beautyPresets: 'yyphone:beauty-presets',
   personas: 'pocketos:personas',
   chatAppearance: 'yyphone:chat-appearance',

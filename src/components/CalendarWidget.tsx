@@ -29,6 +29,7 @@ import {
 } from '../utils/calendarData';
 import { readStoredValue } from '../utils/localStorage';
 import { useWidgetAppearance } from '../utils/widgetAppearance';
+import { CALENDAR_APPEARANCE_KEY } from '../utils/homeAppearance';
 import { WidgetImagePicker } from './WidgetImagePicker';
 
 interface CalendarContact {
@@ -105,7 +106,7 @@ const emptyForm = (date: string): EntryForm => ({
 export const CalendarWidget: React.FC = () => {
   const [data, setData] = useState<CalendarData>(readCalendarData);
   const dataRef = useRef(data);
-  const { appearance, patch: patchAppearance } = useWidgetAppearance('yyphone:calendar-appearance');
+  const { appearance, patch: patchAppearance } = useWidgetAppearance(CALENDAR_APPEARANCE_KEY);
   const [todayKey, setTodayKey] = useState(() => toDateKey(new Date()));
   const [panelOpen, setPanelOpen] = useState(false);
   const [tab, setTab] = useState<PanelTab>('calendar');

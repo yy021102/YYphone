@@ -1,6 +1,7 @@
 import { requestConfiguredAiText } from './aiApi';
 import { readDirectMessages } from './journalData';
 import { readOfflineContacts } from './offlineData';
+import { guardMemoryArchive } from './memoryArchives';
 import {
   addMemoryCandidates,
   isMemoryCategory,
@@ -12,6 +13,14 @@ import {
   SHARED_MEMORY_ID,
   writeMemorySettings,
 } from './memoryData';
+
+export const requestMemoryAiText: typeof requestConfiguredAiText = (system, user, options = {}) => {
+  const settings = readMemorySettings();
+  return requestConfiguredAiText(system, user, {
+    ...options,
+    ...(settings.useSecondaryApi ? { api: settings.secondaryApi } : {}),
+  });
+};
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === 'object' && !Array.isArray(value);
@@ -53,6 +62,7 @@ export interface ExtractionResult {
 
 /** 读取该角色上次整理之后的新聊天，让 AI 提炼值得长期记住的条目。 */
 export const extractMemoryCandidates = async (charId: string): Promise<ExtractionResult> => {
+  const assertArchive = guardMemoryArchive(charId);
   const settings = readMemorySettings();
   const contact = readOfflineContacts().find((c) => c.id === charId);
   const charName = contact?.name ?? '角色';
@@ -79,7 +89,8 @@ export const extractMemoryCandidates = async (charId: string): Promise<Extractio
     `【新的聊天记录】\n${batch.map((m) => m.line).join('\n')}`,
   ].filter(Boolean).join('\n\n');
 
-  const text = await requestConfiguredAiText(system, user, { json: true, temperature: 0.3 });
+  const text = await requestMemoryAiText(system, user, { json: true, temperature: 0.3 });
+  assertArchive();
   let parsed: unknown;
   try {
     parsed = JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] ?? text);
@@ -115,11 +126,14 @@ export const maybeAutoExtractMemory = async (participantIds: string[], chatType:
   if (!settings.autoExtract || running.has(charId)) return;
   if (countNewMessages(charId, settings) < settings.autoEvery) return;
   running.add(charId);
+  const assertArchive = guardMemoryArchive(charId);
   try {
     const result = await extractMemoryCandidates(charId);
+    assertArchive();
     if (result.candidates.length > 0) {
       await addMemoryCandidates(charId, result.candidates, 'chat', readMemorySettings());
     }
+    assertArchive();
     if (result.newCursor) advanceMemoryCursor(charId, result.newCursor);
     const latest = readMemorySettings();
     if (latest.lastAutoError) writeMemorySettings({ ...latest, lastAutoError: '' });

@@ -274,6 +274,24 @@ export const MomentsTab: React.FC<MomentsTabProps> = ({ userName, userAvatarUrl,
                   ...result.likes.filter((like) => !item.likes.some((existing) => existing.id === like.id)),
                 ],
                 comments: [...item.comments, ...result.comments],
+                ...((item.updatedAt ?? '') === (post.updatedAt ?? '') ? {
+                  seenByCharIds: [...new Set([
+                    ...item.seenByCharIds,
+                    ...result.likes.map((like) => like.id),
+                    ...result.comments.map((comment) => comment.authorId),
+                  ])],
+                  seenCommentIdsByChar: {
+                    ...item.seenCommentIdsByChar,
+                    ...Object.fromEntries(
+                      [...new Set([...result.likes.map((like) => like.id), ...result.comments.map((comment) => comment.authorId)])]
+                        .map((id) => [id, [...new Set([
+                          ...(item.seenCommentIdsByChar[id] ?? []),
+                          ...post.comments.map((comment) => comment.id),
+                          ...result.comments.map((comment) => comment.id),
+                        ])]])
+                    ),
+                  },
+                } : {}),
               }
         )
       );

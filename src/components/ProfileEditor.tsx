@@ -218,6 +218,13 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({
             />
           </label>
           {fileInput('coverImageUrl', '资料卡背景')}
+          <button
+            type="button"
+            onClick={() => updateField('coverImageUrl', '')}
+            className="text-[11px] font-semibold text-sky-600"
+          >
+            恢复默认头图（保存后生效）
+          </button>
         </div>
 
         {isProcessingImage && <p className="text-[11px] text-sky-700">正在压缩图片…</p>}

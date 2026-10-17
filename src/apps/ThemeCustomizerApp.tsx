@@ -18,6 +18,7 @@ import {
 } from '../types';
 import { compressImageFile } from '../utils/imageFile';
 import { readSetting, saveSetting, SETTINGS_KEYS } from '../utils/settings';
+import { isHomeAppearance } from '../utils/homeAppearance';
 
 interface ThemeCustomizerAppProps {
   onBack: () => void;
@@ -50,7 +51,8 @@ const isBeautySettings = (value: unknown): value is BeautySettings => {
     typeof settings.appIcons === 'object' &&
     Object.entries(settings.appIcons).every(
       ([id, url]) => ALL_APPS.some((app) => app.id === id) && typeof url === 'string'
-    )
+    ) &&
+    (settings.homeAppearance === undefined || isHomeAppearance(settings.homeAppearance))
   );
 };
 
@@ -304,7 +306,7 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
     <div className="flex-1 w-full flex flex-col bg-[#F3F7FA] overflow-hidden">
       <AppHeader
         title="美化 · 主题与壁纸"
-        subtitle="保存、切换与分享你的搭配"
+        subtitle="壁纸、图标、组件与资料卡整套保存"
         onBack={onBack}
       />
 

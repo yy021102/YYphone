@@ -4,6 +4,7 @@ import { musicPlayer, useMusicPlayer } from '../utils/musicPlayer';
 import { formatMusicTime } from '../utils/musicPlayback';
 import { readStoredValue } from '../utils/localStorage';
 import { useWidgetAppearance } from '../utils/widgetAppearance';
+import { MUSIC_APPEARANCE_KEY } from '../utils/homeAppearance';
 import { WidgetImagePicker } from './WidgetImagePicker';
 
 interface CompanionOption {
@@ -24,7 +25,7 @@ const readCompanionOptions = (): CompanionOption[] =>
 
 export const ListenTogetherWidget: React.FC = () => {
   const player = useMusicPlayer();
-  const { appearance, patch } = useWidgetAppearance('yyphone:music-appearance');
+  const { appearance, patch } = useWidgetAppearance(MUSIC_APPEARANCE_KEY);
   const [panelOpen, setPanelOpen] = useState(false);
   const [companions, setCompanions] = useState<CompanionOption[]>([]);
   const [urlDraft, setUrlDraft] = useState('');

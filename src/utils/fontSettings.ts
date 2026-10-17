@@ -1,0 +1,33 @@
+import { readSetting, SETTINGS_KEYS } from './settings';
+
+export const FONT_FAMILIES = {
+  system: { label: '默认无衬线', value: '"Plus Jakarta Sans", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif' },
+  serif: { label: '宋体 / 衬线', value: '"Noto Serif SC", "Songti SC", SimSun, serif' },
+  rounded: { label: '圆体', value: '"Yuanti SC", "Hiragino Maru Gothic ProN", "Microsoft YaHei", sans-serif' },
+} as const;
+
+export interface FontSettings {
+  scale: number;
+  family: keyof typeof FONT_FAMILIES;
+  url?: string;
+}
+
+export const DEFAULT_FONT_SETTINGS: FontSettings = { scale: 1, family: 'system' };
+
+export const readFontSettings = (): FontSettings =>
+  readSetting(SETTINGS_KEYS.font, DEFAULT_FONT_SETTINGS, (value): value is FontSettings => {
+    if (!value || typeof value !== 'object') return false;
+    const settings = value as Partial<FontSettings>;
+    return typeof settings.scale === 'number' && Number.isFinite(settings.scale) &&
+      settings.scale >= 0.85 && settings.scale <= 1.3 &&
+      typeof settings.family === 'string' && Object.hasOwn(FONT_FAMILIES, settings.family) &&
+      (settings.url === undefined || (typeof settings.url === 'string' &&
+        (!settings.url || /^https?:\/\//i.test(settings.url))));
+  });
+
+export const normalizeFontUrl = (input: string): string => {
+  if (!input.trim()) return '';
+  const url = new URL(input.trim());
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('字体链接必须使用 HTTP 或 HTTPS。');
+  return url.href;
+};

@@ -1,4 +1,4 @@
-import { requestConfiguredAiText } from './aiApi';
+import { requestMemoryAiText } from './memoryAi';
 import {
   activeGrowthNote,
   COMPRESSION,
@@ -20,6 +20,7 @@ import {
 } from './journalData';
 import { readMemories } from './memoryData';
 import { readOfflineContacts } from './offlineData';
+import { guardMemoryArchive } from './memoryArchives';
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === 'object' && !Array.isArray(value);
@@ -66,6 +67,7 @@ export const createJournalEntry = async (
   charId: string,
   options: { minMessages: number } = { minMessages: MIN_MANUAL_CHUNK }
 ): Promise<JournalEntry | null> => {
+  const assertArchive = guardMemoryArchive(charId);
   const settings = readJournalSettings();
   const cursor = settings.journalCursors[charId] ?? '';
   const pending = readDirectMessages(charId).filter((m) => !cursor || m.createdAt > cursor);
@@ -79,11 +81,12 @@ export const createJournalEntry = async (
     `角色设定（仅用于理解语气和立场）：${persona || '（无）'}`,
     `写法：按时间顺序，120~250 字；用“玩家”指代${userName}，用“我”指代${name}；写清楚聊了哪些话题、发生了什么事、双方的情绪和相处氛围、做出的约定或留下的悬念；保留关键细节（人名、地点、数字、日期、专有名词）；客观陈述，不评价、不升华、不写成文学作品。聊天里标为【记录】的是线下剧情摘要或${name}手机内容的记忆，分享的论坛帖子、番茄钟战绩等卡片也都算发生过的事，一并纳入。只输出这篇流水账正文，不要标题和说明。`,
   ].join('\n');
-  const text = await requestConfiguredAiText(
+  const text = await requestMemoryAiText(
     system,
     `【聊天记录（${stamp(chunk[0].createdAt)} 至 ${stamp(chunk[chunk.length - 1].createdAt)}，共 ${chunk.length} 条）】\n${transcript(chunk, name, userName)}`,
     { temperature: 0.4, maxTokens: 900 }
   );
+  assertArchive();
   const entry: JournalEntry = {
     id: newJournalId(),
     charId,
@@ -114,7 +117,7 @@ const mergeEntries = async (charId: string, entries: JournalEntry[], target: Jou
     `角色设定（仅用于理解立场）：${persona || '（无）'}`,
     `要求：${limit}；按时间顺序保留脉络、重要事件、关系和情绪上的变化、仍然有效的约定与悬念；舍弃琐碎重复的细节，但保留关键的人名、地点、数字、日期；用“玩家”指代${userName}，用“我”指代${name}；客观陈述，不评价、不升华。只输出合并后的正文。`,
   ].join('\n');
-  const text = await requestConfiguredAiText(
+  const text = await requestMemoryAiText(
     system,
     entries.map((e, i) => `【第 ${i + 1} 篇（${stamp(e.from)} 至 ${stamp(e.to)}）】\n${e.content}`).join('\n\n'),
     { temperature: 0.3, maxTokens: 900 }
@@ -134,6 +137,7 @@ const mergeEntries = async (charId: string, entries: JournalEntry[], target: Jou
 
 /** 某一层未合并的篇数超过上限时，把最早的几篇合并成上一层的一篇，逐层向上。 */
 export const compressJournal = async (charId: string): Promise<number> => {
+  const assertArchive = guardMemoryArchive(charId);
   let merges = 0;
   for (let guard = 0; guard < 6; guard += 1) {
     let acted = false;
@@ -144,6 +148,7 @@ export const compressJournal = async (charId: string): Promise<number> => {
       const group = unmerged.slice(0, mergeCount);
       const target: JournalLevel = level === 1 ? 2 : 3;
       const merged = await mergeEntries(charId, group, target);
+      assertArchive();
       const ids = new Set(group.map((e) => e.id));
       writeJournalEntries([
         ...readJournalEntries().map((e) => (ids.has(e.id) ? { ...e, mergedInto: merged.id } : e)),
@@ -167,13 +172,16 @@ const coolingDown = (key: string) => Date.now() - (lastAutoAttempt.get(key) ?? 0
 
 /** 手动整理：连续整理最多 maxChunks 段待整理的聊天，再压缩。 */
 export const runJournal = async (charId: string, maxChunks = 6): Promise<{ created: number; merged: number }> => {
+  const assertArchive = guardMemoryArchive(charId);
   let created = 0;
   for (let i = 0; i < maxChunks; i += 1) {
     const entry = await createJournalEntry(charId);
+    assertArchive();
     if (!entry) break;
     created += 1;
   }
   const merged = await compressJournal(charId);
+  assertArchive();
   return { created, merged };
 };
 
@@ -186,8 +194,10 @@ export const maybeAutoJournal = async (participantIds: string[], chatType: strin
   if (countPendingForJournal(charId, settings) < settings.journalEvery) return;
   if (coolingDown(`journal:${charId}`)) return;
   journalRunning.add(charId);
+  const assertArchive = guardMemoryArchive(charId);
   try {
     await createJournalEntry(charId, { minMessages: settings.journalEvery });
+    assertArchive();
     await compressJournal(charId);
   } catch (error) {
     lastAutoAttempt.set(`journal:${charId}`, Date.now());
@@ -224,6 +234,7 @@ const cleanField = (value: unknown, max: number) => (typeof value === 'string' ?
 
 /** 生成一份新的成长笔记：按设置直接生效，或先作为待确认。 */
 export const generateGrowthNote = async (charId: string): Promise<GrowthNote> => {
+  const assertArchive = guardMemoryArchive(charId);
   const settings = readJournalSettings();
   const { name, persona } = charInfo(charId);
   const userName = readUserName();
@@ -261,7 +272,8 @@ export const generateGrowthNote = async (charId: string): Promise<GrowthNote> =>
     `【最近的聊天（${recent.length} 条）】\n${transcript(recent, name, userName)}`,
   ].filter(Boolean).join('\n\n');
 
-  const text = await requestConfiguredAiText(system, user, { json: true, temperature: 0.5 });
+  const text = await requestMemoryAiText(system, user, { json: true, temperature: 0.5 });
+  assertArchive();
   let parsed: unknown;
   try {
     parsed = JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] ?? text);

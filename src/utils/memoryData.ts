@@ -1,4 +1,5 @@
 import { readStorageString, readStoredValue, writeStoredValue } from './localStorage';
+import { archiveCursorsForWrite, guardMemoryArchive, readArchiveCursors, readArchiveRecords, writeArchiveRecords } from './memoryArchives';
 
 export const MEMORY_ITEMS_KEY = 'yyphone:memory-items';
 export const MEMORY_EMBEDDINGS_KEY = 'yyphone:memory-embeddings';
@@ -21,6 +22,7 @@ export const MEMORY_CATEGORIES: Array<{ id: MemoryCategory; label: string; emoji
 export interface MemoryItem {
   id: string;
   charId: string;
+  archiveKey?: string;
   content: string;
   category: MemoryCategory;
   importance: number;
@@ -40,6 +42,8 @@ export interface EmbeddingConfig {
 
 export interface MemorySettings {
   embedding: EmbeddingConfig;
+  useSecondaryApi: boolean;
+  secondaryApi: EmbeddingConfig;
   /** 每轮最多注入的「相关往事」条数 */
   topK: number;
   /** 向量相似度阈值，低于它不算相关 */
@@ -56,6 +60,8 @@ export interface MemorySettings {
 
 export const DEFAULT_MEMORY_SETTINGS: MemorySettings = {
   embedding: { endpoint: 'https://api.siliconflow.cn/v1', apiKey: '', model: 'BAAI/bge-m3' },
+  useSecondaryApi: false,
+  secondaryApi: { endpoint: '', apiKey: '', model: 'gpt-4o-mini' },
   topK: 5,
   threshold: 0.4,
   autoExtract: false,
@@ -79,8 +85,8 @@ const isMemoryList = (value: unknown): value is MemoryItem[] =>
   Array.isArray(value) &&
   value.every((item) => isRecord(item) && typeof item.id === 'string' && typeof item.content === 'string' && typeof item.charId === 'string');
 
-export const readMemories = (): MemoryItem[] => readStoredValue(MEMORY_ITEMS_KEY, [] as MemoryItem[], isMemoryList);
-export const writeMemories = (items: MemoryItem[]) => writeStoredValue(MEMORY_ITEMS_KEY, items);
+export const readMemories = (): MemoryItem[] => readArchiveRecords(MEMORY_ITEMS_KEY, isMemoryList);
+export const writeMemories = (items: MemoryItem[]) => writeArchiveRecords(MEMORY_ITEMS_KEY, items, isMemoryList);
 
 type EmbeddingStore = Record<string, { m: string; v: number[] }>;
 export const readEmbeddings = (): EmbeddingStore =>
@@ -91,11 +97,18 @@ export const readMemorySettings = (): MemorySettings => {
   const stored = readStoredValue(MEMORY_SETTINGS_KEY, null as unknown, (value): value is unknown => true);
   if (!isRecord(stored)) return DEFAULT_MEMORY_SETTINGS;
   const embedding = isRecord(stored.embedding) ? stored.embedding : {};
+  const secondaryApi = isRecord(stored.secondaryApi) ? stored.secondaryApi : {};
   const num = (value: unknown, fallback: number, min: number, max: number) => {
     const n = Number(value);
     return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback;
   };
   return {
+    useSecondaryApi: stored.useSecondaryApi === true,
+    secondaryApi: {
+      endpoint: typeof secondaryApi.endpoint === 'string' ? secondaryApi.endpoint : '',
+      apiKey: typeof secondaryApi.apiKey === 'string' ? secondaryApi.apiKey : '',
+      model: typeof secondaryApi.model === 'string' ? secondaryApi.model : 'gpt-4o-mini',
+    },
     embedding: {
       endpoint: typeof embedding.endpoint === 'string' ? embedding.endpoint : DEFAULT_MEMORY_SETTINGS.embedding.endpoint,
       apiKey: typeof embedding.apiKey === 'string' ? embedding.apiKey : '',
@@ -106,14 +119,14 @@ export const readMemorySettings = (): MemorySettings => {
     autoExtract: stored.autoExtract === true,
     autoEvery: Math.round(num(stored.autoEvery, 30, 10, 300)),
     confirmManual: stored.confirmManual !== false,
-    cursors: isRecord(stored.cursors)
-      ? Object.fromEntries(Object.entries(stored.cursors).filter((entry): entry is [string, string] => typeof entry[1] === 'string'))
-      : {},
+    cursors: readArchiveCursors(MEMORY_SETTINGS_KEY, 'cursors'),
     lastAutoError: typeof stored.lastAutoError === 'string' ? stored.lastAutoError : '',
   };
 };
 
-export const writeMemorySettings = (settings: MemorySettings) => writeStoredValue(MEMORY_SETTINGS_KEY, settings);
+export const writeMemorySettings = (settings: MemorySettings) => writeStoredValue(MEMORY_SETTINGS_KEY, {
+  ...settings, cursors: archiveCursorsForWrite(MEMORY_SETTINGS_KEY, 'cursors', settings.cursors),
+});
 
 // ==================== Embedding ====================
 export const embeddingConfigured = (config: EmbeddingConfig) =>
@@ -176,8 +189,9 @@ export const embedMissingMemories = async (
     const batch = missing.slice(start, start + 16);
     const vectors = await embedTexts(batch.map((item) => item.content), config);
     const latest = readEmbeddings();
+    const existingIds = new Set(readMemories().map((item) => item.id));
     batch.forEach((item, index) => {
-      latest[item.id] = { m: config.model, v: vectors[index] };
+      if (existingIds.has(item.id)) latest[item.id] = { m: config.model, v: vectors[index] };
     });
     writeEmbeddings(latest);
     done += batch.length;
@@ -243,14 +257,14 @@ export const rankMemories = async (
   charIds: string[],
   query: string,
   settings: MemorySettings,
-  options: { signal?: AbortSignal; limit?: number; ignoreThreshold?: boolean } = {}
+  options: { signal?: AbortSignal; limit?: number; ignoreThreshold?: boolean; localOnly?: boolean } = {}
 ): Promise<ScoredMemory[]> => {
   const ids = new Set([...charIds, SHARED_MEMORY_ID]);
   const candidates = readMemories().filter((item) => ids.has(item.charId));
   if (candidates.length === 0 || !query.trim()) return [];
   const store = readEmbeddings();
   let queryVector: number[] | null = null;
-  if (embeddingConfigured(settings.embedding)) {
+  if (embeddingConfigured(settings.embedding) && !options.localOnly) {
     const cacheKey = `${settings.embedding.model}|${query}`;
     queryVector = queryCache.get(cacheKey) ?? null;
     if (!queryVector) {
@@ -302,7 +316,8 @@ export const buildMemoryInjection = async (
   charIds: string[],
   chatType: string,
   query: string,
-  nameOf: (id: string) => string | undefined
+  nameOf: (id: string) => string | undefined,
+  options: { localOnly?: boolean } = {}
 ): Promise<MemoryInjection> => {
   const empty: MemoryInjection = { text: '', ids: [] };
   if (chatType === 'observer' || charIds.length === 0) return empty;
@@ -326,7 +341,7 @@ export const buildMemoryInjection = async (
     const timer = window.setTimeout(() => controller.abort(), 6000);
     let related: ScoredMemory[] = [];
     try {
-      related = (await rankMemories(charIds, query, settings, { signal: controller.signal, limit: settings.topK + always.length }))
+      related = (await rankMemories(charIds, query, settings, { signal: controller.signal, limit: settings.topK + always.length, localOnly: options.localOnly }))
         .filter((entry) => !alwaysIds.has(entry.item.id))
         .slice(0, settings.topK);
     } finally {
@@ -375,8 +390,7 @@ export const addMemoryCandidates = async (
   source: MemoryItem['source'],
   settings: MemorySettings
 ): Promise<{ added: number; merged: number }> => {
-  const items = readMemories();
-  const store = readEmbeddings();
+  const assertArchive = guardMemoryArchive(charId);
   const sameOwner = (item: MemoryItem) => item.charId === charId;
   const useVectors = embeddingConfigured(settings.embedding);
   let vectors: number[][] = [];
@@ -387,6 +401,9 @@ export const addMemoryCandidates = async (
       console.warn('Could not embed new memories for dedupe.', error);
     }
   }
+  assertArchive();
+  const items = readMemories();
+  const store = readEmbeddings();
   const now = new Date().toISOString();
   let added = 0;
   let merged = 0;

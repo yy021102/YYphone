@@ -79,11 +79,29 @@ export interface CustomWallpapers {
 
 export type AppIconOverrides = Partial<Record<AppId, string>>;
 
+export interface WidgetAppearance {
+  background: string;
+  disc: string;
+  note: string;
+}
+
+export interface HomeAppearance {
+  calendar: WidgetAppearance;
+  music: WidgetAppearance;
+  profile: {
+    avatarUrl: string;
+    coverImageUrl: string;
+    avatarFrameEnabled: boolean;
+    avatarFrame?: AvatarFrameStyle;
+  };
+}
+
 export interface BeautySettings {
   themeId: string;
   wallpaperId: string;
   wallpapers: CustomWallpapers;
   appIcons: AppIconOverrides;
+  homeAppearance?: HomeAppearance;
 }
 
 export interface BeautyPreset {

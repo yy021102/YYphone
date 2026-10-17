@@ -1,5 +1,6 @@
 import { readStoredValue, writeStoredValue } from './localStorage';
 import { readWechatChatsRaw } from './memoryData';
+import { archiveCursorsForWrite, readArchiveCursors, readArchiveRecords, writeArchiveRecords } from './memoryArchives';
 
 export const JOURNAL_ENTRIES_KEY = 'yyphone:memory-journal';
 export const GROWTH_NOTES_KEY = 'yyphone:memory-growth';
@@ -17,6 +18,7 @@ export const JOURNAL_LEVEL_LABEL: Record<JournalLevel, string> = {
 export interface JournalEntry {
   id: string;
   charId: string;
+  archiveKey?: string;
   level: JournalLevel;
   /** 覆盖的聊天时间范围 */
   from: string;
@@ -32,6 +34,7 @@ export interface JournalEntry {
 export interface GrowthNote {
   id: string;
   charId: string;
+  archiveKey?: string;
   relationship: string;
   changes: string;
   habits: string;
@@ -77,15 +80,15 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 export const newJournalId = (prefix = 'jr') => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
 // ==================== 存取 ====================
-export const readJournalEntries = (): JournalEntry[] =>
-  readStoredValue(JOURNAL_ENTRIES_KEY, [] as JournalEntry[], (v): v is JournalEntry[] =>
-    Array.isArray(v) && v.every((e) => isRecord(e) && typeof e.id === 'string' && typeof e.content === 'string'));
-export const writeJournalEntries = (items: JournalEntry[]) => writeStoredValue(JOURNAL_ENTRIES_KEY, items);
+const isJournalEntries = (v: unknown): v is JournalEntry[] =>
+  Array.isArray(v) && v.every((e) => isRecord(e) && typeof e.id === 'string' && typeof e.charId === 'string' && typeof e.content === 'string');
+export const readJournalEntries = (): JournalEntry[] => readArchiveRecords(JOURNAL_ENTRIES_KEY, isJournalEntries);
+export const writeJournalEntries = (items: JournalEntry[]) => writeArchiveRecords(JOURNAL_ENTRIES_KEY, items, isJournalEntries);
 
-export const readGrowthNotes = (): GrowthNote[] =>
-  readStoredValue(GROWTH_NOTES_KEY, [] as GrowthNote[], (v): v is GrowthNote[] =>
-    Array.isArray(v) && v.every((n) => isRecord(n) && typeof n.id === 'string' && typeof n.status === 'string'));
-export const writeGrowthNotes = (items: GrowthNote[]) => writeStoredValue(GROWTH_NOTES_KEY, items);
+const isGrowthNotes = (v: unknown): v is GrowthNote[] =>
+  Array.isArray(v) && v.every((n) => isRecord(n) && typeof n.id === 'string' && typeof n.charId === 'string' && typeof n.status === 'string');
+export const readGrowthNotes = (): GrowthNote[] => readArchiveRecords(GROWTH_NOTES_KEY, isGrowthNotes);
+export const writeGrowthNotes = (items: GrowthNote[]) => writeArchiveRecords(GROWTH_NOTES_KEY, items, isGrowthNotes);
 
 export const readJournalSettings = (): JournalSettings => {
   const stored = readStoredValue(JOURNAL_SETTINGS_KEY, null as unknown, (v): v is unknown => true);
@@ -97,16 +100,16 @@ export const readJournalSettings = (): JournalSettings => {
   return {
     journalAuto: stored.journalAuto !== false,
     journalEvery: num(stored.journalEvery, 100, 30, 400),
-    journalCursors: isRecord(stored.journalCursors)
-      ? Object.fromEntries(Object.entries(stored.journalCursors).filter((e): e is [string, string] => typeof e[1] === 'string'))
-      : {},
+    journalCursors: readArchiveCursors(JOURNAL_SETTINGS_KEY, 'journalCursors'),
     growthAuto: stored.growthAuto !== false,
     growthIntervalDays: num(stored.growthIntervalDays, 14, 3, 90),
     growthConfirm: stored.growthConfirm !== false,
     lastError: typeof stored.lastError === 'string' ? stored.lastError : '',
   };
 };
-export const writeJournalSettings = (settings: JournalSettings) => writeStoredValue(JOURNAL_SETTINGS_KEY, settings);
+export const writeJournalSettings = (settings: JournalSettings) => writeStoredValue(JOURNAL_SETTINGS_KEY, {
+  ...settings, journalCursors: archiveCursorsForWrite(JOURNAL_SETTINGS_KEY, 'journalCursors', settings.journalCursors),
+});
 
 // ==================== 读取聊天 ====================
 export interface DirectMessage {
@@ -135,7 +138,9 @@ const describeForSummary = (m: Record<string, unknown>): string => {
       return `[玩家转发了查到的手机内容「${title}」] ${detail}`;
     case 'red-packet':
     case 'transfer':
-      return `[${m.kind === 'red-packet' ? '红包' : '转账'} ¥${typeof m.amount === 'string' || typeof m.amount === 'number' ? m.amount : ''}] ${text}`;
+      return `[${m.kind === 'red-packet' ? '红包' : '转账'} ¥${typeof m.amount === 'string' || typeof m.amount === 'number' ? m.amount : ''}；${m.paymentStatus === 'pending' ? '待领取/收款，未到账' : m.paymentStatus === 'returned' ? '已退回，未到账' : m.senderId === 'user' ? '已发出' : '已领取/收款'}] ${text}`;
+    case 'intimate-pay':
+      return `[亲密付${m.senderId === 'user' ? '申请' : '决定'}；${m.intimateStatus === 'pending' ? '待回应' : m.intimateStatus === 'granted' ? '已同意' : '已拒绝'}] ${text}`;
     case 'order':
       return `[${text || title}]${typeof m.content === 'string' && m.content ? ` ${clip(m.content, 80)}` : ''}`;
     default:

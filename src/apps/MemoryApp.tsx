@@ -28,6 +28,7 @@ import {
 } from '../utils/memoryData';
 import { advanceMemoryCursor, countNewMessages, extractMemoryCandidates } from '../utils/memoryAi';
 import { GrowthPanel, JournalPanel } from '../components/MemoryJournalGrowth';
+import { activeMemoryArchive, guardMemoryArchive, memoryArchiveLabel } from '../utils/memoryArchives';
 
 interface MemoryAppProps {
   onBack: () => void;
@@ -67,7 +68,7 @@ export const MemoryApp: React.FC<MemoryAppProps> = ({ onBack }) => {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [busy, setBusy] = useState('');
   const [notice, setNotice] = useState('');
-  const [review, setReview] = useState<{ charId: string; cursor: string; candidates: Candidate[] } | null>(null);
+  const [review, setReview] = useState<{ charId: string; cursor: string; candidates: Candidate[]; assertArchive: () => void } | null>(null);
   const [testQuery, setTestQuery] = useState('');
   const [testResults, setTestResults] = useState<ScoredMemory[] | null>(null);
   const [tab, setTab] = useState<'memories' | 'journal' | 'growth'>('memories');
@@ -90,13 +91,25 @@ export const MemoryApp: React.FC<MemoryAppProps> = ({ onBack }) => {
   }, []);
 
   const persistSettings = (next: MemorySettings) => {
-    setSettings(next);
-    writeMemorySettings(next);
+    try {
+      writeMemorySettings(next);
+      setSettings(next);
+    } catch (error) {
+      console.error('Could not save memory settings.', error);
+      showYyError(error instanceof Error ? error.message : '记忆设置保存失败，请重试。');
+    }
   };
 
   const persistMemories = (next: MemoryItem[]) => {
-    setMemories(next);
-    writeMemories(next);
+    try {
+      writeMemories(next);
+      setMemories(readMemories());
+      return true;
+    } catch (error) {
+      console.error('Could not save archive memories.', error);
+      showYyError(error instanceof Error ? error.message : '记忆保存失败，请重试。');
+      return false;
+    }
   };
 
   const ownerName = (id: string) => (id === SHARED_MEMORY_ID ? '玩家通用' : contacts.find((c) => c.id === id)?.name ?? '未知角色');
@@ -142,7 +155,7 @@ export const MemoryApp: React.FC<MemoryAppProps> = ({ onBack }) => {
     const item: MemoryItem = { ...editing, content: editing.content.trim().slice(0, 300), updatedAt: now };
     const exists = memories.some((m) => m.id === item.id);
     const previous = memories.find((m) => m.id === item.id);
-    persistMemories(exists ? memories.map((m) => (m.id === item.id ? item : m)) : [...memories, item]);
+    if (!persistMemories(exists ? memories.map((m) => (m.id === item.id ? item : m)) : [...memories, item])) return;
     if (previous && previous.content !== item.content) removeEmbeddings([item.id]);
     setEditing(null);
     if (!exists || previous?.content !== item.content) void embedInBackground([item]);
@@ -151,7 +164,7 @@ export const MemoryApp: React.FC<MemoryAppProps> = ({ onBack }) => {
 
   const deleteItem = (item: MemoryItem) => {
     if (!window.confirm('删除这条记忆？')) return;
-    persistMemories(memories.filter((m) => m.id !== item.id));
+    if (!persistMemories(memories.filter((m) => m.id !== item.id))) return;
     removeEmbeddings([item.id]);
     refreshEmbedded();
   };
@@ -164,6 +177,7 @@ export const MemoryApp: React.FC<MemoryAppProps> = ({ onBack }) => {
     setEditing({
       id: newMemoryId(),
       charId: ownerId,
+      archiveKey: activeMemoryArchive(ownerId),
       content: '',
       category: 'fact',
       importance: 3,
@@ -178,9 +192,11 @@ export const MemoryApp: React.FC<MemoryAppProps> = ({ onBack }) => {
   // ---------- 整理记忆 ----------
   const runExtract = async () => {
     if (busy || ownerId === SHARED_MEMORY_ID) return;
+    const assertArchive = guardMemoryArchive(ownerId);
     setBusy('extract');
     try {
       const result = await extractMemoryCandidates(ownerId);
+      assertArchive();
       if (result.messageCount === 0) {
         flash('没有新的聊天需要整理');
         return;
@@ -194,6 +210,7 @@ export const MemoryApp: React.FC<MemoryAppProps> = ({ onBack }) => {
       if (settings.confirmManual) {
         setReview({
           charId: ownerId,
+          assertArchive,
           cursor: result.newCursor,
           candidates: result.candidates.map((c, i) => ({ ...c, key: `${i}-${c.content.slice(0, 6)}`, selected: true })),
         });
@@ -208,7 +225,9 @@ export const MemoryApp: React.FC<MemoryAppProps> = ({ onBack }) => {
   };
 
   const commitCandidates = async (charId: string, candidates: MemoryCandidate[], cursor: string) => {
+    const assertArchive = guardMemoryArchive(charId);
     const { added, merged } = await addMemoryCandidates(charId, candidates, 'chat', readMemorySettings());
+    assertArchive();
     advanceMemoryCursor(charId, cursor);
     setMemories(readMemories());
     setSettings(readMemorySettings());
@@ -303,6 +322,11 @@ export const MemoryApp: React.FC<MemoryAppProps> = ({ onBack }) => {
           ))}
         </div>
 
+        <p className="rounded-xl bg-sky-50/80 px-3 py-2 text-[11px] leading-relaxed text-slate-500">
+          {ownerId === SHARED_MEMORY_ID
+            ? '玩家通用记忆跨角色、跨存档共用。身份或关系相关的信息请存入对应角色的当前档，避免影响新身份。'
+            : `当前关联微信私聊「${memoryArchiveLabel(ownerId)}」：记忆、流水账和成长笔记仅属于此档。请到聊天 → 更多 → 聊天存档切换；新档为空，删除存档会一并删除这些内容。`}
+        </p>
         {ownerId !== SHARED_MEMORY_ID && (
           <div className="grid grid-cols-3 rounded-2xl bg-white/70 p-1 text-xs">
             {([['memories', '记忆库'], ['journal', '流水账'], ['growth', '成长笔记']] as const).map(([key, label]) => (
@@ -465,7 +489,7 @@ export const MemoryApp: React.FC<MemoryAppProps> = ({ onBack }) => {
               </div>
               <label className="block space-y-1">
                 <span className="font-semibold text-slate-600">属于</span>
-                <select className={inputClass} value={editing.charId} onChange={(e) => setEditing({ ...editing, charId: e.target.value })}>
+                <select className={inputClass} value={editing.charId} onChange={(e) => setEditing({ ...editing, charId: e.target.value, archiveKey: activeMemoryArchive(e.target.value) })}>
                   {owners.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
                 </select>
               </label>
@@ -524,8 +548,11 @@ export const MemoryApp: React.FC<MemoryAppProps> = ({ onBack }) => {
                   const chosen = review.candidates.filter((c) => c.selected && c.content.trim());
                   setBusy('commit');
                   try {
+                    review.assertArchive();
                     await commitCandidates(review.charId, chosen, review.cursor);
                     setReview(null);
+                  } catch (error) {
+                    showYyError(error instanceof Error ? error.message : String(error), '写入记忆失败');
                   } finally {
                     setBusy('');
                   }
@@ -537,9 +564,14 @@ export const MemoryApp: React.FC<MemoryAppProps> = ({ onBack }) => {
                 type="button"
                 className={pillBtn}
                 onClick={() => {
-                  advanceMemoryCursor(review.charId, review.cursor);
-                  setSettings(readMemorySettings());
-                  setReview(null);
+                  try {
+                    review.assertArchive();
+                    advanceMemoryCursor(review.charId, review.cursor);
+                    setSettings(readMemorySettings());
+                    setReview(null);
+                  } catch (error) {
+                    showYyError(error instanceof Error ? error.message : String(error), '更新整理进度失败');
+                  }
                 }}
               >
                 都不要
@@ -558,6 +590,21 @@ export const MemoryApp: React.FC<MemoryAppProps> = ({ onBack }) => {
               <button type="button" aria-label="关闭" onClick={() => setSettingsOpen(false)} className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 text-slate-400"><X className="h-4 w-4" /></button>
             </div>
             <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-0.5 text-xs">
+              <section className="space-y-2">
+                <h4 className="font-bold text-[#6F7F8E]">记忆专用副 API</h4>
+                <label className="flex items-center gap-2 text-slate-600">
+                  <input type="checkbox" checked={settings.useSecondaryApi} onChange={(e) => persistSettings({ ...settings, useSecondaryApi: e.target.checked })} />
+                  <span>独立使用副 API</span>
+                </label>
+                <p className="text-[10px] leading-relaxed text-slate-400">用于手动/自动记忆整理、流水账、回顾合并和成长笔记；不影响聊天主 API。关闭则跟随系统 API，向量化仍使用下方独立接口。</p>
+                {settings.useSecondaryApi && (
+                  <>
+                    <input aria-label="记忆副 API 地址" className={inputClass} placeholder="接口地址（OpenAI 兼容或 Gemini）" value={settings.secondaryApi.endpoint} onChange={(e) => persistSettings({ ...settings, secondaryApi: { ...settings.secondaryApi, endpoint: e.target.value } })} />
+                    <input aria-label="记忆副 API 密钥" className={inputClass} type="password" placeholder="API Key" value={settings.secondaryApi.apiKey} onChange={(e) => persistSettings({ ...settings, secondaryApi: { ...settings.secondaryApi, apiKey: e.target.value } })} />
+                    <input aria-label="记忆副 API 模型" className={inputClass} placeholder="模型名称" value={settings.secondaryApi.model} onChange={(e) => persistSettings({ ...settings, secondaryApi: { ...settings.secondaryApi, model: e.target.value } })} />
+                  </>
+                )}
+              </section>
               <section className="space-y-2">
                 <h4 className="font-bold text-[#6F7F8E]">向量化接口（Embedding）</h4>
                 <p className="text-[10px] leading-relaxed text-slate-400">用语义找出和当前话题相关的记忆。需要支持 OpenAI 兼容 /embeddings 的接口，例如硅基流动的 BAAI/bge-m3。不填则自动用关键词检索。</p>

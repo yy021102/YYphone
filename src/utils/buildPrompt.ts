@@ -30,6 +30,8 @@ export interface PromptChatMessage {
   quantity?: number;
   recipientId?: string;
   payerId?: string;
+  paymentStatus?: string;
+  intimateStatus?: string;
   orderCategory?: string;
   orderMode?: string;
   aiContext?: string;
@@ -300,7 +302,7 @@ const formatClock = (date: Date) => {
 const timeOfDayLabel = (hour: number) =>
   hour < 5 ? '凌晨' : hour < 9 ? '清晨/早上' : hour < 12 ? '上午' : hour < 14 ? '中午' : hour < 18 ? '下午' : hour < 22 ? '晚上' : '深夜';
 
-const toMessageContent = (message: PromptChatMessage) => {
+export const toMessageContent = (message: PromptChatMessage) => {
   let content = toBaseMessageContent(message);
   if (message.replyTo) {
     content = `（引用了${message.replyTo.senderName}的消息「${message.replyTo.text}」）${content}`;
@@ -379,11 +381,12 @@ const toBaseMessageContent = (message: PromptChatMessage) => {
   if (message.kind === 'video-call') return `[视频通话邀请/状态：${message.text}]`;
   if (message.kind === 'location') return `[位置分享：${message.text}]`;
   if (message.kind === 'red-packet') {
-    return `[${message.senderId === 'user' ? '玩家发送' : '角色发送'}红包：¥${message.amount ?? '未知'}${message.quantity ? `，共${message.quantity}个` : ''}；祝福语：${message.text}]`;
+    return `[${message.senderId === 'user' ? '玩家发送' : '角色发送'}红包：¥${message.amount ?? '未知'}${message.quantity ? `，共${message.quantity}个` : ''}；状态：${message.paymentStatus === 'pending' ? '待领取，尚未到账' : message.senderId === 'user' ? '已发出' : '已领取'}；祝福语：${message.text}]`;
   }
   if (message.kind === 'transfer') {
-    return `[${message.senderId === 'user' ? '玩家发送' : '角色发送'}转账：¥${message.amount ?? '未知'}${message.recipientId ? `，收款方：${message.recipientId === 'user' ? '玩家' : message.recipientId}` : ''}${message.payerId ? `，由${message.payerId}的亲密付付款` : ''}；说明：${message.text}]`;
+    return `[${message.senderId === 'user' ? '玩家发送' : '角色发送'}转账：¥${message.amount ?? '未知'}${message.recipientId ? `，收款方：${message.recipientId === 'user' ? '玩家' : message.recipientId}` : ''}${message.payerId ? `，由${message.payerId}的亲密付付款` : ''}；状态：${message.paymentStatus === 'pending' ? '待确认收款，尚未到账' : message.paymentStatus === 'returned' ? '已退回，未到账' : message.senderId === 'user' ? '已发出' : '已收款'}；说明：${message.text}]`;
   }
+  if (message.kind === 'intimate-pay') return `[亲密付${message.senderId === 'user' ? '申请' : '决定'}；状态：${message.intimateStatus === 'pending' ? '待角色回应' : message.intimateStatus === 'granted' ? '已获准' : '已拒绝'}${message.amount ? `；月额度：¥${message.amount}` : ''}；${message.text}]`;
   if (message.kind === 'link') {
     return `[分享链接：${message.title || message.text}${message.source ? `；来源：${message.source}` : ''}${message.content ? `；摘要：${message.content}` : ''}]`;
   }

@@ -275,7 +275,10 @@ export const buildMomentsInjection = (
     for (const post of posts) {
       if (count >= MAX_POSTS_PER_CHAR) break;
       if (!isPostRelevantToChar(post, charId, npcs)) continue;
-      const bodyUnread = post.authorId !== charId && !post.seenByCharIds.includes(charId);
+      const hasInteracted = post.comments.some((comment) =>
+        comment.authorId === charId && (!post.updatedAt || comment.createdAt >= post.updatedAt)
+      ) || (!post.updatedAt && post.likes.some((like) => like.id === charId));
+      const bodyUnread = post.authorId !== charId && !post.seenByCharIds.includes(charId) && !hasInteracted;
       const seenComments = new Set(post.seenCommentIdsByChar[charId] ?? []);
       const newComments = post.comments.filter(
         (comment) => !seenComments.has(comment.id) && comment.authorId !== charId
@@ -288,7 +291,7 @@ export const buildMomentsInjection = (
         : post.authorId === charId ? '你自己' : `${post.authorName}（你的关联 NPC）`;
       const header = bodyUnread
         ? `【${authorLabel}发布了朋友圈${post.updatedAt ? '（已被修改，以下为最新内容）' : ''}】${formatMomentTime(post.createdAt)}　朋友圈ID：${post.id}`
-        : `【${authorLabel}的朋友圈有新评论】朋友圈ID：${post.id}\n（原动态：${post.content.trim().slice(0, 60) || '无文字'}）`;
+        : `【${authorLabel}的朋友圈有新评论（你已看过原动态，本次仅评论更新）】朋友圈ID：${post.id}\n（已读原动态摘要，仅用于定位：${post.content.trim().slice(0, 60) || '无文字'}）`;
       const commentLines = shownComments.map((comment) => {
         const who = comment.authorId === MOMENT_USER_ID ? '玩家' : comment.authorName;
         const self = comment.authorId === charId ? '（你）' : '';
@@ -302,20 +305,20 @@ export const buildMomentsInjection = (
       marks.push({
         postId: post.id,
         charId,
-        commentIds: post.comments.map((comment) => comment.id),
+        commentIds: shownComments.map((comment) => comment.id),
         markBody: bodyUnread,
         version: post.updatedAt ?? '',
       });
       count += 1;
     }
-    if (lines.length) sections.push(`角色「${nameOf(charId) ?? charId}」尚未读过的朋友圈：\n${lines.join('\n\n')}`);
+    if (lines.length) sections.push(`角色「${nameOf(charId) ?? charId}」的朋友圈更新（新动态与已读动态的新评论已分别标注）：\n${lines.join('\n\n')}`);
   });
 
   if (sections.length === 0) return EMPTY_MOMENTS_INJECTION;
   return {
     marks,
     text: [
-      '【朋友圈动态】以下是尚未被相应角色读过的朋友圈内容，只会告知这一次，之后不会再重复提供。角色可以在本次回复中自然地提及，但不要逐条复述，也不要让未读到这些内容的角色知道它们。',
+      '【朋友圈动态】以下按角色区分首次看到的动态和已读动态的新评论。对于“仅评论更新”，角色早已看过原动态，可能还点赞或评论过；只能回应新增评论，不得说“刚看到你的朋友圈”“才刷到”或重新表现为第一次得知原动态。每条新增信息只告知一次，可以自然提及但不要逐条复述，也不要让未读到这些内容的角色知道它们。',
       ...sections,
     ].join('\n\n'),
   };

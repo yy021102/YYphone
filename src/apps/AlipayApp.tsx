@@ -34,6 +34,7 @@ import {
   readAlipayContacts,
   readAlipayData,
   writeAlipayData,
+  requestIntimatePay,
 } from '../utils/alipayData';
 import { readStoredValue, writeStoredValue } from '../utils/localStorage';
 import { compressImageFile } from '../utils/imageFile';
@@ -126,11 +127,13 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
   const [intimateLimitDraft, setIntimateLimitDraft] = useState('');
   const [intimateNoteDraft, setIntimateNoteDraft] = useState('');
   const [intimateError, setIntimateError] = useState('');
+  const [intimateMessage, setIntimateMessage] = useState('');
   useErrorDialog(intimateError);
 
   useEffect(() => {
     try {
       writeAlipayData({
+        ...readAlipayData(),
         balance,
         yuebao,
         bankCardCount,
@@ -159,6 +162,16 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
   useEffect(() => {
     writeStoredValue(ALIPAY_APPEARANCE_KEY, appearance);
   }, [appearance]);
+
+  useEffect(() => {
+    const refresh = () => {
+      const latest = readAlipayData();
+      setBalance(latest.balance);
+      setIntimateCards(latest.intimateCards.filter((card) => contacts.some((contact) => contact.id === card.charId)));
+    };
+    window.addEventListener('yyphone:finance-change', refresh);
+    return () => window.removeEventListener('yyphone:finance-change', refresh);
+  }, [contacts]);
 
   // ==================== 4. 计算逻辑 ====================
   const totalAssets = balance + yuebao;
@@ -215,6 +228,8 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
   const openIntimateEditor = (contactId: string) => {
     const card = intimateCards.find((item) => item.charId === contactId);
     setIntimateContactId(contactId);
+    setIntimateError('');
+    setIntimateMessage('');
     setIntimateLimitDraft(card ? String(card.monthlyLimit) : '');
     setIntimateNoteDraft(card?.note ?? '');
     setShowIntimateEditModal(true);
@@ -227,22 +242,15 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
       setIntimateError('请输入有效的亲密付月度额度。');
       return;
     }
-    const existing = intimateCards.find((card) => card.charId === contact.id);
-    const nextCard: IntimatePayCard = {
-      id: existing?.id ?? `intimate-${contact.id}`,
-      charId: contact.id,
-      charName: contact.name,
-      avatar: contact.avatarUrl,
-      monthlyLimit: limit,
-      usedAmount: existing?.usedAmount ?? 0,
-      note: intimateNoteDraft.trim(),
-    };
-    setIntimateCards((current) => [
-      ...current.filter((card) => card.charId !== contact.id),
-      nextCard,
-    ]);
-    setIntimateError('');
-    setShowIntimateEditModal(false);
+    try {
+      requestIntimatePay(contact, limit, intimateNoteDraft.trim());
+      setIntimateError('');
+      setShowIntimateEditModal(false);
+      setIntimateMessage('申请已发送到微信，请进入与角色的私聊并生成回复；是否同意及实际额度由角色决定。');
+    } catch (error) {
+      console.error('Could not request intimate pay.', error);
+      setIntimateError(error instanceof Error ? error.message : '亲密付申请发送失败。');
+    }
   };
 
   const handleRemoveIntimateCard = () => {
@@ -537,13 +545,13 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
                     onChange={(event) => {
                       if (event.target.value) openIntimateEditor(event.target.value);
                     }}
-                    aria-label="选择通讯录角色开通或编辑亲密付"
+                    aria-label="选择通讯录角色申请亲密付"
                     className="max-w-40 rounded-lg border border-pink-100 bg-white/80 px-2 py-1.5 text-[10px] text-slate-600"
                   >
                     <option value="">选择通讯录角色</option>
                     {contacts.map((contact) => (
                       <option key={contact.id} value={contact.id}>
-                        {intimateCards.some((card) => card.charId === contact.id) ? '编辑 · ' : '开通 · '}{contact.name}
+                        {intimateCards.some((card) => card.charId === contact.id) ? '查看 / 申请调整 · ' : '申请 · '}{contact.name}
                       </option>
                     ))}
                   </select>
@@ -551,6 +559,7 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
               </div>
 
               <div className="space-y-2.5">
+                {intimateMessage && <p role="status" className="text-[11px] text-sky-700">{intimateMessage}</p>}
                 {intimateCards.map((card) => {
                   const contact = contacts.find((item) => item.id === card.charId);
                   if (!contact) return null;
@@ -608,7 +617,7 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
                 })}
                 {intimateCards.length === 0 && (
                   <div className="rounded-2xl border border-dashed border-pink-100 bg-white/40 p-4 text-center text-[10px] text-slate-400">
-                    尚未开通亲密付。请选择一位通讯录角色设置月度额度。
+                    尚未开通亲密付。可以向角色提出申请，或等待角色在聊天中主动赠予；是否同意及额度由角色决定。
                   </div>
                 )}
               </div>
@@ -1196,13 +1205,13 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
         <div className="absolute inset-0 z-50 bg-slate-900/25 backdrop-blur-xs flex items-center justify-center p-5">
           <div className="w-full bg-white/95 backdrop-blur-2xl border border-white rounded-3xl p-5 shadow-xl space-y-3.5">
             <h3 className="text-sm font-extrabold text-[#2C4A5C]">
-              {intimateCards.some((card) => card.charId === intimateContactId) ? '编辑亲密付' : '开通亲密付'}
+              {intimateCards.some((card) => card.charId === intimateContactId) ? '亲密付 / 申请调整' : '申请亲密付'}
               {contacts.find((contact) => contact.id === intimateContactId)?.name
                 ? ` · ${contacts.find((contact) => contact.id === intimateContactId)?.name}`
                 : ''}
             </h3>
             <label className="block text-[11px] font-semibold text-[#2C4A5C]">
-              每月额度（元）
+              希望的每月额度（元）
               <input
                 type="number"
                 min="0.01"
@@ -1214,7 +1223,7 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
               />
             </label>
             <label className="block text-[11px] font-semibold text-[#2C4A5C]">
-              备注或角色留言
+              申请理由（选填）
               <input
                 value={intimateNoteDraft}
                 onChange={(event) => setIntimateNoteDraft(event.target.value)}
@@ -1224,6 +1233,7 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
               />
             </label>
             {intimateError && <p role="alert" className="text-[11px] text-rose-500">{intimateError}</p>}
+            <p className="text-[11px] text-slate-500">提交不会直接开卡或修改额度，请到微信生成角色回复。角色可以同意、调整额度或拒绝。</p>
             <div className="flex gap-2">
               {intimateCards.some((card) => card.charId === intimateContactId) && (
                 <button
@@ -1246,7 +1256,7 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
                 onClick={handleSaveIntimateCard}
                 className="flex-1 rounded-xl bg-gradient-to-r from-sky-200 to-pink-200 py-2 text-xs font-bold text-slate-700"
               >
-                保存额度
+                发送申请
               </button>
             </div>
           </div>

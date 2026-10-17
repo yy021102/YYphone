@@ -1,18 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
 import { readStoredValue, writeStoredValue } from './localStorage';
+import { WidgetAppearance } from '../types';
 
-export interface WidgetAppearance {
-  background: string;
-  disc: string;
-  note: string;
-}
+export type { WidgetAppearance } from '../types';
 
 const EMPTY: WidgetAppearance = { background: '', disc: '', note: '' };
 
 const isAppearance = (value: unknown): value is Partial<WidgetAppearance> =>
   typeof value === 'object' && value !== null;
 
-const read = (key: string): WidgetAppearance => {
+export const readWidgetAppearance = (key: string): WidgetAppearance => {
   const stored = readStoredValue<Partial<WidgetAppearance>>(key, {}, isAppearance);
   return {
     background: typeof stored.background === 'string' ? stored.background : '',
@@ -22,10 +19,10 @@ const read = (key: string): WidgetAppearance => {
 };
 
 export const useWidgetAppearance = (key: string) => {
-  const [appearance, setAppearance] = useState<WidgetAppearance>(() => read(key));
+  const [appearance, setAppearance] = useState<WidgetAppearance>(() => readWidgetAppearance(key));
 
   useEffect(() => {
-    setAppearance(read(key));
+    setAppearance(readWidgetAppearance(key));
   }, [key]);
 
   const patch = useCallback(

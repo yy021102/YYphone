@@ -16,8 +16,13 @@ import { readSetting, saveSetting, SETTINGS_KEYS } from './utils/settings';
 import { StatusBar } from './components/StatusBar';
 import { LockScreen } from './components/LockScreen';
 import { HomeScreen } from './components/HomeScreen';
+import { LittlePPanel } from './components/LittlePPanel';
+import { LITTLE_P_VISIBLE_KEY } from './utils/littleP';
 import { processPomodoroDeadline } from './utils/pomodoroRuntime';
-import { ErrorDialogHost } from './components/ErrorDialog';
+import { ErrorDialogHost, showYyError } from './components/ErrorDialog';
+import { CALENDAR_APPEARANCE_KEY, MUSIC_APPEARANCE_KEY, captureHomeAppearance, isHomeAppearance } from './utils/homeAppearance';
+import { FONT_FAMILIES, FontSettings, readFontSettings } from './utils/fontSettings';
+import { ChatNotification, ChatRuntimeSettings, isKeepAlivePlaying, readChatRuntimeSettings, startKeepAlive, stopKeepAlive } from './utils/chatRuntime';
 
 const WeChatApp = lazy(() => import('./apps/WeChatApp').then((module) => ({ default: module.WeChatApp })));
 const PhoneExplorerApp = lazy(() => import('./apps/PhoneExplorerApp').then((module) => ({ default: module.CheckPhoneApp })));
@@ -71,7 +76,8 @@ const isBeautySettings = (value: unknown): value is BeautySettings => {
     typeof settings.wallpapers.homeScreen === 'string' &&
     !!settings.appIcons &&
     typeof settings.appIcons === 'object' &&
-    Object.values(settings.appIcons).every((url) => typeof url === 'string')
+    Object.values(settings.appIcons).every((url) => typeof url === 'string') &&
+    (settings.homeAppearance === undefined || isHomeAppearance(settings.homeAppearance))
   );
 };
 
@@ -126,6 +132,23 @@ export default function App() {
   );
   const [isLocked, setIsLocked] = useState(() => lockSettings.mode !== 'none');
   const [activeApp, setActiveApp] = useState<AppId | null>(null);
+  const [littlePOpen, setLittlePOpen] = useState(false);
+  const [littlePVisible, setLittlePVisible] = useState(() =>
+    readSetting(LITTLE_P_VISIBLE_KEY, true, (value): value is boolean => typeof value === 'boolean')
+  );
+  const handleLittlePVisible = (visible: boolean) => {
+    try {
+      saveSetting(LITTLE_P_VISIBLE_KEY, visible);
+      setLittlePVisible(visible);
+      if (!visible) setLittlePOpen(false);
+      return true;
+    } catch (error) {
+      console.error('Could not save Little P visibility.', error);
+      showYyError('小P入口设置保存失败，请重试。');
+      return false;
+    }
+  };
+  useEffect(() => { if (isLocked || activeApp) setLittlePOpen(false); }, [isLocked, activeApp]);
   const [showEmergencyDialog, setShowEmergencyDialog] = useState(false);
   const emergencyTapTimesRef = useRef<number[]>([]);
   const [showStatusBar, setShowStatusBar] = useState(() =>
@@ -134,6 +157,146 @@ export default function App() {
   const [userProfile, setUserProfile] = useState<UserProfile>(() =>
     readSetting(SETTINGS_KEYS.userProfile, INITIAL_USER_PROFILE, isUserProfile)
   );
+  const [fontSettings, setFontSettings] = useState(readFontSettings);
+  const [runtimeSettings, setRuntimeSettings] = useState(readChatRuntimeSettings);
+  const [keepAliveStatus, setKeepAliveStatus] = useState('');
+  const [notification, setNotification] = useState<ChatNotification | null>(null);
+  const [requestedChat, setRequestedChat] = useState<{ id: string; at: number } | null>(null);
+
+  useEffect(() => {
+    document.documentElement.style.setProperty('--font-scale', String(fontSettings.scale));
+  }, [fontSettings.scale]);
+
+  useEffect(() => {
+    const fallback = FONT_FAMILIES[fontSettings.family].value;
+    document.documentElement.style.setProperty('--app-font-family', fallback);
+    if (!fontSettings.url) return;
+    let disposed = false;
+    const face = new FontFace('YYphoneCustom', `url(${JSON.stringify(fontSettings.url)})`);
+    void face.load().then((loaded) => {
+      if (disposed) return;
+      document.fonts.add(loaded);
+      document.documentElement.style.setProperty('--app-font-family', `"YYphoneCustom", ${fallback}`);
+    }).catch((error: unknown) => {
+      if (disposed) return;
+      console.error('Could not load custom font.', error);
+      showYyError('字体加载失败，请检查字体直链、文件格式和跨域权限。已暂用系统字体。');
+    });
+    return () => {
+      disposed = true;
+      document.fonts.delete(face);
+    };
+  }, [fontSettings.url, fontSettings.family]);
+
+  useEffect(() => {
+    if (!runtimeSettings.keepAlive) {
+      stopKeepAlive();
+      setKeepAliveStatus('未开启');
+      return;
+    }
+    let disposed = false;
+    void startKeepAlive().then(() => {
+      if (!disposed) setKeepAliveStatus('静默音频循环播放中');
+    }).catch((error: unknown) => {
+      console.error('Could not resume keepalive audio.', error);
+      if (!disposed) setKeepAliveStatus('播放被浏览器暂停，请点击“恢复保活”');
+    });
+    return () => { disposed = true; stopKeepAlive(); };
+  }, [runtimeSettings.keepAlive]);
+
+  useEffect(() => {
+    if (!notification) return;
+    const timer = window.setTimeout(() => setNotification(null), 6000);
+    return () => window.clearTimeout(timer);
+  }, [notification]);
+
+  useEffect(() => {
+    if (!runtimeSettings.keepAlive) return;
+    const check = () => setKeepAliveStatus(isKeepAlivePlaying() ? '静默音频循环播放中' : '播放已暂停，请点击“恢复保活”');
+    window.addEventListener('focus', check);
+    document.addEventListener('visibilitychange', check);
+    return () => {
+      window.removeEventListener('focus', check);
+      document.removeEventListener('visibilitychange', check);
+    };
+  }, [runtimeSettings.keepAlive]);
+
+  const openNotifiedChat = (chatId: string) => {
+    setRequestedChat({ id: chatId, at: Date.now() });
+    setActiveApp('wechat');
+    setNotification(null);
+  };
+
+  useEffect(() => {
+    const receive = (event: MessageEvent<unknown>) => {
+      if (!event.data || typeof event.data !== 'object') return;
+      const data = event.data as { type?: unknown; chatId?: unknown };
+      if (data.type === 'yyphone:open-chat' && typeof data.chatId === 'string') openNotifiedChat(data.chatId);
+    };
+    navigator.serviceWorker?.addEventListener('message', receive);
+    const chatId = new URL(location.href).searchParams.get('chat');
+    if (chatId) openNotifiedChat(chatId);
+    return () => navigator.serviceWorker?.removeEventListener('message', receive);
+  }, []);
+
+  const handleChatNotification = (message: ChatNotification) => {
+    if (runtimeSettings.banners) setNotification(message);
+    if (!runtimeSettings.systemNotifications || document.visibilityState === 'visible') return;
+    if (!('Notification' in window) || Notification.permission !== 'granted') {
+      console.warn('System chat notifications are enabled but permission is unavailable.');
+      return;
+    }
+    void (async () => {
+      try {
+        const options: NotificationOptions = {
+          body: message.text,
+          icon: new URL('pwa-192x192.png', document.baseURI).href,
+          tag: `chat-${message.chatId}`,
+          data: { chatId: message.chatId },
+        };
+        const registration = await navigator.serviceWorker?.getRegistration();
+        if (registration) {
+          await registration.showNotification(message.name, options);
+        } else {
+          const popup = new Notification(message.name, options);
+          popup.onclick = () => { window.focus(); openNotifiedChat(message.chatId); popup.close(); };
+        }
+      } catch (error) {
+        console.error('Could not show system chat notification.', error);
+        showYyError('系统通知发送失败，请检查浏览器通知权限。');
+      }
+    })();
+  };
+
+  const handleRuntimeSettings = async (next: ChatRuntimeSettings, resumeKeepAlive = false): Promise<boolean> => {
+    try {
+      if (next.keepAlive && (!runtimeSettings.keepAlive || resumeKeepAlive)) {
+        await startKeepAlive();
+        setKeepAliveStatus('静默音频循环播放中');
+      } else if (!next.keepAlive) {
+        stopKeepAlive();
+      }
+      saveSetting(SETTINGS_KEYS.chatRuntime, next);
+      setRuntimeSettings(next);
+      return true;
+    } catch (error) {
+      console.error('Could not update chat runtime settings.', error);
+      setKeepAliveStatus('保活启动失败，请点击恢复保活重试');
+      showYyError(error instanceof Error ? error.message : '后台与通知设置保存失败。');
+      return false;
+    }
+  };
+
+  const handleSaveFontSettings = (settings: FontSettings): boolean => {
+    try {
+      saveSetting(SETTINGS_KEYS.font, settings);
+      setFontSettings(settings);
+      return true;
+    } catch (error) {
+      console.error('Could not save global font settings.', error);
+      return false;
+    }
+  };
 
   const [beautySettings, setBeautySettings] = useState<BeautySettings>(() => {
     const legacyWallpapers = readSetting<CustomWallpapers>(
@@ -294,8 +457,22 @@ export default function App() {
     });
   };
 
-  const handleSelectPresetSettings = (settings: BeautySettings): boolean =>
-    handleSaveBeautySettings(settings);
+  const handleSelectPresetSettings = (settings: BeautySettings): boolean => {
+    try {
+      if (settings.homeAppearance) {
+        const { calendar, music, profile } = settings.homeAppearance;
+        saveSetting(CALENDAR_APPEARANCE_KEY, calendar);
+        saveSetting(MUSIC_APPEARANCE_KEY, music);
+        const nextProfile = { ...userProfile, ...profile, avatarFrame: profile.avatarFrame };
+        saveSetting(SETTINGS_KEYS.userProfile, nextProfile);
+        setUserProfile(nextProfile);
+      }
+      return handleSaveBeautySettings(settings);
+    } catch (error) {
+      console.error('Could not apply the complete home beauty preset.', error);
+      return false;
+    }
+  };
 
   const handleToggleStatusBar = (): boolean => {
     const nextValue = !showStatusBar;
@@ -373,7 +550,7 @@ export default function App() {
               wallpaperImage={beautySettings.wallpapers.lockScreen}
               password={lockSettings.mode === 'password' ? lockSettings.password : undefined}
             />
-          ) : activeApp ? (
+          ) : activeApp === 'wechat' ? null : activeApp ? (
             /* Active Sub-App View: Header is safely padded below the notch, back arrow always clickable */
             <div className="w-full h-full flex flex-col overflow-hidden animate-fadeIn">
               <Suspense
@@ -383,11 +560,6 @@ export default function App() {
                   </div>
                 }
               >
-              {activeApp === 'wechat' && (
-                <WeChatApp
-                  onBack={handleBackToHome}
-                />
-              )}
               {activeApp === 'phone_explorer' && (
                 <PhoneExplorerApp onBack={handleBackToHome} />
               )}
@@ -403,6 +575,13 @@ export default function App() {
               )}
               {activeApp === 'settings' && (
                 <SettingsApp
+                  littlePVisible={littlePVisible}
+                  onSaveLittlePVisible={handleLittlePVisible}
+                  runtimeSettings={runtimeSettings}
+                  onSaveRuntimeSettings={handleRuntimeSettings}
+                  keepAliveStatus={keepAliveStatus}
+                  fontSettings={fontSettings}
+                  onSaveFontSettings={handleSaveFontSettings}
                   onBack={handleBackToHome}
                   showStatusBar={showStatusBar}
                   onToggleStatusBar={handleToggleStatusBar}
@@ -423,7 +602,7 @@ export default function App() {
                   appIcons={beautySettings.appIcons}
                   onSaveAppIcons={handleSaveAppIcons}
                   onApplyPreset={handleSelectPresetSettings}
-                  currentSettings={beautySettings}
+                  currentSettings={{ ...beautySettings, homeAppearance: captureHomeAppearance(userProfile) }}
                 />
               )}
               {activeApp === 'world_book' && (
@@ -448,7 +627,44 @@ export default function App() {
               appIcons={beautySettings.appIcons}
             />
           )}
+          <div
+            className={activeApp === 'wechat' && !isLocked ? 'flex min-h-0 flex-1 flex-col bg-white' : 'hidden'}
+            aria-hidden={activeApp !== 'wechat' || isLocked}
+          >
+            <Suspense fallback={null}>
+              <WeChatApp
+                onBack={handleBackToHome}
+                isVisible={activeApp === 'wechat' && !isLocked}
+                runtimeSettings={runtimeSettings}
+                requestedChat={requestedChat}
+                onMessage={handleChatNotification}
+                onIncomingCall={() => setActiveApp('wechat')}
+              />
+            </Suspense>
+          </div>
         </div>
+        {!isLocked && !activeApp && littlePVisible && (
+          <button type="button" onClick={() => setLittlePOpen(true)} aria-label="打开小P"
+            className="absolute bottom-[18%] right-3 z-30 flex h-14 w-14 flex-col items-center justify-center rounded-[22px] border border-white bg-gradient-to-br from-sky-100 to-pink-100 text-sky-700 shadow-lg">
+            <span aria-hidden="true" className="text-xl leading-none">✦</span><span className="mt-1 text-[10px] font-bold">小P</span>
+          </button>
+        )}
+        <LittlePPanel open={littlePOpen && littlePVisible && !isLocked && !activeApp}
+          onClose={() => setLittlePOpen(false)} onHide={() => handleLittlePVisible(false)} />
+        {notification && (
+          <div className="absolute left-3 right-3 top-[max(env(safe-area-inset-top,0px),12px)] z-[100] flex items-center gap-3 rounded-3xl border border-white bg-white/95 p-3 shadow-xl backdrop-blur-xl" role="status">
+            <button type="button" onClick={() => openNotifiedChat(notification.chatId)} className="flex min-w-0 flex-1 items-center gap-3 text-left" aria-label={`查看${notification.name}的新消息`}>
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-teal-100 text-teal-700">
+                {notification.avatar ? <img src={notification.avatar} alt="" className="h-full w-full object-cover" /> : notification.name.charAt(0)}
+              </span>
+              <span className="min-w-0">
+                <strong className="block truncate text-xs text-slate-700">{notification.name}</strong>
+                <span className="block truncate text-xs text-slate-500">{notification.text}</span>
+              </span>
+            </button>
+            <button type="button" aria-label="关闭消息提醒" onClick={() => setNotification(null)} className="p-2 text-sm text-slate-400">×</button>
+          </div>
+        )}
         {showEmergencyDialog && (
           <div className="absolute inset-0 z-[120] flex items-center justify-center bg-slate-950/35 p-6 backdrop-blur-sm">
             <section

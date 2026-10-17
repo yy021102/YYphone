@@ -1,6 +1,8 @@
 @import "tailwindcss";
 
 :root {
+  --font-scale: 1;
+  --app-font-family: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-left: env(safe-area-inset-left, 0px);
@@ -14,11 +16,57 @@ html, body {
   padding: 0;
   overflow: hidden;
   background-color: #DFF1FA;
-  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  font-family: var(--app-font-family);
   user-select: none;
   -webkit-user-select: none;
   -webkit-tap-highlight-color: transparent;
   overscroll-behavior: none;
+}
+
+body {
+  font-size: calc(16px * var(--font-scale));
+}
+
+@theme {
+  --font-sans: var(--app-font-family);
+  --text-xs: calc(0.75rem * var(--font-scale));
+  --text-sm: calc(0.875rem * var(--font-scale));
+  --text-base: calc(1rem * var(--font-scale));
+  --text-lg: calc(1.125rem * var(--font-scale));
+  --text-xl: calc(1.25rem * var(--font-scale));
+  --text-2xl: calc(1.5rem * var(--font-scale));
+  --text-3xl: calc(1.875rem * var(--font-scale));
+  --text-4xl: calc(2.25rem * var(--font-scale));
+  --text-5xl: calc(3rem * var(--font-scale));
+  --text-6xl: calc(3.75rem * var(--font-scale));
+  --text-7xl: calc(4.5rem * var(--font-scale));
+  --text-8xl: calc(6rem * var(--font-scale));
+  --text-9xl: calc(8rem * var(--font-scale));
+}
+
+/* Keep fixed-size text utilities in sync without scaling icons, spacing or the phone canvas. */
+@layer utilities {
+  [class~="text-[6.5px]"] { font-size: calc(6.5px * var(--font-scale)); }
+  [class~="text-[8.5px]"] { font-size: calc(8.5px * var(--font-scale)); }
+  [class~="text-[9px]"] { font-size: calc(9px * var(--font-scale)); }
+  [class~="text-[9.5px]"] { font-size: calc(9.5px * var(--font-scale)); }
+  [class~="text-[10px]"] { font-size: calc(10px * var(--font-scale)); }
+  [class~="text-[10.5px]"] { font-size: calc(10.5px * var(--font-scale)); }
+  [class~="text-[11px]"] { font-size: calc(11px * var(--font-scale)); }
+  [class~="text-[12px]"] { font-size: calc(12px * var(--font-scale)); }
+  [class~="text-[13px]"] { font-size: calc(13px * var(--font-scale)); }
+  [class~="text-[15px]"] { font-size: calc(15px * var(--font-scale)); }
+  [class~="text-[clamp(9px,2.2vw,10.5px)]"] { font-size: calc(clamp(9px, 2.2vw, 10.5px) * var(--font-scale)); }
+  [class~="text-[clamp(10px,2.4vw,11.5px)]"] { font-size: calc(clamp(10px, 2.4vw, 11.5px) * var(--font-scale)); }
+  [class~="text-[clamp(10px,2.5vw,11.5px)]"] { font-size: calc(clamp(10px, 2.5vw, 11.5px) * var(--font-scale)); }
+  [class~="text-[clamp(10px,2.6vw,12px)]"] { font-size: calc(clamp(10px, 2.6vw, 12px) * var(--font-scale)); }
+  [class~="text-[clamp(11px,2.8vw,12.5px)]"] { font-size: calc(clamp(11px, 2.8vw, 12.5px) * var(--font-scale)); }
+  [class~="text-[clamp(11px,2.8vw,13px)]"] { font-size: calc(clamp(11px, 2.8vw, 13px) * var(--font-scale)); }
+  [class~="text-[clamp(11px,3vw,13px)]"] { font-size: calc(clamp(11px, 3vw, 13px) * var(--font-scale)); }
+  [class~="text-[clamp(12px,3.2vw,14px)]"] { font-size: calc(clamp(12px, 3.2vw, 14px) * var(--font-scale)); }
+  [class~="text-[clamp(13.5px,3.5vw,16px)]"] { font-size: calc(clamp(13.5px, 3.5vw, 16px) * var(--font-scale)); }
+  [class~="text-[clamp(15px,4.2vw,18px)]"] { font-size: calc(clamp(15px, 4.2vw, 18px) * var(--font-scale)); }
+  [class~="text-[clamp(20px,5vw,24px)]"] { font-size: calc(clamp(20px, 5vw, 24px) * var(--font-scale)); }
 }
 
 #root {
@@ -26,6 +74,10 @@ html, body {
   width: 100%;
   overflow: hidden;
   background-color: transparent;
+}
+
+.wechat-app .yy-chat-composer {
+  background-color: white;
 }
 
 /* Glassmorphism utility classes */

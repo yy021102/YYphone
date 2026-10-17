@@ -15,6 +15,8 @@ import {
   Upload,
 } from 'lucide-react';
 import { AppHeader } from '../components/AppHeader';
+import { DEFAULT_FONT_SETTINGS, FONT_FAMILIES, FontSettings, normalizeFontUrl } from '../utils/fontSettings';
+import { ChatRuntimeSettings } from '../utils/chatRuntime';
 import { useErrorDialog } from '../components/ErrorDialog';
 import {
   readSetting,
@@ -56,6 +58,13 @@ const isApiPresetList = (value: unknown): value is ApiPreset[] =>
   );
 
 interface SettingsAppProps {
+  littlePVisible: boolean;
+  onSaveLittlePVisible: (visible: boolean) => boolean;
+  runtimeSettings: ChatRuntimeSettings;
+  onSaveRuntimeSettings: (settings: ChatRuntimeSettings, resumeKeepAlive?: boolean) => Promise<boolean>;
+  keepAliveStatus: string;
+  fontSettings: FontSettings;
+  onSaveFontSettings: (settings: FontSettings) => boolean;
   onBack: () => void;
   showStatusBar: boolean;
   onToggleStatusBar: () => boolean;
@@ -68,6 +77,13 @@ interface SettingsAppProps {
 }
 
 export const SettingsApp: React.FC<SettingsAppProps> = ({
+  littlePVisible,
+  onSaveLittlePVisible,
+  runtimeSettings,
+  onSaveRuntimeSettings,
+  keepAliveStatus,
+  fontSettings,
+  onSaveFontSettings,
   onBack,
   showStatusBar,
   onToggleStatusBar,
@@ -75,6 +91,11 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
   lockSettings,
   onSaveLockSettings,
 }) => {
+  const [fontUrlDraft, setFontUrlDraft] = useState(fontSettings.url ?? '');
+  const [apiConfigExpanded, setApiConfigExpanded] = useState(() =>
+    readSetting(SETTINGS_KEYS.apiConfigExpanded, true, (value): value is boolean => typeof value === 'boolean')
+  );
+  const [runtimeBusy, setRuntimeBusy] = useState(false);
   const [lockMode, setLockMode] = useState(lockSettings.mode);
   const [passwordDraft, setPasswordDraft] = useState(lockSettings.password);
   const [lockSettingsSaved, setLockSettingsSaved] = useState(false);
@@ -108,6 +129,23 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
   useErrorDialog(backupError, '备份出错了');
   const [statusBarError, setStatusBarError] = useState('');
   useErrorDialog(statusBarError);
+
+  const updateRuntime = async (patch: Partial<ChatRuntimeSettings>) => {
+    setRuntimeBusy(true);
+    try {
+      if (patch.systemNotifications) {
+        if (!('Notification' in window)) throw new Error('此浏览器不支持系统通知；iPhone 通常需要先添加到主屏幕。');
+        const permission = await Notification.requestPermission();
+        if (permission !== 'granted') throw new Error('系统通知未获授权，请在浏览器或系统设置中允许通知。机内横幅可单独开启。');
+      }
+      await onSaveRuntimeSettings({ ...runtimeSettings, ...patch }, patch.keepAlive === true);
+    } catch (error) {
+      console.error('Could not enable notification permission.', error);
+      setStatusBarError(error instanceof Error ? error.message : '功能开启失败，请重试。');
+    } finally {
+      setRuntimeBusy(false);
+    }
+  };
 
   const persistApiPresets = (nextPresets: ApiPreset[]): boolean => {
     try {
@@ -397,11 +435,22 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
       <AppHeader title="设置 · 系统配置" onBack={onBack} />
 
       <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar p-4 space-y-3">
-        <section className="space-y-2">
-          <div className="flex items-center gap-1.5 px-1 text-xs font-bold text-[#2C4A5C]">
-            <Key className="w-3.5 h-3.5 text-sky-600" />
+        <details open={apiConfigExpanded} onToggle={(event) => {
+          const expanded = event.currentTarget.open;
+          if (expanded === apiConfigExpanded) return;
+          try {
+            saveSetting(SETTINGS_KEYS.apiConfigExpanded, expanded);
+            setApiConfigExpanded(expanded);
+          } catch (error) {
+            event.currentTarget.open = apiConfigExpanded;
+            console.error('Could not save API panel state.', error);
+            setApiError('API 配置折叠状态保存失败，请重试。');
+          }
+        }} className="space-y-2">
+          <summary className="cursor-pointer px-1 text-xs font-bold text-[#2C4A5C]">
+            <Key className="mr-1.5 inline-block h-3.5 w-3.5 align-middle text-sky-600" />
             <span>API 配置预设</span>
-          </div>
+          </summary>
           <div className="glass-card rounded-2xl p-4 space-y-3">
             <div className="flex gap-2">
               <select
@@ -534,6 +583,97 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
               预设保存在当前浏览器；备份文件可能包含 API Key，请妥善保管。
             </p>
           </div>
+        </details>
+        <section className="glass-card rounded-2xl p-4 space-y-3">
+          <h2 className="text-xs font-bold text-[#2C4A5C]">后台、来电与消息提醒</h2>
+          {([
+            ['keepAlive', '后台保活（循环播放静默音频）'],
+            ['allowIncomingCalls', '允许角色主动打电话'],
+            ['banners', '新消息顶部弹窗'],
+            ['systemNotifications', '浏览器系统通知'],
+          ] as const).map(([key, label]) => (
+            <label key={key} className="flex items-center justify-between gap-3 text-xs text-slate-600">
+              <span>{label}</span>
+              <input type="checkbox" checked={runtimeSettings[key]} disabled={runtimeBusy} onChange={(event) => void updateRuntime({ [key]: event.target.checked })} />
+            </label>
+          ))}
+          <p className="text-[11px] leading-relaxed text-slate-500">
+            在每个私聊右上角的对话设置中，单独允许主动消息并填写间隔；会额外消耗 API。角色来电为文字模拟，需点击接通。保活只尝试降低网页暂停概率，不能保证锁屏、系统冻结或关闭网页后仍运行，也可能增加耗电。系统通知需授权，是否展示取决于浏览器与系统。
+          </p>
+          <p className="text-[11px] text-sky-700" role="status">保活状态：{keepAliveStatus || '未开启'}</p>
+          {runtimeSettings.keepAlive && <button type="button" disabled={runtimeBusy} onClick={() => void updateRuntime({ keepAlive: true })} className="text-xs font-semibold text-sky-600">恢复保活</button>}
+        </section>
+        <section className="glass-card rounded-2xl p-4 space-y-3">
+          <h2 className="text-xs font-bold text-[#2C4A5C]">小P · YYphone 小精灵</h2>
+          <label className="flex items-center justify-between gap-3 text-xs text-slate-600">
+            在主页显示小精灵入口
+            <input type="checkbox" checked={littlePVisible} onChange={(event) => onSaveLittlePVisible(event.target.checked)} aria-label="显示小P主页入口" />
+          </label>
+          <p className="text-[11px] leading-relaxed text-slate-500">可答疑、指路、日常聊天和发表情包，不代操作。功能指南离线可看；AI 回复使用当前主 API，默认携带最近 100 条小P消息，没有长期记忆配置，不读取角色聊天或全局世界书。隐藏入口不删除聊天。</p>
+        </section>
+        <section className="glass-card rounded-2xl p-4 space-y-3">
+          <h2 className="text-xs font-bold text-[#2C4A5C]">全局字体</h2>
+          <p className="text-[11px] text-slate-500">应用于主页与所有 App。字体样式取决于设备已安装字体，聊天单独字号在此基础上缩放。</p>
+          <label className="block text-xs text-[#2C4A5C]">
+            字体大小 · {Math.round(fontSettings.scale * 100)}%
+            <input
+              aria-label="全局字体大小"
+              type="range"
+              min={85}
+              max={130}
+              step={5}
+              value={Math.round(fontSettings.scale * 100)}
+              onChange={(event) => {
+                if (!onSaveFontSettings({ ...fontSettings, scale: Number(event.target.value) / 100 })) {
+                  setStatusBarError('全局字体保存失败，请重试。');
+                }
+              }}
+              className="mt-2 w-full"
+            />
+          </label>
+          <label className="block text-xs text-[#2C4A5C]">
+            自定义字体 URL
+            <input
+              type="url"
+              value={fontUrlDraft}
+              onChange={(event) => setFontUrlDraft(event.target.value)}
+              placeholder="https://example.com/font.woff2"
+              className="mt-1 w-full rounded-xl border border-white bg-white/70 px-3 py-2"
+            />
+          </label>
+          <p className="text-[11px] text-slate-500">填写支持跨域的字体文件直链（WOFF2 / WOFF / TTF / OTF），不是字体介绍网页。留空并应用即可恢复所选内置字体。</p>
+          <button type="button" className="text-xs font-semibold text-sky-600" onClick={() => {
+            try {
+              const url = normalizeFontUrl(fontUrlDraft);
+              if (!onSaveFontSettings({ ...fontSettings, url })) throw new Error('字体链接保存失败。');
+              setFontUrlDraft(url);
+            } catch (error) {
+              setStatusBarError(error instanceof Error ? error.message : '无效的字体链接。');
+            }
+          }}>应用字体链接</button>
+          <label className="block text-xs text-[#2C4A5C]">
+            字体样式
+            <select
+              aria-label="全局字体样式"
+              value={fontSettings.family}
+              onChange={(event) => {
+                const family = event.target.value;
+                if (family !== 'system' && family !== 'serif' && family !== 'rounded') {
+                  setStatusBarError('无效的字体样式，请重新选择。');
+                  return;
+                }
+                if (!onSaveFontSettings({ ...fontSettings, family })) setStatusBarError('全局字体保存失败，请重试。');
+              }}
+              className="mt-1 w-full rounded-xl border border-white bg-white/70 px-3 py-2"
+            >
+              {Object.entries(FONT_FAMILIES).map(([id, font]) => <option key={id} value={id}>{font.label}</option>)}
+            </select>
+          </label>
+          <p className="text-sm">预览：今天也要好好生活 Aa 123</p>
+          <button type="button" className="text-xs font-semibold text-sky-600" onClick={() => {
+            if (!onSaveFontSettings(DEFAULT_FONT_SETTINGS)) setStatusBarError('全局字体恢复失败，请重试。');
+            else setFontUrlDraft('');
+          }}>恢复默认字体</button>
         </section>
 
         <section className="space-y-2">

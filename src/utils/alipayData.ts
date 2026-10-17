@@ -31,12 +31,15 @@ export interface AlipayData {
   ledgerList: RealLedgerItem[];
   allowedViewers: string[];
   lastInterestDate: string;
+  chatSettlements?: Record<string, 'received' | 'returned'>;
 }
 
 export interface AlipayContact {
   id: string;
   name: string;
   avatarUrl?: string;
+  forumNickname?: string;
+  forumHandle?: string;
 }
 
 export const ALIPAY_STORAGE_KEY = 'yyphone:alipay-data';
@@ -115,6 +118,11 @@ const normalizeAlipayData = (value: unknown): AlipayData => {
     lastInterestDate: typeof value.lastInterestDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value.lastInterestDate)
       ? value.lastInterestDate
       : today(),
+    chatSettlements: isRecord(value.chatSettlements)
+      ? Object.fromEntries(Object.entries(value.chatSettlements).filter(
+          (entry): entry is [string, 'received' | 'returned'] => entry[1] === 'received' || entry[1] === 'returned'
+        ))
+      : {},
   };
 };
 
@@ -160,6 +168,8 @@ export const readAlipayContacts = (): AlipayContact[] => {
             id: contact.id,
             name: contact.name,
             avatarUrl: typeof contact.avatarUrl === 'string' ? contact.avatarUrl : undefined,
+            forumNickname: typeof contact.forumNickname === 'string' ? contact.forumNickname : undefined,
+            ...(typeof contact.forumHandle === 'string' ? { forumHandle: contact.forumHandle } : {}),
           }]
         : []
     );
@@ -195,7 +205,8 @@ const appendIntimatePayMessage = (
   contact: AlipayContact,
   note: string,
   title: string,
-  amount: number
+  amount: number,
+  request = false
 ) => {
   const chatsRaw = readStorageString(WECHAT_CHATS_STORAGE_KEY);
   const chatsValue: unknown = chatsRaw ? JSON.parse(chatsRaw) : [];
@@ -208,10 +219,17 @@ const appendIntimatePayMessage = (
     chat.participantIds[0] === contact.id
   );
   const timestamp = new Date().toISOString();
+  if (request && conversation?.blocked) throw new Error('该角色已被拉黑，无法提交亲密付申请。');
+  if (request && Array.isArray(conversation?.messages) && conversation.messages.some((message: unknown) =>
+    isRecord(message) && message.kind === 'intimate-pay' && message.intimateStatus === 'pending'
+  )) throw new Error('已有待回应的亲密付申请，请先到微信让角色回复。');
   const message = {
     id: `message-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    senderId: contact.id,
-    text: `${note ? `${note}。` : ''}我刚刚用亲密付帮你支付了「${title}」（¥${amount.toFixed(2)}），记得查收～`,
+    senderId: request ? 'user' : contact.id,
+    text: request
+      ? `我想向你申请亲密付，希望每月额度 ¥${amount.toFixed(2)}。${note ? `申请理由：${note}` : '你愿意为我开通吗？'}`
+      : `${note ? `${note}。` : ''}我刚刚用亲密付帮你支付了「${title}」（¥${amount.toFixed(2)}），记得查收～`,
+    ...(request ? { kind: 'intimate-pay', intimateStatus: 'pending', amount: amount.toFixed(2) } : {}),
     createdAt: timestamp,
     thought: '',
   };
@@ -242,6 +260,11 @@ const appendIntimatePayMessage = (
   conversation.messages.push(message);
   conversation.updatedAt = timestamp;
   writeStorageString(WECHAT_CHATS_STORAGE_KEY, JSON.stringify(chats));
+};
+
+export const requestIntimatePay = (contact: AlipayContact, limit: number, note: string): void => {
+  if (!Number.isFinite(limit) || limit < 0.01 || limit > 1_000_000) throw new Error('申请额度需至少 0.01 且不超过 1,000,000 元。');
+  appendIntimatePayMessage(contact, note, '', limit, true);
 };
 
 export const chargeAlipay = (
@@ -309,8 +332,63 @@ export const creditAlipay = (amount: number): AlipayData => {
     ...data,
     balance: data.balance + amount,
   };
+
   writeAlipayData(nextData);
   return nextData;
+};
+
+export interface IncomingChatPayment {
+  id: string;
+  kind?: string;
+  senderId: string;
+  recipientId?: string;
+  amount?: string;
+  paymentStatus?: 'pending' | 'received' | 'returned';
+}
+
+export const settleIncomingChatPayment = (
+  data: AlipayData,
+  payment: IncomingChatPayment,
+  action: 'received' | 'returned'
+): AlipayData => {
+  if ((payment.kind !== 'transfer' && payment.kind !== 'red-packet') ||
+    payment.senderId === 'user' || payment.recipientId !== 'user' || payment.paymentStatus !== 'pending') {
+    throw new Error('这笔款项不可领取或退回；历史已入账的款项不会重复入账。');
+  }
+  if (data.chatSettlements?.[payment.id]) throw new Error('这笔款项已处理，请重新打开聊天。');
+  if (action === 'returned' && payment.kind !== 'transfer') throw new Error('只有待收款的转账可以退回。');
+  const amount = Number(payment.amount);
+  if (!Number.isFinite(amount) || amount < 0.01 || amount > 1_000_000) throw new Error('收款金额无效。');
+  return {
+    ...data,
+    balance: Math.round((data.balance + (action === 'received' ? amount : 0)) * 100) / 100,
+    chatSettlements: { ...data.chatSettlements, [payment.id]: action },
+  };
+};
+
+export const grantIntimatePay = (contact: AlipayContact, monthlyLimit: number, note: string): void => {
+  if (!Number.isFinite(monthlyLimit) || monthlyLimit < 0.01 || monthlyLimit > 1_000_000) {
+    throw new Error('角色返回的亲密付额度无效。');
+  }
+  const data = readAlipayData();
+  const existing = data.intimateCards.find((card) => card.charId === contact.id);
+  writeAlipayData({
+    ...data,
+    intimateCards: [
+      ...data.intimateCards.filter((card) => card.charId !== contact.id),
+      {
+        id: existing?.id ?? `intimate-${contact.id}`,
+        charId: contact.id,
+        charName: contact.name,
+        avatar: contact.avatarUrl,
+        monthlyLimit: Math.round(monthlyLimit * 100) / 100,
+        usedAmount: existing?.usedAmount ?? 0,
+        usageMonth: today().slice(0, 7),
+        note,
+      },
+    ],
+  });
+  window.dispatchEvent(new Event('yyphone:finance-change'));
 };
 
 export const sendIntimatePayInteraction = (

@@ -1,12 +1,15 @@
 import { readSetting, SETTINGS_KEYS } from './settings';
 import { withGlobalWorldBooks } from './worldBookPrompt';
 
-interface ApiPreset {
-  id: string;
-  name: string;
+export interface ApiConnection {
   endpoint: string;
   apiKey: string;
   model?: string;
+}
+
+interface ApiPreset extends ApiConnection {
+  id: string;
+  name: string;
 }
 
 const isApiPresetList = (value: unknown): value is ApiPreset[] =>
@@ -54,10 +57,20 @@ const readOpenAiContent = (payload: unknown) => {
 export const requestConfiguredAiText = async (
   systemPrompt: string,
   userPrompt: string,
-  options: { json?: boolean; temperature?: number; maxTokens?: number } = {}
+  options: {
+    json?: boolean;
+    temperature?: number;
+    maxTokens?: number;
+    api?: ApiConnection;
+    history?: Array<{ role: 'user' | 'assistant'; content: string }>;
+    includeGlobalWorldBooks?: boolean;
+  } = {}
 ) => {
-  systemPrompt = withGlobalWorldBooks(systemPrompt);
-  const preset = getActiveApiPreset();
+  if (options.includeGlobalWorldBooks !== false) systemPrompt = withGlobalWorldBooks(systemPrompt);
+  const preset = options.api ?? getActiveApiPreset();
+  if (!preset.endpoint.trim() || !preset.apiKey.trim()) {
+    throw new Error('请填写所选 API 的接口地址和密钥。');
+  }
   const endpoint = preset.endpoint.trim().replace(/\/+$/, '');
   const model = preset.model?.trim() || 'gpt-4o-mini';
   let response: Response;
@@ -72,7 +85,13 @@ export const requestConfiguredAiText = async (
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: systemPrompt }] },
-        contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
+        contents: [
+          ...(options.history ?? []).map((message) => ({
+            role: message.role === 'assistant' ? 'model' : 'user',
+            parts: [{ text: message.content }],
+          })),
+          { role: 'user', parts: [{ text: userPrompt }] },
+        ],
         ...(options.json || options.temperature !== undefined || options.maxTokens !== undefined
           ? {
               generationConfig: {
@@ -104,6 +123,7 @@ export const requestConfiguredAiText = async (
         model,
         messages: [
           { role: 'system', content: systemPrompt },
+          ...(options.history ?? []),
           { role: 'user', content: userPrompt },
         ],
         ...(options.json ? { response_format: { type: 'json_object' } } : {}),

@@ -279,8 +279,8 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
   useErrorDialog(aiError, 'AI 生成出错了');
   const [isXianyuReplying, setIsXianyuReplying] = useState(false);
 
-  // 闲鱼 AI 上新配置弹窗状态（选择是否包含角色、随机或指定角色）
   const [showXianyuAiModal, setShowXianyuAiModal] = useState(false);
+  const [aiProductPrompt, setAiProductPrompt] = useState('');
   const [includeCharInXianyuAi, setIncludeCharInXianyuAi] = useState<boolean>(true);
   const [xianyuAiCharTargets, setXianyuAiCharTargets] = useState<string[]>([]); // 空数组 = 随机一位角色
   const [viewingProduct, setViewingProduct] = useState<{ kind: 'market' | 'xianyu'; id: string } | null>(null);
@@ -506,13 +506,8 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
     }
   };
 
-  // 点击顶部“AI 上新”按钮：如果是闲鱼，先弹出角色彩蛋选择框；如果是购物/饿了么，直接生成
   const handleClickAiButton = () => {
-    if (activeTab === 'xianyu') {
-      setShowXianyuAiModal(true);
-    } else {
-      runAiGeneration();
-    }
+    setShowXianyuAiModal(true);
   };
 
   // 执行 AI 生成商品
@@ -546,7 +541,9 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
             : ''
         }${passerbyCount > 0 ? `另外生成 ${passerbyCount} 件普通路人卖家的闲置（sellerId 固定写 "passerby"，不得关联任何通讯录角色）。` : ''}只返回 JSON：{"products":[{"sellerId":"角色ID或passerby","title":"标题","desc":"描述","price":数字,"freeShipping":true或false,"emoji":"契合商品的emoji"}]}。`
         : `为${activeTab === 'shopping' ? '淘宝购物' : '饿了么外卖'}板块生成 2 到 3 件符合板块主题的${activeTab === 'shopping' ? '真实常见商品（例如保温杯、帆布包、耳机、笔记本、护手霜这一类）' : '真实常见的外卖餐品（例如奶茶、炒饭、麻辣烫、汉堡、水果沙拉这一类）'}。只返回 JSON：{"products":[{"title":"标题","desc":"描述","price":数字,"emoji":"契合商品的emoji"}]}。`;
-      const content = await requestConfiguredAiText(systemPrompt, userPrompt, { json: true });
+      const content = await requestConfiguredAiText(systemPrompt,
+        `${userPrompt}${aiProductPrompt.trim() ? `\n玩家本次希望上新的商品：${aiProductPrompt.trim()}。在上述真实商品与输出结构约束内优先满足这个需求。` : ''}`,
+        { json: true });
       const parsed: unknown = JSON.parse(content);
       const rawProducts = Array.isArray(parsed)
         ? parsed
@@ -1572,14 +1569,13 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
           </div>
         );
       })()}
-      {/* ==================== 弹窗 0：闲鱼 AI 上新配置窗（选择是否包含角色彩蛋 & 指定/随机角色） ==================== */}
       {showXianyuAiModal && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-900/30 p-4 backdrop-blur-xs">
           <div className="w-full max-w-sm bg-white/95 backdrop-blur-2xl border border-white rounded-3xl p-5 shadow-xl space-y-4 text-slate-700">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-extrabold flex items-center gap-1.5">
                 <Sparkles className="w-4 h-4 text-sky-400" />
-                <span>闲鱼 AI 上新设置</span>
+                <span>{activeTab === 'xianyu' ? '闲鱼' : activeTab === 'shopping' ? '淘宝' : '饿了么'} AI 上新设置</span>
               </h3>
               <button
                 onClick={() => setShowXianyuAiModal(false)}
@@ -1589,8 +1585,13 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
               </button>
             </div>
 
-            {/* 选择本次生成是否包含角色 */}
-            <div className="space-y-2">
+            <label className="block space-y-2 text-xs font-semibold">
+              <span>商品提示词（选填）</span>
+              <textarea value={aiProductPrompt} onChange={(event) => setAiProductPrompt(event.target.value)} maxLength={1000}
+                placeholder="想要什么样的商品？留空则自由上新，例如：适合秋天的针织衫，价格在 200 元以内"
+                className="min-h-24 w-full rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs font-normal outline-none" />
+            </label>
+            {activeTab === 'xianyu' && <div className="space-y-2">
               <span className="text-xs font-bold block">本次生成是否包含角色闲置彩蛋？</span>
               <div className="grid grid-cols-2 gap-2">
                 <button
@@ -1616,10 +1617,10 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
                   🌿 否，纯路人闲置
                 </button>
               </div>
-            </div>
+            </div>}
 
             {/* 如果选择包含角色：出现随机生成 or 角色点选列表 */}
-            {includeCharInXianyuAi && (
+            {activeTab === 'xianyu' && includeCharInXianyuAi && (
               <div className="space-y-2 bg-pink-50/50 p-3.5 rounded-2xl border border-pink-100">
                 <span className="text-[11px] font-bold text-slate-600 block">
                   选择要偶遇的角色（可多选，每位角色发布 1 件；只选 1 位时另补 2 件路人闲置）：

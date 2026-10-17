@@ -24,6 +24,8 @@ import { AppHeader } from '../components/AppHeader';
 import { showYyError } from '../components/ErrorDialog';
 import { readAlipayContacts, AlipayContact } from '../utils/alipayData';
 import { requestConfiguredAiText } from '../utils/aiApi';
+import { parseAiJson, parseForumPost } from '../utils/aiResponse';
+import { readGeneratedForumHandles, resolveForumHandle } from '../utils/forumIdentity';
 import { readStorageString, readStoredValue, writeStoredValue } from '../utils/localStorage';
 import { compressImage } from '../utils/imageFile';
 
@@ -255,6 +257,7 @@ interface ForumCommenter {
   charId?: string;
   charName?: string;
   persona?: string;
+  forumHandle?: string;
 }
 
 const getCharacterPersona = (charId: string) => {
@@ -287,6 +290,7 @@ const selectAllowedCommenters = (
       id: character.id,
       name: character.name,
       persona: getCharacterPersona(character.id),
+      forumHandle: character.forumHandle || readGeneratedForumHandles()[character.id],
     });
   }
   if (config.includeCustomChar) {
@@ -298,6 +302,7 @@ const selectAllowedCommenters = (
           id: character.id,
           name: character.name,
           persona: getCharacterPersona(character.id),
+          forumHandle: character.forumHandle || readGeneratedForumHandles()[character.id],
         });
       }
     });
@@ -634,10 +639,11 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
     isAnon: boolean,
     baseNoId: number,
     opNoId: number,
-    expectedCount: number
+    expectedCount: number,
+    minimumCount = expectedCount
   ): ForumComment[] => {
-    if (!Array.isArray(rawComments) || rawComments.length !== expectedCount) {
-      throw new Error(`AI 返回的评论数量不正确（需要 ${expectedCount} 条）。`);
+    if (!Array.isArray(rawComments) || rawComments.length < minimumCount || rawComments.length > expectedCount) {
+      throw new Error(`AI 返回的评论数量不正确（需要 ${minimumCount === expectedCount ? expectedCount : `${minimumCount} 到 ${expectedCount}`} 条）。`);
     }
     return rawComments.map((raw, index) => {
       if (
@@ -653,6 +659,7 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
         (candidate) => candidate.type === raw.speakerType && candidate.id === raw.speakerId
       );
       if (!speaker) throw new Error('AI 使用了未在参与设置中允许的评论身份，请重试。');
+      const character = speaker.type === 'char' ? contacts.find((contact) => contact.id === speaker.id) : undefined;
       const anonymous = isAnon;
       return {
         id: `comment-${Date.now()}-${index}`,
@@ -661,10 +668,17 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
           ? (typeof raw.authorName === 'string' && raw.authorName.trim()
             ? raw.authorName.trim()
             : `冲浪网友_${Math.floor(100 + Math.random() * 899)}`)
-          : speaker.name,
+          : speaker.type === 'char'
+            ? contacts.find((contact) => contact.id === speaker.id)?.forumNickname?.trim() || speaker.name
+            : speaker.name,
+        authorAvatar: !anonymous && speaker.type === 'char'
+          ? contacts.find((contact) => contact.id === speaker.id)?.avatarUrl
+          : undefined,
         authorId: anonymous
           ? randomHashId()
-          : speaker.type === 'passerby'
+          : character
+            ? resolveForumHandle(character, raw.authorHandle)
+            : speaker.type === 'passerby'
             ? `netizen_${randomHashId().toLowerCase()}`
             : `${speaker.type}_${speaker.id}`,
         ...(speaker.type === 'char' ? {
@@ -743,7 +757,7 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
         authorId = isAnon ? randomHashId() : `npc_${selectedNpc.id}`;
       } else {
         isChar = true;
-        authorName = isAnon ? '无名氏' : selectedChar.name;
+        authorName = isAnon ? '无名氏' : selectedChar.forumNickname?.trim() || selectedChar.name;
         authorId = isAnon ? randomHashId() : `official_${selectedChar.id}`;
       }
     }
@@ -760,35 +774,42 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
     const systemPrompt = [
       '你是一个中文社交平台内容生成器。只返回合法 JSON，不要使用 Markdown。',
       '根据板块氛围创作自然、具体、有差异的帖子和评论。严格使用提供的参与者名单；不得创造角色、NPC或假装其身份。',
-      '评论 JSON 格式为 { "speakerType": "passerby|char|npc", "speakerId": "名单中的 id", "authorName": "路人昵称（仅路人）", "content": "评论正文" }。',
-      '帖子的发帖人由应用固定，不要在帖子内容中添加身份元数据。',
+      '评论 JSON 格式为 { "speakerType": "passerby|char|npc", "speakerId": "名单中的 id", "authorName": "路人昵称（仅路人）", "authorHandle":"角色论坛ID（角色评论必填）", "content": "评论正文" }。',
+      '非匿名板块：角色 authorHandle 优先使用提供的 forumHandle；未提供则按角色人设、兴趣或生活习惯生成有辨识度的网名式 ID，2–40 个字母、数字、汉字、下划线、短横线或英文句点，不加 @，不要使用内部角色编号或 official_/char_ 等模板编号。同一角色保持一致。若发帖人是角色本人，也在顶层 authorHandle 返回其 ID。',
+      '帖子的发帖人由应用固定，不要在帖子内容中添加身份元数据。板块氛围只决定正文风格，不能改变输出 JSON 结构。',
     ].join('\n');
     const userPrompt = JSON.stringify({
       board: { name: activeBoard.name, style: activeBoard.styleType, prompt: activeBoard.prompt },
       anonymousBoard: isAnon,
       author: authorDescription,
       characterPersona,
+      authorForumHandle: charId && isChar
+        ? contacts.find((contact) => contact.id === charId)?.forumHandle || readGeneratedForumHandles()[charId]
+        : undefined,
       requestedTitle: postTitleInput.trim(),
       userTopicOrDraft: postContentInput.trim(),
       allowedCommenters,
-      commentCount: initialCommentCount,
-      outputShape: {
-        title: 'string; no title may be an empty string',
-        content: 'string',
-        comments: 'array; each item must follow the specified comment JSON format',
+      commentCount: initialCommentCount ? `1 到 ${initialCommentCount} 条；同一身份可以重复评论` : 0,
+      outputExample: {
+        ...(isChar && !isAnon ? { authorHandle: '根据人设生成的角色论坛ID' } : {}),
+        title: '帖子标题（可为空）',
+        content: '帖子正文',
+        comments: allowedCommenters.length ? [{
+          speakerType: allowedCommenters[0].type,
+          speakerId: allowedCommenters[0].id,
+          authorName: '路人昵称（非路人忽略）',
+          authorHandle: '角色评论需填写，路人忽略',
+          content: '评论正文',
+        }] : [],
       },
     });
 
     try {
-      const generated = JSON.parse(await requestConfiguredAiText(systemPrompt, userPrompt, { json: true })) as unknown;
-      if (
-        !isRecord(generated) ||
-        typeof generated.content !== 'string' ||
-        !generated.content.trim() ||
-        typeof generated.title !== 'string' ||
-        !Array.isArray(generated.comments)
-      ) {
-        throw new Error('AI 返回的帖子数据格式不正确，请重试。');
+      const generated = parseForumPost(await requestConfiguredAiText(systemPrompt, userPrompt, { json: true }));
+      if (isChar && !isAnon) {
+        const author = contacts.find((contact) => contact.id === charId);
+        if (!author) throw new Error('发帖角色已不存在，请重新选择。');
+        authorId = resolveForumHandle(author, generated.authorHandle);
       }
       const opNo = randomNo();
       const comments = mapAiComments(
@@ -797,7 +818,8 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
         isAnon,
         opNo + 1,
         opNo,
-        initialCommentCount
+        initialCommentCount,
+        initialCommentCount ? 1 : 0
       );
       const newPost: ForumPost = {
         id: `post-${Date.now()}`,
@@ -805,7 +827,9 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
         noId: opNo,
         authorName,
         authorId,
-        authorAvatar: isPlayer && !isAnon ? currentProfile.avatarUrl : undefined,
+        authorAvatar: isAnon ? undefined : isPlayer
+          ? currentProfile.avatarUrl
+          : isChar ? contacts.find((contact) => contact.id === charId)?.avatarUrl : undefined,
         isPlayer,
         isChar,
         charId,
@@ -884,8 +908,8 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
     setGeneratingCommentPostId(post.id);
     setNoticeBanner('');
     try {
-      const generated = JSON.parse(await requestConfiguredAiText(
-        '你是中文社交平台评论续写器。只返回合法 JSON，不要使用 Markdown。严格只使用提供的评论者名单，不得创作未授权角色或 NPC。',
+      const generated = parseAiJson(await requestConfiguredAiText(
+        '你是中文社交平台评论续写器。只返回合法 JSON，不要使用 Markdown。严格只使用提供的评论者名单，不得创作未授权角色或 NPC。非匿名板块的角色评论必须附 authorHandle：优先用名单中的 forumHandle，若未提供，按人设生成特别的网名式 ID，2–40 个字母、数字、汉字、下划线、短横线或英文句点，不加 @，不用角色内部编号。同一角色保持一致。',
         JSON.stringify({
           board: { name: board.name, prompt: board.prompt, anonymous: board.isAnonymous },
           post: { title: post.title ?? '', content: post.content },
@@ -899,7 +923,7 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
           allowedCommenters,
           requiredCount: 6,
           outputShape: {
-            comments: 'array of exactly 6 items; each item has speakerType, speakerId, authorName (passerby only), content',
+            comments: 'array of exactly 6 items; each item has speakerType, speakerId, authorName (passerby only), authorHandle (char only), content',
           },
         }),
         { json: true }
@@ -1058,7 +1082,20 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
     });
   };
 
-  const boardPosts = posts.filter((p) => p.boardId === activeBoard.id);
+  const bindCharacterProfile = <T extends ForumPost | ForumComment,>(item: T): T => {
+    if (activeBoard.isAnonymous || !item.isChar) return item;
+    const contact = contacts.find((candidate) => candidate.id === item.charId);
+    return contact ? {
+      ...item,
+      authorName: contact.forumNickname?.trim() || contact.name,
+      authorAvatar: contact.avatarUrl,
+      authorId: contact.forumHandle || readGeneratedForumHandles()[contact.id] || item.authorId,
+    } : item;
+  };
+  const boardPosts = posts.filter((p) => p.boardId === activeBoard.id).map((post) => ({
+    ...bindCharacterProfile(post),
+    comments: post.comments.map(bindCharacterProfile),
+  }));
 
   return (
     <div
@@ -1399,6 +1436,13 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
                           >
                             <div className="flex items-center justify-between text-[10px]">
                               <div className="flex items-center gap-1.5 flex-wrap">
+                                {!isAnon && (
+                                  <span className="flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-sky-100 text-sky-700">
+                                    {c.authorAvatar
+                                      ? <img src={c.authorAvatar} alt="" className="h-full w-full object-cover" />
+                                      : c.authorName.slice(0, 1)}
+                                  </span>
+                                )}
                                 <span
                                   className={`font-extrabold ${
                                     isAnon ? 'text-[#2E6B3E]' : 'text-[#2C4A5C]'
