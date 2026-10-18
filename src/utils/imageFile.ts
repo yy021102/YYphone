@@ -75,3 +75,6 @@ const dataUrlBytes = (dataUrl: string) => {
 };
 
 export const compressImageFile = compressImage;
+
+export const compressChatPhoto = (file: File): Promise<string> =>
+  compressImage(file, { maxDimension: 1280, maxBytes: 400 * 1024 });

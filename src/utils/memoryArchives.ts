@@ -1,4 +1,5 @@
 import { readStoredValue, writeStoredValue } from './localStorage';
+import { forgetPaperMemories } from './paperNotes';
 
 const CHATS_KEY = 'yyphone:wechat-chats';
 const RECORD_KEYS = ['yyphone:memory-items', 'yyphone:memory-journal', 'yyphone:memory-growth'];
@@ -129,6 +130,7 @@ export const guardMemoryArchive = (charId: string) => {
 
 export const deleteMemoryArchive = (charId: string, archiveId: string) => {
   const scope = chatArchiveKey(charId, archiveId);
+  forgetPaperMemories({ archiveKey: scope });
   const removedIds = new Set<string>();
   for (const key of RECORD_KEYS) {
     const all = readStoredValue(key, [], (value): value is ArchiveRecord[] => Array.isArray(value));
@@ -153,6 +155,7 @@ export const deleteMemoryArchive = (charId: string, archiveId: string) => {
 };
 
 export const deleteCharacterMemoryArchives = (charId: string) => {
+  forgetPaperMemories({ charId });
   prepareMemoryArchiveSwitch();
   const scopes = new Set<string>([activeMemoryArchive(charId)]);
   for (const key of RECORD_KEYS) {

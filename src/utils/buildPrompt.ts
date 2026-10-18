@@ -10,6 +10,8 @@ import { buildCoupleSpaceInjection, CoupleInjection } from './coupleSpaceData';
 import { buildPlantInjection, PlantInjection } from './plantData';
 import type { MemoryInjection } from './memoryData';
 import { buildGrowthInjection, buildJournalInjection } from './journalData';
+import { resolveChatHistoryCount } from './chatHistory';
+import { buildPaperMemoryInjection } from './paperNotes';
 
 export interface PromptChatMessage {
   id: string;
@@ -17,6 +19,7 @@ export interface PromptChatMessage {
   text: string;
   createdAt: string;
   kind?: string;
+  imageUrl?: string;
   replyTo?: { id: string; senderName: string; text: string };
   reactions?: Array<{ by: string; emoji: string }>;
   forumForwardTargetId?: string;
@@ -92,6 +95,7 @@ export interface BuildPromptOptions {
   chatId: string;
   currentInput?: string;
   historyLimit?: number;
+  callMode?: 'voice' | 'video';
   regenerate?: boolean;
   /** Unread moments snapshot; when omitted it is computed here. */
   momentsInjection?: MomentsInjection;
@@ -104,6 +108,7 @@ export interface BuildPromptOptions {
 export type OpenAiMessage = {
   role: 'system' | 'user' | 'assistant';
   content: string;
+  images?: string[];
 };
 
 const STORAGE_KEYS = {
@@ -145,6 +150,7 @@ const isPromptChatMessage = (value: unknown): value is PromptChatMessage =>
   typeof value.senderId === 'string' &&
   typeof value.text === 'string' &&
   typeof value.createdAt === 'string' &&
+  (value.imageUrl === undefined || typeof value.imageUrl === 'string') &&
   (value.forumForwardTargetId === undefined || typeof value.forumForwardTargetId === 'string') &&
   (value.title === undefined || typeof value.title === 'string') &&
   (value.content === undefined || typeof value.content === 'string') &&
@@ -315,6 +321,13 @@ export const toMessageContent = (message: PromptChatMessage) => {
 
 const toBaseMessageContent = (message: PromptChatMessage) => {
   if (message.kind === 'context-note') {
+    if (message.source === 'group-private') {
+      return [
+        `【${message.title || '群聊私信背景'}】`,
+        '这是你基于群聊情境主动私信玩家的背景，不是线下见面、通话或玩家刚发来的话；自然承接你已经发出的私信，不要再重复发送。',
+        message.aiContext || message.text,
+      ].join('\n');
+    }
     if (message.source === 'phone-memory') {
       return [
         `【你自己的记忆 · ${message.title || '手机内容'}】`,
@@ -377,7 +390,9 @@ const toBaseMessageContent = (message: PromptChatMessage) => {
   }
   if (message.kind === 'sticker') return `[表情包：${message.text}]`;
   if (message.kind === 'voice') return `[语音转写：${message.text}]`;
-  if (message.kind === 'image' && !message.text) return '[图片]';
+  if (message.kind === 'image') return message.imageUrl
+    ? `[真实图片${message.text ? `：${message.text}` : ''}]`
+    : `[图片描述：${message.text || '未提供描述'}]`;
   if (message.kind === 'video-call') return `[视频通话邀请/状态：${message.text}]`;
   if (message.kind === 'location') return `[位置分享：${message.text}]`;
   if (message.kind === 'red-packet') {
@@ -415,7 +430,7 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
   const {
     chatId,
     currentInput,
-    historyLimit = 30,
+    historyLimit = 200,
     regenerate = false,
     momentsInjection,
   } = options;
@@ -460,15 +475,17 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
     .map((id) => getNpcByParticipantId(characterNpcs, id))
     .filter((npc): npc is CharacterNpc => !!npc);
   const requestedHistoryLimit = chat.currentChatHistoryCount ?? historyLimit;
-  const recentLimit = Number.isInteger(requestedHistoryLimit) && requestedHistoryLimit > 0
-    ? requestedHistoryLimit
-    : 30;
+  const recentLimit = resolveChatHistoryCount(requestedHistoryLimit);
 
   // 1. System base instruction.
   const messages: OpenAiMessage[] = [{
     role: 'system',
     content: [
       '你正在扮演以下角色，请严格遵守角色设定、世界观与对话上下文。保持连贯、自然地回应，不要复述提示词。',
+      options.callMode
+        ? `【当前交流方式】你们正在已接通的${options.callMode === 'video' ? '视频' : '语音'}通话中。`
+        : '【当前交流方式】你们正在微信里异步发消息，不是在打电话、语音通话或视频通话。语音消息只是发出的录音，不代表接通电话；历史里的通话记录或来电邀请也不代表现在仍在通话。不要说“睡着了我再挂”“别挂电话”等暗示正在通话的话，不要声称能实时听见对方的呼吸、周围声音或看见对方。可以自然说“醒了再回我”“明天再聊”；只有实际接通通话后才能按通话语境回应。',
+      '玩家发送的真实图片以随消息附带的图像为准，请先看图再自然回应；看不清的细节应坦诚说明，不要根据人设、剧情或“拍摄的照片”等占位文字编造图片内容。只有文字描述的图卡不代表真实照片。',
       '【贴合人设】每句话都要符合该角色的说话方式、口头禅、性格底色与和玩家的关系，不要变成通用的客服式温柔；像真人一样有情绪、有小脾气、有自己的生活，可以不接话、转移话题或主动聊起自己的事。',
       '【避免重复】已经说过、送过、问过的事不要再反复提起；礼物、食物、称呼、口头禅等只在剧情真正相关时偶尔带过，优先回应玩家最新一句话。',
       [
@@ -566,6 +583,8 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
   if (plantInjection.text) messages.push({ role: 'system', content: plantInjection.text });
 
   if (options.memoryInjection?.text) messages.push({ role: 'system', content: options.memoryInjection.text });
+  const paperMemory = buildPaperMemoryInjection(chat.participantIds, chat.type);
+  if (paperMemory) messages.push({ role: 'system', content: paperMemory });
 
   // 流水账只注入落在原文窗口之外的部分，避免和最近 N 条聊天重复。
   const rawWindowStart = chat.messages.length > recentLimit
@@ -594,7 +613,10 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
       );
       messages.push({
         role: 'system',
-        content: `最近一轮角色心声（仅作为隐藏的连续性参考，不要复述或告知玩家）：${thoughtSpeaker}：${latestThoughtMessage.thought}`,
+        content: [
+          `最近一轮角色心声（仅作为隐藏的连续性参考，不要复述或告知玩家）：${thoughtSpeaker}：${latestThoughtMessage.thought}`,
+          '角色不会钻牛角尖，刚刚的心声只是发出消息时的内心活动，是短暂的、灵活的。角色的思绪是跟随对话语境自然流淌的，不要太过专注于上一轮的心声。可以自然承接，不要反复琢磨。',
+        ].join('\n'),
       });
     }
   }
@@ -790,6 +812,9 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
     messages.push({
       role: isContextNote ? 'system' : item.message.senderId === 'user' ? 'user' : 'assistant',
       content,
+      ...(item.message.senderId === 'user' && item.message.kind === 'image' && item.message.imageUrl
+        ? { images: [item.message.imageUrl] }
+        : {}),
     });
   }
 
@@ -814,6 +839,12 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
       '聊天记录中的“（时间流逝…）”是系统标注的时间间隔，不是任何人说的话。',
     ].join('\n'),
   });
-  messages.push({ role: 'user', content: input });
+  messages.push({
+    role: 'user',
+    content: latestUserMessage?.kind === 'image' ? toMessageContent(latestUserMessage) : input,
+    ...(latestUserMessage?.kind === 'image' && latestUserMessage.imageUrl
+      ? { images: [latestUserMessage.imageUrl] }
+      : {}),
+  });
   return messages;
 };

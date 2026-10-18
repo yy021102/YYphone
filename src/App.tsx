@@ -22,6 +22,7 @@ import { processPomodoroDeadline } from './utils/pomodoroRuntime';
 import { ErrorDialogHost, showYyError } from './components/ErrorDialog';
 import { CALENDAR_APPEARANCE_KEY, MUSIC_APPEARANCE_KEY, captureHomeAppearance, isHomeAppearance } from './utils/homeAppearance';
 import { FONT_FAMILIES, FontSettings, readFontSettings } from './utils/fontSettings';
+import { isLockScreenAppearance } from './utils/lockAppearance';
 import { ChatNotification, ChatRuntimeSettings, isKeepAlivePlaying, readChatRuntimeSettings, startKeepAlive, stopKeepAlive } from './utils/chatRuntime';
 
 const WeChatApp = lazy(() => import('./apps/WeChatApp').then((module) => ({ default: module.WeChatApp })));
@@ -77,7 +78,8 @@ const isBeautySettings = (value: unknown): value is BeautySettings => {
     !!settings.appIcons &&
     typeof settings.appIcons === 'object' &&
     Object.values(settings.appIcons).every((url) => typeof url === 'string') &&
-    (settings.homeAppearance === undefined || isHomeAppearance(settings.homeAppearance))
+    (settings.homeAppearance === undefined || isHomeAppearance(settings.homeAppearance)) &&
+    (settings.lockScreenAppearance === undefined || isLockScreenAppearance(settings.lockScreenAppearance))
   );
 };
 
@@ -548,6 +550,7 @@ export default function App() {
               dateString={dateString}
               wallpaperStyle={currentWallpaper.style}
               wallpaperImage={beautySettings.wallpapers.lockScreen}
+              appearance={beautySettings.lockScreenAppearance}
               password={lockSettings.mode === 'password' ? lockSettings.password : undefined}
             />
           ) : activeApp === 'wechat' ? null : activeApp ? (

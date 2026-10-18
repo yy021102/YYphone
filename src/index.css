@@ -1,12 +1,97 @@
 @import "tailwindcss";
 
 :root {
+  color-scheme: light;
   --font-scale: 1;
   --app-font-family: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-left: env(safe-area-inset-left, 0px);
   --safe-right: env(safe-area-inset-right, 0px);
+}
+
+/* Only WeChat follows the system appearance. */
+@media (prefers-color-scheme: dark) {
+  :root .wechat-app {
+    color-scheme: dark;
+    --yy-default-user-bubble-color: rgba(45, 65, 82, 0.9);
+    --yy-default-character-bubble-color: rgba(34, 44, 56, 0.9);
+    background-color: #111820;
+    color: #dce7ef;
+
+    .glass-card, .glass-dock, .glass-nav {
+      background: rgba(28, 38, 49, 0.92);
+      border-color: rgba(157, 184, 204, 0.18);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+    }
+
+    [class~="bg-white"], [class*=" bg-white/"], [class^="bg-white/"],
+    [class~="bg-slate-50"], [class~="bg-slate-100"], [class~="bg-slate-200"],
+    [class~="bg-gray-50"], [class~="bg-gray-100"], [class~="bg-gray-200"],
+    [class~="bg-[#F3F7FA]"], [class~="bg-[#F3F6FA]"], [class~="bg-[#F3F6F8]"],
+    [class~="bg-[#EAEFF5]"], [class~="bg-[#E4EEF6]"], [class~="bg-[#E5EDF2]"],
+    [class~="bg-[#E6EEF6]"], [class~="bg-[#ECF3F9]"], [class~="bg-[#f7faff]"],
+    .yy-chat-composer {
+      background-color: #1c2631;
+    }
+
+    [class~="bg-[#DFF1FA]"], [class~="bg-[#DCEEFF]"],
+    [class~="bg-sky-50"], [class~="bg-sky-100"], [class~="bg-blue-50"], [class~="bg-blue-100"] {
+      background-color: #233648;
+    }
+
+    [class~="bg-[#FAD4E0]"], [class~="bg-[#F3E5E8]"], [class~="bg-[#F2EEF3]"],
+    [class~="bg-[#F2EFF7]"], [class~="bg-[#F6E4E8]"], [class~="bg-[#F7F1F3]"],
+    [class~="bg-[#F7F5F8]"], [class~="bg-[#F8EDF0]"], [class~="bg-[#F9F4F6]"],
+    [class~="bg-[#FBE4EC]"], [class~="bg-[#FBE6EC]"], [class~="bg-[#EAE6ED]"],
+    [class~="bg-[#EAE6F2]"], [class~="bg-pink-50"], [class~="bg-pink-100"],
+    [class~="bg-rose-50"], [class~="bg-rose-100"] {
+      background-color: #382c3a;
+    }
+
+    [class~="bg-[#FDFBF7]"], [class~="bg-[#FFF8EE]"], [class~="bg-[#fffaf1]"],
+    [class~="bg-[#FAF4E6]"], [class~="bg-[#FEF6C9]"],
+    [class~="bg-amber-50"], [class~="bg-amber-100"] {
+      background-color: #373126;
+    }
+
+    [class~="bg-[#DCE8E0]"], [class~="bg-[#E8F2E4]"], [class~="bg-[#F1F7EE]"],
+    [class~="bg-[#F4F8F2]"], [class~="bg-[#FAFDF9]"],
+    [class~="bg-emerald-50"], [class~="bg-emerald-100"], [class~="bg-green-50"], [class~="bg-green-100"] {
+      background-color: #263b32;
+    }
+
+    [class~="text-[#2C4A5C]"], [class~="text-[#4A5A6A]"],
+    [class~="text-[#4A4652]"], [class~="text-[#456176]"],
+    [class~="text-slate-700"], [class~="text-slate-800"], [class~="text-slate-900"],
+    [class~="text-gray-700"], [class~="text-gray-800"], [class~="text-gray-900"] {
+      color: #dce7ef;
+    }
+
+    [class~="text-[#587589]"], [class~="text-[#6F7F8E]"], [class~="text-[#6F8CA0]"],
+    [class~="text-[#5B7485]"], [class~="text-[#5B7A9A]"], [class~="text-[#5F6F7E]"],
+    [class~="text-[#587186]"], [class~="text-slate-500"], [class~="text-slate-600"],
+    [class~="text-gray-500"], [class~="text-gray-600"] {
+      color: #a7bacb;
+    }
+
+    [class~="border-white"], [class*="border-white/"],
+    [class~="border-slate-100"], [class~="border-slate-200"],
+    [class~="border-gray-100"], [class~="border-gray-200"] {
+      border-color: #3c4b5a;
+    }
+
+    [class*="from-sky-"], [class*="from-slate-"], [class*="from-emerald-"],
+    [class*="from-white"] {
+      --tw-gradient-from: #233648;
+    }
+    [class*="from-pink-"], [class*="from-rose-"] { --tw-gradient-from: #382c3a; }
+    [class*="to-sky-"], [class*="to-blue-"], [class*="to-slate-"],
+    [class*="to-teal-"], [class*="to-indigo-"], [class*="to-white"] {
+      --tw-gradient-to: #1c2631;
+    }
+    [class*="to-pink-"], [class*="to-rose-"] { --tw-gradient-to: #382c3a; }
+  }
 }
 
 html, body {

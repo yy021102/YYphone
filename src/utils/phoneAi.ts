@@ -105,7 +105,7 @@ export const generatePhoneScope = async (
   ctx: PhoneGenContext,
   prev: CharacterPhoneData
 ): Promise<Partial<CharacterPhoneData>> => {
-  const brief = readCharacterBrief(ctx.charId);
+  const brief = readCharacterBrief(ctx.charId, { configuredHistory: true });
   const prevWallet = scope === 'wallet' ? (prev.wallet ?? readCharacterWallet(ctx.charId)) : null;
   const system = [
     `你要为角色「${ctx.charName}」生成他/她自己手机里的「${SCOPE_LABEL[scope]}」内容，供玩家“查手机”时偷看。`,

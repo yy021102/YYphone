@@ -102,6 +102,12 @@ export interface BeautySettings {
   wallpapers: CustomWallpapers;
   appIcons: AppIconOverrides;
   homeAppearance?: HomeAppearance;
+  lockScreenAppearance?: LockScreenAppearance;
+}
+
+export interface LockScreenAppearance {
+  textColor: string;
+  subtitle: string;
 }
 
 export interface BeautyPreset {

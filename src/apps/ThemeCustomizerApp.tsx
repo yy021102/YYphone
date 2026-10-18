@@ -19,6 +19,7 @@ import {
 import { compressImageFile } from '../utils/imageFile';
 import { readSetting, saveSetting, SETTINGS_KEYS } from '../utils/settings';
 import { isHomeAppearance } from '../utils/homeAppearance';
+import { DEFAULT_LOCK_APPEARANCE, isLockScreenAppearance } from '../utils/lockAppearance';
 
 interface ThemeCustomizerAppProps {
   onBack: () => void;
@@ -52,7 +53,8 @@ const isBeautySettings = (value: unknown): value is BeautySettings => {
     Object.entries(settings.appIcons).every(
       ([id, url]) => ALL_APPS.some((app) => app.id === id) && typeof url === 'string'
     ) &&
-    (settings.homeAppearance === undefined || isHomeAppearance(settings.homeAppearance))
+    (settings.homeAppearance === undefined || isHomeAppearance(settings.homeAppearance)) &&
+    (settings.lockScreenAppearance === undefined || isLockScreenAppearance(settings.lockScreenAppearance))
   );
 };
 
@@ -81,6 +83,7 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
 }) => {
   const [wallpaperDraft, setWallpaperDraft] = useState(customWallpapers);
   const [iconDraft, setIconDraft] = useState<AppIconOverrides>(appIcons);
+  const [lockAppearanceDraft, setLockAppearanceDraft] = useState(currentSettings.lockScreenAppearance ?? DEFAULT_LOCK_APPEARANCE);
   const [presets, setPresets] = useState(() =>
     readSetting(SETTINGS_KEYS.beautyPresets, DEFAULT_PRESETS, isBeautyPresetList)
   );
@@ -94,6 +97,7 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
     ...currentSettings,
     wallpapers: wallpaperDraft,
     appIcons: iconDraft,
+    lockScreenAppearance: lockAppearanceDraft,
   };
 
   useEffect(() => {
@@ -103,6 +107,9 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
   useEffect(() => {
     setIconDraft(appIcons);
   }, [appIcons]);
+  useEffect(() => {
+    setLockAppearanceDraft(currentSettings.lockScreenAppearance ?? DEFAULT_LOCK_APPEARANCE);
+  }, [currentSettings.lockScreenAppearance]);
 
   const clearFeedback = () => {
     setStatus('');
@@ -430,6 +437,39 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
           </button>
         </section>
 
+        <section className="glass-card rounded-2xl p-4 space-y-3">
+          <h3 className="text-xs font-bold text-[#2C4A5C]">锁屏文字</h3>
+          <label className="flex items-center justify-between text-xs text-slate-600">
+            锁屏字体颜色
+            <input type="color" value={lockAppearanceDraft.textColor}
+              onChange={(event) => setLockAppearanceDraft({ ...lockAppearanceDraft, textColor: event.target.value })} />
+          </label>
+          <label className="block text-xs text-slate-600">
+            时间下方文字
+            <textarea aria-label="时间下方文字" rows={3} maxLength={200} value={lockAppearanceDraft.subtitle}
+              onChange={(event) => setLockAppearanceDraft({ ...lockAppearanceDraft, subtitle: event.target.value })}
+              placeholder="留空则不显示文字"
+              className="mt-1 w-full rounded-xl border border-white bg-white/75 p-2 text-xs" />
+          </label>
+          <div aria-label="锁屏文字预览" className="rounded-2xl bg-slate-200 p-4 text-center"
+            style={{ color: lockAppearanceDraft.textColor }}>
+            <p className="text-3xl font-mono font-bold">21:08</p>
+            <p className="mt-2 text-xs whitespace-pre-wrap break-words">{lockAppearanceDraft.subtitle}</p>
+          </div>
+          <p className="text-[10px] text-slate-500">修改日期、时间及解锁界面的字体颜色；下方文字支持换行，留空可隐藏。会随美化预设保存与导出。</p>
+          <div className="flex gap-2">
+            <button type="button" onClick={() => {
+              if (!onApplyPreset({ ...currentSettings, lockScreenAppearance: lockAppearanceDraft })) {
+                setError('锁屏文字保存失败，请重试。');
+                return;
+              }
+              setStatus('锁屏文字已保存。');
+              setError('');
+            }} className="flex-1 rounded-xl bg-sky-600 py-2 text-xs font-bold text-white">保存锁屏文字</button>
+            <button type="button" onClick={() => setLockAppearanceDraft(DEFAULT_LOCK_APPEARANCE)}
+              className="rounded-xl bg-white/70 px-3 py-2 text-xs text-slate-600">恢复默认文字</button>
+          </div>
+        </section>
         <section className="space-y-2.5">
           <h3 className="px-1 text-xs font-bold text-[#2C4A5C]">App 图标</h3>
           <p className="px-1 text-[10px] text-slate-500">

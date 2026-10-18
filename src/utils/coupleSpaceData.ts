@@ -95,18 +95,20 @@ const readJsonArray = (key: string): Array<Record<string, unknown>> => {
   }
 };
 
-/** 角色人设 + 与玩家最近 5 条真实微信聊天，供情侣空间等 AI 生成使用。 */
-export const readCharacterBrief = (charId: string) => {
+/** 默认保留情侣空间的轻量摘要；查手机使用聊天设置的条数和完整正文。 */
+export const readCharacterBrief = (charId: string, options: { configuredHistory?: boolean } = {}) => {
   const contact = readJsonArray(CONTACTS_STORAGE_KEY).find((item) => item.id === charId);
   const name = typeof contact?.name === 'string' ? contact.name : '角色';
   const pad = (n: number) => String(n).padStart(2, '0');
-  const recent = readDirectMessages(charId)
-    .filter((message) => !message.note)
-    .slice(-5)
+  const history = readDirectMessages(charId, {
+    configuredHistory: options.configuredHistory,
+    fullText: options.configuredHistory,
+  }).filter((message) => !message.note);
+  const recent = (options.configuredHistory ? history : history.slice(-5))
     .map((message) => {
       const time = new Date(message.createdAt);
       const stamp = Number.isNaN(time.getTime()) ? '' : `[${time.getMonth() + 1}/${time.getDate()} ${pad(time.getHours())}:${pad(time.getMinutes())}] `;
-      return `${stamp}${message.senderId === 'user' ? '玩家' : name}：${message.text.slice(0, 120)}`;
+      return `${stamp}${message.senderId === 'user' ? '玩家' : name}：${options.configuredHistory ? message.text : message.text.slice(0, 120)}`;
     });
   return {
     name,

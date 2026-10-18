@@ -38,14 +38,17 @@ import { findMusicTrackByTitle, readMusicPlaybackSnapshot } from '../utils/music
 import { PersonaCollection, UserPersona } from '../types';
 import { readStorageString, readStoredValue, writeStorageString, writeStoredValue } from '../utils/localStorage';
 import { readSetting, saveSetting, SETTINGS_KEYS } from '../utils/settings';
-import { compressImageFile } from '../utils/imageFile';
+import { compressChatPhoto, compressImageFile } from '../utils/imageFile';
 import { buildPrompt } from '../utils/buildPrompt';
+import { toGeminiContents, toOpenAiMessages } from '../utils/chatVision';
 import { showYyError, useErrorDialog } from '../components/ErrorDialog';
 import { AvatarFrameEditor } from '../components/AvatarFrameEditor';
 import { CallScreen } from '../components/CallScreen';
 import { parseChatResponse } from '../utils/aiResponse';
 import { normalizeForumHandle, readGeneratedForumHandles } from '../utils/forumIdentity';
 import { estimateConversationTokens, estimatePromptTokens, estimateTextTokens } from '../utils/chatTokens';
+import { buildCharacterExport, parsePortableWorldBooks, remapImportedWorldBooks } from '../utils/characterExport';
+import { applySocialWrites, buildSocialInstructions, parseSocialActions, type SocialContext } from '../utils/chatSocial';
 import { BUILTIN_STICKERS, CHAT_STICKERS_STORAGE_KEY, type ChatSticker } from '../utils/chatStickers';
 import { ChatNotification, ChatRuntimeSettings, getRoundThought, isProactiveDue, permittedSticker, preserveRoundThoughts } from '../utils/chatRuntime';
 import { AvatarFrameStyle, avatarFrameWrapStyle } from '../utils/avatarFrame';
@@ -333,6 +336,9 @@ interface ChatConversation {
   replyMessageMin?: number;
   replyMessageMax?: number;
   includeLatestThought?: boolean;
+  allowGroupPrivate?: boolean;
+  allowAutoMoments?: boolean;
+  allowAutoCouple?: boolean;
   fontSize?: number;
   proactiveEnabled?: boolean;
   proactiveIntervalMinutes?: number;
@@ -537,6 +543,9 @@ export const isStrictChatList = (value: unknown): value is ChatConversation[] =>
       (chat.replyMessageMin === undefined || typeof chat.replyMessageMin === 'number') &&
       (chat.replyMessageMax === undefined || typeof chat.replyMessageMax === 'number') &&
       (chat.includeLatestThought === undefined || typeof chat.includeLatestThought === 'boolean') &&
+      (chat.allowGroupPrivate === undefined || typeof chat.allowGroupPrivate === 'boolean') &&
+      (chat.allowAutoMoments === undefined || typeof chat.allowAutoMoments === 'boolean') &&
+      (chat.allowAutoCouple === undefined || typeof chat.allowAutoCouple === 'boolean') &&
       (chat.attachedHistoryChatIds === undefined ||
         (Array.isArray(chat.attachedHistoryChatIds) &&
           chat.attachedHistoryChatIds.every((id: unknown) => typeof id === 'string'))) &&
@@ -745,6 +754,8 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
   );
   const [characterNpcs, setCharacterNpcs] = useState<CharacterNpc[]>(() => readCharacterNpcs());
   const [contactsMenuOpen, setContactsMenuOpen] = useState(false);
+  const [characterExportOpen, setCharacterExportOpen] = useState(false);
+  const [exportWorldBookIds, setExportWorldBookIds] = useState<string[]>([]);
   const [isContactEditorOpen, setIsContactEditorOpen] = useState(false);
   const [contactDraft, setContactDraft] = useState<ContactPersona>({
     id: '',
@@ -1387,6 +1398,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
   };
 
   const openContactEditor = (contact?: ContactPersona) => {
+    setCharacterExportOpen(false);
     setContactWorldBooks(readContactWorldBooks());
     const draftId = contact?.id ?? `contact-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     setIsNewContactDraft(!contact);
@@ -1574,6 +1586,9 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
     setImportError('');
     try {
       const parsed: unknown = JSON.parse(await file.text());
+      const bundledBooks = parsed && typeof parsed === 'object' && !Array.isArray(parsed) &&
+        'worldBooks' in parsed ? parsePortableWorldBooks(parsed.worldBooks) : undefined;
+      const importedBooks = bundledBooks ? remapImportedWorldBooks(bundledBooks) : undefined;
       let rawContacts: unknown;
       if (Array.isArray(parsed)) {
         rawContacts = parsed;
@@ -1620,19 +1635,45 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
               : typeof record.description === 'string'
                 ? record.description
                 : '',
-          worldBooks: links,
+          worldBooks: importedBooks ? importedBooks.links(links) : links,
+          bio: typeof record.bio === 'string' ? record.bio : '',
           group: typeof record.group === 'string' && record.group.trim() ? record.group.trim() : '未分组',
           starred: record.starred === true,
         };
       });
       if (importedContacts.length === 0) throw new Error('没有可导入的角色。');
+      const previousBooks = readStorageString('yyphone:world-books');
+      if (importedBooks) {
+        const existingBooks = parsePortableWorldBooks(JSON.parse(previousBooks ?? '[]'));
+        writeStoredValue('yyphone:world-books', [...existingBooks, ...importedBooks.books]);
+      }
       if (persistContacts([...contacts, ...importedContacts])) {
         setImportError('');
         setContactsMenuOpen(false);
+      } else if (importedBooks) {
+        writeStorageString('yyphone:world-books', previousBooks ?? '[]');
       }
     } catch (error) {
       console.error('Could not import WeChat contacts.', error);
       setImportError(error instanceof Error ? error.message : '导入角色失败。');
+    }
+  };
+
+  const exportCharacter = () => {
+    try {
+      if (!contactDraft.name.trim()) throw new Error('请先填写角色姓名。');
+      const books = parsePortableWorldBooks(JSON.parse(readStorageString('yyphone:world-books') ?? '[]'));
+      const payload = buildCharacterExport(contactDraft, exportWorldBookIds, books);
+      const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }));
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `${contactDraft.name.trim().replace(/[<>:"/\\|?*]/g, '_')}-character.json`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      setCharacterExportOpen(false);
+    } catch (error) {
+      console.error('Could not export character.', error);
+      setContactError(error instanceof Error ? error.message : '角色导出失败，请重试。');
     }
   };
 
@@ -2325,7 +2366,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
     setIsProcessingChatImage(true);
     setChatError('');
     try {
-      const imageUrl = await compressImageFile(file);
+      const imageUrl = await compressChatPhoto(file);
       if (attachmentMode === 'camera') {
         if (saveAttachmentMessage('image', '拍摄的照片', { imageUrl })) {
           setAttachmentMode(null);
@@ -2739,6 +2780,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         chatId: chat.id,
         currentInput,
         historyLimit: chat.currentChatHistoryCount ?? 200,
+        callMode: callConnectedAt ? activeCallMode ?? undefined : undefined,
         regenerate,
         momentsInjection,
         coupleInjection,
@@ -2748,6 +2790,8 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       const allowedStickers = allStickers.filter((sticker) =>
         chatMembers.some((member) => permittedSticker('stickerCategories' in member ? member.stickerCategories : undefined, sticker))
       );
+      const socialContext: SocialContext = { chat, actors: chatContacts, regenerate, now: new Date() };
+      const socialInstructions = buildSocialInstructions(socialContext);
       const allowIncomingCall = runtimeSettings.allowIncomingCalls && chat.type === 'direct' && !activeCallMode && !regenerate;
       const pendingIntimateRequest = chat.messages.find((item) => item.kind === 'intimate-pay' &&
         item.senderId === 'user' && item.intimateStatus === 'pending');
@@ -2759,6 +2803,15 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
           .join('')}`)
         .join('；');
       const responseInstructions = [
+        socialInstructions,
+        ...(chat.type === 'group' && chat.allowGroupPrivate !== false && !regenerate ? [
+          `避免重复私发。各主要角色最近已发给玩家的私信（仅供决定是否还需私发，绝不在群里复述）：${JSON.stringify(chatContacts.map((actor) => ({
+            charId: actor.id,
+            recentSent: latestChats.find((item) => item.type === 'direct' && item.participantIds.length === 1 && item.participantIds[0] === actor.id)
+              ?.messages.filter((message) => message.senderId === actor.id && message.kind !== 'context-note').slice(-3)
+              .map((message) => ({ text: message.text, at: message.createdAt })) ?? [],
+          })))}`,
+        ] : []),
         '红包和转账发出后处于待领取/待收款状态，只有玩家确认才存入虚拟余额，玩家可在收款前退回转账。不要声称已经自动到账。',
         ...(chat.type === 'direct' && !contact.id.startsWith('npc:') && !regenerate && !activeCallMode ? [
           `【亲密付】玩家不能自行开卡。你可以结合人设、关系与经济情况主动赠予亲密付，返回可选字段 "intimatePayAction":{"type":"grant","monthlyLimit":正数,"note":"给玩家的留言"${pendingIntimateRequest ? `,"requestId":"${pendingIntimateRequest.id}"` : ''}}。额度由你决定，不必照搬申请额度，最大 1000000 元。${pendingIntimateRequest ? `玩家有待处理申请，申请 ID：${pendingIntimateRequest.id}，希望额度 ¥${pendingIntimateRequest.amount}。请本轮明确同意或拒绝；拒绝返回 "intimatePayAction":{"type":"decline","requestId":"${pendingIntimateRequest.id}"}。` : '没有申请时也可自然地主动赠予；不赠予则省略该字段。'}reply 中自然说明你的决定，不要只口头同意而不返回动作字段。`,
@@ -2770,10 +2823,10 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
           ? '允许在合适时机主动发起一次视频来电：返回一条 {"kind":"video-call","text":"视频来电"}，用户必须自行接通。不要描述为已接听或正在通话。'
           : '本轮禁止返回 video-call，不得主动拨打电话。',
         `以${chat.type === 'direct' ? `${contact.name}的` : '其中一位角色或 NPC 群成员的'}身份自然回复。只返回 JSON 对象，至少包含 reply、thought、speakerId 字段。thought 是该角色此刻的内心独白：必须用第一人称（“我”），完全符合人设，写出没能说出口的真心话、阴暗面、隐秘的在意、不安或脆弱，细腻、真实、有情绪层次；不得是对剧情的第三人称概括，不要复述 reply 里已经说出口的话，不要写成给玩家的发言，约 40-120 字。reply 必须是恰好 ${targetReplyCount} 条独立消息组成的数组；普通消息可写字符串，也可写对象 {"kind":"消息类型","text":"消息/语音转写/图片描述","title":"可选标题","source":"可选来源","content":"可选摘要","amount":"可选金额","quantity":可选红包个数,"stickerId":"可选表情包ID"}。支持类型：text、image（文字描述图片）、voice（语音转写）、sticker、video-call、location、red-packet、transfer、link、pat。pat 表示角色拍了拍玩家（类似微信拍一拍，text 可留空或写简短后缀如“的脑袋”），仅在情境自然时偶尔使用。${chat.narratorEnabled || chat.type === 'observer' ? '本对话已开启旁白：可在 reply 中穿插 {"kind":"narration","text":"旁白内容"} 项，旁白用第三人称简短描述角色此刻的动作、表情、神态、衣着或周围氛围，必须控制在 50 字以内（越短越好），不要包含角色台词，也不要替玩家行动；旁白同样计入 reply 条数，通常每轮最多 1 条，且不要全是旁白。' : ''}链接请提供 title/source/content；红包和转账必须给正数 amount，收款对象只能是玩家 user，群聊红包可提供 quantity。不要编造图片 URL；image 使用文字图卡。【表情包】玩家导入了一批表情包，你可以像真人聊天一样，根据人设、性格和当下情绪，在合适的时候主动发表情包（比如开心、撒娇、无语、委屈、吐槽时），一般可单独作为一条 {"kind":"sticker","stickerId":"表情包ID"}，也可在文字消息后附带一条；偏活泼的人设可以更常用，内敛冷淡的人设就少用，不要每轮都发，也不要连发多个。表情包不只是表达情绪，也可以用来糊弄回复、反讽、玩梗、做社交缓冲（不知道说什么、尴尬、不想认真回答时）；但不要过度解读表情包的含义，也不要给它强加深意。根据当前对话氛围和人设选择性地发，同一个表情包不要反复发（回看历史，近期发过的就换一个或不发）。只能从下列表情包里选（按分类列出，格式 分类：[ID|名称]，请根据名称含义挑选贴切的）：${stickerPromptList}。${allStickers.length === 0 ? '（目前没有表情包，不要发 sticker。）' : ''}请仅在剧情自然、确有必要时使用附件，普通文字聊天优先，不要为了凑数强行发送附件。${regenerate ? '本次是重生成，不得再次发红包、转账或礼物，以免重复入账。' : '角色发给玩家的红包和转账需玩家手动领取或确认收款后才加入支付宝个人余额，不会扣玩家的钱；待收转账可退回。可选 gift 字段仅允许 {"existingProductId":"现有商品ID"} 或 {"title":"新商品名","desc":"描述","price":数字,"category":"shopping或eleme","emoji":"emoji"}，只在剧情自然时由主要角色提供；NPC不使用 gift 字段。'}${chat.type === 'group' && chat.allowAgentGroupRename ? '可选 groupTitle 和 groupNicknames 字段，只在情节自然需要时修改群名或昵称。' : ''}群聊的 speakerId 必须从以下成员 ID 中选择：${chatMembers.map((member) => `${member.id}（${member.name}）`).join(', ')}。${chat.type === 'group' && chat.allowAgentGroupRename ? 'groupNicknames 的键只能使用上方成员 ID。' : ''}${chat.type === 'observer' ? '这是旁观群聊，user不在群里；不得生成发给玩家的红包、转账或礼物；根据角色之间的对话和旁白情境继续由群成员发言。' : ''}`,
-        ...(activeCallMode === 'video'
+        ...(activeCallMode === 'video' && callConnectedAt
           ? [`当前为视频通话${callConnectedAt ? `（已通话 ${Math.floor((Date.now() - callConnectedAt) / 60000)} 分钟）` : ''}，请在角色的每次回复最前方先写一段用小括号包裹的可视动作描写，再接角色说的话；通话中说话要口语化、简短，不要发图片、表情包、红包、转账、链接等附件。`]
           : []),
-        ...(activeCallMode === 'voice'
+        ...(activeCallMode === 'voice' && callConnectedAt
           ? [`当前正在语音通话中${callConnectedAt ? `（已通话 ${Math.floor((Date.now() - callConnectedAt) / 60000)} 分钟）` : ''}：你们是在“说话”，请用口语化的短句直接说，像真的在讲话，可以有语气词、停顿、笑声；不要发图片、表情包、红包、转账、链接、位置等附件，也不要括号动作描写；每次回复保持简短。`]
           : []),
         ...(momentsInjection.marks.length > 0
@@ -2813,12 +2866,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
           .filter((message) => message.role === 'system')
           .map((message) => message.content)
           .join('\n\n');
-        const contents = promptMessages
-          .filter((message) => message.role !== 'system')
-          .map((message) => ({
-            role: message.role === 'assistant' ? 'model' : 'user',
-            parts: [{ text: message.content }],
-          }));
+        const contents = toGeminiContents(promptMessages);
         const response = await fetch(
           `${endpoint}/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiPreset.apiKey)}`,
           {
@@ -2847,7 +2895,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
           },
           body: JSON.stringify({
             model,
-            messages: promptMessages,
+            messages: toOpenAiMessages(promptMessages),
             response_format: { type: 'json_object' },
           }),
         });
@@ -3060,6 +3108,13 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         console.info('Cancelled stale chat generation after chat activity, archive or permissions changed.');
         return;
       }
+      const executionSocialContext = { ...socialContext, chat: liveChat };
+      const socialActions = parseSocialActions(result, executionSocialContext, speakerId);
+      if (socialActions.privateMessage) {
+        const direct = readStoredValue(CHATS_STORAGE_KEY, chats, isChatList).find((item) => item.type === 'direct' &&
+          item.participantIds.length === 1 && item.participantIds[0] === speakerId);
+        if (direct?.blocked) throw new Error('该角色已被拉黑，不能从群聊发送私信。');
+      }
       if (replyParts.some((part) => part.kind === 'video-call') && !delivery.current.runtimeSettings.allowIncomingCalls) {
         throw new Error('角色主动来电已关闭，已取消本次回复。');
       }
@@ -3211,6 +3266,8 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
           ) ?? [...chat.messages].reverse().find((item) => item.senderId === 'user' && item.kind !== 'pat'))?.id
         : undefined;
       const financeBeforeGrant = intimateAction?.type === 'grant' ? readAlipayData() : undefined;
+      const socialActor = chatContacts.find((actor) => actor.id === speakerId);
+      if (socialActor) applySocialWrites(socialActions, executionSocialContext, socialActor);
       if (intimateAction?.type === 'grant' && intimateAction.monthlyLimit) {
         grantIntimatePay(contact, intimateAction.monthlyLimit, intimateAction.note);
       }
@@ -3244,6 +3301,43 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
           window.dispatchEvent(new Event('yyphone:finance-change'));
         }
         throw new Error('回复保存失败，亲密付未生效，请重试。');
+      }
+      if (socialActions.privateMessage && socialActor) {
+        const currentChats = readStoredValue(CHATS_STORAGE_KEY, chats, isChatList);
+        let direct = currentChats.find((item) => item.type === 'direct' &&
+          item.participantIds.length === 1 && item.participantIds[0] === speakerId);
+        if (direct?.blocked) throw new Error('私聊角色已被拉黑，群聊私信未发送。');
+        if (!direct) {
+          direct = {
+            id: `chat-${crypto.randomUUID()}`, type: 'direct', participantIds: [speakerId],
+            noteName: '', context: '', narratorEnabled: false, blocked: false, pinned: false,
+            avatars: {}, messages: [], updatedAt: new Date().toISOString(), currentChatHistoryCount: 200,
+          };
+          currentChats.unshift(direct);
+        }
+        const privateMessages: ChatMessage[] = socialActions.privateMessage.texts.map((text, index) => ({
+          id: `private-${crypto.randomUUID()}`, replyBatchId, senderId: speakerId, kind: 'text',
+          text, createdAt: new Date(Date.now() + index).toISOString(),
+        }));
+        const updatedDirect = {
+          ...direct,
+          messages: [...direct.messages, {
+            id: `context-${crypto.randomUUID()}`, senderId: 'narrator', kind: 'context-note' as const,
+            title: '群聊触发的私信', source: 'group-private',
+            text: `你因群聊「${getChatTitle(chat)}」的情境私下联系玩家：${socialActions.privateMessage.reason}`,
+            aiContext: `这是你从群聊转到私聊的背景，不是玩家说的话：${socialActions.privateMessage.reason}`,
+            createdAt: new Date().toISOString(),
+          }, ...privateMessages],
+          updatedAt: privateMessages[privateMessages.length - 1].createdAt,
+        };
+        if (!persistChats(currentChats.map((item) => item.id === direct.id ? updatedDirect : item))) {
+          throw new Error('群聊私信保存失败，请重试。');
+        }
+        delivery.current.onMessage({
+          chatId: direct.id, name: direct.noteName || socialActor.name,
+          avatar: direct.avatars[speakerId] || socialActor.avatarUrl,
+          text: privateMessages.map((message) => message.text).join(' ').slice(0, 160),
+        });
       }
       // 逐条出现：updateChat 每次都读写存储，即使中途离开聊天页也会把剩余消息补完。
       for (const message of replyMessages.slice(1)) {
@@ -3495,11 +3589,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
             >
               <Plus className="w-5 h-5" />
             </button>
-          ) : (
-            <button className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-black/5 text-[#2C4A5C]">
-              <Plus className="w-5 h-5" />
-            </button>
-          )
+          ) : null
         }
       />
       {!activeChat && activeTab === 'chats' && chatCreateMenuOpen && (
@@ -3567,8 +3657,12 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
           <div
             className="yy-chat-surface flex-1 min-h-0 flex flex-col bg-[#F3F6FA]"
             style={{
-              '--yy-user-bubble-color': hexToRgba(chatAppearance.userBubbleColor, chatAppearance.userBubbleOpacity ?? 0.78),
-              '--yy-character-bubble-color': hexToRgba(chatAppearance.characterBubbleColor, chatAppearance.characterBubbleOpacity ?? 0.78),
+              '--yy-user-bubble-color': chatAppearance.userBubbleColor === DEFAULT_CHAT_APPEARANCE.userBubbleColor
+                ? `var(--yy-default-user-bubble-color, ${hexToRgba(chatAppearance.userBubbleColor, chatAppearance.userBubbleOpacity ?? 0.78)})`
+                : hexToRgba(chatAppearance.userBubbleColor, chatAppearance.userBubbleOpacity ?? 0.78),
+              '--yy-character-bubble-color': chatAppearance.characterBubbleColor === DEFAULT_CHAT_APPEARANCE.characterBubbleColor
+                ? `var(--yy-default-character-bubble-color, ${hexToRgba(chatAppearance.characterBubbleColor, chatAppearance.characterBubbleOpacity ?? 0.78)})`
+                : hexToRgba(chatAppearance.characterBubbleColor, chatAppearance.characterBubbleOpacity ?? 0.78),
             } as React.CSSProperties}
           >
             {activeChat.type === 'observer' && (
@@ -4983,36 +5077,6 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                 <X className="h-4 w-4" />
               </button>
             </header>
-            {(() => {
-              const messages = chats.find((chat) => chat.id === chatSettingsDraft.id)?.messages ?? chatSettingsDraft.messages;
-              const historyCount = Math.min(5000, Math.max(1, Math.trunc(chatSettingsDraft.currentChatHistoryCount || 200)));
-              const recent = messages.slice(-historyCount);
-              return (
-                <section aria-label="对话 Token 估算" className="space-y-1.5 rounded-2xl border border-sky-100 bg-sky-50/60 p-3">
-                  <p className="text-xs font-semibold text-[#2C4A5C]">生成用量估算</p>
-                  <button type="button" disabled={tokenPreviewBusy || isGeneratingReply}
-                    onClick={() => void generateAiReply(false, chatSettingsDraft.id, false, true)}
-                    className="rounded-xl bg-sky-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">
-                    {tokenPreviewBusy ? '正在计算…' : '估算下一次完整输入'}
-                  </button>
-                  {tokenPreview?.chatId === chatSettingsDraft.id && <p className="text-sm font-bold text-sky-700">下次完整输入约 {tokenPreview.input.toLocaleString()} Tokens</p>}
-                  {tokenPreviewError && <p role="alert" className="text-[11px] text-rose-600">{tokenPreviewError}</p>}
-                  {(() => {
-                    const usage = readStoredValue(`yyphone:chat-token-usage:${chatSettingsDraft.id}`, null,
-                      (value): value is { input: number; output?: number; at: string; model: string } =>
-                        !!value && typeof value === 'object' && 'input' in value && typeof value.input === 'number' &&
-                        'at' in value && typeof value.at === 'string' && 'model' in value && typeof value.model === 'string' &&
-                        (!('output' in value) || typeof value.output === 'number'));
-                    return usage && <p className="text-[11px] text-slate-600">最近请求（{usage.model}）：输入约 {usage.input.toLocaleString()}{usage.output !== undefined ? ` + 输出约 ${usage.output.toLocaleString()} = 合计约 ${(usage.input + usage.output).toLocaleString()} Tokens` : ' Tokens，尚无输出统计'}</p>;
-                  })()}
-                  <p className="text-[10px] leading-relaxed text-slate-500">完整输入包含实际提示词中的人设、世界书、长期记忆、日记/成长、挂载聊天、朋友圈/情侣空间等上下文、表情包清单及回复规则。按已保存的聊天设置计算；修改设置后请先保存再重新估算。估算不会请求聊天或向量 API，也不会标记记忆/动态已读；预览记忆采用本地关键词检索，正式生成的向量检索结果可能不同。输出（含心声与 JSON）生成前未知，最近请求显示实际发送/返回文本的估算，模型分词、缓存和计费规则仍以 API 为准。</p>
-                  <p className="text-xs font-semibold text-[#2C4A5C]">消息正文参考</p>
-                  <p className="text-sm font-bold text-sky-700">约 {estimateConversationTokens(messages).toLocaleString()} Tokens · {messages.length} 条消息</p>
-                  <p className="text-[11px] text-slate-600">按当前历史条数设置，最近 {recent.length} 条约 {estimateConversationTokens(recent).toLocaleString()} Tokens</p>
-                  <p className="text-[10px] leading-relaxed text-slate-400">以上消息正文统计不等于一次生成的总输入，请参考上方完整输入估算。</p>
-                </section>
-              );
-            })()}
             {chatSettingsDraft.type !== 'direct' && (
               <section className="space-y-2 rounded-2xl border border-sky-100 bg-gradient-to-br from-[#9BD2FC]/15 to-[#F7B9D2]/20 p-3">
                 <p className="text-[11px] font-semibold text-[#2C4A5C]">群成员（角色与关联 NPC）</p>
@@ -5438,7 +5502,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
             <label className="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2.5">
               <span>
                 <span className="block text-xs font-semibold text-[#2C4A5C]">注入最新一轮的心声</span>
-                <span className="mt-0.5 block text-[9px] text-slate-400">开启后，AI 可参考此对话最近一条角色消息记录的心声。</span>
+                <span className="mt-0.5 block text-[9px] text-slate-400">开启后，AI 可参考最近一轮角色心声，并提示其只是短暂的内心活动，自然承接但不反复琢磨。</span>
               </span>
               <input
                 type="checkbox"
@@ -5457,6 +5521,64 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                 onChange={(event) => setChatSettingsDraft({ ...chatSettingsDraft, narratorEnabled: event.target.checked })}
               />
             </label>
+            {chatSettingsDraft.type !== 'observer' && (
+              <section className="space-y-2 rounded-2xl border border-sky-100 bg-slate-50 p-3">
+                <p className="text-xs font-semibold text-[#2C4A5C]">角色主动行为</p>
+                <p className="text-[10px] text-slate-500">仅主要角色可在聊天时基于人设与当下情境自行决定，不要求每轮触发；不设硬性次数与间隔，朋友圈保持低频、不重复。</p>
+                {chatSettingsDraft.type === 'group' && (
+                  <label className="flex items-center justify-between gap-3 text-xs text-slate-600">
+                    群聊触发私聊
+                    <input type="checkbox" checked={chatSettingsDraft.allowGroupPrivate !== false}
+                      onChange={(event) => setChatSettingsDraft({ ...chatSettingsDraft, allowGroupPrivate: event.target.checked })} />
+                  </label>
+                )}
+                <label className="flex items-center justify-between gap-3 text-xs text-slate-600">
+                  主动发朋友圈
+                  <input type="checkbox" checked={chatSettingsDraft.allowAutoMoments !== false}
+                    onChange={(event) => setChatSettingsDraft({ ...chatSettingsDraft, allowAutoMoments: event.target.checked })} />
+                </label>
+                {chatSettingsDraft.type === 'direct' && (
+                  <>
+                    <label className="flex items-center justify-between gap-3 text-xs text-slate-600">
+                      主动写情侣空间
+                      <input type="checkbox" checked={chatSettingsDraft.allowAutoCouple !== false}
+                        onChange={(event) => setChatSettingsDraft({ ...chatSettingsDraft, allowAutoCouple: event.target.checked })} />
+                    </label>
+                    <p className="text-[10px] leading-relaxed text-slate-500">仅已绑定时可写心情、日记、便签和回答已有问答。睡前可自然补记；明确还没睡、仍在延续前一晚时归前一天，已睡醒或不明确时归当天。不会覆盖已有心情、日记或答案；便签与问答不要求每日写。</p>
+                  </>
+                )}
+              </section>
+            )}
+            {(() => {
+              const messages = chats.find((chat) => chat.id === chatSettingsDraft.id)?.messages ?? chatSettingsDraft.messages;
+              const historyCount = Math.min(5000, Math.max(1, Math.trunc(chatSettingsDraft.currentChatHistoryCount || 200)));
+              const recent = messages.slice(-historyCount);
+              return (
+                <section aria-label="对话 Token 估算" className="space-y-1.5 rounded-2xl border border-sky-100 bg-sky-50/60 p-3">
+                  <p className="text-xs font-semibold text-[#2C4A5C]">生成用量估算</p>
+                  <button type="button" disabled={tokenPreviewBusy || isGeneratingReply}
+                    onClick={() => void generateAiReply(false, chatSettingsDraft.id, false, true)}
+                    className="rounded-xl bg-sky-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">
+                    {tokenPreviewBusy ? '正在计算…' : '估算下一次完整输入'}
+                  </button>
+                  {tokenPreview?.chatId === chatSettingsDraft.id && <p className="text-sm font-bold text-sky-700">下次完整输入约 {tokenPreview.input.toLocaleString()} Tokens</p>}
+                  {tokenPreviewError && <p role="alert" className="text-[11px] text-rose-600">{tokenPreviewError}</p>}
+                  {(() => {
+                    const usage = readStoredValue(`yyphone:chat-token-usage:${chatSettingsDraft.id}`, null,
+                      (value): value is { input: number; output?: number; at: string; model: string } =>
+                        !!value && typeof value === 'object' && 'input' in value && typeof value.input === 'number' &&
+                        'at' in value && typeof value.at === 'string' && 'model' in value && typeof value.model === 'string' &&
+                        (!('output' in value) || typeof value.output === 'number'));
+                    return usage && <p className="text-[11px] text-slate-600">最近请求（{usage.model}）：输入约 {usage.input.toLocaleString()}{usage.output !== undefined ? ` + 输出约 ${usage.output.toLocaleString()} = 合计约 ${(usage.input + usage.output).toLocaleString()} Tokens` : ' Tokens，尚无输出统计'}</p>;
+                  })()}
+                  <p className="text-[10px] leading-relaxed text-slate-500">完整输入包含实际提示词中的人设、世界书、长期记忆、日记/成长、挂载聊天、朋友圈/情侣空间等上下文、表情包清单及回复规则。按已保存的聊天设置计算；修改设置后请先保存再重新估算。估算不会请求聊天或向量 API，也不会标记记忆/动态已读；预览记忆采用本地关键词检索，正式生成的向量检索结果可能不同。输出（含心声与 JSON）生成前未知，最近请求显示实际发送/返回文本的估算，模型分词、缓存和计费规则仍以 API 为准。</p>
+                  <p className="text-xs font-semibold text-[#2C4A5C]">消息正文参考</p>
+                  <p className="text-sm font-bold text-sky-700">约 {estimateConversationTokens(messages).toLocaleString()} Tokens · {messages.length} 条消息</p>
+                  <p className="text-[11px] text-slate-600">按当前历史条数设置，最近 {recent.length} 条约 {estimateConversationTokens(recent).toLocaleString()} Tokens</p>
+                  <p className="text-[10px] leading-relaxed text-slate-400">以上估算仅统计文本，不含真实图片的视觉 Token；图片费用以所选模型及 API 实际用量为准。消息正文统计不等于一次生成的总输入。</p>
+                </section>
+              );
+            })()}
             <div className="grid grid-cols-2 gap-2">
               <button onClick={() => exportChatHistory(chatSettingsDraft)} className="rounded-xl bg-slate-100 py-2 text-[11px] font-semibold text-slate-700">
                 <Download className="mr-1 inline h-3.5 w-3.5" />导出聊天记录
@@ -5527,6 +5649,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                     placeholder="用文字描述你想发送的图片，发送后会以方形文字卡片显示"
                     className="mt-1 w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs outline-none"
                   />
+                  <span className="mt-1 block font-normal text-slate-500">这里发送文字图卡；发送真实图片请使用聊天附件中的“拍摄”。真实图片最长边不超过 1280 像素、大小不超过 400KB，需要所选模型及 API 支持图片识别；小字或细节建议裁剪后发送。</span>
                 </label>
             )}
             {attachmentMode === 'location' && (
@@ -5996,6 +6119,36 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
               <span><Star className="mr-1 inline h-3.5 w-3.5" />设为星标</span>
               <input type="checkbox" checked={contactDraft.starred} onChange={(event) => setContactDraft((draft) => ({ ...draft, starred: event.target.checked }))} />
             </label>
+            {!isNewContactDraft && (
+              <section className="space-y-2 rounded-2xl border border-sky-100 bg-slate-50 p-3">
+                <button type="button" onClick={() => {
+                  setContactWorldBooks(readContactWorldBooks());
+                  const availableBooks = readContactWorldBooks();
+                  setExportWorldBookIds([...new Set(contactDraft.worldBooks.map((link) => link.bookId))]
+                    .filter((id) => availableBooks.some((book) => book.id === id)));
+                  setCharacterExportOpen((open) => !open);
+                }} className="w-full text-xs font-semibold text-sky-700">
+                  <Download className="mr-1 inline h-3.5 w-3.5" />导出角色
+                </button>
+                {characterExportOpen && (
+                  <>
+                    <p className="text-[10px] text-slate-500">导出当前人设、头像、简介与偏好，可勾选一起携带的世界书；不含聊天、存档、API 密钥或 NPC。导入时自动重新关联世界书，全局书仅对导入角色生效。</p>
+                    {contactWorldBooks.map((book) => (
+                      <label key={book.id} className="flex items-center gap-2 text-xs text-slate-600">
+                        <input type="checkbox" checked={exportWorldBookIds.includes(book.id)} onChange={(event) => {
+                          setExportWorldBookIds((ids) => event.target.checked ? [...ids, book.id] : ids.filter((id) => id !== book.id));
+                        }} />
+                        {book.name}{book.isGlobal ? '（全局）' : ''}
+                      </label>
+                    ))}
+                    {!contactWorldBooks.length && <p className="text-[10px] text-slate-400">暂无世界书，可仅导出角色。</p>}
+                    <button type="button" onClick={exportCharacter} className="w-full rounded-xl bg-sky-600 py-2 text-xs font-semibold text-white">
+                      下载角色 JSON
+                    </button>
+                  </>
+                )}
+              </section>
+            )}
             {!isNewContactDraft && (
               <button type="button" onClick={() => deleteContact(contactDraft.id)} className="w-full rounded-xl bg-rose-50 py-2 text-xs font-bold text-rose-600">
                 删除角色

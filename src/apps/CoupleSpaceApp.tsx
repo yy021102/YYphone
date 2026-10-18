@@ -21,6 +21,8 @@ import {
   RotateCcw,
 } from 'lucide-react';
 import { AppHeader } from '../components/AppHeader';
+import { CoupleRecordEditor } from '../components/CoupleRecordEditor';
+import { coupleRecordDate, editCoupleRecord, type CoupleRecordEdit } from '../utils/coupleRecords';
 import { showYyError } from '../components/ErrorDialog';
 import { readAlipayContacts, AlipayContact } from '../utils/alipayData';
 import { appendCharacterContextEvent } from '../utils/characterContext';
@@ -290,8 +292,7 @@ export const CoupleSpaceApp: React.FC<CoupleSpaceAppProps> = ({ onBack }) => {
   const [aiBusy, setAiBusy] = useState('');
   const [bgEditor, setBgEditor] = useState<'page' | 'calendar' | null>(null);
   const [bgDraft, setBgDraft] = useState('');
-  const [editingDiaryId, setEditingDiaryId] = useState<string | null>(null);
-  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [recordEdit, setRecordEdit] = useState<CoupleRecordEdit | null>(null);
 
   // 运行 AI 生成：用调用时的角色 ID 写回，避免生成期间切换角色导致写错空间。
   const runAi = async (key: string, task: () => Promise<void | string>) => {
@@ -532,7 +533,7 @@ export const CoupleSpaceApp: React.FC<CoupleSpaceAppProps> = ({ onBack }) => {
             authorName: charName,
             content,
             colorBg: ['#FEF6C9', '#FFE0E9', '#DCEEFF', '#DCF5E3', '#EDE2FF'][Math.floor(Math.random() * 5)],
-            createdAt: '刚刚',
+            createdAt: todayStr(),
             seenByChar: true,
           };
           updateSpaceFor(charId, (prev) => ({ ...prev, stickyNotes: [note, ...prev.stickyNotes] }));
@@ -1285,6 +1286,20 @@ export const CoupleSpaceApp: React.FC<CoupleSpaceAppProps> = ({ onBack }) => {
             </div>
 
             {/* 角色当天心情 */}
+            <div className="flex gap-2">
+              {(['user', 'char'] as const).map((author) => (
+                <button key={author} type="button" onClick={() => {
+                  const record = currentSpace.moods[editingMoodDate];
+                  setRecordEdit({
+                    kind: 'mood', originalDate: editingMoodDate, date: editingMoodDate, author,
+                    moodId: (author === 'user' ? record?.userMoodId : record?.charMoodId) || 'happy_1',
+                    note: (author === 'user' ? record?.userNote : record?.charNote) || '',
+                  });
+                }} className="flex-1 rounded-xl bg-sky-50 p-2 text-[11px] text-sky-700">
+                  {author === 'user' ? '编辑我的记录与日期' : '编辑角色记录与日期'}
+                </button>
+              ))}
+            </div>
             <div className="p-3 rounded-2xl bg-slate-50/70 border border-slate-200/60 space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-medium text-slate-600">
@@ -1419,6 +1434,9 @@ export const CoupleSpaceApp: React.FC<CoupleSpaceAppProps> = ({ onBack }) => {
                           <span className="text-xs font-medium text-slate-600 font-mono">
                             {dLeft >= 0 ? `还有 ${dLeft} 天` : `已过 ${Math.abs(dLeft)} 天`}
                           </span>
+                          <button type="button" aria-label={`编辑纪念日：${item.title}`}
+                            onClick={() => setRecordEdit({ kind: 'anniversary', id: item.id, date: item.targetDate, title: item.title, type: item.type })}
+                            className="text-slate-400"><Pencil className="h-3.5 w-3.5" /></button>
                           <button
                             onClick={() =>
                               updateCurrentSpace((prev) => ({
@@ -1470,19 +1488,6 @@ export const CoupleSpaceApp: React.FC<CoupleSpaceAppProps> = ({ onBack }) => {
                     <button
                       onClick={() => {
                         if (!newDiaryContent.trim()) return;
-                        if (editingDiaryId) {
-                          const title = newDiaryTitle.trim() || '今日小记';
-                          const content = newDiaryContent.trim();
-                          updateCurrentSpace((prev) => ({
-                            ...prev,
-                            diaries: prev.diaries.map((x) =>
-                              x.id === editingDiaryId
-                                ? { ...x, title, content, seenByChar: false }
-                                : x
-                            ),
-                          }));
-                          setEditingDiaryId(null);
-                        } else {
                           const entry: DiaryEntry = {
                             id: `diary-${Date.now()}`,
                             author: 'user',
@@ -1496,13 +1501,12 @@ export const CoupleSpaceApp: React.FC<CoupleSpaceAppProps> = ({ onBack }) => {
                             ...prev,
                             diaries: [entry, ...prev.diaries],
                           }));
-                        }
                         setNewDiaryTitle('');
                         setNewDiaryContent('');
                       }}
                       className="flex-1 py-2 rounded-xl bg-gradient-to-r from-[#D7A8B7] to-[#A8C6DF] text-white text-xs font-medium cursor-pointer"
                     >
-                      {editingDiaryId ? '保存修改' : '写日记'}
+                      写日记
                     </button>
 
                     <button
@@ -1579,19 +1583,14 @@ export const CoupleSpaceApp: React.FC<CoupleSpaceAppProps> = ({ onBack }) => {
                           {currentChar.name}：{d.replyComment}
                         </p>
                       )}
+                      <button type="button" onClick={() => setRecordEdit({
+                        kind: 'diary', id: d.id, date: d.dateStr, title: d.title, content: d.content,
+                        replyComment: d.replyComment || '', authorName: d.authorName,
+                      })} className="flex items-center gap-1 text-[10px] text-sky-600">
+                        <Pencil className="h-3 w-3" />编辑日记与日期
+                      </button>
                       {d.author === 'user' && (
                         <div className="flex items-center gap-3 pt-0.5">
-                          <button
-                            onClick={() => {
-                              setEditingDiaryId(d.id);
-                              setNewDiaryTitle(d.title);
-                              setNewDiaryContent(d.content);
-                            }}
-                            className="text-[10px] text-slate-400 flex items-center gap-0.5 cursor-pointer"
-                          >
-                            <Pencil className="w-3 h-3" />
-                            编辑
-                          </button>
                           {!d.replyComment && (
                             <button
                               disabled={!!aiBusy}
@@ -1710,7 +1709,14 @@ export const CoupleSpaceApp: React.FC<CoupleSpaceAppProps> = ({ onBack }) => {
                       className="p-3 rounded-2xl bg-white border border-slate-100 space-y-2 shadow-2xs"
                     >
                       <div className="flex items-start justify-between gap-2">
-                        <p className="text-xs font-medium text-slate-700">Q：{qa.question}</p>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-medium text-slate-700">Q：{qa.question}</p>
+                          <p className="mt-1 text-[10px] text-slate-400">{qa.dateStr}</p>
+                        </div>
+                        <button type="button" aria-label={`编辑问答：${qa.question}`} onClick={() => setRecordEdit({
+                          kind: 'qa', id: qa.id, date: qa.dateStr, question: qa.question,
+                          userAnswer: qa.userAnswer || '', charAnswer: qa.charAnswer || '',
+                        })} className="shrink-0 text-slate-400"><Pencil className="h-3.5 w-3.5" /></button>
                         <button
                           onClick={() =>
                             updateCurrentSpace((prev) => ({
@@ -1868,7 +1874,7 @@ export const CoupleSpaceApp: React.FC<CoupleSpaceAppProps> = ({ onBack }) => {
                               colorBg: ['#FEF6C9', '#FFE0E9', '#DCEEFF', '#DCF5E3', '#EDE2FF'][
                                 Math.floor(Math.random() * 5)
                               ],
-                              createdAt: '刚刚',
+                              createdAt: todayStr(),
                               seenByChar: true,
                             };
                             updateSpaceFor(charId, (prev) => ({
@@ -1887,37 +1893,24 @@ export const CoupleSpaceApp: React.FC<CoupleSpaceAppProps> = ({ onBack }) => {
                       <button
                         onClick={() => {
                           if (!newStickyText.trim()) return;
-                          if (editingNoteId) {
-                            const content = newStickyText.trim();
-                            updateCurrentSpace((prev) => ({
-                              ...prev,
-                              stickyNotes: prev.stickyNotes.map((x) =>
-                                x.id === editingNoteId
-                                  ? { ...x, content, colorBg: newStickyColor, seenByChar: false }
-                                  : x
-                              ),
-                            }));
-                            setEditingNoteId(null);
-                          } else {
                             const note: StickyNoteItem = {
                               id: `note-${Date.now()}`,
                               author: 'user',
                               authorName: userProfile.name,
                               content: newStickyText.trim(),
                               colorBg: newStickyColor,
-                              createdAt: '刚刚',
+                              createdAt: todayStr(),
                               seenByChar: false,
                             };
                             updateCurrentSpace((prev) => ({
                               ...prev,
                               stickyNotes: [note, ...prev.stickyNotes],
                             }));
-                          }
                           setNewStickyText('');
                         }}
                         className="px-3.5 py-1 rounded-xl bg-slate-700 text-white text-xs font-medium cursor-pointer"
                       >
-                        {editingNoteId ? '保存' : '贴上'}
+                        贴上
                       </button>
                     </div>
                   </div>
@@ -1934,20 +1927,12 @@ export const CoupleSpaceApp: React.FC<CoupleSpaceAppProps> = ({ onBack }) => {
                         {n.content}
                       </p>
                       <div className="flex items-center justify-between text-[10px] text-slate-500 pt-1 border-t border-black/5">
-                        <span>{n.authorName}</span>
+                        <span>{n.authorName} · {coupleRecordDate(n.createdAt) ?? n.createdAt}</span>
                         <div className="flex items-center gap-1.5">
-                          {n.author === 'user' && (
-                            <button
-                              onClick={() => {
-                                setEditingNoteId(n.id);
-                                setNewStickyText(n.content);
-                                setNewStickyColor(n.colorBg);
-                              }}
-                              className="text-slate-400 hover:text-slate-600 cursor-pointer"
-                            >
-                              <Pencil className="w-3 h-3" />
-                            </button>
-                          )}
+                          <button type="button" aria-label={`编辑便签：${n.content}`} onClick={() => setRecordEdit({
+                            kind: 'note', id: n.id, date: coupleRecordDate(n.createdAt) ?? todayStr(),
+                            content: n.content, authorName: n.authorName, colorBg: n.colorBg,
+                          })} className="text-sky-600"><Pencil className="h-3 w-3" /></button>
                           <button
                             onClick={() =>
                               updateCurrentSpace((prev) => ({
@@ -1968,6 +1953,26 @@ export const CoupleSpaceApp: React.FC<CoupleSpaceAppProps> = ({ onBack }) => {
             )}
           </div>
         </div>
+      )}
+
+      {recordEdit && (
+        <CoupleRecordEditor
+          initial={recordEdit}
+          moods={MOOD_OPTIONS}
+          onClose={() => setRecordEdit(null)}
+          onSave={(edit) => {
+            const latest = readCoupleSpaces();
+            const space = latest[selectedCharId] || createEmptyCoupleSpace(selectedCharId);
+            const next = { ...latest, [selectedCharId]: editCoupleRecord(space, edit) };
+            writeCoupleSpaces(next);
+            setSpacesMap(next);
+            if (edit.kind === 'mood') {
+              setEditingMoodDate(null);
+              setCurrentYearMonth(edit.date.slice(0, 7));
+            }
+            setRecordEdit(null);
+          }}
+        />
       )}
 
       {/* ==================== 弹窗 C：修改起始日与背景 ==================== */}

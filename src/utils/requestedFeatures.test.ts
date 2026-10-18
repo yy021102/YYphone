@@ -13,9 +13,9 @@ import { extractMemoryCandidates, requestMemoryAiText } from './memoryAi';
 import { createJournalEntry, generateGrowthNote } from './journalAi';
 import { buildGrowthInjection, buildJournalInjection, readGrowthNotes, readJournalEntries, readJournalSettings, writeGrowthNotes, writeJournalEntries, writeJournalSettings } from './journalData';
 import { activeMemoryArchive, deleteCharacterMemoryArchives, deleteMemoryArchive, guardMemoryArchive, invalidateMemoryArchive, memoryArchiveLabel, prepareMemoryArchiveSwitch } from './memoryArchives';
-import { applyMomentsAfterChat, buildMomentsInjection, MomentPost, MOMENTS_STORAGE_KEY } from './momentsData';
+import { applyMomentsAfterChat, buildMomentsInjection, MomentPost, MOMENTS_STORAGE_KEY, readMoments } from './momentsData';
 import { readSetting, saveSetting, SETTINGS_KEYS } from './settings';
-import { emptyAlipayData, grantIntimatePay, readAlipayContacts, readAlipayData, requestIntimatePay, settleIncomingChatPayment, writeAlipayData, WECHAT_CHATS_STORAGE_KEY } from './alipayData';
+import { emptyAlipayData, grantIntimatePay, readAlipayContacts, readAlipayData, requestIntimatePay, settleIncomingChatPayment, updateAlipayBalance, writeAlipayData, WECHAT_CHATS_STORAGE_KEY } from './alipayData';
 import { parseAiJson, parseChatResponse, parseForumPost } from './aiResponse';
 import { readStoredValue } from './localStorage';
 import { estimateConversationTokens, estimatePromptTokens, estimateTextTokens } from './chatTokens';
@@ -23,6 +23,22 @@ import { normalizeForumHandle, readGeneratedForumHandles, resolveForumHandle } f
 import { BUILTIN_STICKERS, CHAT_STICKERS_STORAGE_KEY, readAvailableChatStickers } from './chatStickers';
 import { LITTLE_P_MESSAGES_KEY, LITTLE_P_VISIBLE_KEY, littlePHistory, littlePSystemPrompt, parseLittlePReply, readLittlePMessages, writeLittlePMessages, type LittlePMessage } from './littleP';
 import { requestConfiguredAiText } from './aiApi';
+import { buildPrompt, type OpenAiMessage } from './buildPrompt';
+import { toGeminiContents, toOpenAiMessages } from './chatVision';
+import { compressChatPhoto, compressImageFile } from './imageFile';
+import { createEmptyCoupleSpace, readCharacterBrief, readCoupleSpaces, writeCoupleSpaces } from './coupleSpaceData';
+import { readDirectMessages } from './journalData';
+import { generatePhoneScope } from './phoneAi';
+import { readRecentMoneyEvents } from './phoneData';
+import { buildCharacterExport, parsePortableWorldBooks, remapImportedWorldBooks } from './characterExport';
+import { applySocialWrites, buildSocialInstructions, coupleActionDate, parseSocialActions, type SocialContext } from './chatSocial';
+import { coupleRecordDate, editCoupleRecord, isRecordDate } from './coupleRecords';
+import { DEFAULT_LOCK_APPEARANCE, isLockScreenAppearance } from './lockAppearance';
+import { LockScreen } from '../components/LockScreen';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { answerPaper, buildPaperMemoryInjection, discardPaper, openDailyPaper, paperCandidates, PAPER_NOTES_KEY, parsePaperNotesState, readPaperNotes, type PaperContent } from './paperNotes';
+import { generateDailyPaper, generatePaperReply } from './paperNotesAi';
 
 const stored = new Map<string, string>();
 const localStorage = {
@@ -53,6 +69,655 @@ const archiveFixture = (archiveId = 'old') => {
 const archiveMemory = (id: string, charId = 'archive-char') => ({
   id, charId, content: `记忆${id}`, category: 'core' as const, importance: 5, pinned: true,
   createdAt: '2026-01-01', updatedAt: '2026-01-01', recallCount: 0, source: 'manual' as const,
+});
+
+const socialFixture = (now = new Date(2026, 9, 19, 1, 20)): SocialContext => ({
+  chat: {
+    id: 'social-chat', type: 'direct', participantIds: ['social-char'],
+    messages: [{ id: 'awake', senderId: 'user', text: '我们还没睡呢 今天还没有结束 现在准备睡觉啦',
+      createdAt: new Date(now.getTime() - 60_000).toISOString() }],
+  },
+  actors: [{ id: 'social-char', name: '角色', avatarUrl: 'avatar.png' }],
+  regenerate: false, now,
+});
+
+const paperFixture = () => {
+  const contact = (id: string) => ({ id, name: id === 'paper-a' ? '纸条角色甲' : '纸条角色乙', persona: '不善表达但关心玩家', worldBooks: [] });
+  const chat = (id: string) => ({
+    id: `chat-${id}`, type: 'direct', participantIds: [id], activeArchiveId: 'paper-archive',
+    noteName: '', context: '', blocked: false,
+    messages: [{ id: 'hello', senderId: 'user', text: '今天一起去看了海，回来有点累', createdAt: '2026-10-18T12:00:00Z' }],
+  });
+  saveSetting('pocketos:wechat-contacts', ['paper-a', 'paper-b', 'blocked', 'empty', 'group', 'observer', 'npc:test'].map(contact));
+  saveSetting(WECHAT_CHATS_STORAGE_KEY, [
+    chat('paper-a'), chat('paper-b'), { ...chat('blocked'), blocked: true },
+    { ...chat('empty'), messages: [] }, { ...chat('group'), type: 'group' },
+    { ...chat('observer'), type: 'observer' }, chat('npc:test'), chat('deleted-contact'),
+  ]);
+};
+const paperDate = () => new Date(2026, 9, 18, 20);
+const questionPaper = async (): Promise<PaperContent> => ({ kind: 'question', content: '今天看海时，你最喜欢哪个瞬间？' });
+
+test('paper candidates only include real unblocked direct contacts with message history', () => {
+  paperFixture();
+  assert.deepEqual(paperCandidates().map((item) => item.charId), ['paper-a', 'paper-b']);
+});
+
+test('daily paper generation is serialized, persists the random author on failure and never redraws after deletion', async () => {
+  paperFixture();
+  await assert.rejects(openDailyPaper(async (selected) => {
+    assert.equal(selected.charId, 'paper-b');
+    throw new Error('mock offline');
+  }, { now: paperDate, random: () => 0.99 }), /mock offline/);
+  assert.equal(readPaperNotes().notes.length, 0);
+  assert.equal(readPaperNotes().days['2026-10-18'].charId, 'paper-b');
+  let calls = 0;
+  const generate = async () => { calls += 1; return questionPaper(); };
+  const [first, second] = await Promise.all([
+    openDailyPaper(generate, { now: paperDate, random: () => 0 }),
+    openDailyPaper(generate, { now: paperDate, random: () => 0 }),
+  ]);
+  assert.equal(calls, 1);
+  assert.equal(first?.id, second?.id);
+  assert.equal(first?.charId, 'paper-b');
+  assert.equal(readPaperNotes().notes.length, 1);
+  await discardPaper(first!.id);
+  assert.equal(readPaperNotes().notes.length, 0);
+  assert.equal(readPaperNotes().memories.length, 1);
+  assert.equal(await openDailyPaper(generate, { now: paperDate }), undefined);
+  assert.equal(calls, 1);
+  const tomorrow = await openDailyPaper(generate, { now: () => new Date(2026, 9, 19, 0, 1) });
+  assert.equal(tomorrow?.date, '2026-10-19');
+  assert.equal(calls, 2);
+});
+
+test('only question papers accept one same-day answer and retries retain the original answer', async () => {
+  paperFixture();
+  const first = await openDailyPaper(questionPaper, { now: paperDate, random: () => 0 });
+  assert.ok(first);
+  await assert.rejects(answerPaper(first.id, '是海边的风。', async () => { throw new Error('mock reply failure'); }, paperDate), /mock reply failure/);
+  assert.equal(readPaperNotes().notes[0].answer, '是海边的风。');
+  assert.equal(readPaperNotes().memories[0].answer, '是海边的风。');
+  const replied = await answerPaper(first.id, '不能替换已经传回的回答', async (paper) => {
+    assert.equal(paper.answer, '是海边的风。');
+    return '那阵风，我也记得。';
+  }, paperDate);
+  assert.equal(replied.reply, '那阵风，我也记得。');
+  await assert.rejects(answerPaper(first.id, '再问一次', async () => '不应请求', paperDate), /不能再传递/);
+  assert.equal(readPaperNotes().memories[0].reply, replied.reply);
+  assert.equal(readStoredValue(WECHAT_CHATS_STORAGE_KEY, [], Array.isArray)[0].messages.length, 1);
+});
+
+test('thought and unsaid papers cannot be passed and old questions expire without API calls', async () => {
+  for (const kind of ['thought', 'unsaid', 'question'] as const) {
+    paperFixture();
+    saveSetting(PAPER_NOTES_KEY, parsePaperNotesState(undefined));
+    const first = await openDailyPaper(async () => ({ kind, content: '留给你的心里话' }), { now: paperDate });
+    assert.ok(first);
+    let calls = 0;
+    await assert.rejects(answerPaper(first.id, '回答', async () => { calls += 1; return '不应请求'; },
+      () => new Date(2026, 9, 19, 0, 1)), kind === 'question' ? /只能在收到当天/ : /只有提问/);
+    assert.equal(calls, 0);
+    await assert.rejects(answerPaper(first.id, '', async () => '不应请求', paperDate), kind === 'question' ? /请输入回答/ : /只有提问/);
+  }
+});
+
+test('paper generation rejects no candidates, invalid content, midnight rollover and archive switches without consuming the day', async () => {
+  await assert.rejects(openDailyPaper(questionPaper, { now: paperDate }), /先去微信/);
+  paperFixture();
+  await assert.rejects(openDailyPaper(async () => ({ kind: 'thought', content: '' }), { now: paperDate }), /格式无效/);
+  assert.equal(readPaperNotes().days['2026-10-18'].noteId, undefined);
+  let now = paperDate();
+  await assert.rejects(openDailyPaper(async () => {
+    now = new Date(2026, 9, 19, 0, 0);
+    return questionPaper();
+  }, { now: () => now }), /已过零点/);
+  assert.equal(readPaperNotes().notes.length, 0);
+  await assert.rejects(openDailyPaper(async (selected) => {
+    const chats = readStoredValue(WECHAT_CHATS_STORAGE_KEY, [], Array.isArray);
+    saveSetting(WECHAT_CHATS_STORAGE_KEY, chats.map((chat) => chat.id === selected.chatId ? { ...chat, activeArchiveId: 'new-paper-archive' } : chat));
+    return questionPaper();
+  }, { now: paperDate }), /存档/);
+  assert.equal(readPaperNotes().notes.length, 0);
+});
+
+test('paper memories are private, persist after discarding, follow archives and clear on archive deletion', async () => {
+  paperFixture();
+  const first = await openDailyPaper(questionPaper, { now: paperDate, random: () => 0 });
+  assert.ok(first);
+  const prompt = buildPrompt({ chatId: 'chat-paper-a' });
+  assert.match(prompt.map((item) => item.content).join('\n'), /今天看海时，你最喜欢哪个瞬间/);
+  assert.match(buildPaperMemoryInjection(['paper-a'], 'direct'), /通常不要在聊天里提起/);
+  assert.equal(buildPaperMemoryInjection(['paper-b'], 'direct'), '');
+  assert.equal(buildPaperMemoryInjection(['paper-a'], 'group'), '');
+  assert.equal(buildPaperMemoryInjection(['paper-a'], 'observer'), '');
+  await discardPaper(first.id);
+  assert.match(buildPaperMemoryInjection(['paper-a'], 'direct'), /今天看海时/);
+  const chats = readStoredValue(WECHAT_CHATS_STORAGE_KEY, [], Array.isArray);
+  saveSetting(WECHAT_CHATS_STORAGE_KEY, chats.map((chat) => ({ ...chat, activeArchiveId: 'new-archive' })));
+  assert.equal(buildPaperMemoryInjection(['paper-a'], 'direct'), '');
+  saveSetting(WECHAT_CHATS_STORAGE_KEY, chats);
+  deleteMemoryArchive('paper-a', 'paper-archive');
+  assert.equal(buildPaperMemoryInjection(['paper-a'], 'direct'), '');
+  assert.equal(readPaperNotes().memories.length, 0);
+});
+
+test('paper data corruption is explicit and never overwritten by opening a paper', async () => {
+  assert.throws(() => parsePaperNotesState({ version: 2 }), /格式无效/);
+  saveSetting(PAPER_NOTES_KEY, { bad: 'keep this data' });
+  await assert.rejects(openDailyPaper(questionPaper, { now: paperDate }), /格式无效/);
+  assert.deepEqual(readStoredValue(PAPER_NOTES_KEY, {}, (value): value is object => !!value), { bad: 'keep this data' });
+});
+
+test('actual paper AI receives persona, selected world books, active memories and configured recent context without modifying chat', async () => {
+  Object.assign(window, { setTimeout, clearTimeout });
+  paperFixture();
+  saveSetting(SETTINGS_KEYS.apiPresets, [{ id: 'paper-test', name: '测试', endpoint: 'https://paper-test.example/v1', apiKey: 'test' }]);
+  saveSetting(SETTINGS_KEYS.activeApiPreset, 'paper-test');
+  saveSetting('pocketos:wechat-contacts', [{ id: 'paper-a', name: '纸条角色甲', persona: '不善表达但关心玩家', worldBooks: [{ bookId: 'paper-book' }] }]);
+  saveSetting('yyphone:world-books', [{ id: 'paper-book', name: '纸条背景', entries: [{ id: 'entry', title: '偏好', content: '海边长大的背景设定', depth: 'front' }] }]);
+  writeMemories([{ ...archiveMemory('paper-memory', 'paper-a'), content: '玩家喜欢把贝壳带回家', category: 'core' }]);
+  const requests: string[] = [];
+  mock.method(globalThis, 'fetch', async (_input: unknown, init?: RequestInit) => {
+    requests.push(String(init?.body));
+    return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(requests.length === 1 ?
+      { kind: 'question', content: '那枚贝壳，你放在哪里了？' } : { reply: '那就让它替你留住海风。' }) } }] }), { status: 200 });
+  });
+  const first = await openDailyPaper(generateDailyPaper, { now: paperDate, random: () => 0 });
+  assert.ok(first);
+  const response = await answerPaper(first.id, '放在床边啦', generatePaperReply, paperDate);
+  assert.equal(response.reply, '那就让它替你留住海风。');
+  for (const request of requests) {
+    assert.match(request, /不善表达但关心玩家/);
+    assert.match(request, /海边长大的背景设定/);
+    assert.match(request, /玩家喜欢把贝壳带回家/);
+    assert.match(request, /今天一起去看了海/);
+    assert.match(request, /必须匿名/);
+    const payload = JSON.parse(request);
+    const system = payload.messages.find((message: { role: string }) => message.role === 'system').content;
+    assert.match(system, /你清楚玩家看不见作者是谁/);
+    assert.match(system, /试探只是可选的小彩蛋/);
+    assert.match(system, /不要所有角色都吃醋或盘问/);
+    assert.match(system, /不得凭空断言玩家另有恋人/);
+    assert.match(system, /纸条表面不必具体/);
+    assert.match(system, /程度由人设决定/);
+  }
+  assert.match(requests[1], /最后一次回复/);
+  assert.match(requests[1], /不因被猜中或被问身份就自报姓名/);
+  assert.match(requests[1], /根据玩家实际回答和人设/);
+  assert.match(requests[1], /放在床边啦/);
+  assert.equal(readStoredValue(WECHAT_CHATS_STORAGE_KEY, [], Array.isArray)[0].messages.length, 1);
+});
+
+test('direct balance edits persist exact amounts without changing other financial records', () => {
+  const originalWindow = window;
+  const events: string[] = [];
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true, value: { localStorage, dispatchEvent: (event: Event) => { events.push(event.type); return true; } },
+  });
+  try {
+    const finance = { ...emptyAlipayData(), balance: 100, yuebao: 500, chatSettlements: { received: 'received' as const } };
+    writeAlipayData(finance);
+    assert.equal(updateAlipayBalance(' 1234.56 '), 1234.56);
+    assert.deepEqual(readAlipayData(), { ...finance, balance: 1234.56 });
+    assert.deepEqual(events, ['yyphone:finance-change']);
+    for (const value of ['', '-1', '1.234', 'abc', 'NaN', 'Infinity', '1e3', '9007199254740992']) {
+      assert.throws(() => updateAlipayBalance(value), /金额/);
+      assert.equal(readAlipayData().balance, 1234.56);
+    }
+    assert.equal(updateAlipayBalance('0'), 0);
+    assert.equal(readAlipayData().balance, 0);
+  } finally {
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: originalWindow });
+  }
+});
+
+test('moving either side of a mood record preserves the other side and refuses occupied targets', () => {
+  const space = {
+    ...createEmptyCoupleSpace('edit-char'),
+    moods: {
+      '2026-10-18': { dateStr: '2026-10-18', userMoodId: 'happy_1', userNote: '我的记录', charMoodId: 'sad_1', charNote: '角色记录', seenByChar: true },
+      '2026-10-17': { dateStr: '2026-10-17', userMoodId: 'calm_1', userNote: '保留目标另一方', seenByChar: true },
+    },
+  };
+  const moved = editCoupleRecord(space, {
+    kind: 'mood', originalDate: '2026-10-18', date: '2026-10-17', author: 'char', moodId: 'happy_2', note: '改正角色心情',
+  });
+  assert.equal(moved.moods['2026-10-18'].charMoodId, undefined);
+  assert.equal(moved.moods['2026-10-18'].userNote, '我的记录');
+  assert.equal(moved.moods['2026-10-17'].userNote, '保留目标另一方');
+  assert.equal(moved.moods['2026-10-17'].charNote, '改正角色心情');
+  assert.equal(moved.moods['2026-10-17'].seenByChar, true);
+  assert.equal(space.moods['2026-10-18'].charNote, '角色记录');
+  assert.throws(() => editCoupleRecord(moved, {
+    kind: 'mood', originalDate: '2026-10-18', date: '2026-10-17', author: 'user', moodId: 'happy_1', note: '不能覆盖',
+  }), /目标日期已有/);
+  const userMoved = editCoupleRecord(moved, {
+    kind: 'mood', originalDate: '2026-10-18', date: '2026-10-16', author: 'user', moodId: 'calm_2', note: '新的日期',
+  });
+  assert.equal(userMoved.moods['2026-10-18'], undefined);
+  assert.equal(userMoved.moods['2026-10-16'].seenByChar, false);
+  assert.equal(userMoved.moods['2026-10-16'].dateStr, '2026-10-16');
+});
+
+test('couple note dates retain calendar dates and interpret legacy timestamps in local time', () => {
+  assert.equal(coupleRecordDate('2026-10-18'), '2026-10-18');
+  const local = new Date(2026, 9, 18, 0, 15);
+  assert.equal(coupleRecordDate(local.toISOString()), '2026-10-18');
+  assert.equal(coupleRecordDate('刚刚'), undefined);
+  assert.equal(coupleRecordDate('2026-10-18Tinvalid'), undefined);
+});
+
+test('all couple record editors save content and dates without changing authors or unrelated data', () => {
+  const space = {
+    ...createEmptyCoupleSpace('edit-char'),
+    diaries: [
+      { id: 'char-diary', author: 'char' as const, authorName: '角色', dateStr: '2026-10-19', title: '原标题', content: '原文', seenByChar: true },
+      { id: 'user-diary', author: 'user' as const, authorName: '我', dateStr: '2026-10-19', title: '我的标题', content: '我的正文', seenByChar: true },
+    ],
+    qaList: [{ id: 'qa', dateStr: '2026-10-19', question: '原问题', askedBy: 'user' as const, userAnswer: '我的回答', charAnswer: '角色回答', seenByChar: true }],
+    stickyNotes: [
+      { id: 'char-note', author: 'char' as const, authorName: '角色', createdAt: '刚刚', content: '原便签', colorBg: '#DCEEFF' },
+      { id: 'user-note', author: 'user' as const, authorName: '我', createdAt: '2026-10-19', content: '我的便签', colorBg: '#DCEEFF', seenByChar: true },
+    ],
+    anniversaries: [{ id: 'anni', title: '纪念日', targetDate: '2026-10-19', type: 'countdown' as const }],
+  };
+  for (const diary of space.diaries) {
+    const edited = editCoupleRecord(space, {
+      kind: 'diary', id: diary.id, date: '2026-10-18', title: '新标题', content: '修正正文', replyComment: '修正批注', authorName: diary.authorName,
+    });
+    assert.equal(edited.diaries.find((entry) => entry.id === diary.id)?.dateStr, '2026-10-18');
+    assert.equal(edited.diaries.find((entry) => entry.id === diary.id)?.replyComment, '修正批注');
+    assert.equal(edited.diaries.find((entry) => entry.id === diary.id)?.author, diary.author);
+  }
+  const qa = editCoupleRecord(space, { kind: 'qa', id: 'qa', date: '2026-10-18', question: '新问题', userAnswer: '新 user 答案', charAnswer: '新角色答案' });
+  assert.equal(qa.qaList[0].charAnswer, '新角色答案');
+  assert.equal(qa.qaList[0].userAnswer, '新 user 答案');
+  assert.equal(qa.qaList[0].dateStr, '2026-10-18');
+  assert.equal(qa.qaList[0].seenByChar, false);
+  for (const note of space.stickyNotes) {
+    const edited = editCoupleRecord(space, { kind: 'note', id: note.id, date: '2026-10-18', content: '新便签', colorBg: '#123456', authorName: note.authorName });
+    const actual = edited.stickyNotes.find((entry) => entry.id === note.id)!;
+    assert.equal(actual.author, note.author);
+    assert.equal(actual.createdAt, '2026-10-18');
+    assert.equal(actual.colorBg, '#123456');
+  }
+  const anniversary = editCoupleRecord(space, { kind: 'anniversary', id: 'anni', date: '2026-10-18', title: '改正纪念日', type: 'elapsed' });
+  assert.equal(anniversary.anniversaries[0].targetDate, '2026-10-18');
+  assert.equal(anniversary.anniversaries[0].type, 'elapsed');
+  assert.equal(space.qaList[0].question, '原问题');
+  assert.equal(space.stickyNotes[0].createdAt, '刚刚');
+});
+
+test('couple editing rejects invalid dates, missing records and empty required content', () => {
+  for (const date of ['2026-02-29', '2026-13-01', '2026-04-31', '', 'yesterday']) assert.equal(isRecordDate(date), false);
+  assert.equal(isRecordDate('2028-02-29'), true);
+  const space = {
+    ...createEmptyCoupleSpace('edit-char'),
+    diaries: [{ id: 'd', author: 'char' as const, authorName: '角色', dateStr: '2026-10-18', title: '标题', content: '正文' }],
+  };
+  assert.throws(() => editCoupleRecord(space, { kind: 'diary', id: 'd', date: '', title: '', content: '正文', authorName: '', replyComment: '' }), /有效的记录日期/);
+  assert.throws(() => editCoupleRecord(space, { kind: 'diary', id: 'missing', date: '2026-10-18', title: '', content: '正文', authorName: '', replyComment: '' }), /不存在/);
+  assert.throws(() => editCoupleRecord(space, { kind: 'diary', id: 'd', date: '2026-10-18', title: '', content: ' ', authorName: '', replyComment: '' }), /不能为空/);
+});
+
+test('lock appearance persists with beauty settings and renders custom colors, multiline or empty subtitles', () => {
+  assert.equal(isLockScreenAppearance(DEFAULT_LOCK_APPEARANCE), true);
+  assert.equal(isLockScreenAppearance({ textColor: '#fefefe', subtitle: '' }), true);
+  assert.equal(isLockScreenAppearance({ textColor: 'url(bad)', subtitle: 'text' }), false);
+  assert.equal(isLockScreenAppearance({ textColor: '#123456', subtitle: 'x'.repeat(201) }), false);
+  const appearance = { textColor: '#ffcc88', subtitle: '晚风与你\n明天见 <3' };
+  saveSetting(SETTINGS_KEYS.beauty, { themeId: 'ocean-dawn', wallpaperId: 'dreamy-sky', wallpapers: { lockScreen: '', homeScreen: '' }, appIcons: {}, lockScreenAppearance: appearance });
+  const beauty = readSetting(SETTINGS_KEYS.beauty, { lockScreenAppearance: DEFAULT_LOCK_APPEARANCE }, (value): value is { lockScreenAppearance: typeof appearance } =>
+    !!value && typeof value === 'object' && 'lockScreenAppearance' in value && isLockScreenAppearance(value.lockScreenAppearance));
+  assert.deepEqual(beauty.lockScreenAppearance, appearance);
+  const props = { onUnlock() {}, timeString: '21:08', dateString: '10月18日 星期日', wallpaperStyle: '#000' };
+  const html = renderToStaticMarkup(createElement(LockScreen, { ...props, appearance: beauty.lockScreenAppearance }));
+  assert.match(html, /color:#ffcc88/);
+  assert.match(html, /晚风与你\n明天见 &lt;3/);
+  assert.doesNotMatch(html, /丙午年/);
+  const oldDefault = renderToStaticMarkup(createElement(LockScreen, props));
+  assert.match(oldDefault, /丙午年 菊月/);
+  const blank = renderToStaticMarkup(createElement(LockScreen, { ...props, appearance: { ...appearance, subtitle: '' } }));
+  assert.doesNotMatch(blank, /晚风与你|丙午年/);
+});
+
+test('character export includes only selected books and remaps books and entries without global side effects', () => {
+  const books = parsePortableWorldBooks([
+    { id: 'b1', name: '关联书', entries: [{ id: 'e1', title: '条目', content: '正文', depth: 'back' }] },
+    { id: 'b2', name: '全局书', isGlobal: true, entries: [{ id: 'e2', title: '全局条目', content: '全局正文', depth: 'front' }] },
+    { id: 'b3', name: '未选书', entries: [] },
+  ]);
+  const contact = {
+    id: 'original', name: '角色', persona: '人设', avatarUrl: 'data:image/png;base64,AQID',
+    bio: '介绍', forumHandle: 'handle', stickerCategories: ['收藏'],
+    group: '朋友', starred: false, messages: ['不应导出的聊天记录'],
+    worldBooks: [{ bookId: 'b1', entryId: 'e1' }, { bookId: 'b3' }], linkedNpcIds: ['private-npc'],
+  };
+  const bundle = JSON.parse(JSON.stringify(buildCharacterExport(contact, ['b1', 'b2'], books)));
+  assert.equal(bundle.format, 'yyphone-contacts');
+  assert.equal(bundle.version, 1);
+  assert.equal(bundle.contacts[0].persona, '人设');
+  assert.equal(bundle.contacts[0].bio, '介绍');
+  assert.equal(bundle.contacts[0].avatarUrl, contact.avatarUrl);
+  assert.equal(bundle.contacts[0].linkedNpcIds, undefined);
+  assert.equal(bundle.contacts[0].messages, undefined);
+  assert.deepEqual(bundle.worldBooks.map((book: { id: string }) => book.id), ['b1', 'b2']);
+  assert.deepEqual(bundle.contacts[0].worldBooks, [{ bookId: 'b1', entryId: 'e1' }]);
+  const mapped = remapImportedWorldBooks(parsePortableWorldBooks(bundle.worldBooks));
+  const links = mapped.links(bundle.contacts[0].worldBooks);
+  assert.notEqual(mapped.books[0].id, 'b1');
+  assert.equal(mapped.books[0].entries[0].depth, 'back');
+  assert.deepEqual(links[0], { bookId: mapped.books[0].id, entryId: mapped.books[0].entries[0].id });
+  assert.deepEqual(links[1], { bookId: mapped.books[1].id });
+  assert.equal(mapped.books[1].isGlobal, false);
+  const bare = buildCharacterExport(contact, [], books);
+  assert.deepEqual(bare.contacts[0].worldBooks, []);
+  assert.deepEqual(bare.worldBooks, []);
+  assert.throws(() => buildCharacterExport(contact, ['missing'], books), /不存在/);
+  assert.throws(() => mapped.links([{ bookId: 'missing' }]), /缺失/);
+  assert.throws(() => mapped.links([{ bookId: 'b1', entryId: 'missing' }]), /缺失/);
+  assert.throws(() => parsePortableWorldBooks([{ id: 'bad', name: 'bad', entries: [{ id: 'e', title: '', content: '', depth: 'bad' }] }]), /条目/);
+});
+
+test('chat social actions default on but honor per-chat switches, regeneration and observer boundaries', () => {
+  const ctx = socialFixture();
+  ctx.chat.type = 'group';
+  ctx.chat.participantIds.push('npc:test');
+  const record = { privateMessage: { texts: ['刚才在群里没方便问 你还好吗'], reason: '群里提到玩家不舒服，私下关心' }, momentPost: { content: '今晚的云很轻' } };
+  assert.match(buildSocialInstructions(ctx), /群聊触发私聊/);
+  const parsed = parseSocialActions(record, ctx, 'social-char');
+  assert.equal(parsed.privateMessage?.texts.length, 1);
+  assert.equal(parsed.moment?.content, '今晚的云很轻');
+  assert.throws(() => parseSocialActions(record, { ...ctx, regenerate: true }, 'social-char'), /不允许/);
+  assert.throws(() => parseSocialActions(record, { ...ctx, chat: { ...ctx.chat, type: 'observer' } }, 'social-char'), /不允许/);
+  assert.throws(() => parseSocialActions(record, ctx, 'npc:test'), /不允许/);
+  assert.throws(() => parseSocialActions(record, { ...ctx, chat: { ...ctx.chat, participantIds: [] } }, 'social-char'), /不允许/);
+  assert.throws(() => parseSocialActions(record, { ...ctx, chat: { ...ctx.chat, allowGroupPrivate: false } }, 'social-char'), /权限/);
+  assert.throws(() => parseSocialActions({ momentPost: record.momentPost }, { ...ctx, chat: { ...ctx.chat, allowAutoMoments: false } }, 'social-char'), /权限/);
+  assert.throws(() => parseSocialActions({ privateMessage: { texts: [], reason: 'test' } }, ctx, 'social-char'), /格式/);
+  assert.deepEqual(parseSocialActions({}, ctx, 'npc:test'), {});
+  applySocialWrites({ moment: parsed.moment }, ctx, ctx.actors[0]);
+  assert.equal(readMoments()[0].authorId, 'social-char');
+  assert.equal(readMoments()[0].content, '今晚的云很轻');
+  assert.throws(() => parseSocialActions({ momentPost: record.momentPost }, ctx, 'social-char'), /重复/);
+  // No hard cooldown: different, contextually justified posts are not rejected by a timer.
+  assert.ok(parseSocialActions({ momentPost: { content: '另一个确实值得记录的瞬间' } }, ctx, 'social-char').moment);
+});
+
+test('couple actions persist mood, diary, notes and real question answers to the ongoing previous day', () => {
+  const ctx = socialFixture();
+  const space = {
+    ...createEmptyCoupleSpace('social-char'), bindStatus: 'bound' as const,
+    moods: { '2026-10-18': { dateStr: '2026-10-18', userMoodId: 'happy_2', userNote: '用户心情', seenByChar: false } },
+    qaList: [{ id: 'q1', dateStr: '2026-10-18', question: '今天最开心的事？', askedBy: 'user' as const, userAnswer: '聊天', seenByChar: false }],
+  };
+  writeCoupleSpaces({ 'social-char': space });
+  const prompt = buildSocialInstructions(ctx);
+  assert.match(prompt, /前一日=2026-10-18/);
+  assert.match(prompt, /不强制每天写/);
+  assert.match(prompt, /q1/);
+  const record = {
+    coupleWrite: {
+      day: 'previous', overnightEvidence: '我们还没睡呢 今天还没有结束',
+      mood: { moodId: 'calm_1', note: '今天有你在 真好' },
+      diary: { title: '睡前', content: '我想记下今天和你聊的这些小事。' },
+      note: '明天记得吃早饭',
+      answers: [{ questionId: 'q1', content: '陪你聊天' }],
+    },
+  };
+  const actions = parseSocialActions(record, ctx, 'social-char');
+  applySocialWrites(actions, ctx, ctx.actors[0]);
+  const actual = readCoupleSpaces()['social-char'];
+  assert.equal(actual.moods['2026-10-18'].charMoodId, 'calm_1');
+  assert.equal(actual.moods['2026-10-18'].userNote, '用户心情');
+  assert.equal(actual.moods['2026-10-18'].seenByChar, false);
+  assert.equal(actual.moods['2026-10-19'], undefined);
+  assert.equal(actual.diaries[0].dateStr, '2026-10-18');
+  assert.equal(actual.diaries[0].author, 'char');
+  assert.equal(actual.stickyNotes[0].content, '明天记得吃早饭');
+  assert.equal(actual.stickyNotes[0].createdAt, '2026-10-18');
+  assert.equal(actual.qaList[0].charAnswer, '陪你聊天');
+  assert.equal(actual.qaList[0].userAnswer, '聊天');
+  assert.throws(() => parseSocialActions(record, ctx, 'social-char'), /已有角色心情/);
+  assert.throws(() => parseSocialActions({ coupleWrite: { day: 'today', answers: [{ questionId: 'q1', content: '覆盖' }] } }, ctx, 'social-char'), /已经回答/);
+  assert.throws(() => parseSocialActions({ coupleWrite: { day: 'today', answers: [{ questionId: 'missing', content: '内容' }] } }, ctx, 'social-char'), /不存在/);
+  assert.throws(() => parseSocialActions({ coupleWrite: { day: 'today', note: '明天记得吃早饭' } }, ctx, 'social-char'), /重复/);
+  assert.throws(() => parseSocialActions(record, { ...ctx, chat: { ...ctx.chat, allowAutoCouple: false } }, 'social-char'), /状态/);
+  assert.throws(() => parseSocialActions(record, { ...ctx, chat: { ...ctx.chat, type: 'group' } }, 'social-char'), /状态/);
+});
+
+test('previous-day couple dates require fresh evidence and handle year and leap-day boundaries', () => {
+  const ctx = socialFixture(new Date(2027, 0, 1, 1, 0));
+  assert.equal(coupleActionDate({ day: 'previous', overnightEvidence: '我们还没睡呢' }, ctx), '2026-12-31');
+  assert.equal(coupleActionDate({ day: 'today' }, ctx), '2027-01-01');
+  const leap = socialFixture(new Date(2028, 2, 1, 1, 0));
+  assert.equal(coupleActionDate({ day: 'previous', overnightEvidence: '还没睡' }, leap), '2028-02-29');
+  assert.throws(() => coupleActionDate({ day: 'previous' }, ctx), /依据/);
+  assert.throws(() => coupleActionDate({ day: 'previous', overnightEvidence: '编造的没睡' }, ctx), /依据/);
+  assert.throws(() => coupleActionDate({ day: 'previous', overnightEvidence: '我们还没睡呢' }, { ...ctx, now: new Date(2027, 0, 1, 13) }), /依据/);
+  assert.throws(() => coupleActionDate({ day: 'previous', overnightEvidence: '我们还没睡呢' }, { ...ctx, now: new Date(2027, 0, 1, 9) }), /依据/);
+  writeCoupleSpaces({ 'social-char': { ...createEmptyCoupleSpace('social-char'), bindStatus: 'unbound' } });
+  assert.doesNotMatch(buildSocialInstructions(ctx), /可选 coupleWrite/);
+  assert.throws(() => parseSocialActions({ coupleWrite: { day: 'today', note: 'test' } }, ctx, 'social-char'), /状态/);
+});
+
+test('latest thought injection adds flexible continuity guidance only when enabled and available', () => {
+  const chat = {
+    id: 'thought-chat', type: 'direct', participantIds: ['thought-char'], noteName: '', context: '',
+    messages: [{ id: 'thought-message', senderId: 'thought-char', text: '你好', thought: '隐藏心声测试', createdAt: '' }],
+  };
+  for (const enabled of [false, true]) {
+    saveSetting(WECHAT_CHATS_STORAGE_KEY, [{ ...chat, includeLatestThought: enabled }]);
+    const prompt = buildPrompt({ chatId: chat.id }).map((message) => message.content).join('\n');
+    assert.equal(prompt.includes('隐藏心声测试'), enabled);
+    assert.equal(prompt.includes('刚刚的心声只是发出消息时的内心活动'), enabled);
+  }
+  saveSetting(WECHAT_CHATS_STORAGE_KEY, [{ ...chat, includeLatestThought: true, messages: [] }]);
+  assert.equal(buildPrompt({ chatId: chat.id }).some((message) => message.content.includes('刚刚的心声')), false);
+});
+
+test('messaging prompts distinguish asynchronous messages from explicitly connected calls', () => {
+  saveSetting(WECHAT_CHATS_STORAGE_KEY, [{
+    id: 'call-context', type: 'direct', participantIds: [], noteName: '', context: '',
+    messages: [{ id: 'old-call', senderId: 'user', kind: 'video-call', text: '视频通话 · 已结束', createdAt: '' }],
+  }]);
+  const normal = buildPrompt({ chatId: 'call-context' })[0].content;
+  assert.match(normal, /微信里异步发消息/);
+  assert.match(normal, /语音消息只是发出的录音/);
+  for (const callMode of ['voice', 'video'] as const) {
+    const prompt = buildPrompt({ chatId: 'call-context', callMode })[0].content;
+    assert.match(prompt, new RegExp(`已接通的${callMode === 'voice' ? '语音' : '视频'}通话`));
+    assert.doesNotMatch(prompt, /微信里异步发消息/);
+  }
+});
+
+test('phone context follows configured message counts, defaults to 200 and keeps full message text', async () => {
+  const tail = '完整长消息末尾';
+  const messages = Array.from({ length: 260 }, (_, i) => ({
+    id: `phone-${i}`, senderId: i % 2 ? 'phone-char' : 'user',
+    text: `消息${i}：${'正文'.repeat(200)}${tail}`,
+    createdAt: new Date(Date.UTC(2026, 9, 18, 0, i)).toISOString(),
+    ...(i === 220 ? { kind: 'transfer', amount: '123', paymentStatus: 'pending' } : {}),
+  }));
+  saveSetting('pocketos:wechat-contacts', [{ id: 'phone-char', name: '角色', persona: '测试', worldBooks: [] }]);
+  for (const count of [undefined, 40, 240, 500, 0]) {
+    saveSetting(WECHAT_CHATS_STORAGE_KEY, [{
+      id: 'phone-chat', type: 'direct', participantIds: ['phone-char'], noteName: '', context: '',
+      currentChatHistoryCount: count, messages,
+    }]);
+    const expected = Math.min(count && count > 0 ? count : 200, messages.length);
+    const history = readDirectMessages('phone-char', { configuredHistory: true, fullText: true });
+    assert.equal(history.length, expected);
+    assert.ok(history.every((message) => message.text.endsWith(tail)));
+    const brief = readCharacterBrief('phone-char', { configuredHistory: true });
+    assert.equal(brief.recentChat.split('\n').length, expected);
+    assert.match(brief.recentChat, /完整长消息末尾/);
+    assert.equal(readCharacterBrief('phone-char').recentChat.split('\n').length, 5);
+    assert.doesNotMatch(readCharacterBrief('phone-char').recentChat, /完整长消息末尾/);
+  }
+  saveSetting(WECHAT_CHATS_STORAGE_KEY, [{
+    id: 'phone-chat', type: 'direct', participantIds: ['phone-char'], currentChatHistoryCount: 20, messages,
+  }]);
+  assert.doesNotMatch(readRecentMoneyEvents('phone-char'), /123/);
+  saveSetting(WECHAT_CHATS_STORAGE_KEY, [{
+    id: 'phone-chat', type: 'direct', participantIds: ['phone-char'], currentChatHistoryCount: 200, messages,
+  }]);
+  assert.match(readRecentMoneyEvents('phone-char'), /123/);
+  saveSetting(SETTINGS_KEYS.apiPresets, [{ id: 'phone-test', name: '测试', endpoint: 'https://phone-test.example/v1', apiKey: 'test' }]);
+  let body = '';
+  mock.method(globalThis, 'fetch', async (_input: unknown, init?: RequestInit) => {
+    body = String(init?.body);
+    return new Response(JSON.stringify({ choices: [{ message: { content: '{"notes":[{"title":"测试","content":"测试备忘录"}]}' } }] }));
+  });
+  await generatePhoneScope('notes', { charId: 'phone-char', charName: '角色', userName: '玩家', npcs: [] }, {
+    charId: 'phone-char', wallpaperUrl: '', userRemark: '', npcThreads: [], photos: [], browserHistory: [],
+    notes: [], icityDiaries: [],
+    agentSession: { doubaoTopic: '', doubaoTurns: [], claudeTopic: '', claudeTurns: [] },
+  });
+  const sent = JSON.parse(body).messages[0].content;
+  assert.match(sent, /消息60：/);
+  assert.doesNotMatch(sent, /消息59：/);
+  assert.match(sent, /完整长消息末尾/);
+});
+
+test('phone chat display keeps only five latest real messages independently of AI history count', () => {
+  const source = readFileSync(resolve('src', 'apps', 'PhoneExplorerApp.tsx'), 'utf8');
+  const reader = source.slice(source.indexOf('const readRealUserMessagesForChar ='), source.indexOf('const readLinkedNpcsForChar ='));
+  // Strip the local TypeScript signature so the actual UI reader runs in the VM.
+  const executable = reader.replace(
+    /\(\s*charId: string,\s*charName: string,\s*userName: string\s*\): PhoneWeChatMsg\[\]/,
+    '(charId, charName, userName)'
+  ).replace(/ as const/g, '');
+  for (const count of [1, 200]) {
+    saveSetting(WECHAT_CHATS_STORAGE_KEY, [{
+      id: 'display-chat', type: 'direct', participantIds: ['display-char'], currentChatHistoryCount: count,
+      messages: Array.from({ length: 21 }, (_, i) => ({
+        id: `display-${i}`, senderId: i === 20 ? 'narrator' : i % 2 ? 'display-char' : 'user',
+        kind: i === 20 ? 'context-note' : 'text', text: `显示消息${i}`,
+        createdAt: new Date(Date.UTC(2026, 9, 18, 0, i)).toISOString(),
+      })),
+    }]);
+    const result = runInNewContext(`${executable}\nreadRealUserMessagesForChar('display-char', '角色', '玩家')`, { readDirectMessages });
+    assert.equal(result.length, 5);
+    assert.equal(result[0].text, '显示消息15');
+    assert.equal(result[4].text, '显示消息19');
+    assert.equal(readDirectMessages('display-char', { configuredHistory: true }).length, Math.min(count, 21));
+  }
+  const wechat = readFileSync(resolve('src', 'apps', 'WeChatApp.tsx'), 'utf8');
+  assert.match(wechat, /const HISTORY_PAGE_SIZE = 15/);
+  assert.match(wechat, /setVisibleMessageCount\(\(count\) => count \+ HISTORY_PAGE_SIZE\)/);
+  assert.match(wechat, /slice\(-visibleMessageCount\)/);
+  assert.doesNotMatch(source, /查看历史消息/);
+});
+
+test('real photos survive prompt history, current input, regeneration and mounted chats', () => {
+  const imageUrl = 'data:image/jpeg;base64,AQID';
+  const photo = (id: string, text = '拍摄的照片') => ({
+    id, senderId: 'user', text, kind: 'image', imageUrl, createdAt: '2026-10-18T10:00:00Z',
+  });
+  const chat = {
+    id: 'vision-chat', type: 'direct', participantIds: ['vision-char'], noteName: '', context: '',
+    messages: [photo('old-photo'), { id: 'answer', senderId: 'vision-char', text: '回复', createdAt: '2026-10-18T10:01:00Z' }, photo('new-photo')],
+  };
+  saveSetting('pocketos:wechat-contacts', [{ id: 'vision-char', name: '角色', persona: '测试', worldBooks: [] }]);
+  saveSetting(WECHAT_CHATS_STORAGE_KEY, [chat]);
+  for (const regenerate of [false, true]) {
+    const prompt = buildPrompt({ chatId: chat.id, regenerate });
+    assert.equal(prompt.filter((message) => message.images?.[0] === imageUrl).length, 2);
+    assert.deepEqual(prompt.at(-1)?.images, [imageUrl]);
+    assert.match(prompt.at(-1)?.content ?? '', /真实图片/);
+    const openAi = toOpenAiMessages(prompt);
+    assert.deepEqual(openAi.at(-1)?.content, [
+      { type: 'text', text: '[真实图片：拍摄的照片]' },
+      { type: 'image_url', image_url: { url: imageUrl, detail: 'high' } },
+    ]);
+    assert.deepEqual(toGeminiContents(prompt).at(-1)?.parts, [
+      { text: '[真实图片：拍摄的照片]' },
+      { inlineData: { mimeType: 'image/jpeg', data: 'AQID' } },
+    ]);
+  }
+  saveSetting(WECHAT_CHATS_STORAGE_KEY, [
+    { ...chat, attachHistory: true, attachedHistoryChatIds: ['mounted'], messages: [photo('empty-caption', '')] },
+    { ...chat, id: 'mounted', messages: [photo('mounted-photo')] },
+  ]);
+  const prompt = buildPrompt({ chatId: chat.id });
+  assert.equal(prompt.filter((message) => message.images?.length).length, 2);
+  assert.deepEqual(prompt.at(-1)?.images, [imageUrl]);
+});
+
+test('text-only image cards and plain messages stay text-only on both APIs', () => {
+  saveSetting(WECHAT_CHATS_STORAGE_KEY, [{
+    id: 'text-image', type: 'direct', participantIds: [], noteName: '', context: '',
+    messages: [{ id: 'card', senderId: 'user', kind: 'image', text: '一只猫', createdAt: '' }],
+  }]);
+  const prompt = buildPrompt({ chatId: 'text-image' });
+  assert.equal(prompt.some((message) => message.images?.length), false);
+  assert.equal(prompt.at(-1)?.content, '[图片描述：一只猫]');
+  const plain: OpenAiMessage[] = [{ role: 'system', content: 'rules' }, { role: 'user', content: 'hello' }];
+  assert.deepEqual(toOpenAiMessages(plain), plain);
+  assert.deepEqual(toGeminiContents(plain), [{ role: 'user', parts: [{ text: 'hello' }] }]);
+  assert.equal(estimatePromptTokens([{ role: 'user', content: 'hello', images: ['data:image/jpeg;base64,AQID'] }]),
+    estimatePromptTokens([{ role: 'user', content: 'hello' }]));
+});
+
+test('Gemini preserves supported image MIME types and reports invalid image data explicitly', () => {
+  for (const mimeType of ['image/jpeg', 'image/png', 'image/webp', 'image/gif']) {
+    const contents = toGeminiContents([{ role: 'user', content: '', images: [`data:${mimeType};base64,AQID`] }]);
+    assert.deepEqual(contents[0].parts[1], { inlineData: { mimeType, data: 'AQID' } });
+  }
+  for (const url of ['https://example.com/image.jpg', 'blob:local', 'data:image/svg+xml;base64,AQID']) {
+    assert.throws(() => toGeminiContents([{ role: 'user', content: '', images: [url] }]), /重新上传本地图片/);
+  }
+});
+
+test('real chat photos retain 1280px detail within 400KB while other images keep 300px defaults', async () => {
+  const qualities: number[] = [];
+  const canvas = {
+    width: 0, height: 0,
+    getContext: () => ({ clearRect() {}, drawImage() {} }),
+    toDataURL: (type: string, quality: number) => {
+      qualities.push(quality);
+      return `data:${type};base64,${'A'.repeat(canvas.width > 300 ? Math.ceil(quality * 900000) : 1000)}`;
+    },
+  };
+  const replacements = {
+    FileReader: class {
+      result = 'data:image/png;base64,AQID';
+      onload?: () => void;
+      readAsDataURL() { this.onload?.(); }
+    },
+    Image: class {
+      width = 4000;
+      height = 3000;
+      onload?: () => void;
+      set src(_value: string) { this.onload?.(); }
+    },
+    document: { createElement: () => canvas },
+  };
+  const descriptors = Object.keys(replacements).map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)] as const);
+  try {
+    for (const [key, value] of Object.entries(replacements)) {
+      Object.defineProperty(globalThis, key, { configurable: true, value });
+    }
+    const photo = await compressChatPhoto(new File(['photo'], 'photo.png', { type: 'image/png' }));
+    assert.equal(canvas.width, 1280);
+    assert.equal(canvas.height, 960);
+    assert.match(photo, /^data:image\/jpeg;base64,/);
+    assert.ok(Buffer.from(photo.split(',')[1], 'base64').length <= 400 * 1024);
+    assert.ok(Buffer.from(photo.split(',')[1], 'base64').length > 300 * 1024);
+    assert.equal(qualities.length, 2);
+    assert.ok(qualities[1] < qualities[0]);
+    await compressImageFile(new File(['avatar'], 'avatar.png', { type: 'image/png' }));
+    assert.equal(canvas.width, 300);
+    assert.equal(canvas.height, 225);
+    await assert.rejects(compressChatPhoto(new File(['text'], 'text.txt', { type: 'text/plain' })), /请选择图片文件/);
+  } finally {
+    for (const [key, descriptor] of descriptors) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else Reflect.deleteProperty(globalThis, key);
+    }
+  }
 });
 
 test('legacy memory, journals, growth and cursors migrate to current archive and restore together', () => {

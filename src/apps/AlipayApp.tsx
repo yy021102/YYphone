@@ -34,6 +34,7 @@ import {
   readAlipayContacts,
   readAlipayData,
   writeAlipayData,
+  updateAlipayBalance,
   requestIntimatePay,
 } from '../utils/alipayData';
 import { readStoredValue, writeStoredValue } from '../utils/localStorage';
@@ -77,6 +78,9 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
 
   // ==================== 1. 虚拟钱包状态 (我的钱包) ====================
   const [balance, setBalance] = useState<number>(initialFinanceData.balance);
+  const [editingBalance, setEditingBalance] = useState(false);
+  const [balanceDraft, setBalanceDraft] = useState('');
+  const [balanceError, setBalanceError] = useState('');
   const [yuebao, setYuebao] = useState<number>(initialFinanceData.yuebao);
   const [bankCardCount, setBankCardCount] = useState<string>(initialFinanceData.bankCardCount);
   const [bankCardNote, setBankCardNote] = useState<string>(initialFinanceData.bankCardNote);
@@ -176,6 +180,16 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
   // ==================== 4. 计算逻辑 ====================
   const totalAssets = balance + yuebao;
   const dailyYuebaoProfit = ((yuebao * 0.0208) / 365).toFixed(2); // 按年化2.08%自动算日收益
+  const saveBalance = () => {
+    try {
+      setBalance(updateAlipayBalance(balanceDraft));
+      setEditingBalance(false);
+      setBalanceError('');
+    } catch (error) {
+      console.error('Could not update Alipay balance.', error);
+      setBalanceError(error instanceof Error ? error.message : '余额保存失败，请重试。');
+    }
+  };
 
   // 月份切换函数 (支持上月、上上月、去年任意翻页)
   const handleMonthChange = (offset: number) => {
@@ -430,14 +444,32 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
                     {totalAssets.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
                 </div>
-                <p className="text-[11px] text-slate-600 mt-1 flex items-center gap-2">
-                  <span>可用余额: ¥ {balance.toFixed(2)}</span>
+                <div className="text-[11px] text-slate-600 mt-1 flex items-center gap-2">
+                  <span>可用余额: ¥ </span>
+                  {editingBalance ? (
+                    <form className="inline-flex items-center gap-1" onSubmit={(event) => { event.preventDefault(); saveBalance(); }}>
+                      <input autoFocus aria-label="支付宝余额" inputMode="decimal" value={balanceDraft}
+                        onChange={(event) => { setBalanceDraft(event.target.value); setBalanceError(''); }}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Escape') { setEditingBalance(false); setBalanceError(''); }
+                        }}
+                        className="w-24 rounded bg-white/75 px-1 py-0.5 font-mono outline-none" />
+                      <button type="submit" aria-label="保存余额" className="p-1"><Check className="h-3 w-3" /></button>
+                    </form>
+                  ) : (
+                    <button type="button" aria-label="修改支付宝余额" onClick={() => {
+                      setBalanceDraft(balance.toFixed(2));
+                      setBalanceError('');
+                      setEditingBalance(true);
+                    }} className="font-mono cursor-pointer">{balance.toFixed(2)}</button>
+                  )}
                   <span className="opacity-40">|</span>
                   <span className="flex items-center gap-1">
                     <ShieldCheck className="w-3 h-3 text-sky-500" />
                     小手机虚拟金库
                   </span>
-                </p>
+                </div>
+                {balanceError && <p role="alert" className="mt-1 text-[11px] text-rose-600">{balanceError}</p>}
               </div>
 
               {/* 快捷操作栏：去掉了“转账”，保留 3 项，点击“充值”可交互 */}

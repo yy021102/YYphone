@@ -1,6 +1,7 @@
 import { mutateDirectChat } from './coupleSpaceData';
 import { upsertContextNote } from './chatNotes';
 import { readStorageString } from './localStorage';
+import { resolveChatHistoryCount } from './chatHistory';
 
 export interface PhoneWalletRecord {
   id: string;
@@ -63,7 +64,7 @@ export const readRecentMoneyEvents = (charId: string): string => {
   );
   if (!isRecord(chat) || !Array.isArray(chat.messages)) return '';
   const lines: string[] = [];
-  for (const message of chat.messages.slice(-200)) {
+  for (const message of chat.messages.slice(-resolveChatHistoryCount(chat.currentChatHistoryCount))) {
     if (!isRecord(message)) continue;
     const kind = message.kind;
     if (kind !== 'red-packet' && kind !== 'transfer' && kind !== 'order') continue;

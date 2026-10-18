@@ -35,6 +35,7 @@ import {
   syncPhoneMemoryToContext,
 } from '../utils/phoneData';
 import { readStorageString, writeStorageString } from '../utils/localStorage';
+import { readDirectMessages } from '../utils/journalData';
 
 interface CheckPhoneAppProps {
   onBack: () => void;
@@ -139,40 +140,22 @@ const readRealUserMessagesForChar = (
   charName: string,
   userName: string
 ): PhoneWeChatMsg[] => {
-  try {
-    const raw = localStorage.getItem('yyphone:wechat-chats');
-    const chats: unknown = raw ? JSON.parse(raw) : [];
-    const chat = Array.isArray(chats)
-      ? chats.find(
-          (item) =>
-            item?.type === 'direct' &&
-            Array.isArray(item.participantIds) &&
-            item.participantIds.length === 1 &&
-            item.participantIds[0] === charId
-        )
-      : undefined;
-    const list: Record<string, unknown>[] = Array.isArray(chat?.messages)
-      ? chat.messages.filter(
-          (m: Record<string, unknown>) =>
-            m.senderId !== 'narrator' && (typeof m.text === 'string' || typeof m.title === 'string')
-        )
-      : [];
-    return list.slice(-10).map((m, idx) => {
+  return readDirectMessages(charId, { fullText: true })
+    .filter((message) => !message.note)
+    .slice(-5)
+    .map((m, idx) => {
       const isFromUser = m.senderId === 'user';
       const created = typeof m.createdAt === 'string' ? new Date(m.createdAt) : null;
       return {
-        id: String(m.id || `real-${idx}`),
+        id: `real-${idx}`,
         sender: isFromUser ? ('other' as const) : ('char' as const),
         senderName: isFromUser ? userName : charName,
-        text: String(m.text || m.title || '[互动卡片消息]'),
+        text: m.text,
         time: created && !Number.isNaN(created.getTime())
           ? created.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })
           : '',
       };
     });
-  } catch {
-    return [];
-  }
 };
 
 const readLinkedNpcsForChar = (charId: string): { id: string; name: string; persona: string }[] => {
@@ -774,7 +757,7 @@ export const CheckPhoneApp: React.FC<CheckPhoneAppProps> = ({ onBack }) => {
                 </span>
               </div>
 
-              {activeWeChatThread.messages.slice(-10).map((m) => {
+              {activeWeChatThread.messages.map((m) => {
                 const isCharSelf = m.sender === 'char';
                 return (
                   <div

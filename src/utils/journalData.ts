@@ -1,6 +1,7 @@
 import { readStoredValue, writeStoredValue } from './localStorage';
 import { readWechatChatsRaw } from './memoryData';
 import { archiveCursorsForWrite, readArchiveCursors, readArchiveRecords, writeArchiveRecords } from './memoryArchives';
+import { resolveChatHistoryCount } from './chatHistory';
 
 export const JOURNAL_ENTRIES_KEY = 'yyphone:memory-journal';
 export const GROWTH_NOTES_KEY = 'yyphone:memory-growth';
@@ -123,13 +124,13 @@ export interface DirectMessage {
 const clip = (value: unknown, max: number) => (typeof value === 'string' ? value.trim().slice(0, max) : '');
 
 /** 把一条聊天消息（含各类分享卡片、上下文记录）转成适合总结的文字。 */
-const describeForSummary = (m: Record<string, unknown>): string => {
+const describeForSummary = (m: Record<string, unknown>, maxLength = 300): string => {
   const title = clip(m.title, 60);
-  const detail = clip(m.aiContext, 320);
-  const text = clip(m.text, 300);
+  const detail = clip(m.aiContext, maxLength === Infinity ? Infinity : 320);
+  const text = clip(m.text, maxLength);
   switch (m.kind) {
     case 'context-note':
-      return `${title}${m.source === 'offline' ? '（线下剧情摘要）' : m.source === 'phone-memory' ? '（手机内容记忆）' : m.source === 'pomodoro' ? '（番茄钟陪伴）' : '（闲鱼对话）'}：${clip(m.aiContext, 400) || text}`;
+      return `${title}${m.source === 'offline' ? '（线下剧情摘要）' : m.source === 'phone-memory' ? '（手机内容记忆）' : m.source === 'pomodoro' ? '（番茄钟陪伴）' : '（闲鱼对话）'}：${clip(m.aiContext, maxLength === Infinity ? Infinity : 400) || text}`;
     case 'forum-forward':
       return `[玩家分享了论坛帖子「${title}」] ${detail}`;
     case 'pomodoro-share':
@@ -148,7 +149,10 @@ const describeForSummary = (m: Record<string, unknown>): string => {
   }
 };
 
-export const readDirectMessages = (charId: string): DirectMessage[] => {
+export const readDirectMessages = (
+  charId: string,
+  options: { configuredHistory?: boolean; fullText?: boolean } = {}
+): DirectMessage[] => {
   const chat = readWechatChatsRaw().find(
     (item) =>
       isRecord(item) &&
@@ -158,13 +162,16 @@ export const readDirectMessages = (charId: string): DirectMessage[] => {
       item.participantIds[0] === charId
   );
   if (!isRecord(chat) || !Array.isArray(chat.messages)) return [];
-  return chat.messages
+  const messages = options.configuredHistory
+    ? chat.messages.slice(-resolveChatHistoryCount(chat.currentChatHistoryCount))
+    : chat.messages;
+  return messages
     .filter((m): m is Record<string, unknown> =>
       isRecord(m) && typeof m.createdAt === 'string' && (m.senderId !== 'narrator' || m.kind === 'context-note'))
     .map((m) => ({
       createdAt: m.createdAt as string,
       senderId: typeof m.senderId === 'string' ? m.senderId : '',
-      text: describeForSummary(m),
+      text: describeForSummary(m, options.fullText ? Infinity : 300),
       note: m.kind === 'context-note',
     }))
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt));

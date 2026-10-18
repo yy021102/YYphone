@@ -146,9 +146,10 @@ export async function initializeDbStorage(): Promise<void> {
   }
 }
 
-export async function getStorageItem(key: string): Promise<any> {
+export async function getStorageItem(key: string, options: { fresh?: boolean } = {}): Promise<any> {
   await initializeDbStorage();
-  if (memoryCache.has(key)) return memoryCache.get(key);
+  if (!options.fresh && memoryCache.has(key)) return memoryCache.get(key);
+  if (options.fresh) memoryCache.delete(key);
   const database = await openDatabase();
   if (!database) {
     const rawValue = window.localStorage.getItem(key);

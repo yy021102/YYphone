@@ -15,12 +15,14 @@ import {
   MapPin,
   Pencil,
   Package,
+  Mail,
 } from 'lucide-react';
 import { AppIconOverrides, AppId, AppMetadata, UserProfile } from '../types';
 import { ProfileEditor } from './ProfileEditor';
 import { ListenTogetherWidget } from './ListenTogetherWidget';
 import { CalendarWidget } from './CalendarWidget';
 import { frameGradient } from '../utils/avatarFrame';
+import { PaperNotes } from './PaperNotes';
 
 interface HomeScreenProps {
   userProfile: UserProfile;
@@ -40,6 +42,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   appIcons,
 }) => {
   const [isProfileEditorOpen, setIsProfileEditorOpen] = useState(false);
+  const [paperNotesOpen, setPaperNotesOpen] = useState(false);
   // 新头像框优先；没有时沿用旧的“奶油花边框”开关
   const frameOn = userProfile.avatarFrame ? userProfile.avatarFrame.enabled : !!userProfile.avatarFrameEnabled;
 
@@ -220,6 +223,10 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             <p className="min-w-0 flex-1 text-[clamp(10px,2.5vw,11.5px)] text-[#587589]/85 line-clamp-1 font-normal leading-snug">
               {userProfile.signature}
             </p>
+            <button type="button" aria-label="小纸条" title="小纸条" onClick={() => setPaperNotesOpen(true)}
+              className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-lg border border-white/80 bg-gradient-to-br from-[#DCEEFF] to-white text-[#6F8CA0] shadow-2xs active:scale-90">
+              <Mail className="h-3 w-3" />
+            </button>
             <button
               type="button"
               onClick={() => onOpenApp('inventory')}
@@ -305,6 +312,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           onClose={() => setIsProfileEditorOpen(false)}
         />
       )}
+      {paperNotesOpen && <PaperNotes onClose={() => setPaperNotesOpen(false)} />}
     </div>
   );
 };

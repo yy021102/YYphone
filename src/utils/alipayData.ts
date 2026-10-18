@@ -154,6 +154,16 @@ export const writeAlipayData = (data: AlipayData) => {
   writeStorageString(ALIPAY_STORAGE_KEY, JSON.stringify(data));
 };
 
+export const updateAlipayBalance = (input: string): number => {
+  const value = input.trim();
+  if (!/^\d+(?:\.\d{1,2})?$/.test(value)) throw new Error('请输入非负金额，最多两位小数。');
+  const balance = Number(value);
+  if (!Number.isSafeInteger(Math.round(balance * 100))) throw new Error('金额过大，请重新输入。');
+  writeAlipayData({ ...readAlipayData(), balance });
+  window.dispatchEvent(new Event('yyphone:finance-change'));
+  return balance;
+};
+
 export const readAlipayContacts = (): AlipayContact[] => {
   try {
     const value: unknown = JSON.parse(
