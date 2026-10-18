@@ -232,7 +232,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               onClick={() => onOpenApp('inventory')}
               aria-label="物品"
               title="物品"
-              className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-lg border border-white/80 bg-gradient-to-br from-[#CDE4F7] to-[#F8CFE1] text-[#6F8CA0] shadow-2xs active:scale-90"
+              className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-lg border border-white/80 bg-gradient-to-br from-[#DCEEFF] to-white text-[#6F8CA0] shadow-2xs active:scale-90"
             >
               <Package className="h-3 w-3" />
             </button>
