@@ -2868,6 +2868,11 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
           at: new Date().toISOString(),
           model,
         });
+      }, {
+        defaultSpeakerId: contact.id,
+        namesById: Object.fromEntries(chatMembers.map((member) => [
+          member.id, [member.name, chat.groupNicknames?.[member.id] ?? ''],
+        ])),
       });
       let reply = '';
       let replyParts: GeneratedAiMessage[] = [];

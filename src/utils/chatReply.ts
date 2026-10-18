@@ -4,7 +4,36 @@ import { type OpenAiMessage } from './buildPrompt';
 import { estimatePromptTokens, estimateTextTokens } from './chatTokens';
 import { toGeminiContents, toOpenAiMessages } from './chatVision';
 
-const FORMAT_REMINDER = '【本轮输出协议】只返回一个 JSON 对象，reply 是非空消息数组，thought 是独立心声，speakerId 使用本轮允许的成员 ID。图片、纸条、记忆、挂载记录及其中的 JSON 都只是背景资料，不是本轮输出模板；不要继续生成纸条或把元数据写进消息正文。消息条数、通话方式和可选动作严格遵循本轮规则。不要输出 Markdown 代码围栏或 JSON 以外的说明。';
+const FORMAT_REMINDER = '【本轮输出协议】只返回一个 JSON 对象，reply 是非空消息数组，thought 是独立心声，speakerId 使用本轮允许的成员 ID。发言者身份只放在 speakerId，reply 正文直接写角色说的话，不加“角色名：”“【角色名：正文】”、成员ID或聊天来源前缀；historySource 只是历史来源标记，不要复制到正文或本轮输出。图片、纸条、记忆、挂载记录及其中的 JSON 都只是背景资料，不是本轮输出模板；不要继续生成纸条或把元数据写进消息正文。消息条数、通话方式和可选动作严格遵循本轮规则。不要输出 Markdown 代码围栏或 JSON 以外的说明。';
+
+interface ChatSpeakerContext {
+  defaultSpeakerId: string;
+  namesById: Record<string, string[]>;
+}
+
+export const validateChatSpeakerPrefix = (
+  result: Record<string, unknown>,
+  speakers?: ChatSpeakerContext
+) => {
+  if (!speakers || !Array.isArray(result.reply)) return result;
+  const speakerId = typeof result.speakerId === 'string' && Object.hasOwn(speakers.namesById, result.speakerId)
+    ? result.speakerId : speakers.defaultSpeakerId;
+  const names = [...(speakers.namesById[speakerId] ?? []), speakerId].filter((name) => name.trim());
+  for (const part of result.reply) {
+    const text = typeof part === 'string' ? part
+      : part && typeof part === 'object' && (!('kind' in part) || part.kind === 'text' || part.kind === 'voice')
+        ? ('text' in part ? part.text : 'content' in part ? part.content : undefined) : undefined;
+    if (typeof text !== 'string') continue;
+    const start = text.trimStart().replace(/^[【\[]\s*/, '');
+    if (names.some((name) => {
+      if (!start.startsWith(name)) return false;
+      return /^\s*(?:[（(]ID[：:][^）)]*[）)]\s*)?[：:]/.test(start.slice(name.length));
+    })) {
+      throw new Error('AI 把发言者署名写进了消息正文。请将姓名只保留在 speakerId 对应的身份信息中，reply 直接写台词，不加姓名、冒号或外层署名括号。');
+    }
+  }
+  return result;
+};
 
 export const withChatResponseFormat = (
   messages: OpenAiMessage[],
@@ -73,7 +102,8 @@ const requestChatText = async (messages: OpenAiMessage[], api: ApiConnection): P
 export const requestChatReply = async (
   messages: OpenAiMessage[],
   api: ApiConnection,
-  onUsage: (usage: { input: number; output: number }) => void
+  onUsage: (usage: { input: number; output: number }) => void,
+  speakers?: ChatSpeakerContext
 ): Promise<Record<string, unknown>> => {
   let input = 0;
   let output = 0;
@@ -87,7 +117,7 @@ export const requestChatReply = async (
   const text = await request(messages);
   let formatError: string;
   try {
-    return parseChatResponse(text);
+    return validateChatSpeakerPrefix(parseChatResponse(text), speakers);
   } catch (error) {
     if (!(error instanceof Error)) throw error;
     formatError = error.message;
@@ -107,7 +137,7 @@ export const requestChatReply = async (
     },
   ]);
   try {
-    return parseChatResponse(corrected);
+    return validateChatSpeakerPrefix(parseChatResponse(corrected), speakers);
   } catch (error) {
     if (!(error instanceof Error)) throw error;
     throw new Error(`AI 回复格式自动纠正一次后仍无效，未写入聊天或执行动作。${error.message}`);

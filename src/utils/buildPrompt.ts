@@ -519,7 +519,7 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
   messages.push({
     role: 'system',
     content: [
-      `角色人设：\n${participants.map((contact) => `姓名：${contact.name}\n设定：${contact.persona}`).join('\n\n') || '当前聊天没有可用主要角色人设。'}`,
+      `角色人设：\n${participants.map((contact) => `成员 ID：${contact.id}\n姓名：${contact.name}\n设定：${contact.persona}`).join('\n\n') || '当前聊天没有可用主要角色人设。'}`,
       ...participants.flatMap((contact) => {
         const linkedNpcs = characterNpcs.filter((npc) => npc.linkedCharIds.includes(contact.id));
         if (linkedNpcs.length === 0) return [];
@@ -835,7 +835,11 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
         : item.message.senderId === 'user' ? 'user' : 'assistant',
       content: options.structuredHistory && !isContextNote &&
         item.message.senderId !== 'user' && item.message.senderId !== 'narrator'
-        ? JSON.stringify({ speakerId: item.message.senderId, reply: [content] })
+        ? JSON.stringify({
+            speakerId: item.message.senderId,
+            ...(prefix ? { historySource: prefix } : {}),
+            reply: [toMessageContent(item.message)],
+          })
         : content,
       ...(item.message.senderId === 'user' && item.message.kind === 'image' && item.message.imageUrl
         ? { images: [item.message.imageUrl] }

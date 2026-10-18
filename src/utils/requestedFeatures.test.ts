@@ -26,7 +26,7 @@ import { LITTLE_P_MESSAGES_KEY, LITTLE_P_VISIBLE_KEY, littlePHistory, littlePSys
 import { requestConfiguredAiText } from './aiApi';
 import { buildPrompt, type OpenAiMessage } from './buildPrompt';
 import { toGeminiContents, toOpenAiMessages } from './chatVision';
-import { requestChatReply, withChatResponseFormat } from './chatReply';
+import { requestChatReply, validateChatSpeakerPrefix, withChatResponseFormat } from './chatReply';
 import { buildGroupPrivateContext, describeChatSource } from './chatHistory';
 import {
   buildGroupJournalInjection, deleteGroupJournal, deleteGroupJournalEntry, editGroupJournalEntry,
@@ -1367,12 +1367,56 @@ test('live chat history uses JSON without changing stored messages, paper tasks 
   const structured = buildPrompt({ chatId: 'chat-paper-a', structuredHistory: true });
   const previous = structured.find((message) => message.role === 'assistant');
   assert.deepEqual(JSON.parse(previous?.content ?? ''), {
-    speakerId: 'paper-a', reply: ['纸条角色甲：我也想再去看海'],
+    speakerId: 'paper-a', reply: ['我也想再去看海'],
   });
   const plain = buildPrompt({ chatId: 'chat-paper-a' });
   assert.equal(plain.find((message) => message.role === 'assistant')?.content, '纸条角色甲：我也想再去看海');
   assert.match(structured.map((message) => message.content).join('\n'), /不是输出示例/);
   assert.equal(localStorage.getItem(WECHAT_CHATS_STORAGE_KEY), before);
+});
+
+test('speaker-prefix validation detects self labels without rewriting quoted dialogue or attachments', () => {
+  const speakers = {
+    defaultSpeakerId: 'a',
+    namesById: { a: ['角色甲', '小甲'], b: ['角色乙'], 'npc:friend': ['朋友'] },
+  };
+  for (const text of ['角色甲：你好', '角色甲:你好', '【角色甲：你好】', '[小甲: 你好]',
+    '  小甲 ：你好', '角色甲（ID：a）：你好', 'a：你好']) {
+    for (const part of [text, { kind: 'text', text }, { kind: 'voice', text }, { content: text }]) {
+      assert.throws(() => validateChatSpeakerPrefix({ reply: [part] }, speakers), /署名/);
+    }
+  }
+  assert.throws(() => validateChatSpeakerPrefix({ speakerId: 'b', reply: ['角色乙：你好'] }, speakers), /署名/);
+  assert.throws(() => validateChatSpeakerPrefix({ speakerId: 'npc:friend', reply: ['朋友：你好'] }, speakers), /署名/);
+  for (const part of ['我叫角色甲', '你刚刚说“角色甲：你好”', '“角色甲：你好”', '角色乙：他说周末有空',
+    '角色甲今天有空', { kind: 'narration', text: '角色甲：他停了一会' },
+    { kind: 'image', text: '角色甲：照片中的标牌' }, { kind: 'link', title: '角色甲：访谈' }]) {
+    const result = { speakerId: 'a', reply: [part], thought: '心声', reaction: { emoji: '🥰' } };
+    assert.equal(validateChatSpeakerPrefix(result, speakers), result);
+  }
+});
+
+test('self-signed chat replies use the existing single correction and never leak if correction fails', async () => {
+  mock.method(console, 'warn', () => {});
+  const speakers = { defaultSpeakerId: 'a', namesById: { a: ['角色甲'] } };
+  const valid = { speakerId: 'a', reply: ['你好'], thought: '我有点想你', reaction: { emoji: '🥰' } };
+  for (const fails of [false, true]) {
+    let calls = 0;
+    let correctionRequest = '';
+    mock.method(globalThis, 'fetch', async (_input: unknown, init?: RequestInit) => {
+      calls += 1;
+      correctionRequest = String(init?.body);
+      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(
+        calls === 1 || fails ? { ...valid, reply: ['【角色甲：你好】'] } : valid
+      ) } }] }));
+    });
+    const request = requestChatReply([{ role: 'user', content: '你好' }],
+      { endpoint: 'https://chat-test.example/v1', apiKey: 'test' }, () => {}, speakers);
+    if (fails) await assert.rejects(request, /自动纠正一次后仍无效/);
+    else assert.deepEqual(await request, valid);
+    assert.equal(calls, 2);
+    assert.match(correctionRequest, /发言者署名/);
+  }
 });
 
 test('chat source descriptors distinguish group membership, real identities, NPC nicknames and observers', () => {
@@ -1433,8 +1477,20 @@ test('interleaved mounted group and observer messages retain sources even for no
     const history = prompt.map((item) => ({
       ...item, text: structuredHistory && item.role === 'assistant' ? JSON.parse(item.content).reply[0] : item.content,
     }));
-    assert.ok(history.some((item) => item.text === '【挂载群聊「同名群」·记录1】小乙（ID：b）：我周末去爬山'));
-    assert.ok(history.some((item) => item.text === '【挂载旁观群聊「同名群」·记录2】角色甲（ID：a）：我和乙已经约好了'));
+    if (structuredHistory) {
+      for (const message of prompt.filter((item) => item.role === 'assistant')) {
+        const parsed = JSON.parse(message.content);
+        assert.doesNotMatch(parsed.reply[0], /【挂载|【当前|^小乙（ID|^角色甲（ID/);
+      }
+      const mountedReply = prompt.filter((item) => item.role === 'assistant').map((item) => JSON.parse(item.content));
+      assert.ok(mountedReply.some((item) => item.speakerId === 'b' &&
+        item.historySource === '【挂载群聊「同名群」·记录1】' && item.reply[0] === '我周末去爬山'));
+      assert.ok(mountedReply.some((item) => item.speakerId === 'a' &&
+        item.historySource === '【挂载旁观群聊「同名群」·记录2】' && item.reply[0] === '我和乙已经约好了'));
+    } else {
+      assert.ok(history.some((item) => item.text === '【挂载群聊「同名群」·记录1】小乙（ID：b）：我周末去爬山'));
+      assert.ok(history.some((item) => item.text === '【挂载旁观群聊「同名群」·记录2】角色甲（ID：a）：我和乙已经约好了'));
+    }
     assert.ok(history.some((item) => item.role === 'system' && item.text.startsWith('【挂载群聊「同名群」·记录1】') && item.text.includes('群里的经历记录')));
     assert.ok(history.some((item) => item.role === 'system' && item.text === '【挂载旁观群聊「同名群」·记录2】旁白：（旁白：乙点点头）'));
     const photo = prompt.find((item) => item.images?.length);
