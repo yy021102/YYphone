@@ -124,13 +124,16 @@ export interface DirectMessage {
 const clip = (value: unknown, max: number) => (typeof value === 'string' ? value.trim().slice(0, max) : '');
 
 /** 把一条聊天消息（含各类分享卡片、上下文记录）转成适合总结的文字。 */
-const describeForSummary = (m: Record<string, unknown>, maxLength = 300): string => {
+export const describeForSummary = (m: Record<string, unknown>, maxLength = 300): string => {
   const title = clip(m.title, 60);
   const detail = clip(m.aiContext, maxLength === Infinity ? Infinity : 320);
   const text = clip(m.text, maxLength);
   switch (m.kind) {
     case 'context-note':
-      return `${title}${m.source === 'offline' ? '（线下剧情摘要）' : m.source === 'phone-memory' ? '（手机内容记忆）' : m.source === 'pomodoro' ? '（番茄钟陪伴）' : '（闲鱼对话）'}：${clip(m.aiContext, maxLength === Infinity ? Infinity : 400) || text}`;
+      return `${title}${m.source === 'offline' ? '（线下剧情摘要）' : m.source === 'phone-memory' ? '（手机内容记忆）' : m.source === 'pomodoro' ? '（番茄钟陪伴）' : m.source === 'group-private' ? '（群聊转私信背景）' : m.source === 'xianyu' ? '（闲鱼对话）' : '（上下文记录）'}：${[
+        ...(m.source === 'group-private' && m.aiContext && m.text !== m.aiContext ? [text] : []),
+        clip(m.aiContext, maxLength === Infinity ? Infinity : 400) || text,
+      ].join('\n')}`;
     case 'forum-forward':
       return `[玩家分享了论坛帖子「${title}」] ${detail}`;
     case 'pomodoro-share':

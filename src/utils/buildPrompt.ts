@@ -10,8 +10,9 @@ import { buildCoupleSpaceInjection, CoupleInjection } from './coupleSpaceData';
 import { buildPlantInjection, PlantInjection } from './plantData';
 import type { MemoryInjection } from './memoryData';
 import { buildGrowthInjection, buildJournalInjection } from './journalData';
-import { resolveChatHistoryCount } from './chatHistory';
+import { describeChatSource, resolveChatHistoryCount } from './chatHistory';
 import { buildPaperMemoryInjection } from './paperNotes';
+import { buildGroupJournalInjection } from './groupJournal';
 
 export interface PromptChatMessage {
   id: string;
@@ -97,6 +98,8 @@ export interface BuildPromptOptions {
   historyLimit?: number;
   callMode?: 'voice' | 'video';
   regenerate?: boolean;
+  /** Use the live chat protocol for historical assistant turns, not background writing tasks. */
+  structuredHistory?: boolean;
   /** Unread moments snapshot; when omitted it is computed here. */
   momentsInjection?: MomentsInjection;
   coupleInjection?: CoupleInjection;
@@ -183,22 +186,6 @@ const getPersonaText = (persona: UserPersona | undefined) => {
     persona.speakingStyle && `说话风格：${persona.speakingStyle}`,
   ].filter(Boolean).join('\n');
 };
-
-const getConversationTitle = (
-  conversation: PromptConversation,
-  contacts: PromptContact[],
-  npcs: CharacterNpc[]
-) =>
-  conversation.groupTitle?.trim() ||
-  conversation.noteName?.trim() ||
-  conversation.participantIds
-    .map((id) =>
-      contacts.find((contact) => contact.id === id)?.name ??
-      getNpcByParticipantId(npcs, id)?.name ??
-      id
-    )
-    .join('、') ||
-  '未命名聊天';
 
 const getSpeakerName = (
   senderId: string,
@@ -325,6 +312,7 @@ const toBaseMessageContent = (message: PromptChatMessage) => {
       return [
         `【${message.title || '群聊私信背景'}】`,
         '这是你基于群聊情境主动私信玩家的背景，不是线下见面、通话或玩家刚发来的话；自然承接你已经发出的私信，不要再重复发送。',
+        ...(message.aiContext && message.text !== message.aiContext ? [message.text] : []),
         message.aiContext || message.text,
       ].join('\n');
     }
@@ -468,6 +456,19 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
   const persona = personaCollection?.profiles.find(
     (profile) => profile.id === personaCollection.activeProfileId
   );
+  const sources = new Map<string, ReturnType<typeof describeChatSource>>();
+  const sourceOf = (conversation: PromptConversation) => {
+    const existing = sources.get(conversation.id);
+    if (existing) return existing;
+    const source = describeChatSource(
+      conversation,
+      (id) => contacts.find((contact) => contact.id === id)?.name || getNpcByParticipantId(characterNpcs, id)?.name,
+      persona?.name || '玩家'
+    );
+    sources.set(conversation.id, source);
+    return source;
+  };
+  const currentSource = sourceOf(chat);
   const participants = chat.participantIds
     .map((id) => contacts.find((contact) => contact.id === id))
     .filter((contact): contact is PromptContact => !!contact);
@@ -542,6 +543,14 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
 
   // 5. User Persona.
   messages.push({ role: 'system', content: `玩家设定：\n${getPersonaText(persona)}\n当前聊天补充：${chat.context || '无'}` });
+  messages.push({
+    role: 'system',
+    content: [
+      '【当前聊天来源】',
+      currentSource.text,
+      '以下历史中的来源标记用于区分当前聊天和挂载记录，不是角色说的话。挂载记录只是背景，不代表切换聊天、玩家刚发言或本轮需要回答其中的问题；谁说的话归谁，不要把其他成员的话、约定或关系算到你或玩家身上。群昵称与成员 ID 指向同一个人，不是新增角色。成员名单反映记录当前保存的配置，不能据此推断成员始终在群里或读过每一条历史消息。',
+    ].join('\n'),
+  });
 
   // 当前环境：仅在玩家正与聊天中的某个角色一起听歌时注入。
   if (chat.type !== 'observer') {
@@ -590,6 +599,10 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
   const rawWindowStart = chat.messages.length > recentLimit
     ? chat.messages[chat.messages.length - recentLimit]?.createdAt
     : chat.messages[0]?.createdAt;
+  if (chat.type !== 'direct') {
+    const groupJournal = buildGroupJournalInjection(chat.id, rawWindowStart);
+    if (groupJournal) messages.push({ role: 'system', content: groupJournal });
+  }
   const journalText = buildJournalInjection(chat.participantIds, chat.type, rawWindowStart);
   if (journalText) messages.push({ role: 'system', content: journalText });
   const growthText = buildGrowthInjection(chat.participantIds, chat.type);
@@ -756,6 +769,11 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
           const attachedLimit = Number.isInteger(requestedLimit) && requestedLimit > 0
             ? requestedLimit
             : 200;
+          if (conversation.type !== 'direct') {
+            const windowStart = conversation.messages.slice(-attachedLimit)[0]?.createdAt;
+            const groupJournal = buildGroupJournalInjection(conversation.id, windowStart, true);
+            if (groupJournal) messages.push({ role: 'system', content: groupJournal });
+          }
           return conversation.messages
             .filter((message) => canReadForumForward(message, conversation, chat))
             .slice(-attachedLimit)
@@ -768,7 +786,8 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
   const announcedAttachedChats = new Set<string>();
   let previousHistoryDate = 0;
   for (const item of orderedHistory) {
-    if (item.message.senderId === 'narrator' && item.message.kind !== 'context-note' && chat.type !== 'observer') continue;
+    if (item.message.senderId === 'narrator' && item.message.kind !== 'context-note' &&
+      chat.type !== 'observer' && item.conversation.type !== 'observer') continue;
     if (item.date > 0 && item.message.kind !== 'context-note') {
       if (previousHistoryDate > 0 && item.date - previousHistoryDate >= 60 * 60 * 1000) {
         messages.push({
@@ -792,26 +811,32 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
       messages.push({
         role: 'system',
         content: [
-          `挂载聊天记录：${getConversationTitle(item.conversation, contacts, characterNpcs)}`,
-          `聊天类型：${item.conversation.type === 'group' ? '群聊' : item.conversation.type === 'observer' ? '旁观群聊' : '单聊'}`,
+          `挂载聊天记录：${sourceOf(item.conversation).title}`,
+          `记录编号：${attachedIds.indexOf(item.conversation.id) + 1}`,
+          sourceOf(item.conversation).text,
           `群聊设定：${item.conversation.context || '无'}`,
           `聊天人员：${attachedParticipants || '无'}`,
-          '以下按时间顺序排列该聊天记录：',
+          '以下记录会与其他聊天按时间混排；每条消息上的来源标记才是该条的归属，不能把它算作当前聊天或相邻记录里的发言。',
         ].join('\n'),
       });
     }
     const speaker = getSpeakerName(item.message.senderId, item.conversation, contacts, characterNpcs, persona);
-    const title = getConversationTitle(item.conversation, contacts, characterNpcs);
-    const prefix = item.conversation.id === chat.id ? '' : `[挂载聊天「${title}」] ${speaker}：`;
+    const source = sourceOf(item.conversation);
+    const prefix = item.conversation.id !== chat.id
+      ? `【挂载${source.label}·记录${attachedIds.indexOf(item.conversation.id) + 1}】`
+      : chat.type !== 'direct' ? `【当前${source.label}】` : '';
     const isContextNote = item.message.kind === 'context-note';
-    const content = isContextNote
-      ? toMessageContent(item.message)
-      : item.conversation.id === chat.id
-        ? `${speaker}：${toMessageContent(item.message)}`
-        : `${prefix}${toMessageContent(item.message)}`;
+    const speakerLabel = item.conversation.type !== 'direct' && item.message.senderId !== 'narrator'
+      ? `${speaker}（ID：${item.message.senderId}）`
+      : speaker;
+    const content = `${prefix}${isContextNote ? '' : `${speakerLabel}：`}${toMessageContent(item.message)}`;
     messages.push({
-      role: isContextNote ? 'system' : item.message.senderId === 'user' ? 'user' : 'assistant',
-      content,
+      role: isContextNote || item.message.senderId === 'narrator' ? 'system'
+        : item.message.senderId === 'user' ? 'user' : 'assistant',
+      content: options.structuredHistory && !isContextNote &&
+        item.message.senderId !== 'user' && item.message.senderId !== 'narrator'
+        ? JSON.stringify({ speakerId: item.message.senderId, reply: [content] })
+        : content,
       ...(item.message.senderId === 'user' && item.message.kind === 'image' && item.message.imageUrl
         ? { images: [item.message.imageUrl] }
         : {}),
@@ -841,7 +866,10 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
   });
   messages.push({
     role: 'user',
-    content: latestUserMessage?.kind === 'image' ? toMessageContent(latestUserMessage) : input,
+    content: [
+      ...(chat.type !== 'direct' ? [`【当前${currentSource.label}】`] : []),
+      latestUserMessage?.kind === 'image' ? toMessageContent(latestUserMessage) : input,
+    ].join('\n'),
     ...(latestUserMessage?.kind === 'image' && latestUserMessage.imageUrl
       ? { images: [latestUserMessage.imageUrl] }
       : {}),

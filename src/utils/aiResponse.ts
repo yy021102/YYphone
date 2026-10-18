@@ -57,7 +57,27 @@ export const parseChatResponse = (text: string): Record<string, unknown> => {
     }
   }
   if (!Array.isArray(reply) || reply.length === 0) throw new Error('AI 回复缺少有效的 reply 消息数组。');
+  if (parsed.thought !== undefined && typeof parsed.thought !== 'string') {
+    throw new Error('AI 回复的 thought 心声必须是字符串。');
+  }
+  if (parsed.speakerId !== undefined && typeof parsed.speakerId !== 'string') {
+    throw new Error('AI 回复的 speakerId 必须是字符串。');
+  }
   for (const part of reply) {
+    if ((typeof part !== 'string' && !isRecord(part)) || (typeof part === 'string' && !part.trim())) {
+      throw new Error('AI 回复的 reply 包含空消息或无效消息格式。');
+    }
+    if (isRecord(part)) {
+      if (['text', 'content', 'title', 'kind'].some((key) => part[key] !== undefined && typeof part[key] !== 'string')) {
+        throw new Error('AI 回复的消息类型和正文必须是字符串。');
+      }
+      const hasBody = [part.text, part.content, part.kind === 'link' ? part.title : undefined]
+        .some((value) => typeof value === 'string' && value.trim());
+      const hasSticker = typeof part.stickerId === 'string' && !!part.stickerId.trim();
+      if (!hasBody && !hasSticker && !['sticker', 'pat', 'red-packet', 'transfer'].includes(String(part.kind))) {
+        throw new Error('AI 回复的 reply 包含缺少正文的消息对象。');
+      }
+    }
     const content = typeof part === 'string' ? part : isRecord(part) ? part.text ?? part.content : undefined;
     if (typeof content === 'string' && /```(?:json)?|[{\[]\s*"(?:reply|thought|speakerId|kind|text)"|"(?:reply|thought|speakerId)"\s*:/.test(content)) {
       throw new Error('AI 把消息元数据写进了正文，已取消本次生成，请重试。');

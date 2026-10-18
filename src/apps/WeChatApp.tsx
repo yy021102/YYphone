@@ -40,13 +40,15 @@ import { readStorageString, readStoredValue, writeStorageString, writeStoredValu
 import { readSetting, saveSetting, SETTINGS_KEYS } from '../utils/settings';
 import { compressChatPhoto, compressImageFile } from '../utils/imageFile';
 import { buildPrompt } from '../utils/buildPrompt';
-import { toGeminiContents, toOpenAiMessages } from '../utils/chatVision';
+import { buildGroupPrivateContext } from '../utils/chatHistory';
+import { deleteGroupJournal, invalidateGroupJournal, maybeAutoGroupJournal } from '../utils/groupJournal';
+import { GroupJournalPanel } from '../components/GroupJournalPanel';
+import { requestChatReply, withChatResponseFormat } from '../utils/chatReply';
 import { showYyError, useErrorDialog } from '../components/ErrorDialog';
 import { AvatarFrameEditor } from '../components/AvatarFrameEditor';
 import { CallScreen } from '../components/CallScreen';
-import { parseChatResponse } from '../utils/aiResponse';
 import { normalizeForumHandle, readGeneratedForumHandles } from '../utils/forumIdentity';
-import { estimateConversationTokens, estimatePromptTokens, estimateTextTokens } from '../utils/chatTokens';
+import { estimateConversationTokens, estimatePromptTokens } from '../utils/chatTokens';
 import { buildCharacterExport, parsePortableWorldBooks, remapImportedWorldBooks } from '../utils/characterExport';
 import { applySocialWrites, buildSocialInstructions, parseSocialActions, type SocialContext } from '../utils/chatSocial';
 import { BUILTIN_STICKERS, CHAT_STICKERS_STORAGE_KEY, type ChatSticker } from '../utils/chatStickers';
@@ -1905,6 +1907,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
     }));
     if (saved) {
       if (chat.type === 'direct' && chat.participantIds.length === 1) invalidateMemoryArchive(chat.participantIds[0]);
+      if (chat.type !== 'direct') invalidateGroupJournal(chat.id);
       setVisibleMessageCount(HISTORY_PAGE_SIZE);
       setSelectedMessageId('');
       setArchiveNameDraft('');
@@ -1934,6 +1937,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       activeArchiveId: activeId,
     }));
     if (saved && chat.type === 'direct' && chat.participantIds.length === 1) deleteMemoryArchive(chat.participantIds[0], archiveId);
+    if (saved && chat.type !== 'direct') deleteGroupJournal(chat.id, archiveId);
   };
 
   const startChatLongPress = (chatId: string) => {
@@ -1955,6 +1959,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
     prepareMemoryArchiveSwitch();
     if (persistChats(chats.filter((item) => item.id !== chat.id))) {
       if (chat.type === 'direct' && chat.participantIds.length === 1) deleteCharacterMemoryArchives(chat.participantIds[0]);
+      if (chat.type !== 'direct') deleteGroupJournal(chat.id);
       setActiveChatMenuId('');
     }
   };
@@ -2782,6 +2787,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         historyLimit: chat.currentChatHistoryCount ?? 200,
         callMode: callConnectedAt ? activeCallMode ?? undefined : undefined,
         regenerate,
+        structuredHistory: true,
         momentsInjection,
         coupleInjection,
         plantInjection,
@@ -2839,15 +2845,12 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
           ? ['如果你决定主动邀请玩家开通情侣空间（见上文【情侣空间】说明），请额外返回 "coupleSpaceAction":"invite"；否则不要返回该字段。']
           : []),
       ].join('\n');
-      promptMessages.splice(promptMessages.length - 1, 0, {
-        role: 'system',
-        content: responseInstructions,
-      });
       if (proactive) promptMessages.push({
         role: 'user',
         content: '【定时主动联系】这不是玩家新发来的消息。请根据人设、当前时间与已有聊天主动联系玩家，聊一个自然的新话题或关心近况。不要假装玩家刚说过话，不要机械重复上一轮回复，不要提定时器或后台任务。',
       });
-      const estimatedInput = estimatePromptTokens(promptMessages);
+      const requestMessages = withChatResponseFormat(promptMessages, responseInstructions);
+      const estimatedInput = estimatePromptTokens(requestMessages);
       if (previewOnly) {
         setTokenPreview({ chatId: chat.id, input: estimatedInput });
         return;
@@ -2858,58 +2861,13 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         at: new Date().toISOString(),
         model: apiPreset.model || 'gpt-4o-mini',
       });
-      const endpoint = apiPreset.endpoint.trim().replace(/\/+$/, '');
       const model = apiPreset.model?.trim() || 'gpt-4o-mini';
-      let responseText: string;
-      if (endpoint.includes('generativelanguage.googleapis.com')) {
-        const systemInstruction = promptMessages
-          .filter((message) => message.role === 'system')
-          .map((message) => message.content)
-          .join('\n\n');
-        const contents = toGeminiContents(promptMessages);
-        const response = await fetch(
-          `${endpoint}/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiPreset.apiKey)}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              systemInstruction: { parts: [{ text: systemInstruction }] },
-              contents,
-              generationConfig: { responseMimeType: 'application/json' },
-            }),
-          }
-        );
-        if (!response.ok) throw new Error(`AI 请求失败（${response.status}）：${await response.text()}`);
-        const data: unknown = await response.json();
-        const candidate = (data as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> }).candidates?.[0];
-        responseText = candidate?.content?.parts?.map((part) => part.text ?? '').join('') ?? '';
-      } else {
-        const chatEndpoint = /\/chat\/completions$/i.test(endpoint)
-          ? endpoint
-          : `${endpoint}/chat/completions`;
-        const response = await fetch(chatEndpoint, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${apiPreset.apiKey}`,
-          },
-          body: JSON.stringify({
-            model,
-            messages: toOpenAiMessages(promptMessages),
-            response_format: { type: 'json_object' },
-          }),
+      const result = await requestChatReply(requestMessages, apiPreset, (usage) => {
+        writeStoredValue(`yyphone:chat-token-usage:${chat.id}`, {
+          ...usage,
+          at: new Date().toISOString(),
+          model,
         });
-        if (!response.ok) throw new Error(`AI 请求失败（${response.status}）：${await response.text()}`);
-        const data: unknown = await response.json();
-        const choice = (data as { choices?: Array<{ message?: { content?: string } }> }).choices?.[0];
-        responseText = choice?.message?.content ?? '';
-      }
-
-      writeStoredValue(`yyphone:chat-token-usage:${chat.id}`, {
-        input: estimatedInput,
-        output: estimateTextTokens(responseText),
-        at: new Date().toISOString(),
-        model,
       });
       let reply = '';
       let replyParts: GeneratedAiMessage[] = [];
@@ -2922,7 +2880,6 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       let intimateAction: { type: 'grant' | 'decline'; monthlyLimit?: number; note: string; requestId?: string } | undefined;
       const momentActions: MomentChatAction[] = [];
       let coupleDecision: 'accept' | 'decline' | 'invite' | null = null;
-      const result = parseChatResponse(responseText);
       if (result && typeof result === 'object' && !Array.isArray(result)) {
         const record = result as Record<string, unknown>;
         if (record.intimatePayAction !== undefined) {
@@ -3319,13 +3276,19 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
           id: `private-${crypto.randomUUID()}`, replyBatchId, senderId: speakerId, kind: 'text',
           text, createdAt: new Date(Date.now() + index).toISOString(),
         }));
+        const privateContext = buildGroupPrivateContext(
+          chat,
+          (id) => latestContacts.find((item) => item.id === id)?.name || getNpcByParticipantId(characterNpcs, id)?.name,
+          personaDraft.name.trim() || '玩家',
+          socialActions.privateMessage.reason
+        );
         const updatedDirect = {
           ...direct,
           messages: [...direct.messages, {
             id: `context-${crypto.randomUUID()}`, senderId: 'narrator', kind: 'context-note' as const,
             title: '群聊触发的私信', source: 'group-private',
-            text: `你因群聊「${getChatTitle(chat)}」的情境私下联系玩家：${socialActions.privateMessage.reason}`,
-            aiContext: `这是你从群聊转到私聊的背景，不是玩家说的话：${socialActions.privateMessage.reason}`,
+            text: privateContext,
+            aiContext: privateContext,
             createdAt: new Date().toISOString(),
           }, ...privateMessages],
           updatedAt: privateMessages[privateMessages.length - 1].createdAt,
@@ -3375,6 +3338,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         markMemoriesRecalled(memoryInjection.ids);
         void maybeAutoExtractMemory(chat.participantIds, chat.type);
         void maybeAutoJournal(chat.participantIds, chat.type).then(() => maybeAutoGrowth(chat.participantIds, chat.type));
+        if (chat.type !== 'direct') void maybeAutoGroupJournal(chat.id);
       }
       if (replySaved && coupleCharId && coupleDecision === 'invite') {
         const inviteTime = new Date().toISOString();
@@ -3533,6 +3497,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
     if (!window.confirm(`确定解散「${title}」？群聊和其中的聊天记录都会删除。`)) return;
     const remainingChats = chats.filter((chat) => chat.id !== chatSettingsDraft.id);
     if (!persistChats(remainingChats)) return;
+    deleteGroupJournal(chatSettingsDraft.id);
     setActiveChatId('');
     setChatSettingsOpen(false);
     setChatSettingsDraft(null);
@@ -5157,6 +5122,10 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                 />
               </label>
             )}
+            {chatSettingsDraft.type !== 'direct' && (
+              <GroupJournalPanel key={`${chatSettingsDraft.id}:${chatSettingsDraft.activeArchiveId ?? 'archive-default'}`}
+                chatId={chatSettingsDraft.id} />
+            )}
             {chatSettingsDraft.type === 'group' && (
               <section className="space-y-3 rounded-xl bg-slate-50 p-3">
                 <label className="block text-[11px] font-semibold text-[#2C4A5C]">
@@ -5430,7 +5399,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                       <p className="p-2 text-center text-[10px] text-slate-400">消息列表中还没有其他聊天记录</p>
                     )}
                   </div>
-                  <p className="text-[9px] leading-relaxed text-slate-400">可多选任意其他单聊、群聊或旁观群聊，并分别设置挂载条数；不会修改原记录。</p>
+                  <p className="text-[9px] leading-relaxed text-slate-400">可多选任意其他单聊、群聊或旁观群聊，并分别设置挂载条数；AI 会读取名称、成员及逐条来源，旁观群聊会注明玩家不在群内。有群流水账时也会补充原文窗口之前的摘要，不写入角色个人记忆，不修改原记录。</p>
                 </>
               )}
             </section>
@@ -6338,7 +6307,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                   <X className="h-4 w-4" />
                 </button>
               </header>
-              <p className="text-[11px] text-slate-500">每个存档保存独立聊天记录。角色私聊的长期记忆、流水账、成长笔记和整理进度也随档切换；新档从空白开始，删除档会一并删除对应内容。角色人设与玩家通用记忆仍共用，换身份时请自行检查。</p>
+              <p className="text-[11px] text-slate-500">每个存档保存独立聊天记录。角色私聊的长期记忆、流水账、成长笔记和整理进度，以及群聊、旁观聊天的群流水账和整理进度也随档切换；新档从空白开始，删除档会一并删除对应内容。角色人设与玩家通用记忆仍共用，换身份时请自行检查。</p>
               <div className="min-h-0 flex-1 space-y-2 overflow-y-auto">
                 {archives.map((archive) => {
                   const isActive = archive.id === activeId;

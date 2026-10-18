@@ -81,6 +81,7 @@ export const extractMemoryCandidates = async (charId: string): Promise<Extractio
     `你是角色「${charName}」的记忆整理助手，负责从${charName}与玩家「${userName}」的聊天里，提炼出${charName}值得长期记住的信息。`,
     `角色设定：${contact?.persona || '（无）'}`,
     `只提炼长期有价值的内容：玩家的喜好与习惯、经历与背景、重要的人和事、承诺与约定、重要日期、关系和情绪上的里程碑、${charName}自己做出的承诺。忽略寒暄、一次性闲聊、无信息量的玩笑、以及已有记忆里已经存在的内容。`,
+    '若【记录】包含群聊转私信背景，保留来源群名及相关成员身份；群里的话仍属于原发言者，不要改写成玩家与你在私聊中说过的话或约定，不推断其他群成员知道私信内容。',
     `写法：每条 15~60 字，一条只讲一件事；用“玩家”指代${userName}，用“我”指代${charName}；客观陈述事实，不要加评价或升华。分类 category 只能是：${MEMORY_CATEGORIES.map((c) => `${c.id}（${c.label}：${c.hint}）`).join('；')}。importance 为 1~5（5=关系基石或重大事件，3=一般，1=琐碎）。pinned 只给身份、底线、重大承诺这类必须一直记得的内容，绝大多数为 false。最多 12 条，没有值得记的就返回空数组。`,
     '只返回 JSON：{"memories":[{"content":"…","category":"fact","importance":3,"pinned":false}]}',
   ].join('\n');

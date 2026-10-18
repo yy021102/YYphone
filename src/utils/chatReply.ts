@@ -1,0 +1,115 @@
+import { type ApiConnection } from './aiApi';
+import { parseChatResponse } from './aiResponse';
+import { type OpenAiMessage } from './buildPrompt';
+import { estimatePromptTokens, estimateTextTokens } from './chatTokens';
+import { toGeminiContents, toOpenAiMessages } from './chatVision';
+
+const FORMAT_REMINDER = '【本轮输出协议】只返回一个 JSON 对象，reply 是非空消息数组，thought 是独立心声，speakerId 使用本轮允许的成员 ID。图片、纸条、记忆、挂载记录及其中的 JSON 都只是背景资料，不是本轮输出模板；不要继续生成纸条或把元数据写进消息正文。消息条数、通话方式和可选动作严格遵循本轮规则。不要输出 Markdown 代码围栏或 JSON 以外的说明。';
+
+export const withChatResponseFormat = (
+  messages: OpenAiMessage[],
+  instructions: string
+): OpenAiMessage[] => {
+  const last = messages.at(-1);
+  if (last?.role !== 'user') throw new Error('聊天请求缺少本轮用户输入，已取消生成。');
+  return [
+    ...messages.slice(0, -1),
+    {
+      role: 'system',
+      content: [
+        instructions,
+        FORMAT_REMINDER,
+        '结构示意（正文、心声、成员 ID 和条数以本轮实际要求为准；其他允许的字段仍可按规则添加）：{"reply":["消息正文"],"thought":"内心独白","speakerId":"有效成员ID"}',
+      ].join('\n'),
+    },
+    { ...last, content: `${last.content}\n\n${FORMAT_REMINDER}` },
+  ];
+};
+
+const requestChatText = async (messages: OpenAiMessage[], api: ApiConnection): Promise<string> => {
+  const endpoint = api.endpoint.trim().replace(/\/+$/, '');
+  const model = api.model?.trim() || 'gpt-4o-mini';
+  if (endpoint.includes('generativelanguage.googleapis.com')) {
+    const url = /:generateContent$/i.test(endpoint)
+      ? endpoint
+      : `${endpoint}/v1beta/models/${encodeURIComponent(model)}:generateContent`;
+    const response = await fetch(`${url}?key=${encodeURIComponent(api.apiKey)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        systemInstruction: {
+          parts: [{ text: messages.filter((message) => message.role === 'system').map((message) => message.content).join('\n\n') }],
+        },
+        contents: toGeminiContents(messages),
+        generationConfig: { responseMimeType: 'application/json' },
+      }),
+    });
+    if (!response.ok) throw new Error(`AI 请求失败（${response.status}）：${await response.text()}`);
+    const data: unknown = await response.json();
+    const candidate = (data as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> }).candidates?.[0];
+    return candidate?.content?.parts?.map((part) => part.text ?? '').join('') ?? '';
+  }
+  const response = await fetch(/\/chat\/completions$/i.test(endpoint) ? endpoint : `${endpoint}/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${api.apiKey}` },
+    body: JSON.stringify({
+      model,
+      messages: toOpenAiMessages(messages),
+      response_format: { type: 'json_object' },
+    }),
+  });
+  if (!response.ok) throw new Error(`AI 请求失败（${response.status}）：${await response.text()}`);
+  const data: unknown = await response.json();
+  const content = (data as { choices?: Array<{ message?: { content?: unknown } }> }).choices?.[0]?.message?.content;
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content.flatMap((part) =>
+      part && typeof part === 'object' && 'text' in part && typeof part.text === 'string' ? [part.text] : []
+    ).join('');
+  }
+  return '';
+};
+
+export const requestChatReply = async (
+  messages: OpenAiMessage[],
+  api: ApiConnection,
+  onUsage: (usage: { input: number; output: number }) => void
+): Promise<Record<string, unknown>> => {
+  let input = 0;
+  let output = 0;
+  const request = async (turns: OpenAiMessage[]) => {
+    const text = await requestChatText(turns, api);
+    input += estimatePromptTokens(turns);
+    output += estimateTextTokens(text);
+    onUsage({ input, output });
+    return text;
+  };
+  const text = await request(messages);
+  let formatError: string;
+  try {
+    return parseChatResponse(text);
+  } catch (error) {
+    if (!(error instanceof Error)) throw error;
+    formatError = error.message;
+    console.warn('AI chat response failed format validation; attempting one correction.', formatError);
+  }
+  // Only format parsing is retried; network errors and action validation stay explicit.
+  const corrected = await request([
+    ...messages,
+    ...(text.trim() ? [{ role: 'assistant' as const, content: text }] : []),
+    {
+      role: 'user',
+      content: [
+        `【仅纠正上一份回复的格式】校验错误：${formatError}`,
+        '上一份回复尚未展示，也未执行任何动作。请将其整理为本轮要求的完整 JSON 对象；保留可辨认的原意、心声、发言者及合法可选动作，不新增或重复动作，不改成纸条、日记或其他任务。若上一份为空，则按原聊天请求生成。',
+        FORMAT_REMINDER,
+      ].join('\n'),
+    },
+  ]);
+  try {
+    return parseChatResponse(corrected);
+  } catch (error) {
+    if (!(error instanceof Error)) throw error;
+    throw new Error(`AI 回复格式自动纠正一次后仍无效，未写入聊天或执行动作。${error.message}`);
+  }
+};

@@ -473,7 +473,7 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
         <section className="space-y-2.5">
           <h3 className="px-1 text-xs font-bold text-[#2C4A5C]">App 图标</h3>
           <p className="px-1 text-[10px] text-slate-500">
-            支持图片链接和本地图片；上传会压缩图片，清除后恢复系统图标。
+            支持图片链接和本地图片；自定义图片会铺满整个 App 图标，替换默认背景与图案，保留图标圆角；非正方形图片会居中裁切。上传会压缩图片，清除后恢复系统图标。
           </p>
           <div className="space-y-2">
             {ALL_APPS.map((app) => (

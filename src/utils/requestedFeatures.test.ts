@@ -3,7 +3,8 @@ import { afterEach, beforeEach, mock, test } from 'node:test';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { runInNewContext } from 'node:vm';
-import { INITIAL_USER_PROFILE } from '../data/mockData';
+import { DOCK_APPS, INITIAL_USER_PROFILE, MAIN_GRID_APPS } from '../data/mockData';
+import { HomeScreen } from '../components/HomeScreen';
 import { clearDbStorage } from './dbStorage';
 import { DEFAULT_FONT_SETTINGS, normalizeFontUrl, readFontSettings } from './fontSettings';
 import { DEFAULT_CHAT_RUNTIME, getRoundThought, isKeepAlivePlaying, isProactiveDue, permittedSticker, preserveRoundThoughts, proactiveInterval, readChatRuntimeSettings, startKeepAlive, stopKeepAlive } from './chatRuntime';
@@ -25,6 +26,14 @@ import { LITTLE_P_MESSAGES_KEY, LITTLE_P_VISIBLE_KEY, littlePHistory, littlePSys
 import { requestConfiguredAiText } from './aiApi';
 import { buildPrompt, type OpenAiMessage } from './buildPrompt';
 import { toGeminiContents, toOpenAiMessages } from './chatVision';
+import { requestChatReply, withChatResponseFormat } from './chatReply';
+import { buildGroupPrivateContext, describeChatSource } from './chatHistory';
+import {
+  buildGroupJournalInjection, deleteGroupJournal, deleteGroupJournalEntry, editGroupJournalEntry,
+  GROUP_JOURNAL_KEY, invalidateGroupJournal, maybeAutoGroupJournal, readGroupJournal,
+  runGroupJournal, setGroupJournalSettings,
+} from './groupJournal';
+import { GroupJournalPanel } from '../components/GroupJournalPanel';
 import { compressChatPhoto, compressImageFile } from './imageFile';
 import { createEmptyCoupleSpace, readCharacterBrief, readCoupleSpaces, writeCoupleSpaces } from './coupleSpaceData';
 import { readDirectMessages } from './journalData';
@@ -97,6 +106,281 @@ const paperFixture = () => {
 };
 const paperDate = () => new Date(2026, 9, 18, 20);
 const questionPaper = async (): Promise<PaperContent> => ({ kind: 'question', content: '今天看海时，你最喜欢哪个瞬间？' });
+
+test('home profile edit sits beside paper notes and custom grid and dock icons replace the whole tile', () => {
+  const render = (custom: boolean) => renderToStaticMarkup(createElement(HomeScreen, {
+    userProfile: INITIAL_USER_PROFILE,
+    apps: [{ ...MAIN_GRID_APPS[0], badge: 3 }],
+    dockApps: [DOCK_APPS[0]],
+    onOpenApp: () => {},
+    onSaveUserProfile: () => true,
+    appIcons: custom ? { [MAIN_GRID_APPS[0].id]: 'grid-icon.png', [DOCK_APPS[0].id]: 'dock-icon.png' } : {},
+  }));
+  const html = render(true);
+  assert.equal((html.match(/aria-label="编辑资料"/g) ?? []).length, 1);
+  assert.match(html, /title="编辑资料" class="[^"]*from-\[#DCEEFF\][^"]*to-white/);
+  assert.match(html, /title="编辑资料"[^]*?<\/button><button[^]*?aria-label="小纸条"/);
+  assert.match(html, /<img src="grid-icon.png" alt="" class="absolute inset-0 h-full w-full object-cover"/);
+  assert.match(html, /<img src="dock-icon.png" alt="" class="absolute inset-0 h-full w-full object-cover"/);
+  assert.ok(html.includes('>3</span>'), 'app badges remain outside the image tile');
+  for (const color of [MAIN_GRID_APPS[0].color, DOCK_APPS[0].color]) {
+    assert.ok(!html.includes(color), 'custom tiles must not retain the default gradient overlay');
+    assert.ok(render(false).includes(color), 'system tiles keep their original background');
+  }
+});
+
+const groupJournalFixture = (count = 30, type: 'group' | 'observer' = 'group', id = 'journal-group') => {
+  const chat = {
+    id, type, participantIds: ['journal-a', 'journal-b'], groupTitle: '旅行计划群',
+    groupNicknames: { 'journal-b': '小乙' }, noteName: '', context: '', activeArchiveId: 'old',
+    currentChatHistoryCount: 5,
+    messages: Array.from({ length: count }, (_, index) => ({
+      id: `${id}-m-${index}`, senderId: index % 2 ? 'journal-b' : 'journal-a',
+      text: `讨论周末计划${index}`, createdAt: new Date(Date.UTC(2026, 9, 18, 10, 0, index)).toISOString(),
+    })),
+  };
+  saveSetting('pocketos:wechat-contacts', [
+    { id: 'journal-a', name: '角色甲', persona: '甲设定', worldBooks: [] },
+    { id: 'journal-b', name: '角色乙', persona: '乙设定', worldBooks: [] },
+  ]);
+  saveSetting(WECHAT_CHATS_STORAGE_KEY, [chat]);
+  writeMemorySettings({
+    ...DEFAULT_MEMORY_SETTINGS, useSecondaryApi: true,
+    secondaryApi: { endpoint: 'https://group-journal.invalid/v1', apiKey: 'test', model: 'mock' },
+  });
+  return chat;
+};
+
+test('group journals default off, summarize named speakers and remain separate from character memories', async () => {
+  const chat = groupJournalFixture();
+  let calls = 0;
+  const requests: string[] = [];
+  mock.method(globalThis, 'fetch', async (_input: unknown, init?: RequestInit) => {
+    calls += 1;
+    requests.push(String(init?.body));
+    return new Response(JSON.stringify({ choices: [{ message: { content: '甲与乙在旅行计划群商量周末出行，乙负责查路线。' } }] }));
+  });
+  assert.equal(readGroupJournal(chat.id).auto, false);
+  assert.equal(readGroupJournal(chat.id).every, 100);
+  await maybeAutoGroupJournal(chat.id);
+  assert.equal(calls, 0);
+  assert.deepEqual(await runGroupJournal(chat.id), { created: 1, merged: 0 });
+  assert.equal(readGroupJournal(chat.id).pending, 0);
+  assert.equal(readGroupJournal(chat.id).entries[0].messageCount, 30);
+  assert.match(requests[0], /第三人称/);
+  assert.match(requests[0], /名称：旅行计划群/);
+  assert.match(requests[0], /角色乙（ID：journal-b；群昵称：小乙）/);
+  assert.equal(readMemories().length, 0);
+  assert.equal(readJournalEntries().length, 0);
+  assert.deepEqual(await runGroupJournal(chat.id), { created: 0, merged: 0 });
+  assert.equal(calls, 1);
+  assert.equal(buildGroupJournalInjection(chat.id, chat.messages[5].createdAt), '');
+  assert.match(buildGroupJournalInjection(chat.id, '2026-10-19'), /乙负责查路线/);
+  const html = renderToStaticMarkup(createElement(GroupJournalPanel, { chatId: chat.id }));
+  assert.match(html, /本群流水账/);
+  assert.match(html, /默认关闭/);
+  assert.match(html, /乙负责查路线/);
+  assert.match(html, /整理流水账/);
+});
+
+test('observer journals preserve absent players and mounted summaries only supplement older raw history', async () => {
+  const chat = groupJournalFixture(15, 'observer');
+  let request = '';
+  mock.method(globalThis, 'fetch', async (_input: unknown, init?: RequestInit) => {
+    request = String(init?.body);
+    return new Response(JSON.stringify({ choices: [{ message: { content: '甲乙商定周日去公园，玩家不在群内。' } }] }));
+  });
+  await runGroupJournal(chat.id);
+  assert.match(request, /旁观群聊/);
+  assert.match(request, /玩家不在这个群里/);
+  const later = { id: 'later', senderId: 'journal-a', text: '我们按计划出发', createdAt: '2026-10-19T10:00:00Z' };
+  chat.messages = [later];
+  const direct = {
+    ...chat, id: 'mounted-direct', type: 'direct', participantIds: ['journal-a'],
+    attachHistory: true, attachedHistoryChatIds: [chat.id], attachedHistoryCounts: { [chat.id]: 1 },
+    messages: [{ ...later, id: 'user-turn', senderId: 'user', text: '周末有什么安排' }],
+  };
+  saveSetting(WECHAT_CHATS_STORAGE_KEY, [chat, direct]);
+  assert.match(buildPrompt({ chatId: chat.id }).map((item) => item.content).join('\n'), /当前群聊的旧流水账/);
+  const prompt = buildPrompt({ chatId: direct.id }).map((item) => item.content).join('\n');
+  assert.match(prompt, /挂载群聊的旧流水账（仅背景）/);
+  assert.match(prompt, /甲乙商定周日去公园/);
+  saveSetting(WECHAT_CHATS_STORAGE_KEY, [chat, { ...direct, attachHistory: false }]);
+  assert.doesNotMatch(buildPrompt({ chatId: direct.id }).map((item) => item.content).join('\n'), /甲乙商定周日去公园/);
+  assert.equal(readMemories().length, 0);
+});
+
+test('group journals isolate groups and archives, reject stale tasks and clear only targeted scope', async () => {
+  const chat = groupJournalFixture();
+  const other = { ...chat, id: 'journal-other', groupTitle: '另一个群' };
+  saveSetting(WECHAT_CHATS_STORAGE_KEY, [chat, other]);
+  let switchDuringRequest = false;
+  mock.method(globalThis, 'fetch', async () => {
+    if (switchDuringRequest) {
+      saveSetting(WECHAT_CHATS_STORAGE_KEY, [{ ...chat, activeArchiveId: 'new' }, other]);
+      invalidateGroupJournal(chat.id);
+      saveSetting(WECHAT_CHATS_STORAGE_KEY, [chat, other]);
+    }
+    return new Response(JSON.stringify({ choices: [{ message: { content: '旧档群内商量出行。' } }] }));
+  });
+  await runGroupJournal(chat.id);
+  assert.equal(readGroupJournal(other.id).entries.length, 0);
+  saveSetting(WECHAT_CHATS_STORAGE_KEY, [{ ...chat, activeArchiveId: 'new' }, other]);
+  assert.equal(readGroupJournal(chat.id).entries.length, 0);
+  assert.equal(readGroupJournal(chat.id).pending, 30);
+  await runGroupJournal(chat.id);
+  deleteGroupJournal(chat.id, 'old');
+  assert.equal(readGroupJournal(chat.id).entries.length, 1);
+  saveSetting(WECHAT_CHATS_STORAGE_KEY, [chat, other]);
+  assert.equal(readGroupJournal(chat.id).entries.length, 0);
+  switchDuringRequest = true;
+  mock.method(console, 'error', () => {});
+  mock.method(console, 'warn', () => {});
+  await assert.rejects(runGroupJournal(chat.id), /切换、修改或删除/);
+  assert.equal(readGroupJournal(chat.id).entries.length, 0);
+  switchDuringRequest = false;
+  await runGroupJournal(other.id);
+  deleteGroupJournal(chat.id);
+  assert.equal(readGroupJournal(other.id).entries.length, 1);
+  assert.equal(readGroupJournal(chat.id).auto, false);
+});
+
+test('group automatic thresholds include 400 messages, same-time cursors and independent settings', async () => {
+  const chat = groupJournalFixture(400, 'group', 'journal-auto-400');
+  chat.messages = chat.messages.map((message) => ({ ...message, createdAt: '2026-10-18T10:00:00Z' }));
+  const other = { ...chat, id: 'journal-auto-off' };
+  saveSetting(WECHAT_CHATS_STORAGE_KEY, [chat, other]);
+  let calls = 0;
+  mock.method(globalThis, 'fetch', async () => {
+    calls += 1;
+    return new Response(JSON.stringify({ choices: [{ message: { content: '群内确认计划。' } }] }));
+  });
+  setGroupJournalSettings(chat.id, { auto: true, every: 400 });
+  await maybeAutoGroupJournal(other.id);
+  assert.equal(calls, 0);
+  await maybeAutoGroupJournal(chat.id);
+  assert.equal(readGroupJournal(chat.id).pending, 150);
+  assert.equal(readGroupJournal(chat.id).entries[0].messageCount, 250);
+  await runGroupJournal(chat.id);
+  assert.equal(readGroupJournal(chat.id).pending, 0);
+  assert.equal(calls, 2);
+  assert.equal(readGroupJournal(other.id).every, 100);
+  assert.throws(() => setGroupJournalSettings(chat.id, { every: 0 }), /30 到 400/);
+  assert.throws(() => setGroupJournalSettings(chat.id, { every: 401 }), /30 到 400/);
+});
+
+test('group journal compression keeps sources, bounds injection, and deleting a parent restores children', async () => {
+  const chat = groupJournalFixture(0);
+  const entries = Array.from({ length: 9 }, (_, index) => ({
+    id: `seed-${index}`, level: 1, from: `2026-01-${String(index + 1).padStart(2, '0')}T00:00:00Z`,
+    to: `2026-01-${String(index + 1).padStart(2, '0')}T01:00:00Z`, messageCount: 100,
+    content: `第${index}次讨论。`, source: `群名：旧群名${index}，成员：甲乙`, createdAt: '2026-01-01',
+  }));
+  saveSetting(GROUP_JOURNAL_KEY, {
+    version: 1, groups: { [chat.id]: { auto: false, every: 100, archives: { old: { entries, lastError: '' } } } },
+  });
+  let request = '';
+  mock.method(globalThis, 'fetch', async (_input: unknown, init?: RequestInit) => {
+    request = String(init?.body);
+    return new Response(JSON.stringify({ choices: [{ message: { content: '甲乙多次讨论后约定周日出行。' } }] }));
+  });
+  assert.deepEqual(await runGroupJournal(chat.id, { compressOnly: true }), { created: 0, merged: 1 });
+  const result = readGroupJournal(chat.id);
+  const parent = result.entries.find((entry) => entry.level === 2);
+  assert.ok(parent);
+  assert.equal(parent.messageCount, 500);
+  assert.match(parent.source, /旧群名0/);
+  assert.match(parent.source, /旧群名4/);
+  assert.match(request, /第三人称/);
+  assert.equal(result.entries.filter((entry) => entry.mergedInto === parent.id).length, 5);
+  editGroupJournalEntry(chat.id, parent.id, '人工纠正的出行约定');
+  assert.match(buildGroupJournalInjection(chat.id), /人工纠正的出行约定/);
+  assert.throws(() => editGroupJournalEntry(chat.id, parent.id, ' '), /不能为空/);
+  deleteGroupJournalEntry(chat.id, parent.id);
+  assert.equal(readGroupJournal(chat.id).entries.filter((entry) => !entry.mergedInto).length, 9);
+  assert.ok(buildGroupJournalInjection(chat.id).length < 8500);
+});
+
+test('group journal failures retain progress, serialize generation and detect edited source messages', async () => {
+  const chat = groupJournalFixture();
+  let mode = 'offline';
+  mock.method(console, 'error', () => {});
+  mock.method(console, 'warn', () => {});
+  mock.method(globalThis, 'fetch', async () => {
+    if (mode === 'offline') throw new Error('network offline');
+    if (mode === 'edit') {
+      saveSetting(WECHAT_CHATS_STORAGE_KEY, [{ ...chat, messages: chat.messages.slice(1) }]);
+    }
+    if (mode === 'concurrent') {
+      await assert.rejects(runGroupJournal(chat.id), /正在整理/);
+    }
+    return new Response(JSON.stringify({ choices: [{ message: { content: '群内计划摘要' } }] }));
+  });
+  await assert.rejects(runGroupJournal(chat.id), /network offline/);
+  assert.equal(readGroupJournal(chat.id).pending, 30);
+  assert.match(readGroupJournal(chat.id).lastError, /network offline/);
+  mode = 'edit';
+  await assert.rejects(runGroupJournal(chat.id), /已修改或删除/);
+  assert.equal(readGroupJournal(chat.id).entries.length, 0);
+  saveSetting(WECHAT_CHATS_STORAGE_KEY, [chat]);
+  mode = 'concurrent';
+  await runGroupJournal(chat.id);
+  assert.equal(readGroupJournal(chat.id).entries.length, 1);
+  assert.equal(readGroupJournal(chat.id).lastError, '');
+});
+
+test('invalid group journal storage is reported rather than overwritten', () => {
+  const chat = groupJournalFixture();
+  saveSetting(GROUP_JOURNAL_KEY, { version: 99, doNotLose: 'existing data' });
+  assert.throws(() => readGroupJournal(chat.id), /数据格式无效/);
+  assert.throws(() => setGroupJournalSettings(chat.id, { auto: true }), /数据格式无效/);
+  assert.deepEqual(readStoredValue<unknown>(GROUP_JOURNAL_KEY, null, (_value): _value is unknown => true),
+    { version: 99, doNotLose: 'existing data' });
+});
+
+test('group journals compress stages and long recaps and bound injected summary payloads', async () => {
+  const chat = groupJournalFixture(0);
+  mock.method(globalThis, 'fetch', async () =>
+    new Response(JSON.stringify({ choices: [{ message: { content: '甲乙最终确定计划与分工。' } }] })));
+  for (const level of [2, 3] as const) {
+    const entries = Array.from({ length: 7 }, (_, index) => ({
+      id: `level-${level}-${index}`, level, from: `2026-01-${String(index + 1).padStart(2, '0')}T00:00:00Z`,
+      to: `2026-01-${String(index + 1).padStart(2, '0')}T01:00:00Z`, messageCount: 500,
+      content: '旧事'.repeat(1500), source: '群名：旅行计划群；成员：甲乙', createdAt: '2026-01-01',
+    }));
+    saveSetting(GROUP_JOURNAL_KEY, {
+      version: 1, groups: { [chat.id]: { auto: false, every: 100, archives: { old: { entries, lastError: '' } } } },
+    });
+    const injection = buildGroupJournalInjection(chat.id);
+    assert.ok(injection.includes('旧事'));
+    assert.ok(injection.length < 8500, `${injection.length} characters must remain bounded`);
+    assert.deepEqual(await runGroupJournal(chat.id, { compressOnly: true }), { created: 0, merged: 1 });
+    const active = readGroupJournal(chat.id).entries.filter((entry) => !entry.mergedInto);
+    const recap = active.find((entry) => entry.content === '甲乙最终确定计划与分工。');
+    assert.ok(recap);
+    assert.equal(recap.level, 3);
+    assert.equal(recap.messageCount, 2000);
+    assert.equal(active.length, 4);
+  }
+});
+
+test('group journals do not expose forum forwards restricted to their original direct recipient', async () => {
+  const chat = groupJournalFixture(10);
+  saveSetting(WECHAT_CHATS_STORAGE_KEY, [{
+    ...chat, messages: chat.messages.map((message, index) => index ? message : {
+      ...message, kind: 'forum-forward', text: '仅限私聊的帖子正文', title: '仅限私聊的作者',
+      aiContext: '私密转发详情不得泄露', forumForwardTargetId: 'journal-a',
+    }),
+  }]);
+  let request = '';
+  mock.method(globalThis, 'fetch', async (_input: unknown, init?: RequestInit) => {
+    request = String(init?.body);
+    return new Response(JSON.stringify({ choices: [{ message: { content: '群内讨论了出游。' } }] }));
+  });
+  await runGroupJournal(chat.id);
+  assert.doesNotMatch(request, /仅限私聊的帖子正文|仅限私聊的作者|私密转发详情不得泄露/);
+  assert.match(request, /论坛转发内容不向本群开放/);
+});
 
 test('paper candidates only include real unblocked direct contacts with message history', () => {
   paperFixture();
@@ -1008,6 +1292,291 @@ test('AI JSON accepts fences and explanatory wrappers without exposing metadata 
   assert.throws(() => parseChatResponse(JSON.stringify({ reply: ['你好，以下是内容：{"reply":["第一句"],"thought":"元数据"}'] })), /元数据/);
   assert.deepEqual(parseAiJson('{"reply":["<think>正文中的标记</think>"]}'), { reply: ['<think>正文中的标记</think>'] });
   assert.throws(() => parseAiJson('说明 {"reply": [坏数据]}'), /JSON/);
+});
+
+test('chat format validation rejects malformed fields but preserves existing attachment shapes', () => {
+  for (const reply of [[null], [42], [' '], [{}], [{ text: 42 }], [{ kind: 'text', text: '' }]]) {
+    assert.throws(() => parseChatResponse(JSON.stringify({ reply })), /消息|正文/);
+  }
+  assert.throws(() => parseChatResponse('{"reply":["你好"],"thought":[]}'), /thought/);
+  assert.throws(() => parseChatResponse('{"reply":["你好"],"speakerId":{}}'), /speakerId/);
+  const reply = [
+    { kind: 'sticker', stickerId: 'builtin-1' },
+    { kind: 'pat' },
+    { kind: 'red-packet', amount: '1.00' },
+    { kind: 'transfer', amount: '2.00' },
+    { kind: 'link', title: '链接标题' },
+    { kind: 'image', text: '一张文字图卡' },
+    { kind: 'voice', text: '一段语音' },
+  ];
+  assert.deepEqual(parseChatResponse(JSON.stringify({ reply })).reply, reply);
+});
+
+test('live chat history uses JSON without changing stored messages, paper tasks or image payloads', async () => {
+  paperFixture();
+  await openDailyPaper(questionPaper, { now: paperDate, random: () => 0 });
+  const chats = readStoredValue(WECHAT_CHATS_STORAGE_KEY, [], Array.isArray);
+  chats[0].messages.push({ id: 'old-reply', senderId: 'paper-a', text: '我也想再去看海', createdAt: '2026-10-18T12:01:00Z' });
+  saveSetting(WECHAT_CHATS_STORAGE_KEY, chats);
+  const before = localStorage.getItem(WECHAT_CHATS_STORAGE_KEY);
+  const structured = buildPrompt({ chatId: 'chat-paper-a', structuredHistory: true });
+  const previous = structured.find((message) => message.role === 'assistant');
+  assert.deepEqual(JSON.parse(previous?.content ?? ''), {
+    speakerId: 'paper-a', reply: ['纸条角色甲：我也想再去看海'],
+  });
+  const plain = buildPrompt({ chatId: 'chat-paper-a' });
+  assert.equal(plain.find((message) => message.role === 'assistant')?.content, '纸条角色甲：我也想再去看海');
+  assert.match(structured.map((message) => message.content).join('\n'), /不是输出示例/);
+  assert.equal(localStorage.getItem(WECHAT_CHATS_STORAGE_KEY), before);
+});
+
+test('chat source descriptors distinguish group membership, real identities, NPC nicknames and observers', () => {
+  const names: Record<string, string> = { a: '角色甲', b: '角色乙', 'npc:friend': '朋友' };
+  const group = {
+    id: 'group-source', type: 'group' as const, groupTitle: '周末出游群', participantIds: ['a', 'b', 'npc:friend'],
+    groupNicknames: { a: '群昵称甲', 'npc:friend': '朋友昵称', user: '玩家群昵称' },
+  };
+  const descriptor = describeChatSource(group, (id) => names[id], '小雨');
+  assert.equal(descriptor.label, '群聊「周末出游群」');
+  for (const member of ['小雨（ID：user；群昵称：玩家群昵称）', '角色甲（ID：a；群昵称：群昵称甲）',
+    '角色乙（ID：b）', '朋友（ID：npc:friend；群昵称：朋友昵称）']) {
+    assert.ok(descriptor.text.includes(member), member);
+  }
+  const observer = describeChatSource({ ...group, type: 'observer', participantIds: ['user', 'a', 'b'] }, (id) => names[id], '小雨');
+  assert.equal(observer.label, '旁观群聊「周末出游群」');
+  assert.match(observer.text, /玩家不在这个群里/);
+  assert.doesNotMatch(observer.text, /ID：user/);
+  assert.equal(describeChatSource({ ...group, groupTitle: '', noteName: '群备注' }, (id) => names[id]).title, '群备注');
+  assert.equal(describeChatSource({ ...group, groupTitle: '', participantIds: ['a', 'missing'] }, (id) => names[id]).title, '角色甲、missing');
+});
+
+test('interleaved mounted group and observer messages retain sources even for notes, narration and photos', () => {
+  saveSetting('pocketos:wechat-contacts', [
+    { id: 'a', name: '角色甲', persona: '甲设定', worldBooks: [] },
+    { id: 'b', name: '角色乙', persona: '乙设定', worldBooks: [] },
+  ]);
+  const msg = (id: string, senderId: string, text: string, second: number) => ({
+    id, senderId, text, createdAt: `2026-10-18T10:00:${String(second).padStart(2, '0')}Z`,
+  });
+  const group = {
+    id: 'mounted-group', type: 'group', groupTitle: '同名群', participantIds: ['a', 'b'],
+    groupNicknames: { b: '小乙' }, noteName: '', context: '',
+    messages: [
+      msg('g1', 'b', '我周末去爬山', 1),
+      { ...msg('note', 'narrator', '群里的经历记录', 4), kind: 'context-note', source: 'offline' },
+      { ...msg('photo', 'user', '合照', 6), kind: 'image', imageUrl: 'data:image/png;base64,AQID' },
+    ],
+  };
+  const observer = {
+    ...group, id: 'mounted-observer', type: 'observer',
+    messages: [msg('o1', 'a', '我和乙已经约好了', 2), msg('narration', 'narrator', '乙点点头', 5)],
+  };
+  const direct = {
+    id: 'source-direct', type: 'direct', participantIds: ['a'], noteName: '', context: '',
+    attachHistory: true, attachedHistoryChatIds: [group.id, observer.id],
+    messages: [msg('d1', 'a', '私聊旧消息', 3), msg('d2', 'user', '刚才在说什么', 7)],
+  };
+  saveSetting(WECHAT_CHATS_STORAGE_KEY, [direct, group, observer]);
+  const before = localStorage.getItem(WECHAT_CHATS_STORAGE_KEY);
+  for (const structuredHistory of [false, true]) {
+    const prompt = buildPrompt({ chatId: direct.id, structuredHistory });
+    const header = prompt.filter((item) => item.role === 'system').map((item) => item.content).join('\n');
+    assert.match(header, /聊天类型：群聊；名称：同名群；聊天ID：mounted-group/);
+    assert.match(header, /聊天类型：旁观群聊；名称：同名群；聊天ID：mounted-observer/);
+    assert.match(header, /角色乙（ID：b；群昵称：小乙）/);
+    assert.match(header, /玩家不在这个群里/);
+    const history = prompt.map((item) => ({
+      ...item, text: structuredHistory && item.role === 'assistant' ? JSON.parse(item.content).reply[0] : item.content,
+    }));
+    assert.ok(history.some((item) => item.text === '【挂载群聊「同名群」·记录1】小乙（ID：b）：我周末去爬山'));
+    assert.ok(history.some((item) => item.text === '【挂载旁观群聊「同名群」·记录2】角色甲（ID：a）：我和乙已经约好了'));
+    assert.ok(history.some((item) => item.role === 'system' && item.text.startsWith('【挂载群聊「同名群」·记录1】') && item.text.includes('群里的经历记录')));
+    assert.ok(history.some((item) => item.role === 'system' && item.text === '【挂载旁观群聊「同名群」·记录2】旁白：（旁白：乙点点头）'));
+    const photo = prompt.find((item) => item.images?.length);
+    assert.match(photo?.content ?? '', /【挂载群聊「同名群」·记录1】/);
+    assert.deepEqual(photo?.images, ['data:image/png;base64,AQID']);
+    assert.equal(prompt.at(-1)?.content, '刚才在说什么');
+  }
+  assert.equal(localStorage.getItem(WECHAT_CHATS_STORAGE_KEY), before);
+});
+
+test('current group and observer contexts include sources without automatically mounting other conversations', () => {
+  saveSetting('pocketos:wechat-contacts', [
+    { id: 'a', name: '角色甲', persona: '甲设定', worldBooks: [] },
+    { id: 'b', name: '角色乙', persona: '乙设定', worldBooks: [] },
+  ]);
+  for (const type of ['group', 'observer'] as const) {
+    const chat = {
+      id: 'current-source', type, participantIds: ['a', 'b'], groupTitle: '读书群', noteName: '', context: '',
+      messages: [{ id: 'a1', senderId: 'b', text: '我读完了', createdAt: '2026-10-18T10:00:01Z' },
+        ...(type === 'group' ? [{ id: 'u1', senderId: 'user', text: '好看吗', createdAt: '2026-10-18T10:00:02Z' }] : [])],
+    };
+    saveSetting(WECHAT_CHATS_STORAGE_KEY, [
+      chat, { ...chat, id: 'not-mounted', messages: [{ id: 'secret', senderId: 'a', text: '不应自动挂载的内容', createdAt: '2026-10-18T10:00:00Z' }] },
+    ]);
+    const prompt = buildPrompt({ chatId: chat.id });
+    const text = prompt.map((item) => item.content).join('\n');
+    assert.match(text, /【当前聊天来源】/);
+    assert.ok(text.includes(`聊天类型：${type === 'group' ? '群聊' : '旁观群聊'}；名称：读书群`));
+    assert.ok(text.includes('角色乙（ID：b）'));
+    assert.match(prompt.at(-1)?.content ?? '', /【当前.*读书群/);
+    assert.doesNotMatch(text, /不应自动挂载的内容/);
+  }
+});
+
+test('group private provenance is durable in prompts and summaries, including legacy note titles', async () => {
+  const background = buildGroupPrivateContext({
+    id: 'source-group', type: 'group', groupTitle: '旅行群', participantIds: ['a', 'b'],
+  }, (id) => id === 'a' ? '角色甲' : '角色乙', '小雨', '问问玩家是不是累了');
+  assert.match(background, /名称：旅行群；聊天ID：source-group/);
+  assert.match(background, /小雨（ID：user）.*角色甲（ID：a）.*角色乙（ID：b）/);
+  saveSetting('pocketos:wechat-contacts', [{ id: 'a', name: '角色甲', persona: '甲设定', worldBooks: [] }]);
+  saveSetting(WECHAT_CHATS_STORAGE_KEY, [{
+    id: 'private-source', type: 'direct', participantIds: ['a'], noteName: '', context: '',
+    messages: [
+      { id: 'new-note', senderId: 'narrator', kind: 'context-note', source: 'group-private', title: '群聊触发的私信',
+        text: background, aiContext: background, createdAt: '2026-10-18T10:00:00Z' },
+      { id: 'old-note', senderId: 'narrator', kind: 'context-note', source: 'group-private', title: '群聊触发的私信',
+        text: '你因群聊「旧群名」的情境私下联系玩家：旧动机', aiContext: '这是转私聊的背景：旧动机', createdAt: '2026-10-18T10:00:01Z' },
+    ],
+  }]);
+  const prompt = buildPrompt({ chatId: 'private-source' }).map((item) => item.content).join('\n');
+  assert.match(prompt, /名称：旅行群；聊天ID：source-group/);
+  assert.match(prompt, /角色乙（ID：b）/);
+  assert.match(prompt, /旧群名/);
+  const summaries = readDirectMessages('a');
+  assert.match(summaries[0].text, /群聊转私信背景/);
+  assert.match(summaries[0].text, /名称：旅行群/);
+  assert.match(summaries[1].text, /旧群名/);
+  assert.doesNotMatch(summaries.map((item) => item.text).join('\n'), /闲鱼对话/);
+  assert.equal(readMemories().length, 0);
+  assert.equal(readJournalEntries().length, 0);
+  writeMemorySettings({
+    ...DEFAULT_MEMORY_SETTINGS, useSecondaryApi: true,
+    secondaryApi: { endpoint: 'https://memory-test.invalid/v1', apiKey: 'test', model: 'mock' },
+  });
+  const requests: string[] = [];
+  mock.method(globalThis, 'fetch', async (_input: unknown, init?: RequestInit) => {
+    requests.push(String(init?.body));
+    return new Response(JSON.stringify({ choices: [{ message: {
+      content: requests.length === 1 ? '{"memories":[]}' : '我因旅行群里的情境转到私聊关心玩家。',
+    } }] }));
+  });
+  await extractMemoryCandidates('a');
+  await createJournalEntry('a', { minMessages: 1 });
+  assert.equal(requests.length, 2);
+  for (const request of requests) {
+    assert.match(request, /来源群名及相关成员/);
+    assert.match(request, /名称：旅行群/);
+    assert.match(request, /角色乙（ID：b）/);
+    assert.match(request, /旧群名/);
+  }
+});
+
+test('format protocol remains last for photos, regeneration, observer chats and proactive contact', () => {
+  for (const task of ['普通聊天', '重生成：不能转账', '旁观群聊：user不在群里', '定时主动联系']) {
+    const source: OpenAiMessage[] = [
+      { role: 'system', content: '纸条记忆与世界书' },
+      { role: 'assistant', content: '{"speakerId":"c","reply":["旧消息"]}' },
+      { role: 'user', content: task, images: ['data:image/png;base64,AQID'] },
+    ];
+    const prepared = withChatResponseFormat(source, '保留旁白、语音、表情包和可选动作；本轮恰好3条');
+    assert.equal(source.at(-1)?.content, task);
+    assert.match(prepared.at(-2)?.content ?? '', /本轮恰好3条/);
+    assert.match(prepared.at(-2)?.content ?? '', /保留旁白、语音、表情包和可选动作/);
+    assert.match(prepared.at(-1)?.content ?? '', /只返回一个 JSON 对象/);
+    assert.match(prepared.at(-1)?.content ?? '', new RegExp(task));
+    assert.deepEqual(prepared.at(-1)?.images, source.at(-1)?.images);
+    assert.deepEqual(toOpenAiMessages(prepared).at(-1)?.content[1], {
+      type: 'image_url', image_url: { url: 'data:image/png;base64,AQID', detail: 'high' },
+    });
+    assert.deepEqual(toGeminiContents(prepared).at(-1)?.parts[1], {
+      inlineData: { mimeType: 'image/png', data: 'AQID' },
+    });
+  }
+  assert.throws(() => withChatResponseFormat([], '规则'), /用户输入/);
+});
+
+test('both chat APIs correct format once, preserve photos and optional actions, and count both requests', async () => {
+  mock.method(console, 'warn', () => {});
+  const messages = withChatResponseFormat([
+    { role: 'system', content: '纸条只是记忆，重生成不得转账' },
+    { role: 'user', content: '看这张照片', images: ['data:image/jpeg;base64,AQID'] },
+  ], '本轮一条消息，保留全部可选字段');
+  const valid = { reply: ['照片拍得不错'], thought: '我记得那天', speakerId: 'paper-a',
+    reaction: { emoji: '🥰' }, coupleSpaceAction: 'accept' };
+  for (const endpoint of ['https://chat-test.example/v1', 'https://generativelanguage.googleapis.com']) {
+    const requests: Array<{
+      generationConfig?: { responseMimeType: string };
+      contents?: Array<{ role: string }>;
+      response_format?: { type: string };
+      messages?: Array<{ role: string }>;
+    }> = [];
+    const usage: Array<{ input: number; output: number }> = [];
+    mock.method(globalThis, 'fetch', async (_input: unknown, init?: RequestInit) => {
+      requests.push(JSON.parse(String(init?.body)));
+      const text = requests.length === 1 ? '{"kind":"question","content":"错误地写成了纸条"}' : JSON.stringify(valid);
+      return new Response(JSON.stringify(endpoint.includes('googleapis') ?
+        { candidates: [{ content: { parts: [{ text }] } }] } :
+        { choices: [{ message: { content: text } }] }), { status: 200 });
+    });
+    assert.deepEqual(await requestChatReply(messages, { endpoint, apiKey: 'test' }, (value) => usage.push(value)), valid);
+    assert.equal(requests.length, 2);
+    assert.equal(usage.length, 2);
+    assert.equal(usage[0].input, estimatePromptTokens(messages));
+    assert.equal(usage[0].output, estimateTextTokens('{"kind":"question","content":"错误地写成了纸条"}'));
+    assert.ok(usage[1].input > usage[0].input * 2);
+    assert.equal(usage[1].output, usage[0].output + estimateTextTokens(JSON.stringify(valid)));
+    const correction = JSON.stringify(requests[1]);
+    assert.match(correction, /仅纠正上一份回复的格式/);
+    assert.match(correction, /尚未展示，也未执行任何动作/);
+    assert.match(correction, /AQID/);
+    assert.match(correction, /重生成不得转账/);
+    if (endpoint.includes('googleapis')) {
+      assert.equal(requests[1].generationConfig?.responseMimeType, 'application/json');
+      assert.equal(requests[1].contents?.at(-1)?.role, 'user');
+    } else {
+      assert.equal(requests[1].response_format?.type, 'json_object');
+      assert.equal(requests[1].messages?.at(-1)?.role, 'user');
+    }
+  }
+});
+
+test('valid chat output makes one request and never retries HTTP or network failures', async () => {
+  const messages: OpenAiMessage[] = [{ role: 'user', content: '你好' }];
+  const api = { endpoint: 'https://chat-test.example/v1', apiKey: 'test' };
+  let calls = 0;
+  let result: Response | Error = new Response(JSON.stringify({ choices: [{ message: { content: '{"reply":["你好"]}' } }] }));
+  mock.method(globalThis, 'fetch', async () => {
+    calls += 1;
+    if (result instanceof Error) throw result;
+    return result;
+  });
+  assert.deepEqual(await requestChatReply(messages, api, () => {}), { reply: ['你好'] });
+  assert.equal(calls, 1);
+  result = new Response('unavailable', { status: 503 });
+  await assert.rejects(requestChatReply(messages, api, () => {}), /503/);
+  assert.equal(calls, 2);
+  result = new Error('network offline');
+  await assert.rejects(requestChatReply(messages, api, () => {}), /network offline/);
+  assert.equal(calls, 3);
+});
+
+test('format correction is bounded, never substitutes plain text, and exposes correction request failures', async () => {
+  mock.method(console, 'warn', () => {});
+  const messages: OpenAiMessage[] = [{ role: 'user', content: '你好' }];
+  const api = { endpoint: 'https://chat-test.example/v1', apiKey: 'test' };
+  for (const second of ['仍然是纯文本', '{"reply":[{}]}', '{"reply":["你好"],"thought":[]}', 'http-error']) {
+    let calls = 0;
+    mock.method(globalThis, 'fetch', async () => {
+      calls += 1;
+      if (calls === 2 && second === 'http-error') return new Response('bad gateway', { status: 502 });
+      return new Response(JSON.stringify({ choices: [{ message: { content: calls === 1 ? '' : second } }] }));
+    });
+    await assert.rejects(requestChatReply(messages, api, () => {}),
+      second === 'http-error' ? /502/ : /自动纠正一次后仍无效，未写入聊天或执行动作/);
+    assert.equal(calls, 2);
+  }
 });
 
 test('custom-board post output accepts an optional title and wrapped post but validates content', () => {

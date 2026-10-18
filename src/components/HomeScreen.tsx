@@ -54,12 +54,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 
   const renderAppIcon = (
     iconName: string,
-    className = 'w-6 h-6 text-[#587589]',
-    imageUrl?: string
+    className = 'w-6 h-6 text-[#587589]'
   ) => {
-    if (imageUrl) {
-      return <img src={imageUrl} alt="" className={`${className} object-cover rounded-[22%]`} />;
-    }
     switch (iconName) {
       case 'MessageCircle':
         return <MessageCircle className={className} />;
@@ -98,23 +94,28 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       className="flex flex-col items-center justify-center group cursor-pointer active:scale-92 transition-transform p-1 w-full"
     >
       <div className="relative">
-        <div className="w-[clamp(44px,12.5vw,62px)] h-[clamp(44px,12.5vw,62px)] rounded-[clamp(14px,3.6vw,20px)] bg-white/50 backdrop-blur-xl border border-white/80 shadow-[0_4px_16px_rgba(180,210,230,0.35)] flex items-center justify-center relative overflow-hidden transition-all group-hover:bg-white/70 group-hover:shadow-[0_8px_24px_rgba(180,210,230,0.5)]">
-          {/* Subtle translucent tinted sheen */}
-          <div
-            className={`absolute inset-0 bg-gradient-to-br ${app.color} opacity-80 pointer-events-none`}
-          />
-          <div className="absolute inset-0 bg-gradient-to-t from-white/40 to-transparent pointer-events-none" />
+        <div className={`w-[clamp(44px,12.5vw,62px)] h-[clamp(44px,12.5vw,62px)] rounded-[clamp(14px,3.6vw,20px)] shadow-[0_4px_16px_rgba(180,210,230,0.35)] flex items-center justify-center relative overflow-hidden transition-all group-hover:shadow-[0_8px_24px_rgba(180,210,230,0.5)] ${
+          appIcons[app.id] ? '' : 'bg-white/50 backdrop-blur-xl border border-white/80 group-hover:bg-white/70'
+        }`}>
+          {appIcons[app.id] ? (
+            <img src={appIcons[app.id]} alt="" className="absolute inset-0 h-full w-full object-cover" />
+          ) : (
+            <>
+              <div
+                className={`absolute inset-0 bg-gradient-to-br ${app.color} opacity-80 pointer-events-none`}
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-white/40 to-transparent pointer-events-none" />
 
-          {/* Icon */}
-          <div className="relative z-10">
-            {renderAppIcon(
-              app.iconName,
-              `w-[clamp(22px,6vw,28px)] h-[clamp(22px,6vw,28px)] ${
-                app.textColor || 'text-[#587589]'
-              } stroke-[2.2] drop-shadow-xs`,
-              appIcons[app.id]
-            )}
-          </div>
+              <div className="relative z-10">
+                {renderAppIcon(
+                  app.iconName,
+                  `w-[clamp(22px,6vw,28px)] h-[clamp(22px,6vw,28px)] ${
+                    app.textColor || 'text-[#587589]'
+                  } stroke-[2.2] drop-shadow-xs`
+                )}
+              </div>
+            </>
+          )}
         </div>
 
         {/* Badge */}
@@ -153,15 +154,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             />
           )}
           <div className="absolute inset-0 opacity-40 bg-[radial-gradient(circle_at_30%_50%,rgba(255,255,255,0.8),transparent_60%)]" />
-          <button
-            type="button"
-            onClick={() => setIsProfileEditorOpen(true)}
-            aria-label="编辑资料"
-            title="编辑资料"
-            className="flex items-center justify-center w-7 h-7 rounded-full bg-white/80 backdrop-blur-md text-[#587589] border border-white/75 shadow-2xs relative z-10"
-          >
-            <Pencil className="w-3 h-3" />
-          </button>
         </div>
 
         {/* Profile Content Body */}
@@ -218,11 +210,15 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             </span>
           </div>
 
-          {/* Signature / Bio + 物品小盒子 */}
+          {/* Signature / Bio + profile actions */}
           <div className="mb-1.5 flex items-center justify-between gap-2">
             <p className="min-w-0 flex-1 text-[clamp(10px,2.5vw,11.5px)] text-[#587589]/85 line-clamp-1 font-normal leading-snug">
               {userProfile.signature}
             </p>
+            <button type="button" aria-label="编辑资料" title="编辑资料" onClick={() => setIsProfileEditorOpen(true)}
+              className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-lg border border-white/80 bg-gradient-to-br from-[#DCEEFF] to-white text-[#6F8CA0] shadow-2xs active:scale-90">
+              <Pencil className="h-3 w-3" />
+            </button>
             <button type="button" aria-label="小纸条" title="小纸条" onClick={() => setPaperNotesOpen(true)}
               className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-lg border border-white/80 bg-gradient-to-br from-[#DCEEFF] to-white text-[#6F8CA0] shadow-2xs active:scale-90">
               <Mail className="h-3 w-3" />
@@ -279,22 +275,28 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             onClick={() => onOpenApp(dockApp.id)}
             className="flex flex-col items-center cursor-pointer active:scale-90 transition-transform group py-0.5 px-2"
           >
-            <div className="w-[clamp(44px,11.8vw,54px)] h-[clamp(44px,11.8vw,54px)] rounded-[clamp(13px,3.2vw,17px)] bg-white/50 backdrop-blur-xl border border-white/80 shadow-[0_3px_12px_rgba(180,210,230,0.25)] flex items-center justify-center relative overflow-hidden transition-all group-hover:bg-white/70 group-hover:-translate-y-0.5">
-              {/* Soft translucent sheen */}
-              <div
-                className={`absolute inset-0 bg-gradient-to-br ${dockApp.color} opacity-80 pointer-events-none`}
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-white/40 to-transparent pointer-events-none" />
+            <div className={`w-[clamp(44px,11.8vw,54px)] h-[clamp(44px,11.8vw,54px)] rounded-[clamp(13px,3.2vw,17px)] shadow-[0_3px_12px_rgba(180,210,230,0.25)] flex items-center justify-center relative overflow-hidden transition-all group-hover:-translate-y-0.5 ${
+              appIcons[dockApp.id] ? '' : 'bg-white/50 backdrop-blur-xl border border-white/80 group-hover:bg-white/70'
+            }`}>
+              {appIcons[dockApp.id] ? (
+                <img src={appIcons[dockApp.id]} alt="" className="absolute inset-0 h-full w-full object-cover" />
+              ) : (
+                <>
+                  <div
+                    className={`absolute inset-0 bg-gradient-to-br ${dockApp.color} opacity-80 pointer-events-none`}
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-white/40 to-transparent pointer-events-none" />
 
-              <div className="relative z-10">
-                {renderAppIcon(
-                  dockApp.iconName,
-                  `w-[clamp(22px,5.8vw,26px)] h-[clamp(22px,5.8vw,26px)] ${
-                    dockApp.textColor || 'text-[#587589]'
-                  } stroke-[2.2] drop-shadow-xs`,
-                  appIcons[dockApp.id]
-                )}
-              </div>
+                  <div className="relative z-10">
+                    {renderAppIcon(
+                      dockApp.iconName,
+                      `w-[clamp(22px,5.8vw,26px)] h-[clamp(22px,5.8vw,26px)] ${
+                        dockApp.textColor || 'text-[#587589]'
+                      } stroke-[2.2] drop-shadow-xs`
+                    )}
+                  </div>
+                </>
+              )}
             </div>
             <span className="mt-[clamp(2px,0.4vh,3px)] text-[clamp(10px,2.5vw,11.5px)] font-semibold text-[#587589] leading-tight">
               {dockApp.name}

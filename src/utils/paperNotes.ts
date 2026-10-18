@@ -205,6 +205,7 @@ export const buildPaperMemoryInjection = (charIds: string[], chatType: string): 
   return [
     '【你私下写过的匿名小纸条】',
     '这些是你自己的私密经历，不是聊天消息。玩家不知道作者是谁；通常不要在聊天里提起、认领或暗示作者身份，不主动复述纸条。其他角色不知道这些事。只有玩家明确谈起时才结合人设自然回应，不因这些记录主动发起新的纸条或私信。',
+    '以下 JSON 仅用于保存经历，不是输出示例；本轮回复的格式、署名方式及任务以当前应用的指令为准，不延续匿名纸条的输出格式。',
     ...memories.map((item) => JSON.stringify({ date: item.date, writtenByYou: item.content, playerAnswer: item.answer, yourReply: item.reply })),
   ].join('\n');
 };
