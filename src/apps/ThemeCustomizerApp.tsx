@@ -249,11 +249,10 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
 
   const handleExport = () => {
     const exportPresets: BeautyPreset[] = [
-      ...presets,
       {
         id: 'current-design',
         name: '当前搭配',
-        settings: draftSettings,
+        settings: currentSettings,
       },
     ];
     const content = JSON.stringify(
@@ -267,7 +266,7 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
     anchor.download = 'yyphone-beauty.json';
     anchor.click();
     URL.revokeObjectURL(url);
-    setStatus('美化搭配已导出为 JSON 文件。');
+    setStatus('当前已应用的美化已导出为 JSON 文件，不包含其他预设或未保存修改。');
     setError('');
   };
 
@@ -604,7 +603,7 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
           <h3 className="px-1 text-xs font-bold text-[#2C4A5C]">导入、导出美化</h3>
           <div className="glass-card rounded-2xl p-3 space-y-2">
             <p className="text-[10px] text-slate-500">
-              导出文件包含当前搭配和已保存预设；导入后保存全部搭配并应用第一套。
+              只导出当前已应用的美化，不包含已保存的其他预设或未保存修改；导入后保存文件中的搭配并应用第一套，仍兼容旧版多预设文件。
             </p>
             <button
               type="button"

@@ -107,6 +107,51 @@ const paperFixture = () => {
 const paperDate = () => new Date(2026, 9, 18, 20);
 const questionPaper = async (): Promise<PaperContent> => ({ kind: 'question', content: '今天看海时，你最喜欢哪个瞬间？' });
 
+test('beauty export includes only applied appearance, not saved presets or unsaved drafts', async () => {
+  const source = readFileSync(resolve('src', 'apps', 'ThemeCustomizerApp.tsx'), 'utf8');
+  const handler = source.split('  const handleExport = () => {')[1]?.split('\n  };')[0];
+  assert.ok(handler);
+  const currentSettings = {
+    themeId: 'ocean-dawn', wallpaperId: 'dreamy-sky',
+    wallpapers: { lockScreen: 'applied-lock.png', homeScreen: 'applied-home.png' },
+    appIcons: { wechat: 'applied-icon.png' },
+    homeAppearance: captureHomeAppearance(INITIAL_USER_PROFILE),
+    lockScreenAppearance: { textColor: '#123456', subtitle: '当前锁屏文字' },
+  };
+  for (const presets of [[], [{ id: 'private-preset', name: '不应导出', settings: { ...currentSettings, appIcons: { wechat: 'private-icon.png' } } }]]) {
+    let exported: Blob | undefined;
+    let clicked = false;
+    let revoked = '';
+    let status = '';
+    let error = 'previous error';
+    const anchor = { href: '', download: '', click: () => { clicked = true; } };
+    runInNewContext(`(() => {${handler.replace(': BeautyPreset[]', '')}\n})();`, {
+      currentSettings, presets,
+      draftSettings: { ...currentSettings, wallpapers: { homeScreen: 'unsaved.png', lockScreen: '' } },
+      Blob, JSON,
+      URL: {
+        createObjectURL: (blob: Blob) => { exported = blob; return 'blob:beauty-test'; },
+        revokeObjectURL: (url: string) => { revoked = url; },
+      },
+      document: { createElement: () => anchor },
+      setStatus: (value: string) => { status = value; },
+      setError: (value: string) => { error = value; },
+    });
+    assert.ok(exported);
+    const payload = JSON.parse(await exported.text());
+    assert.deepEqual(payload, {
+      format: 'yyphone-beauty', version: 1,
+      presets: [{ id: 'current-design', name: '当前搭配', settings: JSON.parse(JSON.stringify(currentSettings)) }],
+    });
+    assert.equal(exported.type, 'application/json');
+    assert.equal(anchor.download, 'yyphone-beauty.json');
+    assert.equal(clicked, true);
+    assert.equal(revoked, 'blob:beauty-test');
+    assert.match(status, /当前已应用/);
+    assert.equal(error, '');
+  }
+});
+
 test('home profile edit sits beside paper notes and custom grid and dock icons replace the whole tile', () => {
   const render = (custom: boolean) => renderToStaticMarkup(createElement(HomeScreen, {
     userProfile: INITIAL_USER_PROFILE,
