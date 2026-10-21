@@ -10,8 +10,11 @@ import type {
 import { requestConfiguredAiText } from './aiApi';
 import { readCharacterBrief } from './coupleSpaceData';
 import { PhoneHealth, PhoneWallet, readCharacterWallet, readRecentMoneyEvents } from './phoneData';
+import { buildPrompt } from './buildPrompt';
+import { readStorageString } from './localStorage';
 
 export type PhoneGenScope = 'wechat' | 'album' | 'browser' | 'notes' | 'icity' | 'agent' | 'wallet' | 'health';
+export const PHONE_GEN_SCOPES: PhoneGenScope[] = ['wechat', 'album', 'browser', 'notes', 'icity', 'agent', 'wallet', 'health'];
 
 export interface PhoneGenContext {
   charId: string;
@@ -101,20 +104,51 @@ ${money || '（暂无）'}
 };
 
 export const generatePhoneScope = async (
-  scope: PhoneGenScope,
+  scope: PhoneGenScope | 'all',
   ctx: PhoneGenContext,
   prev: CharacterPhoneData
 ): Promise<Partial<CharacterPhoneData>> => {
   const brief = readCharacterBrief(ctx.charId, { configuredHistory: true });
   const prevWallet = scope === 'wallet' ? (prev.wallet ?? readCharacterWallet(ctx.charId)) : null;
+  const chats: unknown = JSON.parse(readStorageString('yyphone:wechat-chats') ?? '[]');
+  const chat = Array.isArray(chats) ? chats.find((item: unknown) => isRecord(item) &&
+    item.type === 'direct' && Array.isArray(item.participantIds) &&
+    item.participantIds.length === 1 && item.participantIds[0] === ctx.charId) : undefined;
+  const background = buildPrompt({ chatId: chat && typeof chat.id === 'string' ? chat.id : '',
+    backgroundCharacterId: ctx.charId, currentInput: '' });
+  const scopes = scope === 'all' ? PHONE_GEN_SCOPES : [scope];
   const system = [
-    `你要为角色「${ctx.charName}」生成他/她自己手机里的「${SCOPE_LABEL[scope]}」内容，供玩家“查手机”时偷看。`,
+    ...background.filter((message) => message.role === 'system').map((message) => message.content),
+    '【当前唯一任务：生成查手机内容】以上微信输出协议和社交动作只作背景，不要执行；只按本次查手机 JSON 格式输出。',
+    `你要为角色「${ctx.charName}」生成他/她自己手机里的「${scopes.map((item) => SCOPE_LABEL[item]).join('、')}」内容，供玩家“查手机”时偷看。`,
     `角色人设：${brief.persona || '（无详细人设，请合理发挥）'}`,
-    brief.recentChat ? `角色与玩家「${ctx.userName}」最近的微信对话（供你保持剧情连贯）：\n${brief.recentChat}` : '',
     '要求：完全贴合人设与当前剧情，有生活感和细节，不要套话、不要客服腔；内容必须是角色自己的真实痕迹，不要出现“作为AI”之类的字眼；只返回 JSON，不要多余文字。',
   ].filter(Boolean).join('\n');
-  const result = parseJson(await requestConfiguredAiText(system, scopeSpec(scope, ctx, prevWallet), { json: true }));
+  const task = scope === 'all'
+    ? `一次生成以下所有模块，返回一个以 ${scopes.join('、')} 为键的 JSON 对象，每个值按对应模块的格式填写，不能遗漏：\n${scopes.map((item) =>
+      `【${item}】\n${scopeSpec(item, ctx, item === 'wallet' ? prev.wallet ?? readCharacterWallet(ctx.charId) : null)}`).join('\n\n')}`
+    : scopeSpec(scope, ctx, prevWallet);
+  const result = parseJson(await requestConfiguredAiText(system, task, {
+    json: true, includeGlobalWorldBooks: false,
+    history: background.flatMap((message) => message.role === 'system' ? [] : [{ role: message.role, content: message.content }]),
+    ...(scope === 'all' ? { maxTokens: 16000 } : {}),
+  }));
+  if (scope !== 'all') return parsePhoneScope(scope, result, ctx, prev, prevWallet);
+  return Object.assign({}, ...scopes.map((item) => {
+    const section = result[item];
+    if (!isRecord(section)) throw new Error(`AI 遗漏了手机模块 ${SCOPE_LABEL[item]}，未保存，请重试。`);
+    if (item === 'agent' && ['doubaoTurns', 'claudeTurns'].some((key) =>
+      !list(section[key]).some((turn) => str(turn.content, 800)))) {
+      throw new Error('AI 未生成两个助手的完整对话，未保存，请重试。');
+    }
+    return parsePhoneScope(item, section, ctx, prev, item === 'wallet' ? prev.wallet ?? readCharacterWallet(ctx.charId) : null);
+  }));
+};
 
+const parsePhoneScope = (
+  scope: PhoneGenScope, result: Record<string, unknown>, ctx: PhoneGenContext,
+  prev: CharacterPhoneData, prevWallet: PhoneWallet | null
+): Partial<CharacterPhoneData> => {
   switch (scope) {
     case 'wechat': {
       const threads: PhoneWeChatThread[] = list(result.threads).slice(0, 3).map((thread, index) => {
@@ -222,6 +256,11 @@ export const generatePhoneScope = async (
       };
     }
     case 'health': {
+      if (!['sleepHours', 'steps', 'screenTimeMinutes'].every((key) =>
+        typeof result[key] === 'number' && Number.isFinite(result[key])) ||
+        typeof result.sleepNote !== 'string') {
+        throw new Error('AI 没有生成完整的健康数据，未保存，请重试。');
+      }
       const health: PhoneHealth = {
         sleepHours: Math.min(14, Math.max(0, Math.round(num(result.sleepHours, 7) * 10) / 10)),
         sleepNote: str(result.sleepNote, 40),

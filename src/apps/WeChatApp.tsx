@@ -29,6 +29,7 @@ import {
   Archive,
   Phone,
   Pencil,
+  Volume2,
 } from 'lucide-react';
 import { AppHeader } from '../components/AppHeader';
 import { MomentsTab } from '../components/MomentsTab';
@@ -44,6 +45,7 @@ import { buildGroupPrivateContext } from '../utils/chatHistory';
 import { deleteGroupJournal, invalidateGroupJournal, maybeAutoGroupJournal } from '../utils/groupJournal';
 import { GroupJournalPanel } from '../components/GroupJournalPanel';
 import { requestChatReply, withChatResponseFormat } from '../utils/chatReply';
+import { generateImage, readImageGenerationSettings } from '../utils/imageGeneration';
 import { showYyError, useErrorDialog } from '../components/ErrorDialog';
 import { AvatarFrameEditor } from '../components/AvatarFrameEditor';
 import { CallScreen } from '../components/CallScreen';
@@ -90,6 +92,7 @@ import {
   readCharacterNpcs,
   writeCharacterNpcs,
 } from '../utils/characterNpcs';
+import { synthesizeVoice } from '../utils/voiceModel';
 
 interface WeChatAppProps {
   onBack: () => void;
@@ -121,6 +124,9 @@ interface ContactPersona {
   group: string;
   starred: boolean;
   linkedNpcIds?: string[];
+  voiceEnabled?: boolean;
+  voiceId?: string;
+  voiceLanguage?: string;
 }
 
 interface ContactWorldBookEntry {
@@ -169,18 +175,43 @@ const shouldShowTimestamp = (previous: string | undefined, current: string) => {
   return Number.isNaN(previousTime) || currentTime - previousTime >= TIMESTAMP_GAP_MS;
 };
 
-const formatChatTimestamp = (value: string) => {
+const formatChatTimestamp = (value: string, timeZone?: string): string => {
   const date = new Date(value);
   const now = new Date();
   const pad = (n: number) => String(n).padStart(2, '0');
-  const clock = `${pad(date.getHours())}:${pad(date.getMinutes())}`;
-  const dayStart = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-  const dayDiff = Math.round((dayStart(now) - dayStart(date)) / 86400000);
+  const makeDateParts = (d: Date) => Object.fromEntries(
+    new Intl.DateTimeFormat('en', {
+      timeZone,
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+      weekday: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    }).formatToParts(d).map((part) => [part.type, part.value])
+  );
+  let dateFields: Record<string, string>;
+  let nowFields: Record<string, string>;
+  try {
+    dateFields = makeDateParts(date);
+    nowFields = makeDateParts(now);
+  } catch (error) {
+    console.error('Could not format chat timestamp for the selected time zone.', error);
+    return timeZone ? formatChatTimestamp(value) : value;
+  }
+  const clock = `${pad(Number(dateFields.hour))}:${pad(Number(dateFields.minute))}`;
+  const dayStart = (fields: Record<string, string>) =>
+    Date.UTC(Number(fields.year), Number(fields.month) - 1, Number(fields.day));
+  const dayDiff = Math.round((dayStart(nowFields) - dayStart(dateFields)) / 86400000);
   if (dayDiff === 0) return clock;
   if (dayDiff === 1) return `昨天 ${clock}`;
-  if (dayDiff > 1 && dayDiff < 7) return `${['周日', '周一', '周二', '周三', '周四', '周五', '周六'][date.getDay()]} ${clock}`;
-  if (date.getFullYear() === now.getFullYear()) return `${date.getMonth() + 1}月${date.getDate()}日 ${clock}`;
-  return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日 ${clock}`;
+  if (dayDiff > 1 && dayDiff < 7) {
+    const weekday = { Sun: '周日', Mon: '周一', Tue: '周二', Wed: '周三', Thu: '周四', Fri: '周五', Sat: '周六' }[dateFields.weekday];
+    return `${weekday ?? dateFields.weekday} ${clock}`;
+  }
+  if (dateFields.year === nowFields.year) return `${dateFields.month}月${dateFields.day}日 ${clock}`;
+  return `${dateFields.year}年${dateFields.month}月${dateFields.day}日 ${clock}`;
 };
 
 interface ChatMessage {
@@ -345,6 +376,10 @@ interface ChatConversation {
   proactiveEnabled?: boolean;
   proactiveIntervalMinutes?: number;
   lastProactiveAt?: string;
+  timeAwarenessEnabled?: boolean;
+  timeZone?: string;
+  imageGenerationEnabled?: boolean;
+  imageGenerationPrompt?: string;
 }
 
 const CONTACTS_STORAGE_KEY = 'pocketos:wechat-contacts';
@@ -438,6 +473,9 @@ const isContactList = (value: unknown): value is ContactPersona[] =>
       (contact.linkedNpcIds === undefined ||
         (Array.isArray(contact.linkedNpcIds) &&
           contact.linkedNpcIds.every((id: unknown) => typeof id === 'string'))) &&
+      (contact.voiceEnabled === undefined || typeof contact.voiceEnabled === 'boolean') &&
+      (contact.voiceId === undefined || typeof contact.voiceId === 'string') &&
+      (contact.voiceLanguage === undefined || typeof contact.voiceLanguage === 'string') &&
       Array.isArray(contact.worldBooks) &&
       contact.worldBooks.every(
         (link: ContactWorldBookLink) =>
@@ -548,6 +586,10 @@ export const isStrictChatList = (value: unknown): value is ChatConversation[] =>
       (chat.allowGroupPrivate === undefined || typeof chat.allowGroupPrivate === 'boolean') &&
       (chat.allowAutoMoments === undefined || typeof chat.allowAutoMoments === 'boolean') &&
       (chat.allowAutoCouple === undefined || typeof chat.allowAutoCouple === 'boolean') &&
+      (chat.timeAwarenessEnabled === undefined || typeof chat.timeAwarenessEnabled === 'boolean') &&
+      (chat.timeZone === undefined || typeof chat.timeZone === 'string') &&
+      (chat.imageGenerationEnabled === undefined || typeof chat.imageGenerationEnabled === 'boolean') &&
+      (chat.imageGenerationPrompt === undefined || typeof chat.imageGenerationPrompt === 'string') &&
       (chat.attachedHistoryChatIds === undefined ||
         (Array.isArray(chat.attachedHistoryChatIds) &&
           chat.attachedHistoryChatIds.every((id: unknown) => typeof id === 'string'))) &&
@@ -871,6 +913,9 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
   const [isGeneratingReply, setIsGeneratingReply] = useState(false);
   const [selectedMessageId, setSelectedMessageId] = useState('');
   const [reactionMenuId, setReactionMenuId] = useState('');
+  const [voicePlaybackMessageId, setVoicePlaybackMessageId] = useState('');
+  const voiceAudioRef = useRef<HTMLAudioElement | null>(null);
+  const voiceObjectUrlRef = useRef('');
   const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
   const [hiddenMessageIds, setHiddenMessageIds] = useState<string[]>([]);
   const HISTORY_PAGE_SIZE = 15;
@@ -1412,6 +1457,9 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       worldBooks: [],
       group: '',
       starred: false,
+      voiceEnabled: false,
+      voiceId: '',
+      voiceLanguage: '中文',
     });
     setNpcDraft({ id: '', name: '', avatarUrl: '', persona: '' });
     setSelectedSharedNpcIds([]);
@@ -1631,6 +1679,9 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
           forumHandle: normalizeForumHandle(typeof record.forumHandle === 'string' ? record.forumHandle : ''),
           ...(Array.isArray(record.stickerCategories) && record.stickerCategories.every((item) => typeof item === 'string')
             ? { stickerCategories: record.stickerCategories } : {}),
+          voiceEnabled: record.voiceEnabled === true,
+          voiceId: typeof record.voiceId === 'string' ? record.voiceId : '',
+          voiceLanguage: typeof record.voiceLanguage === 'string' ? record.voiceLanguage : '中文',
           persona:
             typeof record.persona === 'string'
               ? record.persona
@@ -1974,6 +2025,10 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       replyMessageMin: range.min,
       replyMessageMax: range.max,
       includeLatestThought: chat.includeLatestThought ?? false,
+      timeAwarenessEnabled: chat.timeAwarenessEnabled ?? true,
+      timeZone: chat.timeZone ?? '',
+      imageGenerationEnabled: chat.imageGenerationEnabled ?? false,
+      imageGenerationPrompt: chat.imageGenerationPrompt ?? '',
     });
     setChatSettingsOpen(true);
   };
@@ -1990,6 +2045,14 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
     if (chatSettingsDraft.type !== 'direct' && chatSettingsDraft.participantIds.length < 2) {
       setChatError('群聊至少需要两位角色或 NPC。');
       return;
+    }
+    if (chatSettingsDraft.timeZone) {
+      try {
+        new Intl.DateTimeFormat('en', { timeZone: chatSettingsDraft.timeZone });
+      } catch {
+        setChatError('时区无效，请从列表中重新选择。');
+        return;
+      }
     }
     const attachedHistoryChatIds = getAttachedHistoryChatIds(chatSettingsDraft);
     const messageRange = getReplyMessageRange(chatSettingsDraft);
@@ -2161,6 +2224,55 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
     setSelectedMessageId('');
   };
 
+  const copyChatMessage = async (message: ChatMessage) => {
+    try {
+      await navigator.clipboard.writeText(message.text);
+      setReactionMenuId('');
+    } catch (error) {
+      console.error('Could not copy chat message.', error);
+      setChatError('复制失败，请检查浏览器剪贴板权限。');
+    }
+  };
+
+  const playCharacterVoice = async (message: ChatMessage, speaker: ContactPersona) => {
+    if (!speaker.voiceEnabled || !speaker.voiceId?.trim()) return;
+    setVoicePlaybackMessageId(message.id);
+    setChatError('');
+    let playbackStarted = false;
+    let objectUrl = '';
+    let audio: HTMLAudioElement | null = null;
+    try {
+      const audioBlob = await synthesizeVoice(
+        message.text,
+        speaker.voiceId,
+        speaker.voiceLanguage?.trim() || '中文'
+      );
+      voiceAudioRef.current?.pause();
+      if (voiceObjectUrlRef.current) URL.revokeObjectURL(voiceObjectUrlRef.current);
+      objectUrl = URL.createObjectURL(audioBlob);
+      voiceObjectUrlRef.current = objectUrl;
+      audio = new Audio(objectUrl);
+      voiceAudioRef.current = audio;
+      audio.onended = () => {
+        URL.revokeObjectURL(objectUrl);
+        if (voiceObjectUrlRef.current === objectUrl) voiceObjectUrlRef.current = '';
+        if (voiceAudioRef.current === audio) voiceAudioRef.current = null;
+        setVoicePlaybackMessageId('');
+      };
+      await audio.play();
+      playbackStarted = true;
+    } catch (error) {
+      audio?.pause();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      if (voiceObjectUrlRef.current === objectUrl) voiceObjectUrlRef.current = '';
+      if (voiceAudioRef.current === audio) voiceAudioRef.current = null;
+      console.error('Could not play character voice.', error);
+      setChatError(error instanceof Error ? error.message : '语音播放失败，请检查语音模型配置和网络。');
+    } finally {
+      if (!playbackStarted) setVoicePlaybackMessageId('');
+    }
+  };
+
   const messagePress = (messageId: string) => ({
     onTouchStart: () => {
       if (messagePressTimerRef.current) clearTimeout(messagePressTimerRef.current);
@@ -2186,6 +2298,11 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
     }
     setSelectedMessageId(selectedMessageId === messageId ? '' : messageId);
   };
+
+  useEffect(() => () => {
+    voiceAudioRef.current?.pause();
+    if (voiceObjectUrlRef.current) URL.revokeObjectURL(voiceObjectUrlRef.current);
+  }, []);
 
   const deleteSelectedMessages = () => {
     const chat = chats.find((item) => item.id === activeChatId);
@@ -2792,6 +2909,10 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         coupleInjection,
         plantInjection,
         memoryInjection,
+        timeAwarenessEnabled: chat.timeAwarenessEnabled !== false,
+        timeZone: chat.timeZone || undefined,
+        imageGenerationEnabled: chat.imageGenerationEnabled === true,
+        imageGenerationPrompt: chat.imageGenerationPrompt,
       });
       const allowedStickers = allStickers.filter((sticker) =>
         chatMembers.some((member) => permittedSticker('stickerCategories' in member ? member.stickerCategories : undefined, sticker))
@@ -2847,7 +2968,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       ].join('\n');
       if (proactive) promptMessages.push({
         role: 'user',
-        content: '【定时主动联系】这不是玩家新发来的消息。请根据人设、当前时间与已有聊天主动联系玩家，聊一个自然的新话题或关心近况。不要假装玩家刚说过话，不要机械重复上一轮回复，不要提定时器或后台任务。',
+        content: `【定时主动联系】这不是玩家新发来的消息。请根据人设、${chat.timeAwarenessEnabled === false ? '已有聊天' : '当前时间与已有聊天'}主动联系玩家，聊一个自然的新话题或关心近况。不要假装玩家刚说过话，不要机械重复上一轮回复，不要提定时器或后台任务。`,
       });
       const requestMessages = withChatResponseFormat(promptMessages, responseInstructions);
       const estimatedInput = estimatePromptTokens(requestMessages);
@@ -3063,6 +3184,20 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       }
       if (replyParts.length === 0 || replyParts.every((part) => !part.text.trim() && !part.kind)) {
         throw new Error('AI 返回了空消息，请检查模型配置后重试。');
+      }
+      if (!previewOnly && chat.imageGenerationEnabled) {
+        for (const part of replyParts) {
+          if (part.kind !== 'image' || !part.text.trim()) continue;
+          try {
+            part.imageUrl = await generateImage(part.text, {
+              ...readImageGenerationSettings(),
+              prompt: chat.imageGenerationPrompt,
+            }, apiPreset);
+          } catch (imageError) {
+            console.error('Image generation failed; keeping text image description.', imageError);
+            setChatError(`生图失败，已保留文字图片描述：${imageError instanceof Error ? imageError.message : '未知错误'}`);
+          }
+        }
       }
       const liveChat = readStoredValue(CHATS_STORAGE_KEY, chats, isChatList).find((item) => item.id === chat.id);
       if (!liveChat || liveChat.blocked || liveChat.activeArchiveId !== chat.activeArchiveId ||
@@ -3643,6 +3778,13 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
             <div
               ref={chatScrollRef}
               className="flex-1 min-h-0 overflow-y-auto no-scrollbar p-3 space-y-3"
+              onClick={(event) => {
+                const target = event.target as HTMLElement;
+                if (target.closest('.yy-chat-message-bubble') || target.closest('button') || target.closest('[role="button"]')) return;
+                setSelectedMessageId('');
+                setReactionMenuId('');
+                setActiveChatMenuId('');
+              }}
               style={chatAppearance.backgroundUrl ? {
                 backgroundImage: `linear-gradient(rgba(243,246,250,.38), rgba(243,246,250,.38)), url("${chatAppearance.backgroundUrl}")`,
                 backgroundSize: 'cover',
@@ -3671,7 +3813,10 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                 const previousMessage = visibleList[messageIndex - 1];
                 const divider = shouldShowTimestamp(previousMessage?.createdAt, message.createdAt) ? (
                   <div key={`time-${message.id}`} className="py-1 text-center text-[10px] text-slate-400">
-                    {formatChatTimestamp(message.createdAt)}
+                    {formatChatTimestamp(
+                      message.createdAt,
+                      activeChat.timeAwarenessEnabled === false ? undefined : activeChat.timeZone
+                    )}
                   </div>
                 ) : null;
                 const rendered = (() => {
@@ -3683,6 +3828,16 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                     <button type="button" onClick={() => deleteChatMessage(message.id)} className="rounded-full bg-white/80 px-2.5 py-0.5 text-rose-500 shadow-sm">删除</button>
                     {message.senderId !== 'user' && message.senderId !== 'narrator' && activeChat.type !== 'observer' && (
                       <button type="button" onClick={() => { sendPat(message.senderId); setSelectedMessageId(''); }} className="rounded-full bg-white/80 px-2.5 py-0.5 text-violet-500 shadow-sm">拍一拍</button>
+                    )}
+                    {message.senderId !== 'user' && contacts.find((item) => item.id === message.senderId)?.voiceEnabled && (
+                      <button type="button" disabled={voicePlaybackMessageId === message.id}
+                        onClick={() => {
+                          const speaker = contacts.find((item) => item.id === message.senderId);
+                          if (speaker) void playCharacterVoice(message, speaker);
+                        }}
+                        className="rounded-full bg-white/80 px-2.5 py-0.5 text-teal-600 shadow-sm disabled:opacity-50">
+                        <Volume2 className="mr-1 inline h-3 w-3" />{voicePlaybackMessageId === message.id ? '播放中' : '语音'}
+                      </button>
                     )}
                   </div>
                 );
@@ -3724,10 +3879,10 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                       </button>
                       <button
                         type="button"
-                        onClick={() => setReactionMenuId('')}
-                        className="rounded-full bg-white/60 px-2.5 py-1 text-slate-400 shadow-sm"
+                        onClick={() => void copyChatMessage(message)}
+                        className="rounded-full bg-white/85 px-2.5 py-1 text-slate-500 shadow-sm"
                       >
-                        关闭
+                        复制消息
                       </button>
                     </div>
                   </div>
@@ -5127,6 +5282,52 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                 />
               </label>
             )}
+            <section className="space-y-3 rounded-2xl border border-sky-100 bg-sky-50/60 p-3">
+              <label className="flex items-center justify-between gap-2 text-xs text-slate-600">
+                <span>角色感知当前时间</span>
+                <input type="checkbox" checked={chatSettingsDraft.timeAwarenessEnabled !== false}
+                  onChange={(event) => setChatSettingsDraft({ ...chatSettingsDraft, timeAwarenessEnabled: event.target.checked })} />
+              </label>
+              {chatSettingsDraft.timeAwarenessEnabled !== false && (
+                <label className="block text-[11px] font-semibold text-[#2C4A5C]">
+                  聊天时区
+                  <select value={chatSettingsDraft.timeZone ?? ''}
+                    onChange={(event) => setChatSettingsDraft({ ...chatSettingsDraft, timeZone: event.target.value })}
+                    className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs">
+                    <option value="">跟随设备时区</option>
+                    <option value="Asia/Shanghai">中国标准时间（上海）</option>
+                    <option value="Asia/Hong_Kong">香港</option>
+                    <option value="Asia/Taipei">台北</option>
+                    <option value="Asia/Tokyo">东京</option>
+                    <option value="Asia/Seoul">首尔</option>
+                    <option value="Asia/Singapore">新加坡</option>
+                    <option value="Asia/Bangkok">曼谷</option>
+                    <option value="Europe/London">伦敦</option>
+                    <option value="Europe/Paris">巴黎</option>
+                    <option value="America/Los_Angeles">洛杉矶</option>
+                    <option value="America/New_York">纽约</option>
+                    <option value="Australia/Sydney">悉尼</option>
+                  </select>
+                </label>
+              )}
+              <label className="flex items-center justify-between gap-2 text-xs text-slate-600">
+                <span>启用生图（角色发图片时生成真实图片）</span>
+                <input type="checkbox" checked={chatSettingsDraft.imageGenerationEnabled ?? false}
+                  onChange={(event) => setChatSettingsDraft({ ...chatSettingsDraft, imageGenerationEnabled: event.target.checked })} />
+              </label>
+              {chatSettingsDraft.imageGenerationEnabled && (
+                <>
+                  <label className="block text-[11px] font-semibold text-[#2C4A5C]">
+                    生图附加提示词（选填）
+                    <textarea value={chatSettingsDraft.imageGenerationPrompt ?? ''}
+                      onChange={(event) => setChatSettingsDraft({ ...chatSettingsDraft, imageGenerationPrompt: event.target.value })}
+                      maxLength={2000} rows={3} placeholder="例如：画风、角色外貌；留空则不添加"
+                      className="mt-1 w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none" />
+                  </label>
+                  <p className="text-[10px] leading-relaxed text-slate-400">开启后，角色回复图片消息时会把图片描述（加上附加提示词）发给生图服务生成真实图片；失败时保留文字描述。生图服务商、接口、Key 和模型请在系统设置的“生图模型”中配置。</p>
+                </>
+              )}
+            </section>
             {chatSettingsDraft.type !== 'direct' && (
               <GroupJournalPanel key={`${chatSettingsDraft.id}:${chatSettingsDraft.activeArchiveId ?? 'archive-default'}`}
                 chatId={chatSettingsDraft.id} />
@@ -5511,16 +5712,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                   <input type="checkbox" checked={chatSettingsDraft.allowAutoMoments !== false}
                     onChange={(event) => setChatSettingsDraft({ ...chatSettingsDraft, allowAutoMoments: event.target.checked })} />
                 </label>
-                {chatSettingsDraft.type === 'direct' && (
-                  <>
-                    <label className="flex items-center justify-between gap-3 text-xs text-slate-600">
-                      主动写情侣空间
-                      <input type="checkbox" checked={chatSettingsDraft.allowAutoCouple !== false}
-                        onChange={(event) => setChatSettingsDraft({ ...chatSettingsDraft, allowAutoCouple: event.target.checked })} />
-                    </label>
-                    <p className="text-[10px] leading-relaxed text-slate-500">仅已绑定时可写心情、日记、便签和回答已有问答。睡前可自然补记；明确还没睡、仍在延续前一晚时归前一天，已睡醒或不明确时归当天。不会覆盖已有心情、日记或答案；便签与问答不要求每日写。</p>
-                  </>
-                )}
+                <p className="text-[10px] text-slate-500">情侣空间不再自动写入，请在情侣空间内手动生成或编辑。</p>
               </section>
             )}
             {(() => {
@@ -5883,6 +6075,40 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                 className="mt-1 w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm leading-relaxed outline-none focus:border-sky-400"
               />
             </label>
+            <section className="space-y-2 rounded-2xl border border-teal-100 bg-teal-50/60 p-3">
+              <label className="flex items-center justify-between gap-2 text-xs font-semibold text-[#2C4A5C]">
+                <span>启用角色语音播放</span>
+                <input type="checkbox" checked={contactDraft.voiceEnabled ?? false}
+                  onChange={(event) => setContactDraft({ ...contactDraft, voiceEnabled: event.target.checked })} />
+              </label>
+              {contactDraft.voiceEnabled && (
+                <>
+                  <label className="block text-[11px] font-semibold text-[#2C4A5C]">
+                    语音 ID（音色）
+                    <input value={contactDraft.voiceId ?? ''}
+                      onChange={(event) => setContactDraft({ ...contactDraft, voiceId: event.target.value })}
+                      maxLength={120} placeholder="填写服务商提供的 voice ID"
+                      className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-mono outline-none" />
+                  </label>
+                  <label className="block text-[11px] font-semibold text-[#2C4A5C]">
+                    语言
+                    <select value={contactDraft.voiceLanguage || '中文'}
+                      onChange={(event) => setContactDraft({ ...contactDraft, voiceLanguage: event.target.value })}
+                      className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs">
+                      <option>中文</option>
+                      <option>粤语</option>
+                      <option>英语</option>
+                      <option>日语</option>
+                      <option>韩语</option>
+                      <option>法语</option>
+                      <option>德语</option>
+                      <option>西班牙语</option>
+                    </select>
+                  </label>
+                  <p className="text-[10px] leading-relaxed text-slate-400">开启后，在聊天消息的操作菜单中点击“语音”即可合成播放；需先在系统设置配置语音模型。</p>
+                </>
+              )}
+            </section>
             <section className="space-y-2 rounded-2xl border border-sky-100 bg-sky-50/60 p-3">
               <h3 className="text-xs font-semibold text-[#2C4A5C]">角色可用的表情包分类</h3>
               <label className="flex items-center gap-2 text-xs text-slate-600">

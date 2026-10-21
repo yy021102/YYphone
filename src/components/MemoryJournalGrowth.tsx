@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Pencil, Trash2 } from 'lucide-react';
 import { showYyError } from './ErrorDialog';
+import { JournalRegenerator } from './JournalRegenerator';
 import {
   activateGrowthNote,
   archiveGrowthNote,
@@ -9,6 +10,7 @@ import {
   generateGrowthNote,
   growthStatus,
   runJournal,
+  regenerateJournal,
   updateActiveGrowthNote,
   updateJournalEntryContent,
 } from '../utils/journalAi';
@@ -22,6 +24,7 @@ import {
   JournalLevel,
   JournalSettings,
   readGrowthNotes,
+  readDirectMessages,
   readJournalSettings,
   writeJournalSettings,
 } from '../utils/journalData';
@@ -113,15 +116,19 @@ export const JournalPanel: React.FC<PanelProps> = ({ charId, charName, flash }) 
       </div>
       {editing?.id === entry.id ? (
         <div className="space-y-2">
-          <textarea className={`${inputClass} h-32 resize-none leading-relaxed`} value={editing.text} onChange={(e) => setEditing({ id: entry.id, text: e.target.value })} />
+          <textarea aria-label="个人流水账正文" maxLength={4000} className={`${inputClass} h-32 resize-none leading-relaxed`} value={editing.text} onChange={(e) => setEditing({ id: entry.id, text: e.target.value })} />
           <div className="flex gap-2">
             <button
               type="button"
               className={gradBtn}
               onClick={() => {
-                if (editing.text.trim()) updateJournalEntryContent(entry.id, editing.text.trim());
-                setEditing(null);
-                refresh();
+                try {
+                  updateJournalEntryContent(entry.id, editing.text);
+                  setEditing(null);
+                  refresh();
+                } catch (error) {
+                  showYyError(error instanceof Error ? error.message : String(error), '保存流水账失败');
+                }
               }}
             >
               保存
@@ -150,6 +157,16 @@ export const JournalPanel: React.FC<PanelProps> = ({ charId, charName, flash }) 
           <button type="button" className={gradBtn} disabled={busy} onClick={() => void run()}>{busy ? '整理中…' : '整理流水账'}</button>
           <button type="button" className={pillBtn} disabled={busy} onClick={() => void compressOnly()}>压缩合并</button>
         </div>
+        <JournalRegenerator key={charId} total={readDirectMessages(charId).length} busy={busy} onGenerate={async (range) => {
+          if (busy) return;
+          setBusy(true);
+          try {
+            const created = await regenerateJournal(charId, range);
+            flash(`已重新生成 ${created} 篇流水账，可点篇章右上角铅笔编辑`);
+          } catch (error) {
+            showYyError(error instanceof Error ? error.message : String(error), '重新生成流水账失败');
+          } finally { setBusy(false); refresh(); }
+        }} />
         <label className="flex items-center gap-2 text-xs text-slate-600">
           <input type="checkbox" checked={settings.journalAuto} onChange={(e) => patchSettings({ journalAuto: e.target.checked })} />
           <span>自动整理：聊天累计到一定条数后，后台写一篇（会额外消耗请求）</span>

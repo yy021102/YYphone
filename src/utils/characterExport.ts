@@ -22,6 +22,9 @@ interface PortableCharacter {
   forumNickname?: string;
   forumHandle?: string;
   stickerCategories?: string[];
+  voiceEnabled?: boolean;
+  voiceId?: string;
+  voiceLanguage?: string;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -58,6 +61,9 @@ export const buildCharacterExport = (
       persona: contact.persona, group: contact.group, starred: contact.starred,
       bio: contact.bio, forumNickname: contact.forumNickname, forumHandle: contact.forumHandle,
       stickerCategories: contact.stickerCategories,
+      voiceEnabled: contact.voiceEnabled,
+      voiceId: contact.voiceId,
+      voiceLanguage: contact.voiceLanguage,
       worldBooks: contact.worldBooks.filter((link) => selectedIds.includes(link.bookId)),
     }],
     worldBooks: selected,

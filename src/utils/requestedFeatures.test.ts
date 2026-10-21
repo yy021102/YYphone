@@ -11,14 +11,14 @@ import { DEFAULT_CHAT_RUNTIME, getRoundThought, isKeepAlivePlaying, isProactiveD
 import { CALENDAR_APPEARANCE_KEY, MUSIC_APPEARANCE_KEY, captureHomeAppearance, isHomeAppearance } from './homeAppearance';
 import { addMemoryCandidates, buildMemoryInjection, DEFAULT_MEMORY_SETTINGS, exportMemories, importMemories, readEmbeddings, readMemories, readMemorySettings, writeEmbeddings, writeMemories, writeMemorySettings } from './memoryData';
 import { extractMemoryCandidates, requestMemoryAiText } from './memoryAi';
-import { createJournalEntry, generateGrowthNote } from './journalAi';
-import { buildGrowthInjection, buildJournalInjection, readGrowthNotes, readJournalEntries, readJournalSettings, writeGrowthNotes, writeJournalEntries, writeJournalSettings } from './journalData';
+import { createJournalEntry, generateGrowthNote, regenerateJournal, runJournal, updateJournalEntryContent } from './journalAi';
+import { buildGrowthInjection, buildJournalInjection, deleteJournalEntry, readGrowthNotes, readJournalEntries, readJournalSettings, writeGrowthNotes, writeJournalEntries, writeJournalSettings } from './journalData';
 import { activeMemoryArchive, deleteCharacterMemoryArchives, deleteMemoryArchive, guardMemoryArchive, invalidateMemoryArchive, memoryArchiveLabel, prepareMemoryArchiveSwitch } from './memoryArchives';
 import { applyMomentsAfterChat, buildMomentsInjection, MomentPost, MOMENTS_STORAGE_KEY, readMoments } from './momentsData';
 import { readSetting, saveSetting, SETTINGS_KEYS } from './settings';
 import { emptyAlipayData, grantIntimatePay, readAlipayContacts, readAlipayData, requestIntimatePay, settleIncomingChatPayment, updateAlipayBalance, writeAlipayData, WECHAT_CHATS_STORAGE_KEY } from './alipayData';
 import { parseAiJson, parseChatResponse, parseForumPost } from './aiResponse';
-import { readStoredValue } from './localStorage';
+import { readStoredValue, readStorageString } from './localStorage';
 import { estimateConversationTokens, estimatePromptTokens, estimateTextTokens } from './chatTokens';
 import { normalizeForumHandle, readGeneratedForumHandles, resolveForumHandle } from './forumIdentity';
 import { BUILTIN_STICKERS, CHAT_STICKERS_STORAGE_KEY, readAvailableChatStickers } from './chatStickers';
@@ -31,23 +31,27 @@ import { buildGroupPrivateContext, describeChatSource } from './chatHistory';
 import {
   buildGroupJournalInjection, deleteGroupJournal, deleteGroupJournalEntry, editGroupJournalEntry,
   GROUP_JOURNAL_KEY, invalidateGroupJournal, maybeAutoGroupJournal, readGroupJournal,
-  runGroupJournal, setGroupJournalSettings,
+  runGroupJournal, setGroupJournalSettings, regenerateGroupJournal,
 } from './groupJournal';
 import { GroupJournalPanel } from '../components/GroupJournalPanel';
 import { compressChatPhoto, compressImageFile } from './imageFile';
-import { createEmptyCoupleSpace, readCharacterBrief, readCoupleSpaces, writeCoupleSpaces } from './coupleSpaceData';
+import { createEmptyCoupleSpace, localDateString, readCharacterBrief, readCoupleSpaces, writeCoupleSpaces } from './coupleSpaceData';
 import { readDirectMessages } from './journalData';
 import { generatePhoneScope } from './phoneAi';
 import { readRecentMoneyEvents } from './phoneData';
 import { buildCharacterExport, parsePortableWorldBooks, remapImportedWorldBooks } from './characterExport';
-import { applySocialWrites, buildSocialInstructions, coupleActionDate, parseSocialActions, type SocialContext } from './chatSocial';
+import { applySocialWrites, buildSocialInstructions, parseSocialActions, type SocialContext } from './chatSocial';
 import { coupleRecordDate, editCoupleRecord, isRecordDate } from './coupleRecords';
 import { DEFAULT_LOCK_APPEARANCE, isLockScreenAppearance } from './lockAppearance';
 import { LockScreen } from '../components/LockScreen';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { answerPaper, buildPaperMemoryInjection, discardPaper, openDailyPaper, paperCandidates, PAPER_NOTES_KEY, parsePaperNotesState, readPaperNotes, type PaperContent } from './paperNotes';
+import { answerPaper, buildPaperMemoryInjection, discardPaper, openDailyPaper, paperCandidates, PAPER_NOTES_KEY, parsePaperNotesState, readPaperNotes, retainPaperNotes, setPaperFavorite, loadPaperNotes, type PaperContent, type PaperNote } from './paperNotes';
 import { generateDailyPaper, generatePaperReply } from './paperNotesAi';
+import { generateCoupleBatch } from './coupleSpaceAi';
+import { generateFocusRank } from './pomodoroAi';
+import { buildCalendarContext, emptyCalendarData, toDateKey, writeCalendarData } from './calendarData';
+import { replaceJournalRange, selectJournalRange } from './journalRange';
 
 const stored = new Map<string, string>();
 const localStorage = {
@@ -106,6 +110,380 @@ const paperFixture = () => {
 };
 const paperDate = () => new Date(2026, 9, 18, 20);
 const questionPaper = async (): Promise<PaperContent> => ({ kind: 'question', content: '今天看海时，你最喜欢哪个瞬间？' });
+
+const testApi = () => saveSetting(SETTINGS_KEYS.apiPresets, [{
+  id: 'features', name: '测试', endpoint: 'https://features.invalid/v1', apiKey: 'test',
+}]);
+const aiResponse = (content: unknown) => new Response(JSON.stringify({
+  choices: [{ message: { content: typeof content === 'string' ? content : JSON.stringify(content) } }],
+}));
+
+test('paper retention keeps exactly 100 newest nonfavorites plus unlimited favorites and persists migration', async () => {
+  const papers: PaperNote[] = Array.from({ length: 108 }, (_, index) => ({
+    id: `paper-${index}`, charId: 'a', chatId: 'a', archiveKey: 'a', kind: 'thought',
+    date: localDateString(new Date(2026, 0, index + 1)), content: `纸条${index}`,
+    ...(index < 3 ? { favorite: true } : {}),
+  }));
+  const retained = retainPaperNotes([...papers].reverse());
+  assert.equal(retained.length, 103);
+  assert.equal(retained.filter((paper) => !paper.favorite).length, 100);
+  assert.ok(papers.slice(0, 3).every((paper) => retained.some((item) => item.id === paper.id)));
+  assert.ok(!retained.some((paper) => paper.id === 'paper-3'));
+  assert.ok(retained.some((paper) => paper.id === 'paper-8'));
+  saveSetting(PAPER_NOTES_KEY, { version: 1, days: {}, notes: papers, memories: papers });
+  await loadPaperNotes();
+  const saved = JSON.parse(readStorageString(PAPER_NOTES_KEY)!);
+  assert.equal(saved.notes.length, 103);
+  assert.equal(saved.memories.length, 108);
+  await setPaperFavorite('paper-0', false);
+  assert.equal(readPaperNotes().notes.length, 102);
+  assert.ok(!readPaperNotes().notes.some((paper) => paper.id === 'paper-0'));
+  await setPaperFavorite('paper-107', true);
+  assert.equal(readPaperNotes().notes.find((paper) => paper.id === 'paper-107')?.favorite, true);
+  await assert.rejects(setPaperFavorite('missing', true), /不存在/);
+  assert.throws(() => parsePaperNotesState({ version: 1, days: {}, notes: [{ ...papers[0], favorite: 'yes' }], memories: [] }), /格式无效/);
+});
+
+test('receiving the next paper evicts the oldest nonfavorite but preserves favorites and receipt history', async () => {
+  paperFixture();
+  const today = paperDate();
+  const papers: PaperNote[] = Array.from({ length: 101 }, (_, index) => ({
+    id: `old-${index}`, charId: 'paper-a', chatId: 'chat-paper-a', archiveKey: activeMemoryArchive('paper-a'),
+    kind: 'thought', content: '旧纸条', date: localDateString(new Date(2026, 0, index + 1)),
+    favorite: index === 0,
+  }));
+  saveSetting(PAPER_NOTES_KEY, { version: 1, days: {}, notes: papers, memories: papers });
+  const received = await openDailyPaper(questionPaper, { now: () => today });
+  assert.ok(received);
+  const state = readPaperNotes();
+  assert.equal(state.notes.length, 101);
+  assert.ok(state.notes.some((paper) => paper.id === 'old-0'));
+  assert.ok(!state.notes.some((paper) => paper.id === 'old-1'));
+  await setPaperFavorite(received.id, true);
+  assert.equal((await openDailyPaper(questionPaper, { now: () => today }))?.favorite, true);
+});
+
+test('phone generates all eight scopes with one request and includes world, player and chat settings', async () => {
+  paperFixture(); testApi();
+  const contacts = JSON.parse(readStorageString('pocketos:wechat-contacts')!);
+  contacts[0].worldBooks = [{ bookId: 'phone-world' }];
+  saveSetting('pocketos:wechat-contacts', contacts);
+  saveSetting('yyphone:world-books', [
+    { id: 'phone-world', name: '关联书', entries: [{ id: 'e', title: '规则', content: '角色住在浮空城', depth: 'back' }] },
+    { id: 'global-world', name: '全局书', isGlobal: true, entries: [{ id: 'g', title: '全局', content: '城市没有地铁', depth: 'front' }] },
+    { id: 'other-world', name: '其他角色私有', entries: [{ id: 'o', title: '秘密', content: '不应出现的世界书秘密', depth: 'front' }] },
+  ]);
+  saveSetting(SETTINGS_KEYS.personas, { activeProfileId: 'u', profiles: [{
+    id: 'u', name: '小雨', identity: '钟表修理师', personality: '安静', background: '玩家背景标记', speakingStyle: '简短',
+  }] });
+  const chats = JSON.parse(readStorageString(WECHAT_CHATS_STORAGE_KEY)!);
+  chats[0].context = '补充设定：两人正在旅行';
+  saveSetting(WECHAT_CHATS_STORAGE_KEY, chats);
+  const generated = {
+    wechat: { userRemark: '小雨', threads: [{ name: '朋友', messages: [{ from: 'char', text: '旅行中', time: '10:00' }] }] },
+    album: { photos: [{ sceneDesc: '车窗', isPrivate: false }] },
+    browser: { items: [{ query: '旅行攻略' }] }, notes: { notes: [{ content: '记得带伞' }] },
+    icity: { diaries: [{ content: '今天和小雨去看海' }] },
+    agent: { doubaoTurns: [{ role: 'char', content: '明天天气？' }], claudeTurns: [{ role: 'ai', content: '说说你的心事' }] },
+    wallet: { balance: 800, records: [{ title: '车票', amount: -20 }] },
+    health: { sleepHours: 7, sleepNote: '睡得很好', steps: 1000, screenTimeMinutes: 30 },
+  };
+  let calls = 0; let body = '';
+  mock.method(globalThis, 'fetch', async (_input: unknown, init?: RequestInit) => {
+    calls += 1; body = String(init?.body);
+    return aiResponse(generated);
+  });
+  const prev = { charId: 'paper-a', wallpaperUrl: '', userRemark: '', npcThreads: [], photos: [],
+    browserHistory: [], notes: [], icityDiaries: [],
+    agentSession: { doubaoTopic: '', doubaoTurns: [], claudeTopic: '', claudeTurns: [] } };
+  const result = await generatePhoneScope('all', { charId: 'paper-a', charName: '纸条角色甲', userName: '小雨', npcs: [] }, prev);
+  assert.equal(calls, 1);
+  for (const text of ['角色住在浮空城', '城市没有地铁', '钟表修理师', '玩家背景标记', '两人正在旅行', '今天一起去看了海']) assert.ok(body.includes(text), text);
+  assert.doesNotMatch(body, /不应出现的世界书秘密/);
+  for (const key of ['npcThreads', 'photos', 'browserHistory', 'notes', 'icityDiaries', 'agentSession', 'wallet', 'health']) assert.ok(key in result, key);
+  const snapshot = JSON.stringify(prev);
+  Reflect.deleteProperty(generated, 'notes');
+  await assert.rejects(generatePhoneScope('all', { charId: 'paper-a', charName: '甲', userName: '玩家', npcs: [] }, prev), /遗漏/);
+  assert.equal(calls, 2);
+  assert.equal(JSON.stringify(prev), snapshot);
+});
+
+test('couple one-request generation fills every section and validates missing responses without partial writes', async () => {
+  paperFixture(); testApi();
+  const today = localDateString();
+  const space = { ...createEmptyCoupleSpace('paper-a'), bindStatus: 'bound' as const,
+    moods: { [today]: { dateStr: today, userMoodId: 'calm_1', userNote: '玩家心情' } },
+    diaries: [{ id: 'user-diary', author: 'user' as const, authorName: '玩家', dateStr: today, title: '海', content: '今天看海' }],
+    qaList: [{ id: 'old-q', dateStr: '2020-01-01', askedBy: 'user' as const, question: '最喜欢的事？', userAnswer: '看海' }],
+  };
+  writeCoupleSpaces({ 'paper-a': space });
+  const response = {
+    moods: [{ date: today, moodId: 'calm_1', note: '心情安静' }],
+    diary: { title: '看海以后', content: '海风很舒服' }, replies: [{ id: 'user-diary', reply: '我也记得' }],
+    answers: [{ id: 'old-q', answer: '和你一起看海' }], qa: { question: '下次去哪？', answer: '我想去山里' }, note: '记得休息',
+  };
+  let calls = 0;
+  mock.method(globalThis, 'fetch', async () => { calls += 1; return aiResponse(response); });
+  const next = await generateCoupleBatch('paper-a', '玩家', space, [{ id: 'calm_1', label: '平静', kaomoji: '-' }]);
+  assert.equal(calls, 1);
+  assert.equal(next.moods[today].charMoodId, 'calm_1');
+  assert.equal(next.moods[today].userNote, '玩家心情');
+  assert.equal(next.diaries[0].author, 'char');
+  assert.equal(next.diaries.find((entry) => entry.id === 'user-diary')?.replyComment, '我也记得');
+  assert.equal(next.qaList.find((entry) => entry.id === 'old-q')?.charAnswer, '和你一起看海');
+  assert.equal(next.qaList[0].askedBy, 'char');
+  assert.equal(next.stickyNotes[0].content, '记得休息');
+  assert.deepEqual(readCoupleSpaces()['paper-a'], space);
+  response.replies = [];
+  await assert.rejects(generateCoupleBatch('paper-a', '玩家', space, [{ id: 'calm_1', label: '平静', kaomoji: '-' }]), /全部待写/);
+  assert.equal(calls, 2);
+  assert.deepEqual(readCoupleSpaces()['paper-a'], space);
+});
+
+test('character focus ranking uses AI independent minutes with persona and calendar, rejects invalid totals', async () => {
+  paperFixture(); testApi();
+  const now = new Date(2026, 9, 21, 12, 0);
+  writeCalendarData({ ...emptyCalendarData(), schedules: [
+    { id: 's', charId: 'paper-a', date: toDateKey(now), text: '09:00 专注整理研究材料' },
+  ] });
+  let body = ''; let minutes = 180; let calls = 0;
+  mock.method(globalThis, 'fetch', async (_input: unknown, init?: RequestInit) => {
+    calls += 1; body = String(init?.body);
+    return aiResponse({ characters: [{ id: 'paper-a', todayMinutes: minutes, statusText: '整理研究材料' }] });
+  });
+  const result = await generateFocusRank([{ id: 'paper-a', name: '甲' }], now);
+  assert.equal(result[0].todayMinutes, 180);
+  assert.equal(result[0].dateStr, toDateKey(now));
+  assert.equal(calls, 1);
+  assert.match(body, /不善表达但关心玩家/);
+  assert.match(body, /09:00 专注整理研究材料/);
+  assert.match(body, /不是陪玩家/);
+  minutes = 721;
+  await assert.rejects(generateFocusRank([{ id: 'paper-a', name: '甲' }], now), /专注时间/);
+  const source = readFileSync(resolve('src', 'apps', 'PomodoroApp.tsx'), 'utf8');
+  const ranking = source.slice(source.indexOf('const combinedRankings'), source.indexOf('// ==================== 12.'));
+  assert.doesNotMatch(ranking, /companionCharName|陪读/);
+  assert.match(ranking, /item.dateStr === todayDateStr/);
+});
+
+test('calendar changes affect the next injected character schedule without modifying conversation history', () => {
+  paperFixture();
+  const now = new Date(2026, 9, 21, 12);
+  const before = readStorageString(WECHAT_CHATS_STORAGE_KEY);
+  const schedule = { id: 's', charId: 'paper-a', date: toDateKey(now), text: '14:00 旧行程' };
+  const data = { ...emptyCalendarData(), schedules: [schedule] };
+  writeCalendarData(data);
+  const context = () => buildCalendarContext(['paper-a'], () => '甲', false, now) ?? '';
+  assert.match(context(), /旧行程/);
+  writeCalendarData({ ...data, schedules: [{ ...schedule, text: '15:00 修改后行程' }] });
+  assert.match(context(), /修改后行程/);
+  assert.doesNotMatch(context(), /旧行程/);
+  writeCalendarData({ ...data, schedules: [] });
+  assert.equal(context(), '');
+  assert.equal(readStorageString(WECHAT_CHATS_STORAGE_KEY), before);
+});
+
+test('journal range selection is inclusive and replacement invalidates ancestors while restoring unaffected children', () => {
+  assert.deepEqual(selectJournalRange(['a', 'b', 'c'], { start: 2, end: 3 }), ['b', 'c']);
+  assert.deepEqual(selectJournalRange(['a']), ['a']);
+  for (const range of [{ start: 0, end: 2 }, { start: 2, end: 1 }, { start: 1, end: 4 }, { start: 1.5, end: 2 }]) {
+    assert.throws(() => selectJournalRange(['a', 'b', 'c'], range), /有效聊天范围/);
+  }
+  assert.throws(() => selectJournalRange([]), /有效聊天范围/);
+  const entries = [
+    { id: 'a', from: '01', to: '10', mergedInto: 'parent' },
+    { id: 'b', from: '11', to: '20', mergedInto: 'parent' },
+    { id: 'parent', from: '01', to: '20', mergedInto: 'grandparent' },
+    { id: 'c', from: '21', to: '30', mergedInto: 'grandparent' },
+    { id: 'grandparent', from: '01', to: '30' },
+    { id: 'outside', from: '31', to: '40' },
+  ];
+  const next = replaceJournalRange(entries, '11', '20', [{ id: 'new', from: '11', to: '20' }]);
+  assert.deepEqual(next.map((entry) => entry.id), ['a', 'c', 'outside', 'new']);
+  assert.equal(next[0].mergedInto, undefined);
+  assert.equal(next[1].mergedInto, undefined);
+});
+
+test('personal journal can regenerate after deletion and exact ranges ignore prior cursor and remain editable', async () => {
+  archiveFixture(); testApi();
+  let body = ''; let calls = 0;
+  mock.method(globalThis, 'fetch', async (_input: unknown, init?: RequestInit) => {
+    body = String(init?.body); calls += 1; return aiResponse('重新整理的流水账');
+  });
+  const old = await createJournalEntry('archive-char');
+  assert.ok(old);
+  const cursor = readJournalSettings().journalCursors['archive-char'];
+  deleteJournalEntry(old.id);
+  assert.equal(await createJournalEntry('archive-char'), null);
+  assert.equal(await regenerateJournal('archive-char', { start: 3, end: 4 }), 1);
+  assert.match(body, /身份信息2/); assert.match(body, /身份信息3/);
+  assert.doesNotMatch(body, /身份信息1[^0-9]|身份信息4/);
+  assert.equal(readJournalSettings().journalCursors['archive-char'], cursor);
+  const entry = readJournalEntries()[0];
+  assert.equal(entry.messageCount, 2);
+  updateJournalEntryContent(entry.id, '编辑后');
+  assert.equal(readJournalEntries()[0].content, '编辑后');
+  assert.equal(await regenerateJournal('archive-char'), 1);
+  assert.equal(readJournalEntries().length, 1);
+  assert.equal(readJournalEntries()[0].messageCount, 25);
+  assert.equal(calls, 3);
+});
+
+test('personal journal regeneration rejects changed archives and sources without overwriting existing entries', async () => {
+  archiveFixture(); testApi();
+  mock.method(globalThis, 'fetch', async () => aiResponse('原流水账'));
+  await regenerateJournal('archive-char');
+  const original = readJournalEntries();
+  let changeArchive = false;
+  mock.method(globalThis, 'fetch', async () => {
+    if (changeArchive) archiveFixture('new');
+    else {
+      const chats = JSON.parse(readStorageString(WECHAT_CHATS_STORAGE_KEY)!);
+      chats[0].messages[0].text = '已修改';
+      saveSetting(WECHAT_CHATS_STORAGE_KEY, chats);
+    }
+    return aiResponse('不应写入');
+  });
+  await assert.rejects(regenerateJournal('archive-char'), /已变化/);
+  assert.deepEqual(readJournalEntries(), original);
+  changeArchive = true;
+  await assert.rejects(regenerateJournal('archive-char'), /存档/);
+  archiveFixture();
+  assert.deepEqual(readJournalEntries(), original);
+});
+
+test('group and observer journals regenerate chosen messages after deletion without exposing forum bodies', async () => {
+  for (const type of ['group', 'observer'] as const) {
+    const chat = groupJournalFixture(30, type, `range-${type}`);
+    let body = '';
+    mock.method(globalThis, 'fetch', async (_input: unknown, init?: RequestInit) => {
+      body = String(init?.body); return aiResponse('新群流水账');
+    });
+    await runGroupJournal(chat.id);
+    const old = readGroupJournal(chat.id).entries[0];
+    deleteGroupJournalEntry(chat.id, old.id);
+    assert.equal(readGroupJournal(chat.id).pending, 0);
+    assert.equal(await regenerateGroupJournal(chat.id, { start: 3, end: 4 }), 1);
+    assert.equal(readGroupJournal(chat.id).entries[0].messageCount, 2);
+    assert.match(body, /讨论周末计划2/); assert.match(body, /讨论周末计划3/);
+    assert.doesNotMatch(body, /讨论周末计划1[^0-9]|讨论周末计划4/);
+    assert.match(body, /旅行计划群/);
+    assert.equal(readGroupJournal(chat.id).pending, 0);
+    editGroupJournalEntry(chat.id, readGroupJournal(chat.id).entries[0].id, '编辑后的群记忆');
+    assert.equal(readGroupJournal(chat.id).entries[0].content, '编辑后的群记忆');
+    assert.equal(await regenerateGroupJournal(chat.id), 1);
+    assert.equal(readGroupJournal(chat.id).entries.length, 1);
+    assert.equal(readGroupJournal(chat.id).entries[0].messageCount, 30);
+  }
+});
+
+test('multi-chunk journal regeneration saves nothing on a later request failure and guards concurrent tasks', async () => {
+  const chat = groupJournalFixture(251, 'group', 'range-atomic');
+  let calls = 0;
+  mock.method(globalThis, 'fetch', async () => {
+    calls += 1;
+    await assert.rejects(regenerateGroupJournal(chat.id), /正在整理/);
+    await assert.rejects(runGroupJournal(chat.id), /正在整理/);
+    if (calls === 2) throw new Error('模拟后续请求失败');
+    return aiResponse('第一段新流水账');
+  });
+  await assert.rejects(regenerateGroupJournal(chat.id), /模拟后续请求失败/);
+  assert.equal(calls, 2);
+  assert.equal(readGroupJournal(chat.id).entries.length, 0);
+  assert.equal(readGroupJournal(chat.id).cursor, undefined);
+});
+
+test('range regeneration preserves distinct message ranges sharing identical timestamps and normal summaries do not duplicate them', async () => {
+  const chat = groupJournalFixture(30);
+  chat.messages.forEach((message) => { message.createdAt = chat.messages[0].createdAt; });
+  saveSetting(WECHAT_CHATS_STORAGE_KEY, [chat]);
+  mock.method(globalThis, 'fetch', async () => aiResponse('群内讨论摘要'));
+  await regenerateGroupJournal(chat.id, { start: 1, end: 3 });
+  await regenerateGroupJournal(chat.id, { start: 4, end: 6 });
+  assert.equal(readGroupJournal(chat.id).entries.length, 2);
+  assert.equal(readGroupJournal(chat.id).entries[0].fromMessageId, chat.messages[0].id);
+  await runGroupJournal(chat.id);
+  assert.equal(readGroupJournal(chat.id).entries.length, 3);
+
+  archiveFixture(); testApi();
+  await regenerateJournal('archive-char', { start: 3, end: 4 });
+  assert.equal(readJournalEntries().length, 1);
+  await runJournal('archive-char');
+  assert.equal(readJournalEntries().length, 1);
+  assert.equal(readJournalEntries()[0].messageCount, 25);
+  assert.throws(() => updateJournalEntryContent(readJournalEntries()[0].id, ' '), /不能为空/);
+});
+
+test('personal regeneration is atomic across chunks and serializes normal manual and auto work', async () => {
+  archiveFixture(); testApi();
+  const chats = JSON.parse(readStorageString(WECHAT_CHATS_STORAGE_KEY)!);
+  chats[0].messages = Array.from({ length: 251 }, (_, index) => ({
+    id: `atomic-${index}`, senderId: 'user', text: `消息${index}`,
+    createdAt: new Date(Date.UTC(2026, 0, 1, 0, index)).toISOString(),
+  }));
+  saveSetting(WECHAT_CHATS_STORAGE_KEY, chats);
+  let calls = 0;
+  mock.method(globalThis, 'fetch', async () => {
+    calls += 1;
+    await assert.rejects(regenerateJournal('archive-char'), /正在整理/);
+    await assert.rejects(runJournal('archive-char'), /正在整理/);
+    if (calls === 2) throw new Error('第二段失败');
+    return aiResponse('第一段结果');
+  });
+  await assert.rejects(regenerateJournal('archive-char'), /第二段失败/);
+  assert.equal(readJournalEntries().length, 0);
+  assert.equal(readJournalSettings().journalCursors['archive-char'], undefined);
+});
+
+test('group range regeneration guards source changes and continues filtering private forum cards', async () => {
+  const chat = groupJournalFixture(10);
+  const messages = chat.messages as Array<Record<string, unknown>>;
+  messages[2] = { ...messages[2], kind: 'forum-forward', title: '秘密帖子', text: '论坛正文秘密',
+    aiContext: '作者身份秘密', forumForwardTargetId: 'other-char' };
+  saveSetting(WECHAT_CHATS_STORAGE_KEY, [chat]);
+  let body = ''; let mutate = false;
+  mock.method(globalThis, 'fetch', async (_input: unknown, init?: RequestInit) => {
+    body = String(init?.body);
+    if (mutate) {
+      chat.messages[0].text = '修改过的原文';
+      saveSetting(WECHAT_CHATS_STORAGE_KEY, [chat]);
+    }
+    return aiResponse('不含秘密的群摘要');
+  });
+  await regenerateGroupJournal(chat.id);
+  assert.doesNotMatch(body, /论坛正文秘密|作者身份秘密|秘密帖子/);
+  const original = readGroupJournal(chat.id);
+  mutate = true;
+  await assert.rejects(regenerateGroupJournal(chat.id), /已变化/);
+  assert.deepEqual(readGroupJournal(chat.id), original);
+});
+
+test('phone background settings work before the first chat and Gemini all-generation still makes one request', async () => {
+  testApi();
+  saveSetting('pocketos:wechat-contacts', [{ id: 'new-char', name: '新角色', persona: '新角色设定', worldBooks: [] }]);
+  saveSetting(WECHAT_CHATS_STORAGE_KEY, []);
+  let calls = 0; let body = '';
+  mock.method(globalThis, 'fetch', async (_input: unknown, init?: RequestInit) => {
+    calls += 1; body = String(init?.body); return aiResponse({ notes: [{ content: '新记录' }] });
+  });
+  const previous = { charId: 'new-char', wallpaperUrl: '', userRemark: '', npcThreads: [], photos: [],
+    browserHistory: [], notes: [], icityDiaries: [],
+    agentSession: { doubaoTopic: '', doubaoTurns: [], claudeTopic: '', claudeTurns: [] } };
+  await generatePhoneScope('notes', { charId: 'new-char', charName: '新角色', userName: '玩家', npcs: [] }, previous);
+  assert.equal(calls, 1);
+  assert.match(body, /新角色设定/);
+  assert.deepEqual(JSON.parse(readStorageString(WECHAT_CHATS_STORAGE_KEY)!), []);
+  saveSetting(SETTINGS_KEYS.apiPresets, [{ id: 'gemini', name: 'gemini',
+    endpoint: 'https://generativelanguage.googleapis.com', apiKey: 'test' }]);
+  mock.method(globalThis, 'fetch', async (_input: unknown, init?: RequestInit) => {
+    calls += 1; body = String(init?.body);
+    return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: '{}' }] } }] }));
+  });
+  await assert.rejects(generatePhoneScope('all', { charId: 'new-char', charName: '新角色', userName: '玩家', npcs: [] }, previous), /遗漏/);
+  assert.equal(calls, 2);
+  assert.match(body, /systemInstruction/);
+  assert.match(body, /一次生成以下所有模块/);
+});
 
 test('beauty export includes only applied appearance, not saved presets or unsaved drafts', async () => {
   const source = readFileSync(resolve('src', 'apps', 'ThemeCustomizerApp.tsx'), 'utf8');
@@ -774,7 +1152,7 @@ test('chat social actions default on but honor per-chat switches, regeneration a
   assert.ok(parseSocialActions({ momentPost: { content: '另一个确实值得记录的瞬间' } }, ctx, 'social-char').moment);
 });
 
-test('couple actions persist mood, diary, notes and real question answers to the ongoing previous day', () => {
+test('automatic couple writes are forbidden even for previously enabled bound chats', () => {
   const ctx = socialFixture();
   const space = {
     ...createEmptyCoupleSpace('social-char'), bindStatus: 'bound' as const,
@@ -783,9 +1161,8 @@ test('couple actions persist mood, diary, notes and real question answers to the
   };
   writeCoupleSpaces({ 'social-char': space });
   const prompt = buildSocialInstructions(ctx);
-  assert.match(prompt, /前一日=2026-10-18/);
-  assert.match(prompt, /不强制每天写/);
-  assert.match(prompt, /q1/);
+  assert.match(prompt, /禁止 coupleWrite/);
+  assert.doesNotMatch(prompt, /可选 coupleWrite|主动情侣空间/);
   const record = {
     coupleWrite: {
       day: 'previous', overnightEvidence: '我们还没睡呢 今天还没有结束',
@@ -795,40 +1172,11 @@ test('couple actions persist mood, diary, notes and real question answers to the
       answers: [{ questionId: 'q1', content: '陪你聊天' }],
     },
   };
-  const actions = parseSocialActions(record, ctx, 'social-char');
-  applySocialWrites(actions, ctx, ctx.actors[0]);
-  const actual = readCoupleSpaces()['social-char'];
-  assert.equal(actual.moods['2026-10-18'].charMoodId, 'calm_1');
-  assert.equal(actual.moods['2026-10-18'].userNote, '用户心情');
-  assert.equal(actual.moods['2026-10-18'].seenByChar, false);
-  assert.equal(actual.moods['2026-10-19'], undefined);
-  assert.equal(actual.diaries[0].dateStr, '2026-10-18');
-  assert.equal(actual.diaries[0].author, 'char');
-  assert.equal(actual.stickyNotes[0].content, '明天记得吃早饭');
-  assert.equal(actual.stickyNotes[0].createdAt, '2026-10-18');
-  assert.equal(actual.qaList[0].charAnswer, '陪你聊天');
-  assert.equal(actual.qaList[0].userAnswer, '聊天');
-  assert.throws(() => parseSocialActions(record, ctx, 'social-char'), /已有角色心情/);
-  assert.throws(() => parseSocialActions({ coupleWrite: { day: 'today', answers: [{ questionId: 'q1', content: '覆盖' }] } }, ctx, 'social-char'), /已经回答/);
-  assert.throws(() => parseSocialActions({ coupleWrite: { day: 'today', answers: [{ questionId: 'missing', content: '内容' }] } }, ctx, 'social-char'), /不存在/);
-  assert.throws(() => parseSocialActions({ coupleWrite: { day: 'today', note: '明天记得吃早饭' } }, ctx, 'social-char'), /重复/);
-  assert.throws(() => parseSocialActions(record, { ...ctx, chat: { ...ctx.chat, allowAutoCouple: false } }, 'social-char'), /状态/);
-  assert.throws(() => parseSocialActions(record, { ...ctx, chat: { ...ctx.chat, type: 'group' } }, 'social-char'), /状态/);
-});
-
-test('previous-day couple dates require fresh evidence and handle year and leap-day boundaries', () => {
-  const ctx = socialFixture(new Date(2027, 0, 1, 1, 0));
-  assert.equal(coupleActionDate({ day: 'previous', overnightEvidence: '我们还没睡呢' }, ctx), '2026-12-31');
-  assert.equal(coupleActionDate({ day: 'today' }, ctx), '2027-01-01');
-  const leap = socialFixture(new Date(2028, 2, 1, 1, 0));
-  assert.equal(coupleActionDate({ day: 'previous', overnightEvidence: '还没睡' }, leap), '2028-02-29');
-  assert.throws(() => coupleActionDate({ day: 'previous' }, ctx), /依据/);
-  assert.throws(() => coupleActionDate({ day: 'previous', overnightEvidence: '编造的没睡' }, ctx), /依据/);
-  assert.throws(() => coupleActionDate({ day: 'previous', overnightEvidence: '我们还没睡呢' }, { ...ctx, now: new Date(2027, 0, 1, 13) }), /依据/);
-  assert.throws(() => coupleActionDate({ day: 'previous', overnightEvidence: '我们还没睡呢' }, { ...ctx, now: new Date(2027, 0, 1, 9) }), /依据/);
-  writeCoupleSpaces({ 'social-char': { ...createEmptyCoupleSpace('social-char'), bindStatus: 'unbound' } });
-  assert.doesNotMatch(buildSocialInstructions(ctx), /可选 coupleWrite/);
-  assert.throws(() => parseSocialActions({ coupleWrite: { day: 'today', note: 'test' } }, ctx, 'social-char'), /状态/);
+  for (const enabled of [true, false, undefined]) {
+    assert.throws(() => parseSocialActions(record, { ...ctx, chat: { ...ctx.chat, allowAutoCouple: enabled } }, 'social-char'), /已关闭/);
+  }
+  assert.throws(() => applySocialWrites({ couple: { day: 'today', note: '不应写入' } }, ctx, ctx.actors[0]), /已关闭/);
+  assert.deepEqual(readCoupleSpaces()['social-char'], space);
 });
 
 test('latest thought injection adds flexible continuity guidance only when enabled and available', () => {
@@ -890,7 +1238,7 @@ test('phone context follows configured message counts, defaults to 200 and keeps
   }]);
   assert.doesNotMatch(readRecentMoneyEvents('phone-char'), /123/);
   saveSetting(WECHAT_CHATS_STORAGE_KEY, [{
-    id: 'phone-chat', type: 'direct', participantIds: ['phone-char'], currentChatHistoryCount: 200, messages,
+    id: 'phone-chat', type: 'direct', participantIds: ['phone-char'], noteName: '', context: '', currentChatHistoryCount: 200, messages,
   }]);
   assert.match(readRecentMoneyEvents('phone-char'), /123/);
   saveSetting(SETTINGS_KEYS.apiPresets, [{ id: 'phone-test', name: '测试', endpoint: 'https://phone-test.example/v1', apiKey: 'test' }]);
@@ -904,7 +1252,7 @@ test('phone context follows configured message counts, defaults to 200 and keeps
     notes: [], icityDiaries: [],
     agentSession: { doubaoTopic: '', doubaoTurns: [], claudeTopic: '', claudeTurns: [] },
   });
-  const sent = JSON.parse(body).messages[0].content;
+  const sent = JSON.parse(body).messages.map((message: { content: string }) => message.content).join('\n');
   assert.match(sent, /消息60：/);
   assert.doesNotMatch(sent, /消息59：/);
   assert.match(sent, /完整长消息末尾/);

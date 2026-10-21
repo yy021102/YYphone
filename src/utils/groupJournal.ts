@@ -3,6 +3,7 @@ import { getNpcByParticipantId, readCharacterNpcs } from './characterNpcs';
 import { COMPRESSION, describeForSummary, type JournalLevel } from './journalData';
 import { readStorageString, writeStoredValue } from './localStorage';
 import { requestMemoryAiText } from './memoryAi';
+import { replaceJournalRange, selectJournalRange, type JournalRange } from './journalRange';
 
 export const GROUP_JOURNAL_KEY = 'yyphone:group-journal';
 
@@ -29,6 +30,8 @@ export interface GroupJournalEntry {
   level: JournalLevel;
   from: string;
   to: string;
+  fromMessageId?: string;
+  toMessageId?: string;
   messageCount: number;
   content: string;
   source: string;
@@ -60,6 +63,8 @@ const isEntry = (value: unknown): value is GroupJournalEntry =>
   typeof value.from === 'string' && typeof value.to === 'string' &&
   typeof value.messageCount === 'number' && typeof value.content === 'string' &&
   typeof value.source === 'string' && typeof value.createdAt === 'string' &&
+  (value.fromMessageId === undefined || typeof value.fromMessageId === 'string') &&
+  (value.toMessageId === undefined || typeof value.toMessageId === 'string') &&
   (value.mergedInto === undefined || typeof value.mergedInto === 'string');
 const isArchive = (value: unknown) =>
   object(value) && Array.isArray(value.entries) && value.entries.every(isEntry) &&
@@ -160,7 +165,7 @@ export const readGroupJournal = (chatId: string) => {
   const group = groupOf(state, chatId);
   const archive = archiveOf(state, chat);
   return { ...archive, auto: group.auto, every: group.every, pending: pendingMessages(chat, archive).length,
-    archiveId: archiveIdOf(chat) };
+    archiveId: archiveIdOf(chat), messageCount: chat.messages.length };
 };
 
 export const setGroupJournalSettings = (chatId: string, patch: { auto?: boolean; every?: number }) => {
@@ -240,10 +245,11 @@ const createEntry = async (chatId: string, minimum: number) => {
   const last = batch[batch.length - 1];
   updateArchive(chat, (archive) => ({
     ...archive, lastError: '', cursor: { id: last.id, createdAt: last.createdAt },
-    entries: [...archive.entries, {
+    entries: replaceJournalRange(archive.entries, batch[0].createdAt, last.createdAt, [{
       id: newId(), level: 1, from: batch[0].createdAt, to: last.createdAt,
+      fromMessageId: batch[0].id, toMessageId: last.id,
       messageCount: batch.length, source: source.text, content, createdAt: new Date().toISOString(),
-    }],
+    }], { messages: chat.messages, range: { start: chat.messages.indexOf(batch[0]) + 1, end: chat.messages.indexOf(last) + 1 } }),
   }));
   return true;
 };
@@ -277,6 +283,7 @@ const compress = async (chatId: string) => {
       ...archive, lastError: '',
       entries: [...archive.entries.map((entry) => ids.has(entry.id) ? { ...entry, mergedInto: id } : entry), {
         id, level: level === 1 ? 2 : 3, from: batch[0].from, to: batch[batch.length - 1].to,
+        fromMessageId: batch[0].fromMessageId, toMessageId: batch[batch.length - 1].toMessageId,
         messageCount: batch.reduce((sum, entry) => sum + entry.messageCount, 0), content,
         source: [...new Set(batch.map((entry) => entry.source))].join('\n\n'), createdAt: new Date().toISOString(),
       }],
@@ -288,6 +295,51 @@ const compress = async (chatId: string) => {
 
 const running = new Set<string>();
 const lastAttempt = new Map<string, number>();
+export const regenerateGroupJournal = async (chatId: string, range?: JournalRange) => {
+  if (running.has(chatId)) throw new Error('这个群的流水账正在整理，请稍后再试。');
+  const chat = readChat(chatId);
+  const assertCurrent = guard(chat);
+  const selected = selectJournalRange(chat.messages, range);
+  const original = archiveOf(readState(), chat);
+  const source = sourceOf(chat);
+  const generated: GroupJournalEntry[] = [];
+  running.add(chatId);
+  try {
+    for (let index = 0; index < selected.length; index += 250) {
+      const batch = selected.slice(index, index + 250);
+      const content = summaryText(await requestMemoryAiText(
+        `把以下群聊整理成200~400字的流水账。\n${summaryRules}`,
+        `${source.text}\n【指定范围聊天记录】\n${batch.map((message) =>
+          `[${message.createdAt}] ${source.speaker(message.senderId)}：${message.kind === 'forum-forward'
+            ? '[论坛转发内容不向本群开放，不记录其正文或作者信息]'
+            : describeForSummary(message, 600)}`).join('\n')}`,
+        { temperature: 0.3, maxTokens: 1600 }
+      ));
+      assertCurrent();
+      generated.push({ id: newId(), level: 1, from: batch[0].createdAt,
+        to: batch[batch.length - 1].createdAt, messageCount: batch.length,
+        fromMessageId: batch[0].id, toMessageId: batch[batch.length - 1].id,
+        content, source: source.text, createdAt: new Date().toISOString() });
+    }
+    const latest = assertCurrent();
+    if (JSON.stringify(latest.messages.slice(0, chat.messages.length)) !== JSON.stringify(chat.messages) ||
+      JSON.stringify(archiveOf(readState(), latest)) !== JSON.stringify(original)) {
+      throw new Error('生成期间群聊或流水账已变化，未覆盖现有数据，请重试。');
+    }
+    const last = selected[selected.length - 1];
+    const cursorIndex = original.cursor ? chat.messages.findIndex((message) => message.id === original.cursor?.id) : -1;
+    const canAdvance = (range?.start ?? 1) <= cursorIndex + 2;
+    updateArchive(chat, (archive) => ({ ...archive, lastError: '',
+      cursor: canAdvance && (!original.cursor || last.createdAt >= original.cursor.createdAt)
+        ? { id: last.id, createdAt: last.createdAt } : archive.cursor,
+      entries: replaceJournalRange(archive.entries, selected[0].createdAt, last.createdAt, generated,
+        { messages: chat.messages, range: range ?? { start: 1, end: chat.messages.length } }),
+    }));
+    return generated.length;
+  } finally {
+    running.delete(chatId);
+  }
+};
 export const runGroupJournal = async (chatId: string, options: { compressOnly?: boolean; auto?: boolean } = {}) => {
   if (running.has(chatId)) throw new Error('这个群的流水账正在整理，请稍后再试。');
   const chat = readChat(chatId);

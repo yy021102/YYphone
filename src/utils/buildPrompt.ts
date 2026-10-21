@@ -94,6 +94,8 @@ interface PromptWorldBook {
 
 export interface BuildPromptOptions {
   chatId: string;
+  /** Background tasks can use character/world/player settings before a first chat exists. */
+  backgroundCharacterId?: string;
   currentInput?: string;
   historyLimit?: number;
   callMode?: 'voice' | 'video';
@@ -106,6 +108,10 @@ export interface BuildPromptOptions {
   plantInjection?: PlantInjection;
   /** 长期记忆（向量检索结果）；检索是异步的，由调用方先算好传入。 */
   memoryInjection?: MemoryInjection;
+  timeAwarenessEnabled?: boolean;
+  timeZone?: string;
+  imageGenerationEnabled?: boolean;
+  imageGenerationPrompt?: string;
 }
 
 export type OpenAiMessage = {
@@ -287,9 +293,28 @@ const formatDuration = (ms: number) => {
   return `${Math.floor(hours / 24)} 天${hours % 24 ? ` ${hours % 24} 小时` : ''}`;
 };
 
-const formatClock = (date: Date) => {
+const formatClock = (date: Date, timeZone?: string) => {
+  if (timeZone) {
+    return new Intl.DateTimeFormat('zh-CN', {
+      timeZone,
+      month: 'numeric',
+      day: 'numeric',
+      weekday: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    }).format(date);
+  }
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${date.getMonth() + 1}月${date.getDate()}日 ${['周日', '周一', '周二', '周三', '周四', '周五', '周六'][date.getDay()]} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+};
+
+const getClockHour = (date: Date, timeZone?: string) => {
+  if (!timeZone) return date.getHours();
+  const hour = new Intl.DateTimeFormat('en', { timeZone, hour: '2-digit', hourCycle: 'h23' })
+    .formatToParts(date)
+    .find((part) => part.type === 'hour')?.value;
+  return Number(hour ?? date.getHours());
 };
 
 const timeOfDayLabel = (hour: number) =>
@@ -429,7 +454,11 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
   const alipayData = readAlipayData();
 
   const chats = Array.isArray(chatsValue) ? chatsValue.filter(isChatConversation) : [];
-  const chat = chats.find((item) => item.id === chatId);
+  const chat: PromptConversation | undefined = chats.find((item) => item.id === chatId) ??
+    (!chatId && options.backgroundCharacterId ? {
+      id: `background:${options.backgroundCharacterId}`, type: 'direct',
+      participantIds: [options.backgroundCharacterId], noteName: '', context: '', messages: [],
+    } : undefined);
   if (!chat) throw new Error(`找不到聊天记录：${chatId}`);
 
   const contacts = Array.isArray(contactsValue)
@@ -789,10 +818,11 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
     if (item.message.senderId === 'narrator' && item.message.kind !== 'context-note' &&
       chat.type !== 'observer' && item.conversation.type !== 'observer') continue;
     if (item.date > 0 && item.message.kind !== 'context-note') {
-      if (previousHistoryDate > 0 && item.date - previousHistoryDate >= 60 * 60 * 1000) {
+      if (options.timeAwarenessEnabled !== false &&
+        previousHistoryDate > 0 && item.date - previousHistoryDate >= 60 * 60 * 1000) {
         messages.push({
           role: 'system',
-          content: `（时间流逝：距上一条消息过去了${formatDuration(item.date - previousHistoryDate)}，此时是${formatClock(new Date(item.date))}）`,
+          content: `（时间流逝：距上一条消息过去了${formatDuration(item.date - previousHistoryDate)}，此时是${formatClock(new Date(item.date), options.timeZone)}）`,
         });
       }
       previousHistoryDate = item.date;
@@ -852,22 +882,34 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
   if (afterEntries) messages.push({ role: 'system', content: `世界书条目 - 深度后：\n${afterEntries}` });
 
   // 9. User's current input.
-  const nowDate = new Date();
-  const lastBefore = [...orderedHistory].reverse().find(
-    (item) => item.date > 0 && item.conversation.id === chat.id && item.message.kind !== 'context-note'
-  );
-  const gapMs = lastBefore ? nowDate.getTime() - lastBefore.date : 0;
-  messages.push({
-    role: 'system',
-    content: [
-      `【当前时间】现在是${formatClock(nowDate)}，${timeOfDayLabel(nowDate.getHours())}。`,
-      lastBefore && gapMs >= 30 * 60 * 1000
-        ? `距离上一条聊天消息已过去${formatDuration(gapMs)}。这段时间里大家并不是静止的，而是各自在正常生活：你可能已经做了一些事情（吃饭、工作、外出、休息、处理杂事等，结合人设与当前行程），玩家也一样。请自然体现时间的流逝，可以顺带提一句自己这段时间做了什么、或好奇玩家做了什么；久未联系可以提到“好久没说话”，不要把过了很久的事当成刚刚发生，也不要生硬报时。`
-        : '请结合现在的时间段（早晨、饭点、深夜等）自然体现角色的状态，不要生硬报时。',
-      '关于作息：不要催促玩家睡觉或早起。夜深时最多轻轻关心一次，玩家没有表示要睡就不要再提；禁止反复、连续地催睡、劝睡或“该睡了”式的叮嘱。',
-      '聊天记录中的“（时间流逝…）”是系统标注的时间间隔，不是任何人说的话。',
-    ].join('\n'),
-  });
+  if (options.imageGenerationEnabled) {
+    messages.push({
+      role: 'system',
+      content: [
+        '本对话已开启生图：当你发送图片消息时，图片描述会被交给生图模型生成真实图片。请把图片描述写成具体的画面提示词（主体、外貌、动作、场景、光线、构图），不要只写“一张照片”。',
+        options.imageGenerationPrompt?.trim() ? `生图附加提示词（会自动拼接，无需重复）：${options.imageGenerationPrompt.trim()}` : '',
+      ].filter(Boolean).join('\n'),
+    });
+  }
+  if (options.timeAwarenessEnabled !== false) {
+    const nowDate = new Date();
+    const lastBefore = [...orderedHistory].reverse().find(
+      (item) => item.date > 0 && item.conversation.id === chat.id && item.message.kind !== 'context-note'
+    );
+    const gapMs = lastBefore ? nowDate.getTime() - lastBefore.date : 0;
+    const hour = getClockHour(nowDate, options.timeZone);
+    messages.push({
+      role: 'system',
+      content: [
+        `【当前时间】现在是${formatClock(nowDate, options.timeZone)}，${timeOfDayLabel(hour)}。`,
+        lastBefore && gapMs >= 30 * 60 * 1000
+          ? `距离上一条聊天消息已过去${formatDuration(gapMs)}。这段时间里大家并不是静止的，而是各自在正常生活：你可能已经做了一些事情（吃饭、工作、外出、休息、处理杂事等，结合人设与当前行程），玩家也一样。请自然体现时间的流逝，可以顺带提一句自己这段时间做了什么、或好奇玩家做了什么；久未联系可以提到“好久没说话”，不要把过了很久的事当成刚刚发生，也不要生硬报时。`
+          : '请结合现在的时间段（早晨、饭点、深夜等）自然体现角色的状态，不要生硬报时。',
+        '关于作息：不要催促玩家睡觉或早起。夜深时最多轻轻关心一次，玩家没有表示要睡就不要再提；禁止反复、连续地催睡、劝睡或“该睡了”式的叮嘱。',
+        '聊天记录中的“（时间流逝…）”是系统标注的时间间隔，不是任何人说的话。',
+      ].join('\n'),
+    });
+  }
   messages.push({
     role: 'user',
     content: [

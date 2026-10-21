@@ -51,7 +51,6 @@ const getCharAvatar = (charObj: unknown): string => {
 
 type SubAppKey = 'home' | 'wechat' | 'album' | 'browser' | 'notes' | 'icity' | 'agent' | 'wallet' | 'maps' | 'health';
 
-const GEN_SCOPES: PhoneGenScope[] = ['wechat', 'album', 'browser', 'notes', 'icity', 'agent', 'wallet', 'health'];
 const scopeForApp = (app: SubAppKey): 'all' | PhoneGenScope =>
   app === 'home' ? 'all' : app === 'maps' ? 'album' : app;
 
@@ -280,6 +279,7 @@ export const CheckPhoneApp: React.FC<CheckPhoneAppProps> = ({ onBack }) => {
 
   const [activeSubApp, setActiveSubApp] = useState<SubAppKey>('home');
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
+  const generatingRef = useRef(false);
   const [showTopMenu, setShowTopMenu] = useState<boolean>(false);
 
   const [selectedWeChatThreadId, setSelectedWeChatThreadId] = useState<string | null>(null);
@@ -320,7 +320,8 @@ export const CheckPhoneApp: React.FC<CheckPhoneAppProps> = ({ onBack }) => {
   const [shareNotice, setShareNotice] = useState('');
 
   const handleTriggerGenerate = async (scope: 'all' | PhoneGenScope) => {
-    if (isGenerating) return;
+    if (generatingRef.current) return;
+    generatingRef.current = true;
     setIsGenerating(true);
     const ctx: PhoneGenContext = {
       charId: selectedCharId,
@@ -328,24 +329,18 @@ export const CheckPhoneApp: React.FC<CheckPhoneAppProps> = ({ onBack }) => {
       userName,
       npcs: readLinkedNpcsForChar(selectedCharId),
     };
-    const scopes: PhoneGenScope[] = scope === 'all' ? [...GEN_SCOPES] : [scope];
     const charId = selectedCharId;
-    const results = await Promise.allSettled(
-      scopes.map(async (item) => {
-        const patch = await generatePhoneScope(item, ctx, phonesMapRef.current[charId] ?? currentPhone);
-        setPhonesMap((prev) => ({
-          ...prev,
-          [charId]: { ...(prev[charId] ?? createDefaultPhoneData(charId, currentChar.name)), ...patch },
-        }));
-      })
-    );
-    const failed = results.flatMap((result, index) =>
-      result.status === 'rejected'
-        ? [`${scopes[index]}：${result.reason instanceof Error ? result.reason.message : String(result.reason)}`]
-        : []
-    );
-    if (failed.length > 0) showYyError(failed.join('\n'), '生成手机内容时出错了');
-    setIsGenerating(false);
+    try {
+      const patch = await generatePhoneScope(scope, ctx, phonesMapRef.current[charId] ?? currentPhone);
+      setPhonesMap((prev) => ({
+        ...prev, [charId]: { ...(prev[charId] ?? createDefaultPhoneData(charId, currentChar.name)), ...patch },
+      }));
+    } catch (error) {
+      showYyError(error instanceof Error ? error.message : String(error), '生成手机内容时出错了');
+    } finally {
+      generatingRef.current = false;
+      setIsGenerating(false);
+    }
   };
 
   const forwardToChar = (appLabel: string, summary: string, detail: string, mode: PhoneShareMode) => {

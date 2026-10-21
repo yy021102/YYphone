@@ -22,6 +22,7 @@ export interface PaperNote extends PaperAuthor, PaperContent {
   date: string;
   answer?: string;
   reply?: string;
+  favorite?: boolean;
 }
 interface PaperDay extends PaperAuthor { noteId?: string }
 export interface PaperNotesState {
@@ -40,7 +41,14 @@ const note = (value: unknown): value is PaperNote =>
   isRecordDate(value.date) && ['question', 'thought', 'unsaid'].includes(String(value.kind)) &&
   typeof value.content === 'string' && !!value.content.trim() &&
   (value.answer === undefined || typeof value.answer === 'string') &&
-  (value.reply === undefined || typeof value.reply === 'string');
+  (value.reply === undefined || typeof value.reply === 'string') &&
+  (value.favorite === undefined || typeof value.favorite === 'boolean');
+
+export const retainPaperNotes = (notes: PaperNote[]): PaperNote[] => {
+  const retained = new Set(notes.filter((item) => !item.favorite)
+    .sort((a, b) => b.date.localeCompare(a.date)).slice(0, 100).map((item) => item.id));
+  return notes.filter((item) => item.favorite || retained.has(item.id));
+};
 
 const validState = (value: unknown): value is PaperNotesState =>
   record(value) && value.version === 1 && record(value.days) &&
@@ -54,7 +62,7 @@ export const parsePaperNotesState = (value: unknown): PaperNotesState => {
   if (!validState(value)) {
     throw new Error('小纸条数据格式无效，请先备份数据后检查，未覆盖原有纸条。');
   }
-  return value;
+  return { ...value, notes: retainPaperNotes(value.notes) };
 };
 
 export const readPaperNotes = (): PaperNotesState => {
@@ -96,6 +104,12 @@ const freshState = async () => {
   await Promise.all([CHATS_KEY, CONTACTS_KEY].map((key) => getStorageItem(key, { fresh: true })));
   return parsePaperNotesState(await getStorageItem(PAPER_NOTES_KEY, { fresh: true }));
 };
+export const loadPaperNotes = (): Promise<PaperNotesState> => exclusive(async () => {
+  const raw: unknown = await getStorageItem(PAPER_NOTES_KEY, { fresh: true });
+  const parsed = parsePaperNotesState(raw);
+  if (validState(raw) && parsed.notes.length !== raw.notes.length) await setStorageItem(PAPER_NOTES_KEY, parsed);
+  return parsed;
+});
 const eligible = (selected: PaperAuthor) => {
   if (!paperCandidates().some((candidate) => candidate.charId === selected.charId && candidate.chatId === selected.chatId)) {
     throw new Error('写纸条的角色已不可用，请检查私聊是否被删除或拉黑。');
@@ -139,7 +153,7 @@ export const openDailyPaper = (
   const paper: PaperNote = { ...selected, ...content, id: `paper-${date}`, date };
   await setStorageItem(PAPER_NOTES_KEY, {
     ...state, days: { ...state.days, [date]: { ...selected, noteId: paper.id } },
-    notes: [...state.notes, paper], memories: [...state.memories, paper],
+    notes: retainPaperNotes([...state.notes, paper]), memories: [...state.memories, paper],
   } satisfies PaperNotesState);
   return paper;
 });
@@ -184,6 +198,14 @@ export const answerPaper = (
 export const discardPaper = (id: string): Promise<void> => exclusive(async () => {
   const state = await freshState();
   await setStorageItem(PAPER_NOTES_KEY, { ...state, notes: state.notes.filter((item) => item.id !== id) });
+});
+
+export const setPaperFavorite = (id: string, favorite: boolean): Promise<void> => exclusive(async () => {
+  const state = await freshState();
+  if (!state.notes.some((item) => item.id === id)) throw new Error('纸条已不存在，无法收藏。');
+  await setStorageItem(PAPER_NOTES_KEY, { ...state,
+    notes: retainPaperNotes(state.notes.map((item) => item.id === id ? { ...item, favorite } : item)),
+  } satisfies PaperNotesState);
 });
 
 export const forgetPaperMemories = (scope: { archiveKey?: string; charId?: string }) => {

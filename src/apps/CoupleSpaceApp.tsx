@@ -40,6 +40,7 @@ import {
 import {
   generateCharDiary,
   generateCharMood,
+  generateCoupleBatch,
   generateDiaryReply,
   generateQaAnswer,
   generateQaQuestion,
@@ -250,6 +251,8 @@ export const CoupleSpaceApp: React.FC<CoupleSpaceAppProps> = ({ onBack }) => {
   const [userProfile] = useState(() => readWeChatUserProfile());
 
   const [spacesMap, setSpacesMap] = useState<Record<string, CharacterCoupleSpace>>(() => readCoupleSpaces());
+  const spacesRef = useRef(spacesMap);
+  spacesRef.current = spacesMap;
   const persistReadyRef = useRef(false);
   useEffect(() => {
     if (!persistReadyRef.current) {
@@ -290,13 +293,15 @@ export const CoupleSpaceApp: React.FC<CoupleSpaceAppProps> = ({ onBack }) => {
 
   const [bannerTip, setBannerTip] = useState<string>('');
   const [aiBusy, setAiBusy] = useState('');
+  const aiWorking = useRef(false);
   const [bgEditor, setBgEditor] = useState<'page' | 'calendar' | null>(null);
   const [bgDraft, setBgDraft] = useState('');
   const [recordEdit, setRecordEdit] = useState<CoupleRecordEdit | null>(null);
 
   // 运行 AI 生成：用调用时的角色 ID 写回，避免生成期间切换角色导致写错空间。
   const runAi = async (key: string, task: () => Promise<void | string>) => {
-    if (aiBusy) return;
+    if (aiWorking.current) return;
+    aiWorking.current = true;
     setAiBusy(key);
     try {
       const result = await task();
@@ -304,6 +309,7 @@ export const CoupleSpaceApp: React.FC<CoupleSpaceAppProps> = ({ onBack }) => {
     } catch (error) {
       setBannerTip(error instanceof Error ? error.message : 'AI 生成失败，请检查 API 配置后重试。');
     } finally {
+      aiWorking.current = false;
       setAiBusy('');
     }
   };
@@ -432,133 +438,19 @@ export const CoupleSpaceApp: React.FC<CoupleSpaceAppProps> = ({ onBack }) => {
     });
   };
 
-  // 一键生成：根据玩家已经写好的心情、日记、问答、便签，一次生成角色对应的内容。
+  // Validate the complete response before writing any section.
   const handleGenerateAll = () => {
     const charId = selectedCharId;
     const space = currentSpace;
-    const today = todayStr();
-    const charName = currentChar.name;
-    const steps: Array<{ label: string; run: () => Promise<void> }> = [];
-
-    // 心情：最近几天里玩家记了、角色还没记的
-    Object.values(space.moods)
-      .filter((rec) => rec.userMoodId && !rec.charMoodId)
-      .sort((a, b) => b.dateStr.localeCompare(a.dateStr))
-      .slice(0, 3)
-      .forEach((rec) => {
-        steps.push({
-          label: '心情',
-          run: async () => {
-            const userMood = getMoodById(rec.userMoodId);
-            const result = await generateCharMood(charId, userProfile.name, rec.dateStr, MOOD_OPTIONS, {
-              label: userMood?.label,
-              note: rec.userNote,
-            });
-            updateSpaceFor(charId, (prev) => ({
-              ...prev,
-              moods: {
-                ...prev.moods,
-                [rec.dateStr]: { ...(prev.moods[rec.dateStr] || { dateStr: rec.dateStr }), charMoodId: result.moodId, charNote: result.note },
-              },
-            }));
-          },
-        });
-      });
-
-    // 日记：回复玩家还没被回复的日记；玩家今天写了而角色今天没写，则角色也写一篇
-    const willWriteDiary =
-      space.diaries.some((entry) => entry.author === 'user' && entry.dateStr === today) &&
-      !space.diaries.some((entry) => entry.author === 'char' && entry.dateStr === today);
-    // 日记一次只生成一篇：优先写角色自己的日记，否则只回复最新一篇。
-    space.diaries
-      .filter((entry) => !willWriteDiary && entry.author === 'user' && !entry.replyComment)
-      .slice(0, 1)
-      .forEach((entry) => {
-        steps.push({
-          label: '日记回复',
-          run: async () => {
-            const reply = await generateDiaryReply(charId, userProfile.name, entry.title, entry.content);
-            updateSpaceFor(charId, (prev) => ({
-              ...prev,
-              diaries: prev.diaries.map((x) => (x.id === entry.id ? { ...x, replyComment: reply } : x)),
-            }));
-          },
-        });
-      });
-    if (willWriteDiary) {
-      steps.push({
-        label: '日记',
-        run: async () => {
-          const result = await generateCharDiary(charId, userProfile.name, space);
-          const diary: DiaryEntry = {
-            id: `diary-${Date.now()}`,
-            author: 'char',
-            authorName: charName,
-            dateStr: today,
-            title: result.title,
-            content: result.content,
-            seenByChar: true,
-          };
-          updateSpaceFor(charId, (prev) => ({ ...prev, diaries: [diary, ...prev.diaries] }));
-        },
-      });
-    }
-
-    // 问答：玩家答了、角色还没答的
-    space.qaList
-      .filter((qa) => qa.userAnswer && !qa.charAnswer)
-      .slice(0, 3)
-      .forEach((qa) => {
-        steps.push({
-          label: '问答',
-          run: async () => {
-            const answer = await generateQaAnswer(charId, userProfile.name, qa.question, qa.userAnswer);
-            updateSpaceFor(charId, (prev) => ({
-              ...prev,
-              qaList: prev.qaList.map((item) => (item.id === qa.id ? { ...item, charAnswer: answer } : item)),
-            }));
-          },
-        });
-      });
-
-    // 碎碎念：玩家贴的便签是最新一张，角色回一张
-    if (space.stickyNotes[0]?.author === 'user') {
-      steps.push({
-        label: '便签',
-        run: async () => {
-          const content = await generateStickyNote(charId, userProfile.name, space);
-          const note: StickyNoteItem = {
-            id: `note-${Date.now()}`,
-            author: 'char',
-            authorName: charName,
-            content,
-            colorBg: ['#FEF6C9', '#FFE0E9', '#DCEEFF', '#DCF5E3', '#EDE2FF'][Math.floor(Math.random() * 5)],
-            createdAt: todayStr(),
-            seenByChar: true,
-          };
-          updateSpaceFor(charId, (prev) => ({ ...prev, stickyNotes: [note, ...prev.stickyNotes] }));
-        },
-      });
-    }
-
     void runAi('all', async () => {
-      if (steps.length === 0) {
-        return `你还没有新的心情、日记、问答或便签，${charName}暂时没有需要回应的内容。`;
+      const result = await generateCoupleBatch(charId, userProfile.name, space, MOOD_OPTIONS);
+      if (JSON.stringify(readCoupleSpaces()[charId]) !== JSON.stringify(space) ||
+        JSON.stringify(spacesRef.current[charId]) !== JSON.stringify(space) ||
+        todayStr() !== result.stickyNotes[0]?.createdAt) {
+        throw new Error('生成期间情侣空间内容已变化，未覆盖现有内容，请重试。');
       }
-      const failures: string[] = [];
-      let done = 0;
-      for (const step of steps) {
-        try {
-          await step.run();
-          done += 1;
-        } catch (error) {
-          failures.push(`${step.label}：${error instanceof Error ? error.message : '生成失败'}`);
-        }
-      }
-      if (failures.length > 0 && done === 0) throw new Error(failures.join('；'));
-      return failures.length > 0
-        ? `已生成 ${done} 项，${failures.length} 项失败（${failures.join('；')}）`
-        : `已根据你写的内容，一键生成了 ${charName} 的 ${done} 项内容`;
+      updateSpaceFor(charId, () => result);
+      return '已用一次请求补齐心情、日记、问答和便签，保留已有内容。';
     });
   };
 

@@ -21,6 +21,7 @@ import {
 import { readMemories } from './memoryData';
 import { readOfflineContacts } from './offlineData';
 import { guardMemoryArchive } from './memoryArchives';
+import { replaceJournalRange, selectJournalRange, type JournalRange } from './journalRange';
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === 'object' && !Array.isArray(value);
@@ -70,9 +71,11 @@ export const createJournalEntry = async (
   const assertArchive = guardMemoryArchive(charId);
   const settings = readJournalSettings();
   const cursor = settings.journalCursors[charId] ?? '';
-  const pending = readDirectMessages(charId).filter((m) => !cursor || m.createdAt > cursor);
+  const messages = readDirectMessages(charId);
+  const pending = messages.filter((m) => !cursor || m.createdAt > cursor);
   if (pending.length < options.minMessages) return null;
   const chunk = pending.slice(0, MAX_CHUNK);
+  const original = entriesOf(charId);
   const { name, persona } = charInfo(charId);
   const userName = readUserName();
 
@@ -88,18 +91,30 @@ export const createJournalEntry = async (
     { temperature: 0.4, maxTokens: 900 }
   );
   assertArchive();
+  if (JSON.stringify(readDirectMessages(charId).slice(0, messages.length)) !== JSON.stringify(messages) ||
+    JSON.stringify(entriesOf(charId)) !== JSON.stringify(original) ||
+    (readJournalSettings().journalCursors[charId] ?? '') !== cursor) {
+    throw new Error('生成期间聊天或流水账已变化，未保存旧摘要，请重试。');
+  }
   const entry: JournalEntry = {
     id: newJournalId(),
     charId,
     level: 1,
     from: chunk[0].createdAt,
     to: chunk[chunk.length - 1].createdAt,
+    fromMessageId: chunk[0].id,
+    toMessageId: chunk[chunk.length - 1].id,
     messageCount: chunk.length,
     content: text.trim(),
     createdAt: new Date().toISOString(),
     source: options.minMessages >= readJournalSettings().journalEvery ? 'auto' : 'manual',
   };
-  writeJournalEntries([...readJournalEntries(), entry]);
+  writeJournalEntries([
+    ...readJournalEntries().filter((item) => item.charId !== charId),
+    ...replaceJournalRange(original, entry.from, entry.to, [entry], {
+      messages, range: { start: messages.indexOf(chunk[0]) + 1, end: messages.indexOf(chunk[chunk.length - 1]) + 1 },
+    }),
+  ]);
   const latest = readJournalSettings();
   writeJournalSettings({
     ...latest,
@@ -130,6 +145,8 @@ const mergeEntries = async (charId: string, entries: JournalEntry[], target: Jou
     level: target,
     from: entries[0].from,
     to: entries[entries.length - 1].to,
+    fromMessageId: entries[0].fromMessageId,
+    toMessageId: entries[entries.length - 1].toMessageId,
     messageCount: entries.reduce((sum, e) => sum + e.messageCount, 0),
     content: text.trim(),
     createdAt: new Date().toISOString(),
@@ -172,19 +189,74 @@ const COOLDOWN_MS = 10 * 60 * 1000;
 /** 自动任务失败后冷却一段时间，避免每次回复都重试、反复消耗请求。 */
 const coolingDown = (key: string) => Date.now() - (lastAutoAttempt.get(key) ?? 0) < COOLDOWN_MS;
 
+export const regenerateJournal = async (charId: string, range?: JournalRange) => {
+  if (journalRunning.has(charId)) throw new Error('这个角色的流水账正在整理，请稍后再试。');
+  const assertArchive = guardMemoryArchive(charId);
+  const messages = readDirectMessages(charId, { fullText: true });
+  const selected = selectJournalRange(messages, range);
+  const original = entriesOf(charId);
+  const originalCursor = readJournalSettings().journalCursors[charId];
+  const { name, persona } = charInfo(charId);
+  const generated: JournalEntry[] = [];
+  journalRunning.add(charId);
+  try {
+    for (let index = 0; index < selected.length; index += MAX_CHUNK) {
+      const chunk = selected.slice(index, index + MAX_CHUNK);
+      const content = (await requestMemoryAiText(
+        `你是${name}的记忆整理助手。人设：${persona}。按时间顺序把以下聊天整理成120~250字流水账，用“我”指代${name}，“玩家”指代${readUserName()}。保留人物、事件、情绪、约定、关键数字和未完话题，不杜撰。背景记录及群聊转私信须保留群名、成员、发言归属与来源，不混淆为私聊。只输出正文。`,
+        transcript(chunk, name, readUserName()), { temperature: 0.4, maxTokens: 1200 }
+      )).trim();
+      if (!content || content.length > 4000) throw new Error('流水账正文为空或过长，未保存本次重做。');
+      assertArchive();
+      generated.push({ id: newJournalId(), charId, level: 1, from: chunk[0].createdAt,
+        to: chunk[chunk.length - 1].createdAt, messageCount: chunk.length,
+        fromMessageId: chunk[0].id, toMessageId: chunk[chunk.length - 1].id,
+        content, createdAt: new Date().toISOString(), source: 'manual' });
+    }
+    if (JSON.stringify(readDirectMessages(charId, { fullText: true }).slice(0, messages.length)) !== JSON.stringify(messages) ||
+      JSON.stringify(entriesOf(charId)) !== JSON.stringify(original) ||
+      readJournalSettings().journalCursors[charId] !== originalCursor) {
+      throw new Error('生成期间聊天或流水账已变化，未覆盖现有数据，请重试。');
+    }
+    assertArchive();
+    const from = selected[0].createdAt;
+    const to = selected[selected.length - 1].createdAt;
+    const others = readJournalEntries().filter((entry) => entry.charId !== charId);
+    writeJournalEntries([...others, ...replaceJournalRange(original, from, to, generated,
+      { messages, range: range ?? { start: 1, end: messages.length } })]);
+    const settings = readJournalSettings();
+    const start = range?.start ?? 1;
+    const cursorIndex = originalCursor ? messages.reduce((last, message, index) =>
+      message.createdAt <= originalCursor ? index : last, -1) : -1;
+    writeJournalSettings({ ...settings, lastError: '', journalCursors: {
+      ...settings.journalCursors,
+      ...(start <= cursorIndex + 2 ? { [charId]: originalCursor && originalCursor > to ? originalCursor : to } : {}),
+    } });
+    return generated.length;
+  } finally {
+    journalRunning.delete(charId);
+  }
+};
+
 /** 手动整理：连续整理最多 maxChunks 段待整理的聊天，再压缩。 */
 export const runJournal = async (charId: string, maxChunks = 6): Promise<{ created: number; merged: number }> => {
+  if (journalRunning.has(charId)) throw new Error('这个角色的流水账正在整理，请稍后再试。');
   const assertArchive = guardMemoryArchive(charId);
-  let created = 0;
-  for (let i = 0; i < maxChunks; i += 1) {
-    const entry = await createJournalEntry(charId);
+  journalRunning.add(charId);
+  try {
+    let created = 0;
+    for (let i = 0; i < maxChunks; i += 1) {
+      const entry = await createJournalEntry(charId);
+      assertArchive();
+      if (!entry) break;
+      created += 1;
+    }
+    const merged = await compressJournal(charId);
     assertArchive();
-    if (!entry) break;
-    created += 1;
+    return { created, merged };
+  } finally {
+    journalRunning.delete(charId);
   }
-  const merged = await compressJournal(charId);
-  assertArchive();
-  return { created, merged };
 };
 
 /** 聊天回复保存后调用：新消息累计够多时在后台写一篇流水账并压缩。失败只记录。 */
@@ -210,8 +282,12 @@ export const maybeAutoJournal = async (participantIds: string[], chatType: strin
   }
 };
 
-export const updateJournalEntryContent = (id: string, content: string) =>
-  writeJournalEntries(readJournalEntries().map((e) => (e.id === id ? { ...e, content } : e)));
+export const updateJournalEntryContent = (id: string, content: string) => {
+  if (!content.trim() || content.trim().length > 4000) throw new Error('流水账正文不能为空或超过4000字。');
+  const entries = readJournalEntries();
+  if (!entries.some((entry) => entry.id === id)) throw new Error('流水账已不存在，无法保存。');
+  writeJournalEntries(entries.map((entry) => entry.id === id ? { ...entry, content: content.trim() } : entry));
+};
 
 // ==================== 角色成长笔记 ====================
 export const growthStatus = (charId: string) => {

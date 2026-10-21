@@ -24,6 +24,8 @@ export interface JournalEntry {
   /** 覆盖的聊天时间范围 */
   from: string;
   to: string;
+  fromMessageId?: string;
+  toMessageId?: string;
   messageCount: number;
   content: string;
   createdAt: string;
@@ -114,6 +116,7 @@ export const writeJournalSettings = (settings: JournalSettings) => writeStoredVa
 
 // ==================== 读取聊天 ====================
 export interface DirectMessage {
+  id?: string;
   createdAt: string;
   senderId: string;
   text: string;
@@ -172,6 +175,7 @@ export const readDirectMessages = (
     .filter((m): m is Record<string, unknown> =>
       isRecord(m) && typeof m.createdAt === 'string' && (m.senderId !== 'narrator' || m.kind === 'context-note'))
     .map((m) => ({
+      ...(typeof m.id === 'string' ? { id: m.id } : {}),
       createdAt: m.createdAt as string,
       senderId: typeof m.senderId === 'string' ? m.senderId : '',
       text: describeForSummary(m, options.fullText ? Infinity : 300),

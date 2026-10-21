@@ -49,6 +49,7 @@ import {
 import { requestConfiguredAiText } from '../utils/aiApi';
 import { readCharacterBrief } from '../utils/coupleSpaceData';
 import { upsertContextNote } from '../utils/chatNotes';
+import { generateFocusRank } from '../utils/pomodoroAi';
 
 interface PomodoroAppProps {
   onBack: () => void;
@@ -102,6 +103,7 @@ export interface CharRankItem {
   isPlayer?: boolean;
   todayMinutes: number;
   statusText: string;
+  dateStr?: string;
 }
 
 // 每个角色专属的花盆进度
@@ -391,7 +393,7 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
   const [showSpecimenModal, setShowSpecimenModal] = useState(false);
   const [isWateringAnim, setIsWateringAnim] = useState(false);
 
-  // 角色专注排行榜：只保存真实数据，由「刷新角色状态」调用 AI 按人设生成
+  // Character activity is fictional; only the player's timer records are measured.
   const [rankList, setRankList] = useState<CharRankItem[]>(() => {
     const initialRankList: CharRankItem[] = contacts.map((c) => ({
       id: `rank-${c.id}`,
@@ -1005,14 +1007,12 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
     .filter((r) => r.dateStr === todayDateStr())
     .reduce((sum, r) => sum + r.durationMinutes, 0);
 
-  // 角色的分钟数 = 今天玩家在其陪伴下真实完成的专注分钟数
   const combinedRankings: CharRankItem[] = [
-    ...rankList.map((item) => ({
-      ...item,
-      todayMinutes: records
-        .filter((r) => r.dateStr === todayDateStr() && r.companionCharName === item.name)
-        .reduce((sum, r) => sum + r.durationMinutes, 0),
-    })),
+    ...contacts.map((contact) => {
+      const item = rankList.find((item) => item.charId === contact.id && item.dateStr === todayDateStr());
+      return item ?? { id: `rank-${contact.id}`, charId: contact.id, name: contact.name,
+        todayMinutes: 0, statusText: '尚未生成今日专注状态' };
+    }),
     {
       id: 'rank-player',
       name: '我 (玩家)',
@@ -1025,29 +1025,21 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
   const handleRefreshAiRank = async () => {
     if (isRefreshingRank || contacts.length === 0) return;
     setIsRefreshingRank(true);
-    const hour = new Date().getHours();
-    const results = await Promise.all(contacts.map(async (c) => {
-      const line = await requestCharLine(
-        c.id,
-        `现在是${hour}点。用一句话（30字内）说说你此刻正在做什么、状态如何，要符合你的人设和现在的时间，不要提到番茄钟排名。`
-      );
-      return [c.id, line] as const;
-    }));
-    const lines = new Map(results);
-    setRankList(contacts.map((c) => ({
-      id: `rank-${c.id}`,
-      charId: c.id,
-      name: c.name,
-      todayMinutes: 0,
-      statusText: lines.get(c.id) || rankList.find((item) => item.charId === c.id)?.statusText || '',
-    })));
-    setIsRefreshingRank(false);
+    try {
+      const generated = await generateFocusRank(contacts);
+      if (generated[0]?.dateStr !== todayDateStr()) throw new Error('已过零点，请重新生成今日排行。');
+      setRankList(generated);
+    } catch (error) {
+      showYyError(error instanceof Error ? error.message : String(error), '生成角色专注排行失败');
+    } finally {
+      setIsRefreshingRank(false);
+    }
   };
 
   const handleInteractRankChar = (item: CharRankItem, myMinutes: number) => {
     const text = item.todayMinutes > myMinutes
-      ? `「${item.name}」今天陪你的时间比你自己的专注还多。`
-      : `你今天的专注 ${myMinutes} 分钟，「${item.name}」陪读 ${item.todayMinutes} 分钟。`;
+      ? `「${item.name}」今天自己专注了 ${item.todayMinutes} 分钟，比你的 ${myMinutes} 分钟更多。`
+      : `你今天专注 ${myMinutes} 分钟，「${item.name}」自己专注 ${item.todayMinutes} 分钟。`;
     setNoticeBanner(text);
   };
 
@@ -1798,7 +1790,7 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
                     <span>今日自习室专注排行</span>
                   </h4>
                   <p className="text-[10px] opacity-60 mt-0.5">
-                    今日陪读分钟数为真实记录；状态由角色按人设生成
+                    角色时长与状态由 AI 按人设、日程编造；玩家时长为真实专注记录
                   </p>
                 </div>
 
@@ -1808,7 +1800,7 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
                   className="px-2.5 py-1.5 rounded-xl bg-sky-50 text-sky-600 border border-sky-100 text-[11px] font-bold flex items-center gap-1 cursor-pointer"
                 >
                   <Sparkles className={`w-3 h-3 ${isRefreshingRank ? 'animate-spin' : ''}`} />
-                  <span>刷新角色状态</span>
+                  <span>生成角色专注排行</span>
                 </button>
               </div>
 

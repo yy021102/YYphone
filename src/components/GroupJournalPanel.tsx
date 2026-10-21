@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { showYyError } from './ErrorDialog';
+import { JournalRegenerator } from './JournalRegenerator';
 import { JOURNAL_LEVEL_LABEL } from '../utils/journalData';
 import {
   deleteGroupJournalEntry, editGroupJournalEntry, readGroupJournal,
-  runGroupJournal, setGroupJournalSettings,
+  runGroupJournal, setGroupJournalSettings, regenerateGroupJournal,
 } from '../utils/groupJournal';
 
 export const GroupJournalPanel = ({ chatId }: { chatId: string }) => {
@@ -72,6 +73,16 @@ export const GroupJournalPanel = ({ chatId }: { chatId: string }) => {
       <button type="button" disabled={busy} onClick={() => void run(true)}
         className="rounded-full bg-white px-3 py-1.5 text-[11px] text-slate-600 disabled:opacity-50">压缩合并</button>
     </div>
+    <JournalRegenerator key={chatId} total={journal.messageCount} busy={busy} onGenerate={async (range) => {
+      if (busy) return;
+      setBusy(true); setMessage('');
+      try {
+        const created = await regenerateGroupJournal(chatId, range);
+        setMessage(`已重新生成 ${created} 篇，可在下方编辑`);
+      } catch (error) {
+        showYyError(error instanceof Error ? error.message : String(error), '重新生成群聊流水账失败');
+      } finally { setBusy(false); refresh((value) => value + 1); }
+    }} />
     {message && <p role="status" className="text-[10px] text-sky-600">{message}</p>}
     {journal.lastError && <p role="alert" className="text-[10px] text-rose-500">上次整理失败：{journal.lastError}</p>}
     {!journal.entries.length && <p className="text-[10px] text-slate-400">本存档还没有流水账，可手动整理已有群聊。</p>}

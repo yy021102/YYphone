@@ -5,6 +5,8 @@ import {
   Download,
   Eye,
   EyeOff,
+  ImageDown,
+  Image as ImageIcon,
   Key,
   Lock,
   Plus,
@@ -13,6 +15,7 @@ import {
   Sliders,
   Trash2,
   Upload,
+  Volume2,
 } from 'lucide-react';
 import { AppHeader } from '../components/AppHeader';
 import { DEFAULT_FONT_SETTINGS, FONT_FAMILIES, FontSettings, normalizeFontUrl } from '../utils/fontSettings';
@@ -30,6 +33,20 @@ import {
   initializeDbStorage,
   replaceDbStorage,
 } from '../utils/dbStorage';
+import { compressUploadedImages } from '../utils/bulkImageCompression';
+import {
+  getVoiceProviderDefaults,
+  readVoiceModelSettings,
+  VOICE_PROVIDER_OPTIONS,
+  VoiceModelSettings,
+} from '../utils/voiceModel';
+import {
+  IMAGE_PROVIDER_DEFAULTS,
+  IMAGE_PROVIDER_OPTIONS,
+  ImageGenerationSettings,
+  isImageGenerationProvider,
+  readImageGenerationSettings,
+} from '../utils/imageGeneration';
 
 interface ApiPreset {
   id: string;
@@ -68,6 +85,8 @@ interface SettingsAppProps {
   onBack: () => void;
   showStatusBar: boolean;
   onToggleStatusBar: () => boolean;
+  followSystemDark: boolean;
+  onToggleFollowSystemDark: () => boolean;
   onLockScreen: () => void;
   lockSettings: { mode: 'none' | 'lock' | 'password'; password: string };
   onSaveLockSettings: (settings: {
@@ -87,6 +106,8 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
   onBack,
   showStatusBar,
   onToggleStatusBar,
+  followSystemDark,
+  onToggleFollowSystemDark,
   onLockScreen,
   lockSettings,
   onSaveLockSettings,
@@ -129,6 +150,15 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
   useErrorDialog(backupError, '备份出错了');
   const [statusBarError, setStatusBarError] = useState('');
   useErrorDialog(statusBarError);
+  const [voiceModelDraft, setVoiceModelDraft] = useState<VoiceModelSettings>(readVoiceModelSettings);
+  const [voiceModelMessage, setVoiceModelMessage] = useState('');
+  const voiceProvider = voiceModelDraft.provider ?? 'openai';
+  const voiceDefaults = getVoiceProviderDefaults(voiceProvider);
+  const [imageGenerationDraft, setImageGenerationDraft] = useState<ImageGenerationSettings>(readImageGenerationSettings);
+  const [imageGenerationMessage, setImageGenerationMessage] = useState('');
+  const imageDefaults = IMAGE_PROVIDER_DEFAULTS[imageGenerationDraft.provider];
+  const [imageCompressionBusy, setImageCompressionBusy] = useState(false);
+  const [imageCompressionMessage, setImageCompressionMessage] = useState('');
 
   const updateRuntime = async (patch: Partial<ChatRuntimeSettings>) => {
     setRuntimeBusy(true);
@@ -340,6 +370,56 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
     });
     setLockSettingsError(saved ? '' : '保存失败，请检查浏览器本地存储空间后重试。');
     setLockSettingsSaved(saved);
+  };
+
+  const handleSaveImageGeneration = () => {
+    const endpoint = imageGenerationDraft.endpoint.trim();
+    if (endpoint) {
+      try {
+        const url = new URL(endpoint);
+        if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('invalid protocol');
+      } catch {
+        setImageGenerationMessage('生图接口地址无效，请填写 http(s):// 开头的地址或留空。');
+        return;
+      }
+    }
+    try {
+      saveSetting(SETTINGS_KEYS.imageGeneration, { ...imageGenerationDraft, endpoint });
+      setImageGenerationMessage('生图模型配置已保存。');
+      setStatusBarError('');
+    } catch (error) {
+      console.error('Could not save image generation settings.', error);
+      setImageGenerationMessage('');
+      setStatusBarError('生图模型配置保存失败，请检查浏览器本地存储空间。');
+    }
+  };
+
+  const handleSaveVoiceModel = () => {
+    try {
+      saveSetting(SETTINGS_KEYS.voiceModel, voiceModelDraft);
+      setVoiceModelMessage('语音模型配置已保存。');
+      setStatusBarError('');
+    } catch (error) {
+      console.error('Could not save voice model settings.', error);
+      setVoiceModelMessage('');
+      setStatusBarError('语音模型配置保存失败，请检查浏览器本地存储空间。');
+    }
+  };
+
+  const handleCompressUploadedImages = async () => {
+    setImageCompressionBusy(true);
+    setImageCompressionMessage('');
+    try {
+      const count = await compressUploadedImages();
+      setImageCompressionMessage(count > 0
+        ? `已压缩 ${count} 张聊天、朋友圈或论坛图片。`
+        : '没有需要压缩的图片。');
+    } catch (error) {
+      console.error('Could not compress uploaded images.', error);
+      setImageCompressionMessage(error instanceof Error ? `压缩失败：${error.message}` : '图片压缩失败，请重试。');
+    } finally {
+      setImageCompressionBusy(false);
+    }
   };
 
   const handleExportBackup = async () => {
@@ -604,6 +684,116 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
           {runtimeSettings.keepAlive && <button type="button" disabled={runtimeBusy} onClick={() => void updateRuntime({ keepAlive: true })} className="text-xs font-semibold text-sky-600">恢复保活</button>}
         </section>
         <section className="glass-card rounded-2xl p-4 space-y-3">
+          <h2 className="flex items-center gap-1.5 text-xs font-bold text-[#2C4A5C]">
+            <Volume2 className="h-3.5 w-3.5 text-sky-600" />语音模型
+          </h2>
+          <label className="block text-[11px] font-semibold text-[#2C4A5C]">
+            服务商
+            <select value={voiceProvider}
+              onChange={(event) => setVoiceModelDraft({
+                ...voiceModelDraft,
+                provider: VOICE_PROVIDER_OPTIONS.find((option) => option.value === event.target.value)?.value ?? 'openai',
+              })}
+              className="mt-1 w-full rounded-xl border border-white bg-white/70 px-3 py-2 text-xs">
+              {VOICE_PROVIDER_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+          </label>
+          <label className="block text-[11px] font-semibold text-[#2C4A5C]">
+            {voiceProvider === 'minimax' ? 'Group ID（选填，旧版账号需要）' : 'API ID（选填）'}
+            <input value={voiceModelDraft.id} onChange={(event) => setVoiceModelDraft({ ...voiceModelDraft, id: event.target.value })}
+              className="mt-1 w-full rounded-xl border border-white bg-white/70 px-3 py-2 text-xs font-mono outline-none" />
+          </label>
+          <label className="block text-[11px] font-semibold text-[#2C4A5C]">
+            API Key{voiceProvider === 'moss' ? '（自部署可留空）' : ''}
+            <input type="password" autoComplete="off" value={voiceModelDraft.key}
+              onChange={(event) => setVoiceModelDraft({ ...voiceModelDraft, key: event.target.value })}
+              className="mt-1 w-full rounded-xl border border-white bg-white/70 px-3 py-2 text-xs font-mono outline-none" />
+          </label>
+          <label className="block text-[11px] font-semibold text-[#2C4A5C]">
+            模型
+            <input value={voiceModelDraft.model} onChange={(event) => setVoiceModelDraft({ ...voiceModelDraft, model: event.target.value })}
+              placeholder={voiceDefaults.model ? `留空默认：${voiceDefaults.model}` : '选填'}
+              className="mt-1 w-full rounded-xl border border-white bg-white/70 px-3 py-2 text-xs font-mono outline-none" />
+          </label>
+          {([
+            ['domesticEndpoint', '国内接口地址'],
+            ['overseasEndpoint', '海外接口地址'],
+          ] as const).map(([field, label]) => (
+            <label key={field} className="block text-[11px] font-semibold text-[#2C4A5C]">
+              {label}
+              <input type="url" value={voiceModelDraft[field]}
+                onChange={(event) => setVoiceModelDraft({ ...voiceModelDraft, [field]: event.target.value })}
+                placeholder={(field === 'domesticEndpoint' ? voiceDefaults.domestic : voiceDefaults.overseas)
+                  ? `留空默认：${field === 'domesticEndpoint' ? voiceDefaults.domestic : voiceDefaults.overseas}`
+                  : '接口 Base URL'}
+                className="mt-1 w-full rounded-xl border border-white bg-white/70 px-3 py-2 text-xs font-mono outline-none" />
+            </label>
+          ))}
+          <label className="block text-[11px] font-semibold text-[#2C4A5C]">
+            使用区域
+            <select value={voiceModelDraft.region}
+              onChange={(event) => setVoiceModelDraft({ ...voiceModelDraft, region: event.target.value === 'overseas' ? 'overseas' : 'domestic' })}
+              className="mt-1 w-full rounded-xl border border-white bg-white/70 px-3 py-2 text-xs">
+              <option value="domestic">国内</option>
+              <option value="overseas">海外</option>
+            </select>
+          </label>
+          <p className="text-[10px] leading-relaxed text-slate-400">OpenAI 兼容与 MOSS-TTS 请求 /audio/speech；MiniMax 请求 /v1/t2a_v2（国内 api.minimaxi.com，海外 api.minimax.io）。音色 ID 在角色设定中填写。密钥保存在本地，请勿分享备份文件。</p>
+          <button type="button" onClick={handleSaveVoiceModel} className="w-full rounded-xl bg-sky-600 py-2 text-xs font-bold text-white">保存语音模型</button>
+          {voiceModelMessage && <p role="status" className="text-[11px] text-emerald-700">{voiceModelMessage}</p>}
+        </section>
+        <section className="glass-card rounded-2xl p-4 space-y-3">
+          <h2 className="flex items-center gap-1.5 text-xs font-bold text-[#2C4A5C]">
+            <ImageIcon className="h-3.5 w-3.5 text-sky-600" />生图模型
+          </h2>
+          <label className="block text-[11px] font-semibold text-[#2C4A5C]">
+            服务商
+            <select value={imageGenerationDraft.provider}
+              onChange={(event) => setImageGenerationDraft({
+                ...imageGenerationDraft,
+                provider: isImageGenerationProvider(event.target.value) ? event.target.value : 'openai',
+              })}
+              className="mt-1 w-full rounded-xl border border-white bg-white/70 px-3 py-2 text-xs">
+              {IMAGE_PROVIDER_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+          </label>
+          <label className="block text-[11px] font-semibold text-[#2C4A5C]">
+            接口地址（选填）
+            <input type="url" value={imageGenerationDraft.endpoint}
+              onChange={(event) => setImageGenerationDraft({ ...imageGenerationDraft, endpoint: event.target.value })}
+              placeholder={imageDefaults.endpoint ? `留空默认：${imageDefaults.endpoint}` : '留空使用当前 API 地址'}
+              className="mt-1 w-full rounded-xl border border-white bg-white/70 px-3 py-2 text-xs font-mono outline-none" />
+          </label>
+          <label className="block text-[11px] font-semibold text-[#2C4A5C]">
+            API Key{imageGenerationDraft.provider === 'novelai' ? '' : '（选填）'}
+            <input type="password" autoComplete="off" value={imageGenerationDraft.apiKey}
+              onChange={(event) => setImageGenerationDraft({ ...imageGenerationDraft, apiKey: event.target.value })}
+              placeholder={imageGenerationDraft.provider === 'novelai' ? 'NovelAI 必填（pst-...）' : '留空则在格式匹配时使用当前 API 的 Key'}
+              className="mt-1 w-full rounded-xl border border-white bg-white/70 px-3 py-2 text-xs font-mono outline-none" />
+          </label>
+          <label className="block text-[11px] font-semibold text-[#2C4A5C]">
+            模型（选填）
+            <input value={imageGenerationDraft.model}
+              onChange={(event) => setImageGenerationDraft({ ...imageGenerationDraft, model: event.target.value })}
+              placeholder={`留空默认：${imageDefaults.model}`}
+              className="mt-1 w-full rounded-xl border border-white bg-white/70 px-3 py-2 text-xs font-mono outline-none" />
+          </label>
+          <p className="text-[10px] leading-relaxed text-slate-400">在各聊天的对话设置中开启“生图”后生效。OpenAI 兼容留空地址/Key 时使用当前 API；Imagen / Gemini 留空 Key 时，若当前 API 是 Google 也会复用。密钥保存在本地，请勿分享备份文件。</p>
+          <button type="button" onClick={handleSaveImageGeneration} className="w-full rounded-xl bg-sky-600 py-2 text-xs font-bold text-white">保存生图模型</button>
+          {imageGenerationMessage && <p role="status" className={`text-[11px] ${imageGenerationMessage.includes('无效') ? 'text-red-600' : 'text-emerald-700'}`}>{imageGenerationMessage}</p>}
+        </section>
+        <section className="glass-card rounded-2xl p-4 space-y-3">
+          <h2 className="flex items-center gap-1.5 text-xs font-bold text-[#2C4A5C]">
+            <ImageDown className="h-3.5 w-3.5 text-sky-600" />图片空间整理
+          </h2>
+          <p className="text-[10px] leading-relaxed text-slate-500">压缩聊天消息、朋友圈和论坛帖子中的已发送图片；不会处理 App 图标、壁纸、锁屏、聊天背景或头像。</p>
+          <button type="button" disabled={imageCompressionBusy} onClick={() => void handleCompressUploadedImages()}
+            className="w-full rounded-xl bg-white/80 py-2 text-xs font-bold text-[#2C4A5C] disabled:opacity-50">
+            {imageCompressionBusy ? '正在压缩图片…' : '一键压缩已发送图片'}
+          </button>
+          {imageCompressionMessage && <p role="status" className="text-[11px] text-sky-700">{imageCompressionMessage}</p>}
+        </section>
+        <section className="glass-card rounded-2xl p-4 space-y-3">
           <h2 className="text-xs font-bold text-[#2C4A5C]">小P · YYphone 小精灵</h2>
           <label className="flex items-center justify-between gap-3 text-xs text-slate-600">
             在主页显示小精灵入口
@@ -795,6 +985,16 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
                   }`}
                 />
               </button>
+            </div>
+            <div className="flex items-center justify-between p-3.5">
+              <div>
+                  <p className="text-xs font-bold text-[#2C4A5C]">跟随系统深色模式</p>
+                  <span className="text-[10px] text-slate-400">仅在设备启用深色外观时切换聊天界面</span>
+              </div>
+              <input type="checkbox" checked={followSystemDark} onChange={() => {
+                  const saved = onToggleFollowSystemDark();
+                  setStatusBarError(saved ? '' : '深色模式偏好保存失败，请检查浏览器本地存储空间。');
+              }} aria-label="跟随系统深色模式" />
             </div>
             {statusBarError && <p role="alert" className="px-3.5 pb-2 text-[11px] text-rose-600">{statusBarError}</p>}
 

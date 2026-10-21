@@ -20,7 +20,7 @@ const parseJson = (text: string): Record<string, unknown> => {
 
 const str = (value: unknown, max: number) => (typeof value === 'string' ? value.trim().slice(0, max) : '');
 
-const request = async (charId: string, userName: string, task: string, schema: string) => {
+const request = async (charId: string, userName: string, task: string, schema: string, maxTokens?: number) => {
   const brief = readCharacterBrief(charId);
   const system = [
     `你正在扮演「${brief.name}」，正在和恋人「${userName}」共用一个微信里的情侣空间小应用。`,
@@ -31,7 +31,7 @@ const request = async (charId: string, userName: string, task: string, schema: s
     '要求：完全以该角色的口吻与性格写作，像真人一样自然、有生活感和小情绪，不要套话；内容简短；不要提到自己是 AI。',
     `只返回一个 JSON 对象，格式：${schema}`,
   ].filter(Boolean).join('\n');
-  return parseJson(await requestConfiguredAiText(system, task, { json: true }));
+  return parseJson(await requestConfiguredAiText(system, task, { json: true, ...(maxTokens ? { maxTokens } : {}) }));
 };
 
 export const generateCharMood = async (
@@ -124,4 +124,82 @@ export const generateStickyNote = async (charId: string, userName: string, space
   const content = str(data.content, 120);
   if (!content) throw new Error('AI 没有写出便签，请重试。');
   return content;
+};
+
+export const generateCoupleBatch = async (
+  charId: string, userName: string, space: CharacterCoupleSpace, moods: MoodChoice[]
+): Promise<CharacterCoupleSpace> => {
+  const today = localDateString();
+  const moodDates = [...new Set([today, ...Object.values(space.moods)
+    .filter((item) => item.userMoodId && !item.charMoodId).map((item) => item.dateStr)])]
+    .filter((date) => !space.moods[date]?.charMoodId);
+  const diaries = space.diaries.filter((item) => item.author === 'user' && !item.replyComment);
+  const questions = space.qaList.filter((item) => !item.charAnswer &&
+    (item.askedBy !== 'char' || item.userAnswer));
+  const needsDiary = !space.diaries.some((item) => item.author === 'char' && item.dateStr === today);
+  const needsQuestion = !space.qaList.some((item) => item.dateStr === today);
+  const data = await request(charId, userName,
+    `一次完成情侣空间全部待写内容，不要漏项、不覆盖已有内容。今天=${today}。
+心情可选：${JSON.stringify(moods)}。
+需要写心情的日期（逐一返回）：${JSON.stringify(moodDates)}。
+玩家心情：${JSON.stringify(space.moods)}。
+需要回复的玩家日记（逐一按 id 回复）：${JSON.stringify(diaries)}。
+需要回答的问题（逐一按 id 回答）：${JSON.stringify(questions)}。
+${needsDiary ? '写一篇今天自己的日记，60~200字，呼应玩家近况。' : '今天已有自己的日记，diary 返回 null。'}
+${needsQuestion ? '今天还没有问答，生成一个新问题并写自己的回答，放入 qa。' : '今天已有问答，qa 返回 null。'}
+写一条新的碎碎念，50字以内。最近便签：${JSON.stringify(space.stickyNotes.slice(0, 6))}。
+最近日记：${JSON.stringify(space.diaries.slice(0, 4))}。
+每个列表只包含指定 id/日期，返回完整，不要用省略号。`,
+    '{"moods":[{"date":"YYYY-MM-DD","moodId":"心情id","note":"小记"}],"diary":{"title":"标题","content":"正文"}或null,"replies":[{"id":"日记id","reply":"批注"}],"answers":[{"id":"问题id","answer":"回答"}],"qa":{"question":"新问题","answer":"自己的回答"}或null,"note":"便签正文"}', 16000
+  );
+  const requiredText = (value: unknown, max: number, label: string) => {
+    if (typeof value !== 'string' || !value.trim() || value.trim().length > max) {
+      throw new Error(`AI 返回的${label}为空或过长，未保存本次生成。`);
+    }
+    return value.trim();
+  };
+  const listBy = (value: unknown, ids: string[], key: string) => {
+    if (!Array.isArray(value) || value.length !== ids.length) throw new Error('AI 未返回全部待写内容，未保存，请重试。');
+    const result = new Map<string, Record<string, unknown>>();
+    for (const item of value) {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) throw new Error('AI 返回列表格式无效。');
+      const row = item as Record<string, unknown>;
+      if (typeof row[key] !== 'string' || !ids.includes(row[key]) || result.has(row[key])) throw new Error('AI 返回的日期或记录 ID 无效。');
+      result.set(row[key], row);
+    }
+    return result;
+  };
+  const next: CharacterCoupleSpace = { ...space, moods: { ...space.moods },
+    diaries: [...space.diaries], qaList: [...space.qaList], stickyNotes: [...space.stickyNotes] };
+  const generatedMoods = listBy(data.moods, moodDates, 'date');
+  for (const [date, row] of generatedMoods) {
+    if (!moods.some((mood) => mood.id === row.moodId)) throw new Error('AI 选择了不存在的心情。');
+    next.moods[date] = { ...next.moods[date], dateStr: date, charMoodId: String(row.moodId),
+      charNote: requiredText(row.note, 80, '心情小记') };
+  }
+  const replies = listBy(data.replies, diaries.map((item) => item.id), 'id');
+  next.diaries = next.diaries.map((item) => replies.has(item.id)
+    ? { ...item, replyComment: requiredText(replies.get(item.id)?.reply, 200, '日记批注') } : item);
+  const answers = listBy(data.answers, questions.map((item) => item.id), 'id');
+  next.qaList = next.qaList.map((item) => answers.has(item.id)
+    ? { ...item, charAnswer: requiredText(answers.get(item.id)?.answer, 200, '问答回答') } : item);
+  const name = readCharacterBrief(charId).name;
+  const id = (prefix: string) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  if (needsDiary) {
+    const diary = data.diary;
+    if (!diary || typeof diary !== 'object' || Array.isArray(diary)) throw new Error('AI 遗漏了今日日记。');
+    const row = diary as Record<string, unknown>;
+    next.diaries.unshift({ id: id('diary'), author: 'char', authorName: name, dateStr: today,
+      title: requiredText(row.title, 30, '日记标题'), content: requiredText(row.content, 600, '日记正文'), seenByChar: true });
+  }
+  if (needsQuestion) {
+    const qa = data.qa;
+    if (!qa || typeof qa !== 'object' || Array.isArray(qa)) throw new Error('AI 遗漏了今日问答。');
+    const row = qa as Record<string, unknown>;
+    next.qaList.unshift({ id: id('qa'), dateStr: today, askedBy: 'char',
+      question: requiredText(row.question, 80, '问题'), charAnswer: requiredText(row.answer, 200, '回答') });
+  }
+  next.stickyNotes.unshift({ id: id('note'), author: 'char', authorName: name,
+    content: requiredText(data.note, 120, '便签'), colorBg: '#DCEEFF', createdAt: today, seenByChar: true });
+  return next;
 };

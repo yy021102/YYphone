@@ -156,6 +156,24 @@ export default function App() {
   const [showStatusBar, setShowStatusBar] = useState(() =>
     readSetting(SETTINGS_KEYS.statusBarVisible, true, (value): value is boolean => typeof value === 'boolean')
   );
+  const [followSystemDark, setFollowSystemDark] = useState(() =>
+    readSetting(SETTINGS_KEYS.followSystemDark, false, (value): value is boolean => typeof value === 'boolean')
+  );
+  useEffect(() => {
+    document.documentElement.dataset.followSystemDark = String(followSystemDark);
+    return () => { delete document.documentElement.dataset.followSystemDark; };
+  }, [followSystemDark]);
+  const handleToggleFollowSystemDark = (): boolean => {
+    const nextValue = !followSystemDark;
+    try {
+      saveSetting(SETTINGS_KEYS.followSystemDark, nextValue);
+      setFollowSystemDark(nextValue);
+      return true;
+    } catch (error) {
+      console.error('Could not save system dark appearance preference.', error);
+      return false;
+    }
+  };
   const [userProfile, setUserProfile] = useState<UserProfile>(() =>
     readSetting(SETTINGS_KEYS.userProfile, INITIAL_USER_PROFILE, isUserProfile)
   );
@@ -588,6 +606,8 @@ export default function App() {
                   onBack={handleBackToHome}
                   showStatusBar={showStatusBar}
                   onToggleStatusBar={handleToggleStatusBar}
+                  followSystemDark={followSystemDark}
+                  onToggleFollowSystemDark={handleToggleFollowSystemDark}
                   onLockScreen={handleLock}
                   lockSettings={lockSettings}
                   onSaveLockSettings={handleSaveLockSettings}

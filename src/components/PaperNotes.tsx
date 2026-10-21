@@ -1,8 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Archive, ArrowLeft, Mail, Send, Trash2, X } from 'lucide-react';
-import { getStorageItem } from '../utils/dbStorage';
+import { Archive, ArrowLeft, Mail, Send, Star, Trash2, X } from 'lucide-react';
 import { localDateString } from '../utils/coupleSpaceData';
-import { answerPaper, discardPaper, openDailyPaper, PAPER_NOTES_KEY, parsePaperNotesState, type PaperNotesState } from '../utils/paperNotes';
+import { answerPaper, discardPaper, openDailyPaper, loadPaperNotes, setPaperFavorite, type PaperNotesState } from '../utils/paperNotes';
 import { generateDailyPaper, generatePaperReply } from '../utils/paperNotesAi';
 
 export const PaperNotes: React.FC<{ onClose: () => void }> = ({ onClose }) => {
@@ -15,7 +14,10 @@ export const PaperNotes: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const [error, setError] = useState('');
   const [deleting, setDeleting] = useState(false);
   const working = useRef(false);
-  const refresh = async () => setState(parsePaperNotesState(await getStorageItem(PAPER_NOTES_KEY, { fresh: true })));
+  const pressTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const longPressed = useRef(false);
+  const cancelPress = () => { clearTimeout(pressTimer.current); };
+  const refresh = async () => setState(await loadPaperNotes());
   const fail = (error: unknown) => {
     console.error('Could not update anonymous paper notes.', error);
     setError(error instanceof Error ? error.message : '小纸条操作失败，请重试。');
@@ -25,7 +27,7 @@ export const PaperNotes: React.FC<{ onClose: () => void }> = ({ onClose }) => {
     const tick = () => setToday(localDateString());
     const timer = window.setInterval(tick, 15_000);
     window.addEventListener('focus', tick);
-    return () => { window.clearInterval(timer); window.removeEventListener('focus', tick); };
+    return () => { window.clearInterval(timer); window.removeEventListener('focus', tick); cancelPress(); };
   }, []);
   const act = async (task: () => Promise<void>) => {
     if (working.current) return;
@@ -68,6 +70,11 @@ export const PaperNotes: React.FC<{ onClose: () => void }> = ({ onClose }) => {
           ) : paper ? (
             <>
               <p className="text-center text-[11px] text-slate-400">{paper.date} · 匿名</p>
+              <button type="button" disabled={busy} aria-pressed={!!paper.favorite}
+                onClick={() => void act(async () => { await setPaperFavorite(paper.id, !paper.favorite); })}
+                className="mx-auto flex items-center gap-1 text-xs text-sky-600">
+                <Star className={`h-4 w-4 ${paper.favorite ? 'fill-sky-200' : ''}`} />{paper.favorite ? '已收藏 · 点击取消' : '收藏纸条'}
+              </button>
               <article aria-label="匿名纸条正文" className="whitespace-pre-wrap break-words rounded-2xl border border-sky-100 bg-gradient-to-br from-sky-50 to-white p-4 text-sm leading-7 shadow-sm">{paper.content}</article>
               {paper.answer !== undefined && <div className="rounded-2xl bg-sky-50 p-4 text-xs">
                 <p className="mb-2 text-slate-400">你传回的纸条</p><p className="whitespace-pre-wrap break-words leading-6">{paper.answer}</p>
@@ -103,10 +110,21 @@ export const PaperNotes: React.FC<{ onClose: () => void }> = ({ onClose }) => {
             </>
           ) : drawer ? (
             <div className="space-y-2">
+              <p className="text-[10px] text-slate-400">长按纸条收藏 / 取消收藏。保留最近100条未收藏纸条，收藏不占名额、不会自动删除。</p>
               {state.notes.length ? [...state.notes].sort((a, b) => b.date.localeCompare(a.date)).map((item) => (
-                <button type="button" key={item.id} onClick={() => select(item.id)}
+                <button type="button" key={item.id} disabled={busy}
+                  onPointerDown={() => {
+                    cancelPress(); longPressed.current = false;
+                    pressTimer.current = setTimeout(() => {
+                      longPressed.current = true;
+                      void act(async () => { await setPaperFavorite(item.id, !item.favorite); });
+                    }, 550);
+                  }}
+                  onPointerUp={cancelPress} onPointerLeave={cancelPress} onPointerCancel={cancelPress}
+                  onContextMenu={(event) => event.preventDefault()}
+                  onClick={() => { if (!longPressed.current) select(item.id); longPressed.current = false; }}
                   className="flex w-full items-center gap-3 rounded-2xl border border-sky-100 bg-gradient-to-br from-sky-50 to-white p-4 text-left">
-                  <Mail className="h-5 w-5 shrink-0 text-[#6F8CA0]" />
+                  {item.favorite ? <Star aria-label="已收藏" className="h-5 w-5 shrink-0 fill-sky-200 text-sky-500" /> : <Mail className="h-5 w-5 shrink-0 text-[#6F8CA0]" />}
                   <div className="min-w-0 flex-1"><p className="text-xs">{item.date}</p>
                     <p className="mt-1 truncate text-[11px] text-slate-400">{item.content}</p></div>
                 </button>

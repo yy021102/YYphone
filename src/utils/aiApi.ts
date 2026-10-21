@@ -139,3 +139,61 @@ export const requestConfiguredAiText = async (
   if (!trimmed) throw new Error('AI 返回了空内容。');
   return trimmed.replace(/^```(?:json)?\s*|\s*```$/gi, '').trim();
 };
+
+export const requestConfiguredImage = async (
+  prompt: string,
+  options: { model: string; api: ApiConnection }
+): Promise<string> => {
+  const endpoint = options.api.endpoint.trim().replace(/\/+$/, '');
+  if (!endpoint || !options.api.apiKey.trim() || !options.model.trim()) {
+    throw new Error('生图模型缺少接口地址、Key 或模型 ID。');
+  }
+  if (endpoint.includes('generativelanguage.googleapis.com')) {
+    throw new Error('当前生图流程需要 OpenAI 兼容的 /images/generations 接口；Gemini API 不支持此接口格式。');
+  }
+  let baseUrl: URL;
+  try {
+    baseUrl = new URL(endpoint);
+    if (baseUrl.protocol !== 'http:' && baseUrl.protocol !== 'https:') {
+      throw new Error('生图接口必须使用 HTTP 或 HTTPS。');
+    }
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : '生图接口地址无效。');
+  }
+  baseUrl.pathname = baseUrl.pathname
+    .replace(/\/chat\/completions$/i, '')
+    .replace(/\/completions$/i, '')
+    .replace(/\/images\/generations$/i, '');
+  baseUrl.pathname = `${baseUrl.pathname.replace(/\/+$/, '')}/images/generations`;
+  baseUrl.search = '';
+  baseUrl.hash = '';
+
+  const response = await fetch(baseUrl, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${options.api.apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: options.model.trim(),
+      prompt,
+      n: 1,
+    }),
+  });
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`生图失败（HTTP ${response.status}）：${detail || response.statusText}`);
+  }
+  const payload: unknown = await response.json();
+  const image = payload && typeof payload === 'object' &&
+    Array.isArray((payload as { data?: unknown }).data)
+    ? (payload as { data: unknown[] }).data[0]
+    : undefined;
+  if (!image || typeof image !== 'object') throw new Error('生图接口没有返回图片。');
+  const result = image as { url?: unknown; b64_json?: unknown };
+  if (typeof result.url === 'string' && /^https?:\/\//i.test(result.url)) return result.url;
+  if (typeof result.b64_json === 'string' && result.b64_json) {
+    return `data:image/png;base64,${result.b64_json}`;
+  }
+  throw new Error('生图接口返回的数据中没有有效的图片 URL 或 base64 图片。');
+};
