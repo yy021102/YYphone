@@ -34,6 +34,7 @@ import {
   readWorldBookOptions,
   withWorldBooksForContacts,
 } from '../utils/worldBookPrompt';
+import { withForumBreakLimit } from '../utils/forumPrompt';
 import { getChatRelationContexts } from '../utils/chatContext';
 
 interface ForumAppProps {
@@ -191,6 +192,7 @@ const FORUM_STORAGE_KEYS = {
   activePresetId: 'yyphone:forum-active-preset-id',
   currentTheme: 'yyphone:forum-current-theme',
   worldBookIds: 'yyphone:forum-world-book-ids',
+  breakLimitWords: 'yyphone:forum-break-limit-words',
   chats: 'yyphone:wechat-chats',
   forwards: 'yyphone:forum-forwards',
 } as const;
@@ -452,11 +454,16 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
     readStoredValue(FORUM_STORAGE_KEYS.currentTheme, DEFAULT_FORUM_PRESET, isForumThemePreset)
   );
   const [newPresetName, setNewPresetName] = useState<string>('');
-  const [menuTab, setMenuTab] = useState<'theme' | 'data' | 'worldBooks'>('theme');
+  const [menuTab, setMenuTab] = useState<'theme' | 'data' | 'worldBooks' | 'breakLimit'>('theme');
   const [worldBookOptions] = useState(() => readWorldBookOptions());
   const [selectedForumWorldBookIds, setSelectedForumWorldBookIds] = useState<string[] | null>(() =>
     readStoredValue(FORUM_STORAGE_KEYS.worldBookIds, null, (value): value is string[] | null =>
       value === null || (Array.isArray(value) && value.every((id) => typeof id === 'string'))
+    )
+  );
+  const [forumBreakLimitWords, setForumBreakLimitWords] = useState(() =>
+    readStoredValue(FORUM_STORAGE_KEYS.breakLimitWords, '', (value): value is string =>
+      typeof value === 'string'
     )
   );
 
@@ -567,11 +574,12 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
       writeStoredValue(FORUM_STORAGE_KEYS.activePresetId, activePresetId);
       writeStoredValue(FORUM_STORAGE_KEYS.currentTheme, currentTheme);
       writeStoredValue(FORUM_STORAGE_KEYS.worldBookIds, selectedForumWorldBookIds);
+      writeStoredValue(FORUM_STORAGE_KEYS.breakLimitWords, forumBreakLimitWords);
     } catch (error) {
       console.error('Could not persist forum data.', error);
       setNoticeBanner('论坛数据保存失败，请检查浏览器本地存储空间。');
     }
-  }, [boards, posts, playerProfiles, playerAccounts, activePlayerAccounts, themePresets, activePresetId, currentTheme, selectedForumWorldBookIds]);
+  }, [boards, posts, playerProfiles, playerAccounts, activePlayerAccounts, themePresets, activePresetId, currentTheme, selectedForumWorldBookIds, forumBreakLimitWords]);
 
   // 当前选中的发帖角色名下的 NPC 列表
   const npcsForSelectedPostChar =
@@ -912,7 +920,7 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
       ])];
       const relationContexts = getChatRelationContexts(worldBookContactIds);
       const generated = parseForumPost(await requestConfiguredAiText(
-        [
+        withForumBreakLimit([
           relationContexts.length
             ? `参与角色的对话关系补充（用于理解关系和背景）：\n${relationContexts.join('\n\n')}`
             : '',
@@ -921,7 +929,7 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
             worldBookContactIds,
             selectedForumWorldBookIds ?? undefined
           ),
-        ].filter(Boolean).join('\n\n'),
+        ].filter(Boolean).join('\n\n'), forumBreakLimitWords),
         userPrompt,
         { json: true, includeGlobalWorldBooks: false }
       ));
@@ -1034,7 +1042,7 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
       ))];
       const commenterRelationContexts = getChatRelationContexts(commenterContactIds);
       const generated = parseAiJson(await requestConfiguredAiText(
-        [
+        withForumBreakLimit([
           commenterRelationContexts.length
             ? `评论角色的对话关系补充（用于理解角色关系和背景）：\n${commenterRelationContexts.join('\n\n')}`
             : '',
@@ -1043,7 +1051,7 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
             commenterContactIds,
             selectedForumWorldBookIds ?? undefined
           ),
-        ].filter(Boolean).join('\n\n'),
+        ].filter(Boolean).join('\n\n'), forumBreakLimitWords),
         JSON.stringify({
           board: { name: board.name, prompt: board.prompt, anonymous: board.isAnonymous },
           post: { title: post.title ?? '', content: post.content },
@@ -2299,7 +2307,7 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
               </button>
             </div>
 
-            <div className="grid grid-cols-3 p-1 bg-slate-100 rounded-2xl">
+            <div className="grid grid-cols-4 p-1 bg-slate-100 rounded-2xl">
               <button
                 onClick={() => setMenuTab('theme')}
                 className={`py-1.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1 cursor-pointer ${
@@ -2327,7 +2335,35 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
                 <BookOpen className="w-3.5 h-3.5 text-indigo-400" />
                 <span>世界书</span>
               </button>
+              <button
+                onClick={() => setMenuTab('breakLimit')}
+                className={`py-1.5 rounded-xl text-[10px] font-bold flex items-center justify-center gap-1 cursor-pointer ${
+                  menuTab === 'breakLimit' ? 'bg-white text-slate-800 shadow-2xs' : 'text-slate-500'
+                }`}
+              >
+                <span>破限词</span>
+              </button>
             </div>
+
+            {menuTab === 'breakLimit' && (
+              <div className="space-y-2.5 text-xs">
+                <label className="block space-y-1.5">
+                  <span className="font-bold text-slate-700">论坛破限词</span>
+                  <textarea
+                    aria-label="论坛破限词"
+                    value={forumBreakLimitWords}
+                    onChange={(event) => setForumBreakLimitWords(event.target.value)}
+                    rows={7}
+                    maxLength={10000}
+                    placeholder="填写只供论坛生成使用的补充词，可留空。内容会置于论坛提示词最前面。"
+                    className="w-full resize-y rounded-xl border border-slate-200 bg-white/90 px-3 py-2.5 text-[11px] leading-relaxed outline-none focus:border-indigo-300"
+                  />
+                </label>
+                <p className="text-[10px] leading-relaxed text-slate-400">
+                  仅在论坛生成帖子和评论时注入，不会提供给聊天、记忆整理或其他应用。
+                </p>
+              </div>
+            )}
 
             {menuTab === 'worldBooks' && (
               <div className="space-y-3 text-xs">

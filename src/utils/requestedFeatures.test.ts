@@ -13,6 +13,7 @@ import { addMemoryCandidates, buildMemoryInjection, DEFAULT_MEMORY_SETTINGS, exp
 import { extractMemoryCandidates, requestMemoryAiText } from './memoryAi';
 import { withWorldBooksForContacts } from './worldBookPrompt';
 import { getChatRelationContexts } from './chatContext';
+import { withForumBreakLimit } from './forumPrompt';
 import { createJournalEntry, generateGrowthNote, regenerateJournal, runJournal, updateJournalEntryContent } from './journalAi';
 import { buildGrowthInjection, buildJournalInjection, deleteJournalEntry, readGrowthNotes, readJournalEntries, readJournalSettings, writeGrowthNotes, writeJournalEntries, writeJournalSettings } from './journalData';
 import { activeMemoryArchive, deleteCharacterMemoryArchives, deleteMemoryArchive, guardMemoryArchive, invalidateMemoryArchive, memoryArchiveLabel, prepareMemoryArchiveSwitch } from './memoryArchives';
@@ -2374,6 +2375,12 @@ test('forum and memory generation use applicable world books and memory candidat
   await extractMemoryCandidates('memory-world-char');
   assert.match(requestBody, /角色世界书标记/);
   assert.doesNotMatch(requestBody, /全局世界书标记|不应注入的私有世界书/);
+});
+
+test('forum break-limit prompt is prepended only when configured', () => {
+  const prompt = withForumBreakLimit('论坛系统提示', '论坛专属补充词');
+  assert.ok(prompt.startsWith('【论坛破限词】\n论坛专属补充词\n\n'));
+  assert.equal(withForumBreakLimit('论坛系统提示', '  '), '论坛系统提示');
 });
 
 test('memory secondary API also supports Gemini without a configured main API', async () => {
