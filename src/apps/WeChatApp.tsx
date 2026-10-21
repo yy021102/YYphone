@@ -29,7 +29,6 @@ import {
   Archive,
   Phone,
   Pencil,
-  Volume2,
 } from 'lucide-react';
 import { AppHeader } from '../components/AppHeader';
 import { MomentsTab } from '../components/MomentsTab';
@@ -914,8 +913,13 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
   const [selectedMessageId, setSelectedMessageId] = useState('');
   const [reactionMenuId, setReactionMenuId] = useState('');
   const [voicePlaybackMessageId, setVoicePlaybackMessageId] = useState('');
+  const [voiceLoadingMessageId, setVoiceLoadingMessageId] = useState('');
   const voiceAudioRef = useRef<HTMLAudioElement | null>(null);
-  const voiceObjectUrlRef = useRef('');
+  const voiceStopRef = useRef<(() => void) | null>(null);
+  const voiceCacheRef = useRef(new Map<string, string>());
+  const callVoiceQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const callVoiceSessionRef = useRef(0);
+  const callVoicePlayedRef = useRef(new Set<string>());
   const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
   const [hiddenMessageIds, setHiddenMessageIds] = useState<string[]>([]);
   const HISTORY_PAGE_SIZE = 15;
@@ -2234,43 +2238,75 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
     }
   };
 
+  const getVoiceSpeaker = (message: ChatMessage) => {
+    if (message.senderId === 'user' || message.senderId === 'narrator') return undefined;
+    const speaker = contacts.find((item) => item.id === message.senderId);
+    return speaker?.voiceEnabled && speaker.voiceId?.trim() ? speaker : undefined;
+  };
+
+  const stopCharacterVoice = () => {
+    voiceStopRef.current?.();
+    voiceStopRef.current = null;
+  };
+
+  // Resolves when playback ends, is stopped, or fails, so call lines can be queued one after another.
   const playCharacterVoice = async (message: ChatMessage, speaker: ContactPersona) => {
-    if (!speaker.voiceEnabled || !speaker.voiceId?.trim()) return;
-    setVoicePlaybackMessageId(message.id);
-    setChatError('');
-    let playbackStarted = false;
-    let objectUrl = '';
-    let audio: HTMLAudioElement | null = null;
-    try {
-      const audioBlob = await synthesizeVoice(
-        message.text,
-        speaker.voiceId,
-        speaker.voiceLanguage?.trim() || '中文'
-      );
+    // Video-call lines start with bracketed action descriptions that should not be spoken.
+    const speech = message.text.replace(/[（(][^（）()]*[）)]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!speech) return;
+    stopCharacterVoice();
+    let cancelled = false;
+    let finish: () => void = () => undefined;
+    const done = new Promise<void>((resolve) => { finish = resolve; });
+    voiceStopRef.current = () => {
+      cancelled = true;
       voiceAudioRef.current?.pause();
-      if (voiceObjectUrlRef.current) URL.revokeObjectURL(voiceObjectUrlRef.current);
-      objectUrl = URL.createObjectURL(audioBlob);
-      voiceObjectUrlRef.current = objectUrl;
-      audio = new Audio(objectUrl);
+      voiceAudioRef.current = null;
+      setVoicePlaybackMessageId('');
+      setVoiceLoadingMessageId('');
+      finish();
+    };
+    const stopSelf = voiceStopRef.current;
+    setChatError('');
+    try {
+      let objectUrl = voiceCacheRef.current.get(message.id);
+      if (!objectUrl) {
+        setVoiceLoadingMessageId(message.id);
+        const audioBlob = await synthesizeVoice(speech, speaker.voiceId ?? '', speaker.voiceLanguage?.trim() || '中文');
+        objectUrl = URL.createObjectURL(audioBlob);
+        voiceCacheRef.current.set(message.id, objectUrl);
+      }
+      if (cancelled) return;
+      setVoiceLoadingMessageId('');
+      const audio = new Audio(objectUrl);
       voiceAudioRef.current = audio;
       audio.onended = () => {
-        URL.revokeObjectURL(objectUrl);
-        if (voiceObjectUrlRef.current === objectUrl) voiceObjectUrlRef.current = '';
+        if (voiceStopRef.current === stopSelf) voiceStopRef.current = null;
         if (voiceAudioRef.current === audio) voiceAudioRef.current = null;
         setVoicePlaybackMessageId('');
+        finish();
       };
+      setVoicePlaybackMessageId(message.id);
       await audio.play();
-      playbackStarted = true;
     } catch (error) {
-      audio?.pause();
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-      if (voiceObjectUrlRef.current === objectUrl) voiceObjectUrlRef.current = '';
-      if (voiceAudioRef.current === audio) voiceAudioRef.current = null;
-      console.error('Could not play character voice.', error);
-      setChatError(error instanceof Error ? error.message : '语音播放失败，请检查语音模型配置和网络。');
-    } finally {
-      if (!playbackStarted) setVoicePlaybackMessageId('');
+      if (!cancelled) {
+        console.error('Could not play character voice.', error);
+        setChatError(error instanceof Error ? error.message : '语音播放失败，请检查语音模型配置和网络。');
+        stopSelf();
+      }
     }
+    return done;
+  };
+
+  const toggleCharacterVoice = (message: ChatMessage) => {
+    const speaker = getVoiceSpeaker(message);
+    if (!speaker) return false;
+    if (voicePlaybackMessageId === message.id || voiceLoadingMessageId === message.id) {
+      stopCharacterVoice();
+    } else {
+      void playCharacterVoice(message, speaker);
+    }
+    return true;
   };
 
   const messagePress = (messageId: string) => ({
@@ -2300,8 +2336,10 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
   };
 
   useEffect(() => () => {
-    voiceAudioRef.current?.pause();
-    if (voiceObjectUrlRef.current) URL.revokeObjectURL(voiceObjectUrlRef.current);
+    voiceStopRef.current?.();
+    callVoiceSessionRef.current += 1;
+    voiceCacheRef.current.forEach((url) => URL.revokeObjectURL(url));
+    voiceCacheRef.current.clear();
   }, []);
 
   const deleteSelectedMessages = () => {
@@ -2656,6 +2694,9 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
     setIncomingCallMessageId('');
     setCallConnectedAt(null);
     setChatError('');
+    callVoiceSessionRef.current += 1;
+    callVoiceQueueRef.current = Promise.resolve();
+    stopCharacterVoice();
   };
 
   const sendVoiceMessage = () => {
@@ -3643,6 +3684,31 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
     setChatSettingsDraft(null);
   };
 
+  // During a connected voice/video call, speak each new line from a voice-enabled character in order.
+  useEffect(() => {
+    if (!activeCallMode || !callConnectedAt) {
+      callVoicePlayedRef.current.clear();
+      return;
+    }
+    const chat = chats.find((item) => item.id === activeChatId);
+    if (!chat) return;
+    const session = callVoiceSessionRef.current;
+    chat.messages
+      .filter((message) => Date.parse(message.createdAt) >= callConnectedAt &&
+        (!message.kind || message.kind === 'text' || message.kind === 'voice') &&
+        !callVoicePlayedRef.current.has(message.id) &&
+        !!getVoiceSpeaker(message))
+      .forEach((message) => {
+        callVoicePlayedRef.current.add(message.id);
+        const speaker = getVoiceSpeaker(message);
+        if (!speaker) return;
+        callVoiceQueueRef.current = callVoiceQueueRef.current.then(() =>
+          session === callVoiceSessionRef.current ? playCharacterVoice(message, speaker) : undefined
+        );
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeCallMode, callConnectedAt, chats, activeChatId, contacts]);
+
   const activeChat = chats.find((chat) => chat.id === activeChatId);
 
   return (
@@ -3828,16 +3894,6 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                     <button type="button" onClick={() => deleteChatMessage(message.id)} className="rounded-full bg-white/80 px-2.5 py-0.5 text-rose-500 shadow-sm">删除</button>
                     {message.senderId !== 'user' && message.senderId !== 'narrator' && activeChat.type !== 'observer' && (
                       <button type="button" onClick={() => { sendPat(message.senderId); setSelectedMessageId(''); }} className="rounded-full bg-white/80 px-2.5 py-0.5 text-violet-500 shadow-sm">拍一拍</button>
-                    )}
-                    {message.senderId !== 'user' && contacts.find((item) => item.id === message.senderId)?.voiceEnabled && (
-                      <button type="button" disabled={voicePlaybackMessageId === message.id}
-                        onClick={() => {
-                          const speaker = contacts.find((item) => item.id === message.senderId);
-                          if (speaker) void playCharacterVoice(message, speaker);
-                        }}
-                        className="rounded-full bg-white/80 px-2.5 py-0.5 text-teal-600 shadow-sm disabled:opacity-50">
-                        <Volume2 className="mr-1 inline h-3 w-3" />{voicePlaybackMessageId === message.id ? '播放中' : '语音'}
-                      </button>
                     )}
                   </div>
                 );
@@ -4214,29 +4270,41 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
 
                       ) : message.kind === 'voice' ? (
                         (() => {
-                          // 微信式语音条：喇叭弧线 + 秒数，点一下展开/收起转写文字
+                          // 微信式语音条：开启语音的角色点一下播放/停止，“转文字”展开转写；其他语音条点一下展开文字
                           const seconds = Math.min(60, Math.max(1, Math.ceil(message.text.length / 3.5)));
                           const open = expandedVoiceIds.includes(message.id);
+                          const playable = !!getVoiceSpeaker(message);
+                          const playing = voicePlaybackMessageId === message.id;
+                          const loading = voiceLoadingMessageId === message.id;
+                          const toggleText = () => setExpandedVoiceIds((ids) => (ids.includes(message.id) ? ids.filter((id) => id !== message.id) : [...ids, message.id]));
                           return (
                             <div>
-                              <button
-                                type="button"
-                                aria-label={open ? '收起语音文字' : '展开语音文字'}
-                                onClick={(event) => {
-                                  if (selectMode) return;
-                                  event.stopPropagation();
-                                  setExpandedVoiceIds((ids) => (ids.includes(message.id) ? ids.filter((id) => id !== message.id) : [...ids, message.id]));
-                                }}
-                                className={`flex items-center gap-2 text-[#6F8CA0] ${isUserMessage ? 'flex-row-reverse' : ''}`}
-                                style={{ minWidth: `${Math.min(150, 48 + seconds * 4)}px` }}
-                              >
-                                <svg viewBox="0 0 24 24" className={`h-4 w-4 shrink-0 ${isUserMessage ? '-scale-x-100' : ''}`} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                                  <path d="M8 9a4.5 4.5 0 0 1 0 6" />
-                                  <path d="M12 6.5a8.5 8.5 0 0 1 0 11" />
-                                  <path d="M16 4a12.5 12.5 0 0 1 0 16" />
-                                </svg>
-                                <span className="text-[12px]">{seconds}″</span>
-                              </button>
+                              <div className={`flex items-center gap-2 ${isUserMessage ? 'flex-row-reverse' : ''}`}>
+                                <button
+                                  type="button"
+                                  aria-label={playable ? (playing || loading ? '停止播放语音' : '播放语音') : (open ? '收起语音文字' : '展开语音文字')}
+                                  onClick={(event) => {
+                                    if (selectMode) return;
+                                    event.stopPropagation();
+                                    if (!toggleCharacterVoice(message)) toggleText();
+                                  }}
+                                  className={`flex items-center gap-2 text-[#6F8CA0] ${isUserMessage ? 'flex-row-reverse' : ''}`}
+                                  style={{ minWidth: `${Math.min(150, 48 + seconds * 4)}px` }}
+                                >
+                                  <svg viewBox="0 0 24 24" className={`h-4 w-4 shrink-0 ${isUserMessage ? '-scale-x-100' : ''} ${playing ? 'animate-pulse text-teal-600' : ''}`} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                                    <path d="M8 9a4.5 4.5 0 0 1 0 6" />
+                                    <path d="M12 6.5a8.5 8.5 0 0 1 0 11" />
+                                    <path d="M16 4a12.5 12.5 0 0 1 0 16" />
+                                  </svg>
+                                  <span className="text-[12px]">{loading ? '合成中…' : `${seconds}″`}</span>
+                                </button>
+                                {playable && (
+                                  <button type="button" onClick={(event) => { if (selectMode) return; event.stopPropagation(); toggleText(); }}
+                                    className="text-[10px] text-slate-400">
+                                    {open ? '收起' : '转文字'}
+                                  </button>
+                                )}
+                              </div>
                               {open && <p className="mt-1.5 border-t border-slate-200/60 pt-1.5 text-[11px] leading-relaxed text-slate-600">{message.text}</p>}
                             </div>
                           );
@@ -6105,7 +6173,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                       <option>西班牙语</option>
                     </select>
                   </label>
-                  <p className="text-[10px] leading-relaxed text-slate-400">开启后，在聊天消息的操作菜单中点击“语音”即可合成播放；需先在系统设置配置语音模型。</p>
+                  <p className="text-[10px] leading-relaxed text-slate-400">开启后，角色发送的语音消息点击语音条即可播放，语音/视频通话中角色说的话会自动朗读；普通文字消息不会合成语音。需先在系统设置配置语音模型。</p>
                 </>
               )}
             </section>
