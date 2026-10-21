@@ -514,7 +514,7 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
     <div className="flex-1 w-full flex flex-col bg-[#F3F6F8] overflow-hidden">
       <AppHeader title="设置 · 系统配置" onBack={onBack} />
 
-      <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar p-4 space-y-3">
+      <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar p-4 space-y-3 flex flex-col">
         <details open={apiConfigExpanded} onToggle={(event) => {
           const expanded = event.currentTarget.open;
           if (expanded === apiConfigExpanded) return;
@@ -866,7 +866,7 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
           }}>恢复默认字体</button>
         </section>
 
-        <section className="space-y-2">
+        <section style={{ order: 100 }} className="space-y-2">
           <div className="flex items-center gap-1.5 px-1 text-xs font-bold text-[#2C4A5C]">
             <Database className="w-3.5 h-3.5 text-sky-600" />
             <span>小手机备份</span>

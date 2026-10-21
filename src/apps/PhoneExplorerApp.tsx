@@ -947,11 +947,7 @@ export const CheckPhoneApp: React.FC<CheckPhoneAppProps> = ({ onBack }) => {
 
       {activeSubApp === 'douban' && (
         <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar p-4 space-y-3">
-          <div className="rounded-[24px] border border-white bg-[#F4F8F2]/90 p-4 shadow-2xs">
-            <p className="text-[10px] font-semibold tracking-[0.2em] text-[#6D9272]">DOUBAN · TA 的最近记录</p>
-            <h3 className="mt-1 text-base font-bold text-[#3E6548]">{currentChar.name}最近读过、看过和玩过的</h3>
-            <p className="mt-1 text-[10px] leading-relaxed text-slate-500">根据角色人设与近期剧情生成的评分和短评；点右上角 ✦ 可更新。</p>
-          </div>
+          <h3 className="px-1 text-sm font-bold text-[#3E6548]">{currentChar.name}最近读过、看过和玩过的</h3>
           {(currentPhone.ratings ?? []).length === 0 && (
             <p className="py-10 text-center text-[11px] text-slate-400">还没有评分记录，点右上角 ✦ 生成至少三条。</p>
           )}
@@ -964,9 +960,18 @@ export const CheckPhoneApp: React.FC<CheckPhoneAppProps> = ({ onBack }) => {
                   {item.creator && <p className="mt-0.5 text-[10px] text-slate-400">{item.creator}</p>}
                 </div>
                 <div className="shrink-0 text-right">
-                  <div className="flex items-center justify-end gap-0.5 text-amber-500" aria-label={`${item.rating}分`}>
+                  <div className="flex items-center justify-end gap-0.5 text-amber-500" aria-label={`${item.rating}分（满分5分）`}>
                     {Array.from({ length: 5 }, (_, index) => (
-                      <Star key={index} className={`h-3 w-3 ${index < Math.round(item.rating / 2) ? 'fill-current' : ''}`} />
+                      <span key={index} className="relative inline-flex h-3 w-3">
+                        <Star className="absolute inset-0 h-3 w-3 text-slate-200" />
+                        {item.rating >= index + 1 ? (
+                          <Star className="absolute inset-0 h-3 w-3 fill-current" />
+                        ) : item.rating >= index + 0.5 ? (
+                          <span className="absolute inset-0 overflow-hidden" style={{ width: '50%' }}>
+                            <Star className="h-3 w-3 fill-current" />
+                          </span>
+                        ) : null}
+                      </span>
                     ))}
                   </div>
                   <p className="mt-0.5 text-sm font-bold text-[#64896A]">{item.rating.toFixed(1)}</p>

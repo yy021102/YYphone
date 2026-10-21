@@ -28,6 +28,8 @@ import { parseAiJson, parseForumPost } from '../utils/aiResponse';
 import { normalizeForumHandle, readGeneratedForumHandles, resolveForumHandle } from '../utils/forumIdentity';
 import { readStorageString, readStoredValue, writeStoredValue } from '../utils/localStorage';
 import { compressImage } from '../utils/imageFile';
+import { withWorldBooksForContacts } from '../utils/worldBookPrompt';
+import { getChatRelationContexts } from '../utils/chatContext';
 
 interface ForumAppProps {
   onBack: () => void;
@@ -889,7 +891,23 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
     });
 
     try {
-      const generated = parseForumPost(await requestConfiguredAiText(systemPrompt, userPrompt, { json: true }));
+      const worldBookContactIds = [...new Set([
+        ...(charId ? [charId] : []),
+        ...allowedCommenters.flatMap((commenter) =>
+          commenter.type === 'char' ? [commenter.id] : commenter.charId ? [commenter.charId] : []
+        ),
+      ])];
+      const relationContexts = getChatRelationContexts(worldBookContactIds);
+      const generated = parseForumPost(await requestConfiguredAiText(
+        [
+          relationContexts.length
+            ? `参与角色的对话关系补充（用于理解关系和背景）：\n${relationContexts.join('\n\n')}`
+            : '',
+          withWorldBooksForContacts(systemPrompt, worldBookContactIds),
+        ].filter(Boolean).join('\n\n'),
+        userPrompt,
+        { json: true }
+      ));
       if (isChar && !isAnon) {
         const author = contacts.find((contact) => contact.id === charId);
         if (!author) throw new Error('发帖角色已不存在，请重新选择。');
@@ -994,8 +1012,20 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
     setGeneratingCommentPostId(post.id);
     setNoticeBanner('');
     try {
+      const commenterContactIds = [...new Set(allowedCommenters.flatMap((commenter) =>
+        commenter.type === 'char' ? [commenter.id] : commenter.charId ? [commenter.charId] : []
+      ))];
+      const commenterRelationContexts = getChatRelationContexts(commenterContactIds);
       const generated = parseAiJson(await requestConfiguredAiText(
-        '你是中文社交平台评论续写器。只返回合法 JSON，不要使用 Markdown。严格只使用提供的评论者名单，不得创作未授权角色或 NPC。非匿名板块的角色评论必须附 authorHandle：优先用名单中的 forumHandle，若未提供，按人设生成特别的网名式 ID，2–40 个字母、数字、汉字、下划线、短横线或英文句点，不加 @，不用角色内部编号。同一角色保持一致。',
+        [
+          commenterRelationContexts.length
+            ? `评论角色的对话关系补充（用于理解角色关系和背景）：\n${commenterRelationContexts.join('\n\n')}`
+            : '',
+          withWorldBooksForContacts(
+            '你是中文社交平台评论续写器。只返回合法 JSON，不要使用 Markdown。严格只使用提供的评论者名单，不得创作未授权角色或 NPC。非匿名板块的角色评论必须附 authorHandle：优先用名单中的 forumHandle，若未提供，按人设生成特别的网名式 ID，2–40 个字母、数字、汉字、下划线、短横线或英文句点，不加 @，不用角色内部编号。同一角色保持一致。',
+            commenterContactIds
+          ),
+        ].filter(Boolean).join('\n\n'),
         JSON.stringify({
           board: { name: board.name, prompt: board.prompt, anonymous: board.isAnonymous },
           post: { title: post.title ?? '', content: post.content },

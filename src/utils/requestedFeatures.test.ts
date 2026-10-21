@@ -11,6 +11,8 @@ import { DEFAULT_CHAT_RUNTIME, getRoundThought, isKeepAlivePlaying, isProactiveD
 import { CALENDAR_APPEARANCE_KEY, MUSIC_APPEARANCE_KEY, captureHomeAppearance, isHomeAppearance } from './homeAppearance';
 import { addMemoryCandidates, buildMemoryInjection, DEFAULT_MEMORY_SETTINGS, exportMemories, importMemories, readEmbeddings, readMemories, readMemorySettings, writeEmbeddings, writeMemories, writeMemorySettings } from './memoryData';
 import { extractMemoryCandidates, requestMemoryAiText } from './memoryAi';
+import { withWorldBooksForContacts } from './worldBookPrompt';
+import { getChatRelationContexts } from './chatContext';
 import { createJournalEntry, generateGrowthNote, regenerateJournal, runJournal, updateJournalEntryContent } from './journalAi';
 import { buildGrowthInjection, buildJournalInjection, deleteJournalEntry, readGrowthNotes, readJournalEntries, readJournalSettings, writeGrowthNotes, writeJournalEntries, writeJournalSettings } from './journalData';
 import { activeMemoryArchive, deleteCharacterMemoryArchives, deleteMemoryArchive, guardMemoryArchive, invalidateMemoryArchive, memoryArchiveLabel, prepareMemoryArchiveSwitch } from './memoryArchives';
@@ -225,6 +227,8 @@ test('phone generates all eight scopes with one request and includes world, play
   for (const key of ['npcThreads', 'photos', 'browserHistory', 'notes', 'icityDiaries', 'agentSession', 'wallet', 'health', 'ratings']) assert.ok(key in result, key);
   assert.equal(result.ratings?.length, 3);
   assert.match(body, /至少 3 条/);
+  assert.match(body, /评分必须与短评的态度和结论严格一致/);
+  assert.match(body, /失望作品或烂片/);
   const snapshot = JSON.stringify(prev);
   Reflect.deleteProperty(generated, 'notes');
   await assert.rejects(generatePhoneScope('all', { charId: 'paper-a', charName: '甲', userName: '玩家', npcs: [] }, prev), /遗漏/);
@@ -2298,6 +2302,66 @@ test('memory API is independent of the main API and covers journal generation', 
     'https://memory.example/v1/chat/completions',
     'https://memory.example/v1/chat/completions',
   ]);
+});
+
+test('forum and memory generation use applicable world books and memory candidates stay under 500 characters', async () => {
+  testApi();
+  saveSetting('pocketos:wechat-contacts', [{
+    id: 'memory-world-char',
+    name: '世界书角色',
+    persona: '角色人设标记',
+    worldBooks: [{ bookId: 'character-book' }],
+  }]);
+  saveSetting('yyphone:world-books', [
+    { id: 'global-book', name: '全局设定', isGlobal: true, entries: [
+      { id: 'global-entry', title: '全局条目', content: '全局世界书标记', depth: 'front' },
+    ] },
+    { id: 'character-book', name: '角色设定', entries: [
+      { id: 'character-entry', title: '角色条目', content: '角色世界书标记', depth: 'middle' },
+    ] },
+    { id: 'unrelated-book', name: '无关设定', entries: [
+      { id: 'unrelated-entry', title: '无关条目', content: '不应注入的私有世界书', depth: 'back' },
+    ] },
+  ]);
+  saveSetting(SETTINGS_KEYS.personas, {
+    activeProfileId: 'active-player',
+    profiles: [{
+      id: 'active-player', name: '玩家人设', identity: '玩家身份标记',
+      personality: '玩家性格标记', background: '玩家背景标记', speakingStyle: '玩家说话风格标记',
+    }],
+  });
+  saveSetting(WECHAT_CHATS_STORAGE_KEY, [{
+    id: 'memory-world-chat', type: 'direct', participantIds: ['memory-world-char'],
+    context: '双方关系补充标记：已经交往半年',
+    messages: [{ id: 'memory-world-message', senderId: 'user', text: '记住我们一起看海', createdAt: '2026-10-17T10:00:00.000Z' }],
+  }, {
+    id: 'unrelated-context-chat', type: 'direct', participantIds: ['other-char'],
+    context: '不应混入的其他角色关系补充',
+    messages: [],
+  }]);
+
+  const forumPrompt = withWorldBooksForContacts('论坛生成提示', ['memory-world-char']);
+  assert.match(forumPrompt, /全局世界书标记/);
+  assert.match(forumPrompt, /角色世界书标记/);
+  assert.doesNotMatch(forumPrompt, /不应注入的私有世界书/);
+  const forumRelationContexts = getChatRelationContexts(['memory-world-char']);
+  assert.match(forumRelationContexts.join('\n'), /双方关系补充标记：已经交往半年/);
+  assert.doesNotMatch(forumRelationContexts.join('\n'), /不应混入的其他角色关系补充/);
+
+  let requestBody = '';
+  mock.method(globalThis, 'fetch', async (_input: unknown, init?: RequestInit) => {
+    requestBody = String(init?.body);
+    return aiResponse({ memories: Array.from({ length: 8 }, (_, index) => ({
+      content: `${index}${'记'.repeat(100)}`, category: 'fact', importance: 3, pinned: false,
+    })) });
+  });
+  const result = await extractMemoryCandidates('memory-world-char');
+  for (const marker of [
+    '角色人设标记', '玩家身份标记', '玩家性格标记', '玩家背景标记',
+    '玩家说话风格标记', '全局世界书标记', '角色世界书标记', '双方关系补充标记：已经交往半年',
+  ]) assert.ok(requestBody.includes(marker), marker);
+  assert.doesNotMatch(requestBody, /不应注入的私有世界书|不应混入的其他角色关系补充/);
+  assert.ok(result.candidates.reduce((sum, candidate) => sum + Array.from(candidate.content).length, 0) <= 500);
 });
 
 test('memory secondary API also supports Gemini without a configured main API', async () => {

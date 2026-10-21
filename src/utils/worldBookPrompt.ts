@@ -16,6 +16,11 @@ interface StoredWorldBook {
   entries: StoredWorldBookEntry[];
 }
 
+interface StoredWorldBookLink {
+  bookId: string;
+  entryId?: string;
+}
+
 export const WORLD_BOOKS_STORAGE_KEY = 'yyphone:world-books';
 
 const isDepth = (value: unknown): value is WorldBookDepth =>
@@ -60,6 +65,62 @@ export const getGlobalWorldBookEntries = (depth: WorldBookDepth): string[] =>
         .filter((entry) => entry.depth === depth && entry.content.trim())
         .map((entry) => `【${book.name} / ${entry.title}】\n${entry.content}`)
     );
+
+export const getWorldBookEntriesForContacts = (contactIds: string[]): string[] => {
+  const books = readStoredWorldBooks();
+  const contactSet = new Set(contactIds);
+  const linksByContact = new Map<string, StoredWorldBookLink[]>();
+  try {
+    const raw = readStorageString('pocketos:wechat-contacts');
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    if (Array.isArray(parsed)) {
+      for (const contact of parsed as unknown[]) {
+        if (!contact || typeof contact !== 'object' || !('id' in contact) ||
+          typeof contact.id !== 'string' || !contactSet.has(contact.id) ||
+          !('worldBooks' in contact) || !Array.isArray(contact.worldBooks)) continue;
+        const links = contact.worldBooks.filter((link: unknown): link is StoredWorldBookLink =>
+          !!link && typeof link === 'object' && 'bookId' in link && typeof link.bookId === 'string' &&
+          (!('entryId' in link) || typeof link.entryId === 'string'));
+        linksByContact.set(contact.id, links);
+      }
+    }
+  } catch (error) {
+    console.error('Could not read character world-book links.', error);
+  }
+
+  const seen = new Set<string>();
+  const entries: string[] = [];
+  for (const book of books) {
+    if (book.isGlobal) {
+      for (const entry of book.entries) {
+        const key = `${book.id}:${entry.id}`;
+        if (!entry.content.trim() || seen.has(key)) continue;
+        seen.add(key);
+        entries.push(`【${book.name} / ${entry.title}】\n${entry.content}`);
+      }
+    }
+  }
+  for (const contactId of contactIds) {
+    for (const link of linksByContact.get(contactId) ?? []) {
+      const book = books.find((item) => item.id === link.bookId);
+      if (!book) continue;
+      for (const entry of book.entries) {
+        const key = `${book.id}:${entry.id}`;
+        if (!entry.content.trim() || (link.entryId && link.entryId !== entry.id) || seen.has(key)) continue;
+        seen.add(key);
+        entries.push(`【${book.name} / ${entry.title}】\n${entry.content}`);
+      }
+    }
+  }
+  return entries;
+};
+
+export const withWorldBooksForContacts = (systemPrompt: string, contactIds: string[]): string => {
+  const entries = getWorldBookEntriesForContacts(contactIds);
+  return entries.length > 0
+    ? `可参考的世界书（仅用于理解设定与事实，优先遵守本次任务和聊天记录，不要复述无关条目）：\n${entries.join('\n\n')}\n\n${systemPrompt}`
+    : systemPrompt;
+};
 
 export const withGlobalWorldBooks = (systemPrompt: string): string => {
   const front = getGlobalWorldBookEntries('front');

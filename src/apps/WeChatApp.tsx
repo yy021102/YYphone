@@ -5366,7 +5366,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       )}
       {chatSettingsOpen && chatSettingsDraft && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-          <section role="dialog" aria-modal="true" aria-labelledby="chat-settings-title" className="w-full max-w-sm max-h-[90%] overflow-y-auto rounded-3xl bg-white/95 p-5 shadow-2xl space-y-3">
+          <section role="dialog" aria-modal="true" aria-labelledby="chat-settings-title" className="flex w-full max-w-sm max-h-[90%] flex-col overflow-y-auto rounded-3xl bg-white/95 p-5 shadow-2xl space-y-3">
             <header className="flex items-center justify-between">
               <h2 id="chat-settings-title" className="text-base font-bold text-[#2C4A5C]">对话设置</h2>
               <button onClick={() => { setChatSettingsOpen(false); setChatSettingsDraft(null); setChatError(''); }} aria-label="关闭" className="w-8 h-8 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100">
@@ -5374,7 +5374,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
               </button>
             </header>
             {chatSettingsDraft.type !== 'direct' && (
-              <section className="space-y-2 rounded-2xl border border-sky-100 bg-gradient-to-br from-[#9BD2FC]/15 to-[#F7B9D2]/20 p-3">
+              <section style={{ order: 6 }} className="space-y-2 rounded-2xl border border-sky-100 bg-gradient-to-br from-[#9BD2FC]/15 to-[#F7B9D2]/20 p-3">
                 <p className="text-[11px] font-semibold text-[#2C4A5C]">群成员（角色与关联 NPC）</p>
                 <div className="max-h-44 space-y-1 overflow-y-auto">
                   {contacts.map((contact) => (
@@ -5414,10 +5414,10 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                     );
                   })}
                 </div>
-              </section>
+            </section>
             )}
             {chatSettingsDraft.type === 'direct' && (
-              <section className="space-y-2 rounded-2xl border border-sky-100 bg-sky-50/60 p-3">
+              <section style={{ order: 6 }} className="space-y-2 rounded-2xl border border-sky-100 bg-sky-50/60 p-3">
                 <label className="flex items-center justify-between gap-2 text-xs text-slate-600">
                   <span>允许角色主动发消息</span>
                   <input
@@ -5438,11 +5438,11 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                       className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs" />
                   </label>
                 )}
-                <p className="text-[10px] leading-relaxed text-slate-400">距离本对话最近活动达到间隔后主动联系；逐个调度，不补发离线期间的消息。需保持网页运行，后台可在系统设置尝试开启保活，会额外消耗 API。</p>
+                <p className="text-[10px] leading-relaxed text-slate-400">距离本对话最近活动达到间隔后主动联系；逐个调度，不补发离线期间的消息。后台主动发消息需要在系统设置开启保活，浏览器仍可能限制后台运行；每次生成会消耗 API。</p>
               </section>
             )}
             {chatSettingsDraft.type === 'direct' && (
-              <section className="space-y-3 rounded-2xl border border-rose-100 bg-rose-50/50 p-3">
+              <section style={{ order: 13 }} className="space-y-3 rounded-2xl border border-rose-100 bg-rose-50/50 p-3">
                 <h3 className="text-xs font-semibold text-slate-700">拉黑后的联系</h3>
                 <label className="block text-[11px] text-slate-600">
                   联系时间
@@ -5476,7 +5476,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
               </section>
             )}
             {chatSettingsDraft.type === 'direct' && (
-              <label className="block text-[11px] font-semibold text-[#2C4A5C]">
+              <label style={{ order: 1 }} className="block text-[11px] font-semibold text-[#2C4A5C]">
                 备注名（仅自己可见）
                 <input
                   value={chatSettingsDraft.noteName}
@@ -5487,7 +5487,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                 />
               </label>
             )}
-            <section className="space-y-3 rounded-2xl border border-sky-100 bg-sky-50/60 p-3">
+            <section style={{ order: 7 }} className="space-y-3 rounded-2xl border border-sky-100 bg-sky-50/60 p-3">
               <label className="flex items-center justify-between gap-2 text-xs text-slate-600">
                 <span>角色感知当前时间</span>
                 <input type="checkbox" checked={chatSettingsDraft.timeAwarenessEnabled !== false}
@@ -5515,6 +5515,8 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                   </select>
                 </label>
               )}
+            </section>
+            <section style={{ order: 8 }} className="space-y-3 rounded-2xl border border-sky-100 bg-sky-50/60 p-3">
               <label className="flex items-center justify-between gap-2 text-xs text-slate-600">
                 <span>启用生图（角色发图片时生成真实图片）</span>
                 <input type="checkbox" checked={chatSettingsDraft.imageGenerationEnabled ?? false}
@@ -5534,11 +5536,13 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
               )}
             </section>
             {chatSettingsDraft.type !== 'direct' && (
+              <div style={{ order: 7 }}>
               <GroupJournalPanel key={`${chatSettingsDraft.id}:${chatSettingsDraft.activeArchiveId ?? 'archive-default'}`}
                 chatId={chatSettingsDraft.id} />
+              </div>
             )}
             {chatSettingsDraft.type === 'group' && (
-              <section className="space-y-3 rounded-xl bg-slate-50 p-3">
+              <section style={{ order: 1 }} className="space-y-3 rounded-xl bg-slate-50 p-3">
                 <label className="block text-[11px] font-semibold text-[#2C4A5C]">
                   群聊名称
                   <input
@@ -5589,7 +5593,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
               </section>
             )}
             {chatSettingsDraft.type === 'observer' && (
-              <label className="block text-[11px] font-semibold text-[#2C4A5C]">
+              <label style={{ order: 1 }} className="block text-[11px] font-semibold text-[#2C4A5C]">
                 群名称（留空使用角色名称）
                 <input
                   value={chatSettingsDraft.groupTitle ?? ''}
@@ -5603,7 +5607,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                 />
               </label>
             )}
-            <div className="space-y-2">
+            <div style={{ order: 2 }} className="space-y-2">
               <p className="text-[11px] font-semibold text-[#2C4A5C]">
                 {chatSettingsDraft.type === 'direct' ? '双方在此聊天中的头像' : '参与者在此聊天中的头像'}
               </p>
@@ -5648,7 +5652,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
               ))}
             </div>
             {chatSettingsDraft.type === 'group' && (
-              <section className="space-y-2 rounded-xl bg-slate-50 p-3">
+              <section style={{ order: 3 }} className="space-y-2 rounded-xl bg-slate-50 p-3">
                 <p className="text-[11px] font-semibold text-[#2C4A5C]">群聊昵称</p>
                 {[
                   { id: 'user', label: '我' },
@@ -5673,7 +5677,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                 ))}
               </section>
             )}
-            <label className="block text-[11px] font-semibold text-[#2C4A5C]">
+            <label style={{ order: chatSettingsDraft.type === 'direct' ? 3 : 4 }} className="block text-[11px] font-semibold text-[#2C4A5C]">
               {chatSettingsDraft.type === 'observer' ? '此聊天的补充（AI 会读取）' : '我和角色的补充（将提供给 AI）'}
               <textarea
                 value={chatSettingsDraft.context}
@@ -5687,7 +5691,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
               />
             </label>
             {chatSettingsDraft.type === 'direct' && (
-              <div className="space-y-2 rounded-xl bg-slate-50 p-3">
+              <div style={{ order: 4 }} className="space-y-2 rounded-xl bg-slate-50 p-3">
                 <p className="text-[11px] font-semibold text-[#2C4A5C]">补充预设</p>
                 <select
                   value={selectedContextPresetId}
@@ -5725,7 +5729,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                 </div>
               </div>
             )}
-            <section className="space-y-2 rounded-xl bg-slate-50 p-3">
+            <section style={{ order: 5 }} className="space-y-2 rounded-xl bg-slate-50 p-3">
               <p className="text-[11px] font-semibold text-[#2C4A5C]">挂载聊天记录</p>
               <label className="block text-[10px] text-slate-500">
                 本对话聊天记录
@@ -5814,7 +5818,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                 </>
               )}
             </section>
-            <section className="space-y-2 rounded-xl bg-slate-50 p-3">
+            <section style={{ order: 12 }} className="space-y-2 rounded-xl bg-slate-50 p-3">
               <div className="flex items-center justify-between">
                 <p className="text-[11px] font-semibold text-[#2C4A5C]">聊天字体大小</p>
                 <span className="text-[10px] text-slate-500">{chatSettingsDraft.fontSize ?? 12}px</span>
@@ -5840,7 +5844,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                 </button>
               </div>
             </section>
-            <section className="space-y-2 rounded-xl bg-slate-50 p-3">
+            <section style={{ order: 9 }} className="space-y-2 rounded-xl bg-slate-50 p-3">
               <p className="text-[11px] font-semibold text-[#2C4A5C]">角色消息数</p>
               <p className="text-[9px] leading-relaxed text-slate-400">
                 每次生成时随机决定连续消息条数。
@@ -5879,7 +5883,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                 </label>
               </div>
             </section>
-            <label className="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2.5">
+            <label style={{ order: 10 }} className="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2.5">
               <span>
                 <span className="block text-xs font-semibold text-[#2C4A5C]">注入最新一轮的心声</span>
                 <span className="mt-0.5 block text-[9px] text-slate-400">开启后，AI 可参考最近一轮角色心声，并提示其只是短暂的内心活动，自然承接但不反复琢磨。</span>
@@ -5893,7 +5897,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                 })}
               />
             </label>
-            <label className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2.5">
+            <label style={{ order: 11 }} className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2.5">
               <span className="text-xs font-semibold text-[#2C4A5C]">旁白</span>
               <input
                 type="checkbox"
@@ -5902,7 +5906,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
               />
             </label>
             {chatSettingsDraft.type !== 'observer' && (
-              <section className="space-y-2 rounded-2xl border border-sky-100 bg-slate-50 p-3">
+              <section style={{ order: 6 }} className="space-y-2 rounded-2xl border border-sky-100 bg-slate-50 p-3">
                 <p className="text-xs font-semibold text-[#2C4A5C]">角色主动行为</p>
                 <p className="text-[10px] text-slate-500">仅主要角色可在聊天时基于人设与当下情境自行决定，不要求每轮触发；不设硬性次数与间隔，朋友圈保持低频、不重复。</p>
                 {chatSettingsDraft.type === 'group' && (
@@ -5922,35 +5926,21 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
             )}
             {(() => {
               const messages = chats.find((chat) => chat.id === chatSettingsDraft.id)?.messages ?? chatSettingsDraft.messages;
-              const historyCount = Math.min(5000, Math.max(1, Math.trunc(chatSettingsDraft.currentChatHistoryCount || 200)));
-              const recent = messages.slice(-historyCount);
               return (
-                <section aria-label="对话 Token 估算" className="space-y-1.5 rounded-2xl border border-sky-100 bg-sky-50/60 p-3">
+                <section aria-label="对话 Token 估算" style={{ order: 14 }} className="space-y-1.5 rounded-2xl border border-sky-100 bg-sky-50/60 p-3">
                   <p className="text-xs font-semibold text-[#2C4A5C]">生成用量估算</p>
                   <button type="button" disabled={tokenPreviewBusy || isGeneratingReply}
                     onClick={() => void generateAiReply(false, chatSettingsDraft.id, false, true)}
                     className="rounded-xl bg-sky-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">
                     {tokenPreviewBusy ? '正在计算…' : '估算下一次完整输入'}
                   </button>
-                  {tokenPreview?.chatId === chatSettingsDraft.id && <p className="text-sm font-bold text-sky-700">下次完整输入约 {tokenPreview.input.toLocaleString()} Tokens</p>}
+                  {tokenPreview?.chatId === chatSettingsDraft.id && <p className="text-xs font-semibold text-sky-700">下次完整输入约 {tokenPreview.input.toLocaleString()} Tokens</p>}
                   {tokenPreviewError && <p role="alert" className="text-[11px] text-rose-600">{tokenPreviewError}</p>}
-                  {(() => {
-                    const usage = readStoredValue(`yyphone:chat-token-usage:${chatSettingsDraft.id}`, null,
-                      (value): value is { input: number; output?: number; at: string; model: string } =>
-                        !!value && typeof value === 'object' && 'input' in value && typeof value.input === 'number' &&
-                        'at' in value && typeof value.at === 'string' && 'model' in value && typeof value.model === 'string' &&
-                        (!('output' in value) || typeof value.output === 'number'));
-                    return usage && <p className="text-[11px] text-slate-600">最近请求（{usage.model}）：输入约 {usage.input.toLocaleString()}{usage.output !== undefined ? ` + 输出约 ${usage.output.toLocaleString()} = 合计约 ${(usage.input + usage.output).toLocaleString()} Tokens` : ' Tokens，尚无输出统计'}</p>;
-                  })()}
-                  <p className="text-[10px] leading-relaxed text-slate-500">完整输入包含实际提示词中的人设、世界书、长期记忆、日记/成长、挂载聊天、朋友圈/情侣空间等上下文、表情包清单及回复规则。按已保存的聊天设置计算；修改设置后请先保存再重新估算。估算不会请求聊天或向量 API，也不会标记记忆/动态已读；预览记忆采用本地关键词检索，正式生成的向量检索结果可能不同。输出（含心声与 JSON）生成前未知，最近请求显示实际发送/返回文本的估算，模型分词、缓存和计费规则仍以 API 为准。</p>
-                  <p className="text-xs font-semibold text-[#2C4A5C]">消息正文参考</p>
-                  <p className="text-sm font-bold text-sky-700">约 {estimateConversationTokens(messages).toLocaleString()} Tokens · {messages.length} 条消息</p>
-                  <p className="text-[11px] text-slate-600">按当前历史条数设置，最近 {recent.length} 条约 {estimateConversationTokens(recent).toLocaleString()} Tokens</p>
-                  <p className="text-[10px] leading-relaxed text-slate-400">以上估算仅统计文本，不含真实图片的视觉 Token；图片费用以所选模型及 API 实际用量为准。消息正文统计不等于一次生成的总输入。</p>
+                  <p className="text-xs font-semibold text-sky-700">聊天记录约 {estimateConversationTokens(messages).toLocaleString()} Tokens · 共 {messages.length} 条消息</p>
                 </section>
               );
             })()}
-            <div className="grid grid-cols-2 gap-2">
+            <div style={{ order: 15 }} className="grid grid-cols-2 gap-2">
               <button onClick={() => exportChatHistory(chatSettingsDraft)} className="rounded-xl bg-slate-100 py-2 text-[11px] font-semibold text-slate-700">
                 <Download className="mr-1 inline h-3.5 w-3.5" />导出聊天记录
               </button>
@@ -5967,11 +5957,12 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                 />
               </label>
             </div>
-            <button onClick={clearChatHistory} className="w-full rounded-xl bg-rose-50 py-2 text-xs font-semibold text-rose-700">
+            <button style={{ order: 15 }} onClick={clearChatHistory} className="w-full rounded-xl bg-rose-50 py-2 text-xs font-semibold text-rose-700">
               清空聊天记录
             </button>
             {chatSettingsDraft.type === 'direct' ? (
               <button
+                style={{ order: 15 }}
                 onClick={() => setChatSettingsDraft({ ...chatSettingsDraft, blocked: !chatSettingsDraft.blocked })}
                 className={`w-full rounded-xl py-2 text-xs font-semibold ${chatSettingsDraft.blocked ? 'bg-slate-100 text-slate-700' : 'bg-rose-50 text-rose-700'}`}
               >
@@ -5982,9 +5973,9 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                 解散群聊
               </button>
             )}
-            {isProcessingChatImage && <p className="text-[10px] text-sky-700">正在压缩图片…</p>}
-            {chatError && <p role="alert" className="text-[11px] text-rose-600">{chatError}</p>}
-            <button onClick={saveChatSettings} className="w-full rounded-xl bg-teal-600 py-2.5 text-sm font-bold text-white">
+            {isProcessingChatImage && <p style={{ order: 15 }} className="text-[10px] text-sky-700">正在压缩图片…</p>}
+            {chatError && <p style={{ order: 15 }} role="alert" className="text-[11px] text-rose-600">{chatError}</p>}
+            <button style={{ order: 16 }} onClick={saveChatSettings} className="w-full rounded-xl bg-teal-600 py-2.5 text-sm font-bold text-white">
               保存设置
             </button>
           </section>
