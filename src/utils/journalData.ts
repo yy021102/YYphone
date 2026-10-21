@@ -211,7 +211,7 @@ export const deleteJournalEntry = (id: string) => {
 const formatSpan = (from: string, to: string) => {
   const f = new Date(from);
   const t = new Date(to);
-  const fmt = (d: Date) => `${d.getMonth() + 1}月${d.getDate()}日`;
+  const fmt = (d: Date) => `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
   if (Number.isNaN(f.getTime()) || Number.isNaN(t.getTime())) return '';
   return fmt(f) === fmt(t) ? fmt(f) : `${fmt(f)}–${fmt(t)}`;
 };
@@ -238,7 +238,7 @@ export const buildJournalInjection = (
   const lines = (list: JournalEntry[]) => list.map((e) => `- ${formatSpan(e.from, e.to)}：${e.content}`).join('\n');
   return [
     '【你和玩家相处的流水账（你的记忆）】',
-    '以下按时间从远到近，是你对更早相处经历的记忆概要（更近的内容在下面的聊天记录里）。把它当作自己记得的往事，自然地带着这份了解去聊天；不要逐条复述，不要每轮都提起。',
+    '以下按时间从远到近，是对更早相处经历的客观记录。记录使用第三人称和真实姓名，具体年月日与事件不得省略或模糊化；更近的内容在下面聊天记录里。将其作为已发生的往事，不要每轮都复述。',
     long.length > 0 ? `久远的时光：\n${lines(long)}` : '',
     mid.length > 0 ? `一段时间以来：\n${lines(mid)}` : '',
     recent.length > 0 ? `不久之前：\n${lines(recent)}` : '',

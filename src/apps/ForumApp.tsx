@@ -25,7 +25,7 @@ import { showYyError } from '../components/ErrorDialog';
 import { readAlipayContacts, AlipayContact } from '../utils/alipayData';
 import { requestConfiguredAiText } from '../utils/aiApi';
 import { parseAiJson, parseForumPost } from '../utils/aiResponse';
-import { readGeneratedForumHandles, resolveForumHandle } from '../utils/forumIdentity';
+import { normalizeForumHandle, readGeneratedForumHandles, resolveForumHandle } from '../utils/forumIdentity';
 import { readStorageString, readStoredValue, writeStoredValue } from '../utils/localStorage';
 import { compressImage } from '../utils/imageFile';
 
@@ -59,6 +59,7 @@ export interface ForumComment {
   authorId: string;
   authorAvatar?: string;
   isPlayer?: boolean; // 是否为玩家本人
+  isPlayerAlt?: boolean;
   isChar?: boolean; // 是否为通讯录角色
   charId?: string;
   realCharName?: string; // 角色的真实姓名（供转发时标注给 AI）
@@ -92,6 +93,7 @@ export interface ForumPost {
   authorId: string;
   authorAvatar?: string;
   isPlayer?: boolean;
+  isPlayerAlt?: boolean;
   isChar?: boolean;
   charId?: string;
   realCharName?: string;
@@ -114,6 +116,10 @@ export interface PlayerForumProfile {
   handleId: string;
   avatarUrl: string;
   bio: string;
+}
+
+interface PlayerForumAccount extends PlayerForumProfile {
+  id: string;
 }
 
 // 论坛专属美化预设结构
@@ -172,6 +178,8 @@ const FORUM_STORAGE_KEYS = {
   boards: 'yyphone:forum-boards',
   posts: 'yyphone:forum-posts',
   playerProfiles: 'yyphone:forum-player-profiles',
+  playerAccounts: 'yyphone:forum-player-accounts',
+  activePlayerAccounts: 'yyphone:forum-active-player-accounts',
   themePresets: 'yyphone:forum-theme-presets',
   activePresetId: 'yyphone:forum-active-preset-id',
   currentTheme: 'yyphone:forum-current-theme',
@@ -208,6 +216,7 @@ const isForumComment = (value: unknown): value is ForumComment =>
   typeof value.noId === 'number' &&
   typeof value.authorName === 'string' &&
   typeof value.authorId === 'string' &&
+  (value.isPlayerAlt === undefined || typeof value.isPlayerAlt === 'boolean') &&
   typeof value.content === 'string' &&
   typeof value.time === 'string';
 
@@ -218,6 +227,7 @@ const isForumPost = (value: unknown): value is ForumPost =>
   typeof value.noId === 'number' &&
   typeof value.authorName === 'string' &&
   typeof value.authorId === 'string' &&
+  (value.isPlayerAlt === undefined || typeof value.isPlayerAlt === 'boolean') &&
   typeof value.content === 'string' &&
   typeof value.time === 'string' &&
   typeof value.likes === 'number' &&
@@ -234,6 +244,16 @@ const isPlayerForumProfile = (value: unknown): value is PlayerForumProfile =>
 
 const isPlayerForumProfiles = (value: unknown): value is Record<string, PlayerForumProfile> =>
   isRecord(value) && Object.values(value).every(isPlayerForumProfile);
+
+const isPlayerForumAccount = (value: unknown): value is PlayerForumAccount =>
+  isRecord(value) && typeof value.id === 'string' && isPlayerForumProfile(value);
+
+const isPlayerForumAccounts = (value: unknown): value is Record<string, PlayerForumAccount[]> =>
+  isRecord(value) && Object.values(value).every((accounts) =>
+    Array.isArray(accounts) && accounts.every(isPlayerForumAccount));
+
+const isActivePlayerAccounts = (value: unknown): value is Record<string, string> =>
+  isRecord(value) && Object.values(value).every((id) => typeof id === 'string');
 
 const isForumThemePreset = (value: unknown): value is ForumThemePreset =>
   isRecord(value) &&
@@ -444,12 +464,21 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
     }, isPlayerForumProfiles)
   );
 
-  const currentProfile: PlayerForumProfile = playerProfiles[activeBoardId] || {
+  const [playerAccounts, setPlayerAccounts] = useState<Record<string, PlayerForumAccount[]>>(() =>
+    readStoredValue(FORUM_STORAGE_KEYS.playerAccounts, {}, isPlayerForumAccounts)
+  );
+  const [activePlayerAccounts, setActivePlayerAccounts] = useState<Record<string, string>>(() =>
+    readStoredValue(FORUM_STORAGE_KEYS.activePlayerAccounts, {}, isActivePlayerAccounts)
+  );
+  const activePlayerAccount = activeBoard?.isAnonymous ? undefined : (playerAccounts[activeBoardId] ?? [])
+    .find((account) => account.id === activePlayerAccounts[activeBoardId]);
+  const currentProfile: PlayerForumProfile = (activePlayerAccount ?? playerProfiles[activeBoardId]) || {
     nickname: '小手机玩家',
     handleId: 'player_001',
     avatarUrl: '',
     bio: '这个人很神秘，什么都没写~',
   };
+  const currentProfileIsAlt = !!activePlayerAccount;
 
   // ==================== 4. 帖子列表状态 ====================
   const [posts, setPosts] = useState<ForumPost[]>(() =>
@@ -492,6 +521,7 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
   // 玩家资料编辑弹窗
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [tempProfile, setTempProfile] = useState<PlayerForumProfile>(currentProfile);
+  const [editingAltAccountId, setEditingAltAccountId] = useState<string | null>(null);
 
   // 转发帖子给微信角色弹窗
   const [forwardingPost, setForwardingPost] = useState<ForumPost | null>(null);
@@ -517,6 +547,8 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
       writeStoredValue(FORUM_STORAGE_KEYS.boards, boards);
       writeStoredValue(FORUM_STORAGE_KEYS.posts, posts);
       writeStoredValue(FORUM_STORAGE_KEYS.playerProfiles, playerProfiles);
+      writeStoredValue(FORUM_STORAGE_KEYS.playerAccounts, playerAccounts);
+      writeStoredValue(FORUM_STORAGE_KEYS.activePlayerAccounts, activePlayerAccounts);
       writeStoredValue(FORUM_STORAGE_KEYS.themePresets, themePresets);
       writeStoredValue(FORUM_STORAGE_KEYS.activePresetId, activePresetId);
       writeStoredValue(FORUM_STORAGE_KEYS.currentTheme, currentTheme);
@@ -524,7 +556,7 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
       console.error('Could not persist forum data.', error);
       setNoticeBanner('论坛数据保存失败，请检查浏览器本地存储空间。');
     }
-  }, [boards, posts, playerProfiles, themePresets, activePresetId, currentTheme]);
+  }, [boards, posts, playerProfiles, playerAccounts, activePlayerAccounts, themePresets, activePresetId, currentTheme]);
 
   // 当前选中的发帖角色名下的 NPC 列表
   const npcsForSelectedPostChar =
@@ -533,6 +565,54 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
       : allNpcs.filter((n) => n.charId === selectedCharForPost);
 
   // ==================== 6. 工具与美化预设逻辑 ====================
+  const handleSelectPlayerAccount = (accountId: string) => {
+    setActivePlayerAccounts((previous) => ({ ...previous, [activeBoardId]: accountId }));
+  };
+
+  const handleCreateAltAccount = () => {
+    const account: PlayerForumAccount = {
+      id: `alt-${Date.now()}-${randomHashId().toLowerCase()}`,
+      nickname: `${currentProfile.nickname}的小号`,
+      handleId: `alt_${randomHashId().toLowerCase()}`,
+      avatarUrl: '',
+      bio: '',
+    };
+    setPlayerAccounts((previous) => ({
+      ...previous,
+      [activeBoardId]: [...(previous[activeBoardId] ?? []), account],
+    }));
+    setActivePlayerAccounts((previous) => ({ ...previous, [activeBoardId]: account.id }));
+    setEditingAltAccountId(account.id);
+    setTempProfile(account);
+    setShowProfileModal(true);
+  };
+
+  const handleSavePlayerProfile = () => {
+    const nickname = tempProfile.nickname.trim();
+    let handleId: string;
+    try {
+      handleId = normalizeForumHandle(tempProfile.handleId);
+    } catch (error) {
+      setNoticeBanner(error instanceof Error ? error.message : '论坛 ID 格式无效。');
+      return;
+    }
+    if (!nickname || !handleId) {
+      setNoticeBanner('论坛昵称和账号 ID 不能为空。');
+      return;
+    }
+    const savedProfile = { ...tempProfile, nickname, handleId, bio: tempProfile.bio.trim() };
+    if (editingAltAccountId) {
+      setPlayerAccounts((previous) => ({
+        ...previous,
+        [activeBoardId]: (previous[activeBoardId] ?? []).map((account) =>
+          account.id === editingAltAccountId ? { ...savedProfile, id: editingAltAccountId } : account),
+      }));
+    } else {
+      setPlayerProfiles((previous) => ({ ...previous, [activeBoardId]: savedProfile }));
+    }
+    setShowProfileModal(false);
+  };
+
   const handleLocalImageUpload = async (
     e: React.ChangeEvent<HTMLInputElement>,
     onSuccess: (base64: string) => void
@@ -717,6 +797,7 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
     let authorName = isAnon ? '无名氏' : currentProfile.nickname;
     let authorId = isAnon ? randomHashId() : currentProfile.handleId;
     let isPlayer = false;
+    let isPlayerAlt = false;
     let isChar = false;
     let charId: string | undefined;
     let realCharName: string | undefined;
@@ -726,6 +807,7 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
 
     if (postMode === 'self') {
       isPlayer = true;
+      isPlayerAlt = currentProfileIsAlt;
     } else if (postMode === 'stranger') {
       authorName = isAnon ? '无名氏' : `热心网友_${Math.floor(100 + Math.random() * 900)}`;
       authorId = isAnon ? randomHashId() : `stranger_${randomHashId().toLowerCase()}`;
@@ -762,7 +844,9 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
       }
     }
 
-    const authorDescription = isPlayer
+    const authorDescription = isPlayer && isPlayerAlt
+      ? `一位普通论坛网友，论坛昵称为「${currentProfile.nickname}」，与玩家及通讯录角色没有已知关联。`
+      : isPlayer
       ? `玩家本人，论坛昵称为「${currentProfile.nickname}」。`
       : isNpc
         ? `角色关联 NPC「${realNpcName}」，所属角色为「${realCharName}」。`
@@ -830,7 +914,8 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
         authorAvatar: isAnon ? undefined : isPlayer
           ? currentProfile.avatarUrl
           : isChar ? contacts.find((contact) => contact.id === charId)?.avatarUrl : undefined,
-        isPlayer,
+        isPlayer: isPlayer && !isPlayerAlt,
+        isPlayerAlt,
         isChar,
         charId,
         realCharName,
@@ -877,8 +962,9 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
       authorName: isAnon ? '无名氏' : currentProfile.nickname,
       authorId: isAnon ? randomHashId() : currentProfile.handleId,
       authorAvatar: !isAnon ? currentProfile.avatarUrl : undefined,
-      isPlayer: true, // 标记为玩家本人，转发给角色时角色能认出这是玩家
-      isOP: Boolean(post.isPlayer),
+      isPlayer: !currentProfileIsAlt,
+      isPlayerAlt: currentProfileIsAlt,
+      isOP: Boolean(post.isPlayer || post.isPlayerAlt),
       replyToNo: replyTarget?.postId === post.id ? replyTarget.noId : undefined,
       replyToName: replyTarget?.postId === post.id ? replyTarget.authorName : undefined,
       content: `${replyPrefix}${raw}`,
@@ -956,6 +1042,7 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
   const formatAuthorIdentityForAi = (item: {
     authorName: string;
     isPlayer?: boolean;
+    isPlayerAlt?: boolean;
     isChar?: boolean;
     realCharName?: string;
     isNpc?: boolean;
@@ -963,6 +1050,9 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
   }) => {
     if (item.isPlayer) {
       return `【玩家本人(User) · 论坛显示名：${item.authorName}】`;
+    }
+    if (item.isPlayerAlt) {
+      return `【普通论坛网友 · 论坛显示名：${item.authorName}】`;
     }
     if (item.isNpc) {
       return `【重要角色关联NPC：${item.realNpcName || item.authorName}${item.realCharName ? `（关联角色：${item.realCharName}）` : ''} · 论坛显示名：${item.authorName}】`;
@@ -992,7 +1082,7 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
 
     // 组装给 AI 阅读的结构化摘要（让接收转发的角色一眼认出 User、其他角色真实名字，也能看到逆天路人言论）
     const aiReadableSummary = [
-      '[身份识别规则：标记为玩家本人(User)的发帖人或评论者就是当前玩家，优先关注；其他角色与NPC的真实姓名仅用于识别，不代表你已认识他们，也不要推断其人设背景；路人内容可见，关注优先级通常较低，但离谱或有趣时可以吐槽。]',
+      '[身份识别规则：仅明确标记为玩家本人(User)的发帖人或评论者才是当前玩家；普通论坛网友与玩家没有已知关联，不要猜测或推断其身份。其他角色与NPC的真实姓名仅用于识别，不代表你已认识他们，也不要推断其人设背景；路人内容可见，关注优先级通常较低，但离谱或有趣时可以吐槽。]',
       `[玩家向你转发了一条来自「${postBoard?.name ?? activeBoard.name}」的论坛帖子]`,
       `发帖人：${postAuthorTag}`,
       forwardingPost.title ? `标题：${forwardingPost.title}` : '',
@@ -1044,7 +1134,7 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
 
   const handleExportForum = () => {
     const dataStr = JSON.stringify(
-      { boards, posts, playerProfiles, themePresets, activePresetId, currentTheme },
+      { boards, posts, playerProfiles, playerAccounts, activePlayerAccounts, themePresets, activePresetId, currentTheme },
       null,
       2
     );
@@ -1197,40 +1287,61 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
         {!activeBoard.isAnonymous ? (
           <div
             style={{ backgroundColor: currentTheme.cardBg, borderRadius: currentTheme.cardRadius }}
-            className="backdrop-blur-xl border border-white/85 p-3.5 flex items-center justify-between shadow-2xs"
+            className="backdrop-blur-xl border border-white/85 p-3.5 space-y-2.5 shadow-2xs"
           >
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-[#9BD2FC] to-[#F7B9D2] text-white flex items-center justify-center font-extrabold text-xs overflow-hidden border border-white shrink-0">
-                {currentProfile.avatarUrl ? (
-                  <img
-                    src={currentProfile.avatarUrl}
-                    alt={currentProfile.nickname}
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <User className="w-4 h-4" />
-                )}
-              </div>
-              <div className="min-w-0">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs font-extrabold truncate">{currentProfile.nickname}</span>
-                  <span className="text-[10px] font-mono bg-sky-50 text-sky-500 px-1.5 py-0.5 rounded-full border border-sky-100 shrink-0">
-                    @{currentProfile.handleId}
-                  </span>
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-[#9BD2FC] to-[#F7B9D2] text-white flex items-center justify-center font-extrabold text-xs overflow-hidden border border-white shrink-0">
+                  {currentProfile.avatarUrl ? (
+                    <img
+                      src={currentProfile.avatarUrl}
+                      alt={currentProfile.nickname}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <User className="w-4 h-4" />
+                  )}
                 </div>
-                <p className="text-[10px] opacity-60 truncate mt-0.5">{currentProfile.bio}</p>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs font-extrabold truncate">{currentProfile.nickname}</span>
+                    {currentProfileIsAlt && <span className="shrink-0 rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold text-amber-700">小号</span>}
+                    <span className="text-[10px] font-mono bg-sky-50 text-sky-500 px-1.5 py-0.5 rounded-full border border-sky-100 shrink-0">
+                      @{currentProfile.handleId}
+                    </span>
+                  </div>
+                  <p className="text-[10px] opacity-60 truncate mt-0.5">{currentProfile.bio}</p>
+                </div>
               </div>
+              <button
+                onClick={() => {
+                  setTempProfile(currentProfile);
+                  setEditingAltAccountId(currentProfileIsAlt ? activePlayerAccount?.id ?? null : null);
+                  setShowProfileModal(true);
+                }}
+                className="px-2.5 py-1.5 rounded-xl bg-white/90 border border-white text-[11px] font-bold text-sky-500 cursor-pointer flex items-center gap-1 shadow-2xs shrink-0"
+              >
+                <Pencil className="w-3 h-3" />
+                <span>名片</span>
+              </button>
             </div>
-            <button
-              onClick={() => {
-                setTempProfile(currentProfile);
-                setShowProfileModal(true);
-              }}
-              className="px-2.5 py-1.5 rounded-xl bg-white/90 border border-white text-[11px] font-bold text-sky-500 cursor-pointer flex items-center gap-1 shadow-2xs shrink-0"
-            >
-              <Pencil className="w-3 h-3" />
-              <span>名片</span>
-            </button>
+            <div className="flex gap-2">
+              <select
+                aria-label="切换此论坛的身份"
+                value={currentProfileIsAlt ? activePlayerAccount?.id ?? '' : 'main'}
+                onChange={(event) => handleSelectPlayerAccount(event.target.value === 'main' ? '' : event.target.value)}
+                className="min-w-0 flex-1 rounded-xl border border-white bg-white/85 px-2.5 py-2 text-[10px] font-semibold text-slate-600 outline-none"
+              >
+                <option value="main">主账号 · {playerProfiles[activeBoardId]?.nickname ?? '默认身份'}</option>
+                {(playerAccounts[activeBoardId] ?? []).map((account) => (
+                  <option key={account.id} value={account.id}>{account.nickname} · @{account.handleId}</option>
+                ))}
+              </select>
+              <button type="button" onClick={handleCreateAltAccount}
+                className="shrink-0 rounded-xl bg-sky-50 px-3 py-2 text-[10px] font-bold text-sky-600">
+                + 创建小号
+              </button>
+            </div>
           </div>
         ) : (
           <div className="bg-[#F4F8F2]/85 backdrop-blur-xl border border-[#D5E6CF] rounded-2xl px-3.5 py-2 flex items-center justify-between text-[11px] text-[#4A6B3B]">
@@ -1992,8 +2103,13 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-900/30 p-4 backdrop-blur-xs">
           <div className="w-full max-w-sm bg-white/95 backdrop-blur-2xl border border-white rounded-3xl p-5 shadow-xl space-y-3 text-slate-700">
             <h3 className="text-sm font-extrabold">
-              我在「{activeBoard.name}」的个人资料
+              {editingAltAccountId ? '设置论坛小号' : `我在「${activeBoard.name}」的个人资料`}
             </h3>
+            {editingAltAccountId && (
+              <p className="text-[10px] leading-relaxed text-slate-500">
+                小号仅用于当前论坛板块。发帖和评论会以普通网友身份呈现，不会向角色标记为玩家本人。
+              </p>
+            )}
             <input
               type="text"
               placeholder="论坛昵称"
@@ -2040,10 +2156,7 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
               </label>
             </div>
             <button
-              onClick={() => {
-                setPlayerProfiles((prev) => ({ ...prev, [activeBoardId]: tempProfile }));
-                setShowProfileModal(false);
-              }}
+              onClick={handleSavePlayerProfile}
               style={{ background: currentTheme.primaryGradient }}
               className="w-full py-2.5 rounded-2xl text-white text-xs font-bold cursor-pointer"
             >
@@ -2347,6 +2460,8 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
                           }
                           if (Array.isArray(data.posts) && data.posts.every(isForumPost)) setPosts(data.posts);
                           if (isPlayerForumProfiles(data.playerProfiles)) setPlayerProfiles(data.playerProfiles);
+                          if (isPlayerForumAccounts(data.playerAccounts)) setPlayerAccounts(data.playerAccounts);
+                          if (isActivePlayerAccounts(data.activePlayerAccounts)) setActivePlayerAccounts(data.activePlayerAccounts);
                           if (isForumThemePresetList(data.themePresets)) {
                             const presets = data.themePresets.some((preset) => preset.id === 'default')
                               ? data.themePresets

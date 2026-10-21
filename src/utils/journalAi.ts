@@ -42,18 +42,39 @@ const charInfo = (charId: string) => {
 };
 
 const MAX_CHUNK = 250;
+const MAX_CHUNK_CHARS = 12000;
 const MIN_MANUAL_CHUNK = 10;
 
 const pad = (n: number) => String(n).padStart(2, '0');
 const stamp = (iso: string) => {
   const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? '' : `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return Number.isNaN(d.getTime())
+    ? ''
+    : `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+
+const splitMessages = (messages: DirectMessage[]) => {
+  const chunks: DirectMessage[][] = [];
+  let chunk: DirectMessage[] = [];
+  let length = 0;
+  for (const message of messages) {
+    if (chunk.length > 0 &&
+      (chunk.length >= MAX_CHUNK || length + message.text.length > MAX_CHUNK_CHARS)) {
+      chunks.push(chunk);
+      chunk = [];
+      length = 0;
+    }
+    chunk.push(message);
+    length += message.text.length;
+  }
+  if (chunk.length > 0) chunks.push(chunk);
+  return chunks;
 };
 
 const transcript = (messages: DirectMessage[], charName: string, userName: string) =>
   messages
     .map((m) =>
-      `[${stamp(m.createdAt)}] ${m.note ? '【记录】' : `${m.senderId === 'user' ? userName : charName}：`}${m.text.slice(0, 420)}`
+      `[${stamp(m.createdAt)}] ${m.note ? '【记录】' : `${m.senderId === 'user' ? userName : charName}：`}${m.text}`
     )
     .join('\n');
 
@@ -71,10 +92,11 @@ export const createJournalEntry = async (
   const assertArchive = guardMemoryArchive(charId);
   const settings = readJournalSettings();
   const cursor = settings.journalCursors[charId] ?? '';
-  const messages = readDirectMessages(charId);
+  const messages = readDirectMessages(charId, { fullText: true });
   const pending = messages.filter((m) => !cursor || m.createdAt > cursor);
   if (pending.length < options.minMessages) return null;
-  const chunk = pending.slice(0, MAX_CHUNK);
+  const chunk = splitMessages(pending.slice(0, MAX_CHUNK))[0] ?? [];
+  if (chunk.length === 0) return null;
   const original = entriesOf(charId);
   const { name, persona } = charInfo(charId);
   const userName = readUserName();
@@ -83,15 +105,16 @@ export const createJournalEntry = async (
     `你是角色「${name}」的记忆整理助手。请把${name}与玩家「${userName}」的下面这段微信聊天，整理成一篇给${name}自己回忆用的“流水账”。`,
     `角色设定（仅用于理解语气和立场）：${persona || '（无）'}`,
     '【记录】也可能是群聊转私信背景。涉及这类经历时保留来源群名及相关成员，区分群内发言与后续私信，不把其他成员说的话或约定记到玩家或我身上，也不推断其他成员知道私信内容。',
-    `写法：按时间顺序，120~250 字；用“玩家”指代${userName}，用“我”指代${name}；写清楚聊了哪些话题、发生了什么事、双方的情绪和相处氛围、做出的约定或留下的悬念；保留关键细节（人名、地点、数字、日期、专有名词）；客观陈述，不评价、不升华、不写成文学作品。聊天里标为【记录】的内容按各自来源理解，可能是线下剧情摘要、${name}手机内容的记忆或群聊转私信背景等；分享的论坛帖子、番茄钟战绩等卡片也都算发生过的事，一并纳入。只输出这篇流水账正文，不要标题和说明。`,
+    `写法：按时间顺序，用第三人称和真实姓名叙述，必须明确写出${name}和${userName}的名字，不用“我”“玩家”“对方”“他们”等代称代替姓名。每件事都标明记录中对应的具体年月日（YYYY年M月D日）；不得只写“当天”“后来”“之后”等模糊时间。逐项记录这段聊天里发生的事件、双方具体言行、重要信息、情绪变化、承诺、约定和未完事项；保留所有人物、地点、数字、日期、专有名词和事件结果。禁止省略事件、把多件事笼统合并、模糊化细节、杜撰记录里没有的信息或为了缩短篇幅删掉内容；可以精简重复措辞，但不能删减事实。客观陈述，不评价、不升华、不写成文学作品。聊天里标为【记录】的内容按各自来源理解，保留线下剧情、手机内容、群聊转私信等来源与发言归属；分享卡片也作为具体事件记录。只输出正文，不要标题和说明。`,
   ].join('\n');
+  const source = `【聊天记录（${stamp(chunk[0].createdAt)} 至 ${stamp(chunk[chunk.length - 1].createdAt)}，共 ${chunk.length} 条）】\n${transcript(chunk, name, userName)}`;
   const text = await requestMemoryAiText(
     system,
-    `【聊天记录（${stamp(chunk[0].createdAt)} 至 ${stamp(chunk[chunk.length - 1].createdAt)}，共 ${chunk.length} 条）】\n${transcript(chunk, name, userName)}`,
-    { temperature: 0.4, maxTokens: 900 }
+    source,
+    { temperature: 0.2, maxTokens: Math.max(1600, Math.min(8000, Math.ceil(source.length / 2))) }
   );
   assertArchive();
-  if (JSON.stringify(readDirectMessages(charId).slice(0, messages.length)) !== JSON.stringify(messages) ||
+  if (JSON.stringify(readDirectMessages(charId, { fullText: true }).slice(0, messages.length)) !== JSON.stringify(messages) ||
     JSON.stringify(entriesOf(charId)) !== JSON.stringify(original) ||
     (readJournalSettings().journalCursors[charId] ?? '') !== cursor) {
     throw new Error('生成期间聊天或流水账已变化，未保存旧摘要，请重试。');
@@ -127,17 +150,17 @@ export const createJournalEntry = async (
 const mergeEntries = async (charId: string, entries: JournalEntry[], target: JournalLevel): Promise<JournalEntry> => {
   const { name, persona } = charInfo(charId);
   const userName = readUserName();
-  const limit = target === 2 ? '150~250 字' : '200~320 字';
+  const source = entries.map((e, i) => `【第 ${i + 1} 篇（${stamp(e.from)} 至 ${stamp(e.to)}）】\n${e.content}`).join('\n\n');
   const system = [
     `你是角色「${name}」的记忆整理助手。下面是${name}按时间顺序对与玩家「${userName}」相处经历写下的多篇记录，请把它们压缩合并成一篇更概括的“${target === 2 ? '阶段回顾' : '长篇回顾'}”。`,
     `角色设定（仅用于理解立场）：${persona || '（无）'}`,
-    `要求：${limit}；按时间顺序保留脉络、重要事件、关系和情绪上的变化、仍然有效的约定与悬念；舍弃琐碎重复的细节，但保留关键的人名、地点、数字、日期；用“玩家”指代${userName}，用“我”指代${name}；客观陈述，不评价、不升华。只输出合并后的正文。`,
-    '涉及群聊转私信的事件，压缩时仍保留原有的来源群名及相关成员，不能把群内发言改写为私聊，也不能合并不同人的发言、关系或承诺。',
+    `要求：按时间顺序，用第三人称和真实姓名明确写出${name}与${userName}，不用“我”“玩家”“对方”等代称。每件事写明具体年月日（YYYY年M月D日），不得用“后来”“之后”等模糊时间代替。完整保留输入各篇中发生的每一件事、具体言行、事件结果、人物、地点、数字、情绪变化、承诺、约定和未完事项；禁止省略、模糊化、笼统合并不同事件或杜撰事实。只可精简重复措辞，不能删减事实；客观陈述，不评价、不升华。只输出正文。`,
+    '涉及群聊转私信的事件，仍须保留来源群名、相关成员和发言归属，不能把群内发言改写为私聊，也不能合并不同人的发言、关系或承诺。',
   ].join('\n');
   const text = await requestMemoryAiText(
     system,
-    entries.map((e, i) => `【第 ${i + 1} 篇（${stamp(e.from)} 至 ${stamp(e.to)}）】\n${e.content}`).join('\n\n'),
-    { temperature: 0.3, maxTokens: 900 }
+    source,
+    { temperature: 0.2, maxTokens: Math.max(1600, Math.min(8000, Math.ceil(source.length / 2))) }
   );
   return {
     id: newJournalId(),
@@ -200,13 +223,13 @@ export const regenerateJournal = async (charId: string, range?: JournalRange) =>
   const generated: JournalEntry[] = [];
   journalRunning.add(charId);
   try {
-    for (let index = 0; index < selected.length; index += MAX_CHUNK) {
-      const chunk = selected.slice(index, index + MAX_CHUNK);
+    for (const chunk of splitMessages(selected)) {
+      const source = transcript(chunk, name, readUserName());
       const content = (await requestMemoryAiText(
-        `你是${name}的记忆整理助手。人设：${persona}。按时间顺序把以下聊天整理成120~250字流水账，用“我”指代${name}，“玩家”指代${readUserName()}。保留人物、事件、情绪、约定、关键数字和未完话题，不杜撰。背景记录及群聊转私信须保留群名、成员、发言归属与来源，不混淆为私聊。只输出正文。`,
-        transcript(chunk, name, readUserName()), { temperature: 0.4, maxTokens: 1200 }
+        `你是${name}的记忆整理助手。人设仅供理解，不用于改写事实。按时间顺序用第三人称和真实姓名明确写出${name}与${readUserName()}，不用“我”“玩家”“对方”等代称。每件事标明具体年月日（YYYY年M月D日），逐项记录所有具体事件、言行、结果、情绪变化、承诺和未完事项，保留所有人名、地点、数字、专有名词及来源。禁止省略、模糊化、笼统合并事件或杜撰；只精简重复措辞，不删减事实。群聊转私信须保留群名、成员、发言归属和来源。只输出客观正文，不加标题。`,
+        source, { temperature: 0.2, maxTokens: Math.max(1600, Math.min(8000, Math.ceil(source.length / 2))) }
       )).trim();
-      if (!content || content.length > 4000) throw new Error('流水账正文为空或过长，未保存本次重做。');
+      if (!content || content.length > 20000) throw new Error('流水账正文为空或过长，未保存本次重做。');
       assertArchive();
       generated.push({ id: newJournalId(), charId, level: 1, from: chunk[0].createdAt,
         to: chunk[chunk.length - 1].createdAt, messageCount: chunk.length,
@@ -283,7 +306,7 @@ export const maybeAutoJournal = async (participantIds: string[], chatType: strin
 };
 
 export const updateJournalEntryContent = (id: string, content: string) => {
-  if (!content.trim() || content.trim().length > 4000) throw new Error('流水账正文不能为空或超过4000字。');
+  if (!content.trim() || content.trim().length > 20000) throw new Error('流水账正文不能为空或超过20000字。');
   const entries = readJournalEntries();
   if (!entries.some((entry) => entry.id === id)) throw new Error('流水账已不存在，无法保存。');
   writeJournalEntries(entries.map((entry) => entry.id === id ? { ...entry, content: content.trim() } : entry));

@@ -24,6 +24,14 @@ import { CALENDAR_APPEARANCE_KEY, MUSIC_APPEARANCE_KEY, captureHomeAppearance, i
 import { FONT_FAMILIES, FontSettings, readFontSettings } from './utils/fontSettings';
 import { isLockScreenAppearance } from './utils/lockAppearance';
 import { ChatNotification, ChatRuntimeSettings, isKeepAlivePlaying, readChatRuntimeSettings, startKeepAlive, stopKeepAlive } from './utils/chatRuntime';
+import {
+  generateBlockedPeriodBacklog,
+  processBlockedContactSchedules,
+  readBlockedInteractions,
+  respondToBlockedPaper,
+  storePaperInDrawer,
+  type BlockedInteraction,
+} from './utils/blockedContact';
 
 const WeChatApp = lazy(() => import('./apps/WeChatApp').then((module) => ({ default: module.WeChatApp })));
 const PhoneExplorerApp = lazy(() => import('./apps/PhoneExplorerApp').then((module) => ({ default: module.CheckPhoneApp })));
@@ -106,6 +114,85 @@ const isUserProfile = (value: unknown): value is UserProfile => {
     (profile.coverImageUrl === undefined || typeof profile.coverImageUrl === 'string')
   );
 };
+
+function BlockedContactRuntime({ enabled }: { enabled: boolean }) {
+  const [interaction, setInteraction] = useState<BlockedInteraction | null>(null);
+  const [answer, setAnswer] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    const refresh = () => {
+      const pending = readBlockedInteractions().find((item) => item.type === 'paper' && item.status === 'pending');
+      setInteraction(pending ?? null);
+    };
+    const process = () => {
+      void processBlockedContactSchedules().catch((error: unknown) => {
+        console.error('Blocked-contact scheduling failed.', error);
+        showYyError(error instanceof Error ? error.message : '拉黑后的联系调度失败。');
+      });
+      void generateBlockedPeriodBacklog().catch((error: unknown) => {
+        console.error('Blocked-period message generation failed.', error);
+        showYyError(error instanceof Error ? error.message : '拉黑期间消息生成失败。');
+      });
+    };
+    refresh();
+    process();
+    const timer = window.setInterval(process, 15_000);
+    window.addEventListener('focus', process);
+    window.addEventListener('pageshow', process);
+    document.addEventListener('visibilitychange', process);
+    window.addEventListener('yyphone:blocked-interactions', refresh);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', process);
+      window.removeEventListener('pageshow', process);
+      document.removeEventListener('visibilitychange', process);
+      window.removeEventListener('yyphone:blocked-interactions', refresh);
+    };
+  }, []);
+
+  const sendAnswer = async () => {
+    if (!interaction || busy) return;
+    setBusy(true);
+    try {
+      await respondToBlockedPaper(interaction.id, answer);
+      setAnswer('');
+    } catch (error) {
+      console.error('Could not reply to blocked-contact paper.', error);
+      showYyError(error instanceof Error ? error.message : '回复纸条失败，请重试。');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!enabled || !interaction) return null;
+  return (
+    <div className="absolute inset-0 z-[100] flex items-center justify-center bg-slate-950/55 p-5">
+      <section role="dialog" aria-modal="true" aria-label="匿名小纸条" className="w-full max-w-sm rounded-3xl bg-[#fffdf8] p-5 shadow-2xl">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-sm font-bold text-[#2C4A5C]">收到一张匿名小纸条</h2>
+        </div>
+        <div className="max-h-56 space-y-2 overflow-y-auto rounded-2xl bg-amber-50/80 p-3 text-xs leading-relaxed text-slate-700">
+          {(interaction.thread ?? [{ role: 'character' as const, text: interaction.message, createdAt: interaction.createdAt }]).map((line, index) => (
+            <p key={`${line.createdAt}-${index}`} className={line.role === 'user' ? 'text-right text-teal-800' : ''}>
+              {line.text}
+            </p>
+          ))}
+        </div>
+        <textarea value={answer} onChange={(event) => setAnswer(event.target.value)} maxLength={2000}
+          placeholder="写下你的回复…" className="mt-3 min-h-20 w-full resize-none rounded-xl border border-amber-100 bg-white p-3 text-xs outline-none" />
+        <div className="mt-3 flex gap-2">
+          <button type="button" disabled={busy} onClick={() => {
+            storePaperInDrawer(interaction.id);
+            setInteraction(null);
+          }} className="flex-1 rounded-xl bg-slate-100 py-2.5 text-xs font-semibold text-slate-600">放进抽屉</button>
+          <button type="button" disabled={busy || !answer.trim()} onClick={() => void sendAnswer()}
+            className="flex-1 rounded-xl bg-teal-600 py-2.5 text-xs font-semibold text-white disabled:opacity-50">{busy ? '发送中…' : '回复'}</button>
+        </div>
+      </section>
+    </div>
+  );
+}
 
 export default function App() {
   useEffect(() => {
@@ -674,6 +761,7 @@ export default function App() {
         )}
         <LittlePPanel open={littlePOpen && littlePVisible && !isLocked && !activeApp}
           onClose={() => setLittlePOpen(false)} onHide={() => handleLittlePVisible(false)} />
+        <BlockedContactRuntime enabled={!isLocked} />
         {notification && (
           <div className="absolute left-3 right-3 top-[max(env(safe-area-inset-top,0px),12px)] z-[100] flex items-center gap-3 rounded-3xl border border-white bg-white/95 p-3 shadow-xl backdrop-blur-xl" role="status">
             <button type="button" onClick={() => openNotifiedChat(notification.chatId)} className="flex min-w-0 flex-1 items-center gap-3 text-left" aria-label={`查看${notification.name}的新消息`}>

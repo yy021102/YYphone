@@ -54,6 +54,7 @@ import { buildCharacterExport, parsePortableWorldBooks, remapImportedWorldBooks 
 import { applySocialWrites, buildSocialInstructions, parseSocialActions, type SocialContext } from '../utils/chatSocial';
 import { BUILTIN_STICKERS, CHAT_STICKERS_STORAGE_KEY, type ChatSticker } from '../utils/chatStickers';
 import { ChatNotification, ChatRuntimeSettings, getRoundThought, isProactiveDue, permittedSticker, preserveRoundThoughts } from '../utils/chatRuntime';
+import { readBlockedInteractions, updateBlockedInteraction, type BlockedInteraction } from '../utils/blockedContact';
 import { AvatarFrameStyle, avatarFrameWrapStyle } from '../utils/avatarFrame';
 import {
   chargeAlipay,
@@ -352,6 +353,14 @@ interface ChatConversation {
   context: string;
   narratorEnabled: boolean;
   blocked: boolean;
+  blockedSince?: string;
+  blockedNextAt?: string;
+  blockedDelayMinutes?: number;
+  blockedTiming?: 'after' | 'within';
+  blockedActivity?: 'friend' | 'paper' | 'both';
+  blockedActivityCount?: number;
+  blockedBacklogGeneratedAt?: string;
+  blockedBacklogRetryAt?: string;
   pinned: boolean;
   avatars: Record<string, string>;
   messages: ChatMessage[];
@@ -511,6 +520,15 @@ export const isStrictChatList = (value: unknown): value is ChatConversation[] =>
       typeof chat.context === 'string' &&
       typeof chat.narratorEnabled === 'boolean' &&
       typeof chat.blocked === 'boolean' &&
+      (chat.blockedSince === undefined || typeof chat.blockedSince === 'string') &&
+      (chat.blockedNextAt === undefined || typeof chat.blockedNextAt === 'string') &&
+      (chat.blockedDelayMinutes === undefined || Number.isInteger(chat.blockedDelayMinutes)) &&
+      (chat.blockedTiming === undefined || chat.blockedTiming === 'after' || chat.blockedTiming === 'within') &&
+      (chat.blockedActivity === undefined || chat.blockedActivity === 'friend' ||
+        chat.blockedActivity === 'paper' || chat.blockedActivity === 'both') &&
+      (chat.blockedActivityCount === undefined || Number.isInteger(chat.blockedActivityCount)) &&
+      (chat.blockedBacklogGeneratedAt === undefined || typeof chat.blockedBacklogGeneratedAt === 'string') &&
+      (chat.blockedBacklogRetryAt === undefined || typeof chat.blockedBacklogRetryAt === 'string') &&
       typeof chat.pinned === 'boolean' &&
       !!chat.avatars &&
       typeof chat.avatars === 'object' &&
@@ -795,6 +813,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
   const [contacts, setContacts] = useState(() =>
     readStoredValue(CONTACTS_STORAGE_KEY, [] as ContactPersona[], isContactList)
   );
+  const [blockedInteractions, setBlockedInteractions] = useState<BlockedInteraction[]>(readBlockedInteractions);
   const [characterNpcs, setCharacterNpcs] = useState<CharacterNpc[]>(() => readCharacterNpcs());
   const [contactsMenuOpen, setContactsMenuOpen] = useState(false);
   const [characterExportOpen, setCharacterExportOpen] = useState(false);
@@ -852,6 +871,16 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
     setCharacterNpcs(readCharacterNpcs());
     setPersonaCollection(readSetting(SETTINGS_KEYS.personas, DEFAULT_PERSONAS, isPersonaCollection));
   }, [isVisible]);
+
+  useEffect(() => {
+    const refreshBlockedInteractions = () => {
+      setBlockedInteractions(readBlockedInteractions());
+      setChats(readStoredValue(CHATS_STORAGE_KEY, [], isChatList));
+    };
+    refreshBlockedInteractions();
+    window.addEventListener('yyphone:blocked-interactions', refreshBlockedInteractions);
+    return () => window.removeEventListener('yyphone:blocked-interactions', refreshBlockedInteractions);
+  }, []);
 
   useEffect(() => {
     const tick = () => {
@@ -2033,6 +2062,9 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       timeZone: chat.timeZone ?? '',
       imageGenerationEnabled: chat.imageGenerationEnabled ?? false,
       imageGenerationPrompt: chat.imageGenerationPrompt ?? '',
+      blockedDelayMinutes: chat.blockedDelayMinutes ?? 60,
+      blockedTiming: chat.blockedTiming ?? 'after',
+      blockedActivity: chat.blockedActivity ?? 'both',
     });
     setChatSettingsOpen(true);
   };
@@ -2044,6 +2076,13 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         (chatSettingsDraft.proactiveIntervalMinutes ?? 0) < 1 ||
         (chatSettingsDraft.proactiveIntervalMinutes ?? 0) > 1440)) {
       setChatError('主动消息间隔请输入 1 到 1440 分钟之间的整数。');
+      return;
+    }
+    if (chatSettingsDraft.type === 'direct' &&
+      (!Number.isInteger(chatSettingsDraft.blockedDelayMinutes) ||
+        (chatSettingsDraft.blockedDelayMinutes ?? 0) < 1 ||
+        (chatSettingsDraft.blockedDelayMinutes ?? 0) > 10080)) {
+      setChatError('拉黑后联系间隔请输入 1 到 10080 分钟之间的整数。');
       return;
     }
     if (chatSettingsDraft.type !== 'direct' && chatSettingsDraft.participantIds.length < 2) {
@@ -2086,16 +2125,35 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       ),
       attachHistory: chatSettingsDraft.attachHistory && attachedHistoryChatIds.length > 0,
     };
-    if (updateChat(savedDraft.id, (current) => ({
-      ...savedDraft,
-      messages: current.messages,
-      archives: current.archives,
-      activeArchiveId: current.activeArchiveId,
-      updatedAt: current.updatedAt,
-      lastProactiveAt: current.proactiveEnabled === savedDraft.proactiveEnabled &&
-        current.proactiveIntervalMinutes === savedDraft.proactiveIntervalMinutes
-        ? current.lastProactiveAt : new Date().toISOString(),
-    }))) {
+    if (updateChat(savedDraft.id, (current) => {
+      const blockedChanged = current.blocked !== savedDraft.blocked;
+      const timingChanged = current.blockedDelayMinutes !== savedDraft.blockedDelayMinutes ||
+        current.blockedTiming !== savedDraft.blockedTiming;
+      const delay = savedDraft.blockedDelayMinutes ?? 60;
+      const timing = savedDraft.blockedTiming ?? 'after';
+      const delayMs = delay * 60_000;
+      const blockedNextAt = !savedDraft.blocked
+        ? undefined
+        : blockedChanged || timingChanged
+          ? new Date(Date.now() + (timing === 'within' ? Math.max(60_000, Math.floor(Math.random() * delayMs)) : delayMs)).toISOString()
+          : current.blockedNextAt;
+      return {
+        ...savedDraft,
+        blockedSince: savedDraft.blocked
+          ? blockedChanged ? new Date().toISOString() : current.blockedSince
+          : current.blockedSince,
+        blockedNextAt,
+        blockedActivityCount: blockedChanged && savedDraft.blocked ? 0 : current.blockedActivityCount,
+        blockedBacklogGeneratedAt: blockedChanged && !savedDraft.blocked ? undefined : current.blockedBacklogGeneratedAt,
+        messages: current.messages,
+        archives: current.archives,
+        activeArchiveId: current.activeArchiveId,
+        updatedAt: current.updatedAt,
+        lastProactiveAt: current.proactiveEnabled === savedDraft.proactiveEnabled &&
+          current.proactiveIntervalMinutes === savedDraft.proactiveIntervalMinutes
+          ? current.lastProactiveAt : new Date().toISOString(),
+      };
+    })) {
       setChatSettingsOpen(false);
       setChatSettingsDraft(null);
     }
@@ -4365,9 +4423,13 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                 </div>
               </div>
             ) : activeChat.blocked ? (
-              <p className="border-t border-slate-200 bg-white/70 p-3 text-center text-xs text-rose-600">
-                此对话已拉黑，无法发送消息。
-              </p>
+              <div className="flex items-center justify-between gap-3 border-t border-slate-200 bg-white/70 p-3">
+                <p className="text-xs text-rose-600">此对话已拉黑，无法发送消息。</p>
+                <button type="button" onClick={() => openChatSettings(activeChat)}
+                  className="shrink-0 rounded-lg bg-slate-100 px-2.5 py-1.5 text-[10px] font-semibold text-slate-700">
+                  修改设置 / 解除拉黑
+                </button>
+              </div>
             ) : activeChat.type === 'observer' ? (
               <form
                 onSubmit={(event) => {
@@ -4724,6 +4786,47 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         {/* TAB 2: CONTACTS */}
         {activeTab === 'contacts' && (
           <div className="flex flex-col p-3 space-y-3 pb-4">
+            <section className="space-y-1.5">
+              <h3 className="px-1 text-[11px] font-bold text-slate-400">
+                新的朋友{blockedInteractions.filter((item) => item.type === 'friend-request' && item.status === 'pending').length > 0
+                  ? ` · ${blockedInteractions.filter((item) => item.type === 'friend-request' && item.status === 'pending').length}` : ''}
+              </h3>
+              <div className="glass-card divide-y divide-slate-100/60 overflow-hidden rounded-2xl">
+                {blockedInteractions.filter((item) => item.type === 'friend-request' && item.status === 'pending').map((request) => (
+                  <div key={request.id} className="p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-semibold text-[#2C4A5C]">{request.charName}</span>
+                      <span className="text-[9px] text-slate-400">{new Date(request.createdAt).toLocaleString()}</span>
+                    </div>
+                    <p className="mt-1 text-[11px] leading-relaxed text-slate-500">{request.message}</p>
+                    <div className="mt-2 flex justify-end gap-2">
+                      <button type="button" onClick={() => {
+                        try {
+                          updateBlockedInteraction(request.id, 'rejected');
+                          setBlockedInteractions(readBlockedInteractions());
+                        } catch (error) {
+                          console.error('Could not reject blocked-contact friend request.', error);
+                          showYyError(error instanceof Error ? error.message : '拒绝好友申请失败。');
+                        }
+                      }} className="rounded-lg bg-slate-100 px-3 py-1.5 text-[10px] font-semibold text-slate-600">拒绝</button>
+                      <button type="button" onClick={() => {
+                        try {
+                          updateBlockedInteraction(request.id, 'accepted');
+                          setBlockedInteractions(readBlockedInteractions());
+                          setChats(readStoredValue(CHATS_STORAGE_KEY, [], isChatList));
+                        } catch (error) {
+                          console.error('Could not accept blocked-contact friend request.', error);
+                          showYyError(error instanceof Error ? error.message : '接受好友申请失败。');
+                        }
+                      }} className="rounded-lg bg-teal-600 px-3 py-1.5 text-[10px] font-semibold text-white">接受并解除拉黑</button>
+                    </div>
+                  </div>
+                ))}
+                {!blockedInteractions.some((item) => item.type === 'friend-request' && item.status === 'pending') && (
+                  <p className="px-3 py-3 text-[10px] text-slate-400">暂无新的好友申请</p>
+                )}
+              </div>
+            </section>
             {Object.keys(contactsByGroup).sort((a, b) => a.localeCompare(b, 'zh-CN')).map((group) => (
               <section key={group} className="space-y-1.5">
                 <h3 className="px-1 text-[11px] font-bold text-slate-400">{group}</h3>
@@ -5339,6 +5442,40 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
               </section>
             )}
             {chatSettingsDraft.type === 'direct' && (
+              <section className="space-y-3 rounded-2xl border border-rose-100 bg-rose-50/50 p-3">
+                <h3 className="text-xs font-semibold text-slate-700">拉黑后的联系</h3>
+                <label className="block text-[11px] text-slate-600">
+                  联系时间
+                  <input type="number" min={1} max={10080}
+                    value={chatSettingsDraft.blockedDelayMinutes ?? 60}
+                    onChange={(event) => setChatSettingsDraft({ ...chatSettingsDraft, blockedDelayMinutes: Number(event.target.value) })}
+                    className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs" />
+                </label>
+                <label className="block text-[11px] text-slate-600">
+                  触发方式
+                  <select value={chatSettingsDraft.blockedTiming ?? 'after'}
+                    onChange={(event) => setChatSettingsDraft({ ...chatSettingsDraft, blockedTiming: event.target.value as 'after' | 'within' })}
+                    className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs">
+                    <option value="after">间隔到达后联系</option>
+                    <option value="within">在设定时间内随机联系</option>
+                  </select>
+                </label>
+                <label className="block text-[11px] text-slate-600">
+                  联系方式
+                  <select value={chatSettingsDraft.blockedActivity ?? 'both'}
+                    onChange={(event) => setChatSettingsDraft({ ...chatSettingsDraft, blockedActivity: event.target.value as 'friend' | 'paper' | 'both' })}
+                    className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs">
+                    <option value="both">好友申请与匿名小纸条交替</option>
+                    <option value="friend">仅发送好友申请</option>
+                    <option value="paper">仅发送匿名小纸条</option>
+                  </select>
+                </label>
+                <p className="text-[10px] leading-relaxed text-slate-500">
+                  时间单位为分钟（1–10080）。随机时间模式需要在系统设置开启后台保活；页面关闭或浏览器停止运行时无法保证准时执行。拉黑期间不会发送普通聊天消息。
+                </p>
+              </section>
+            )}
+            {chatSettingsDraft.type === 'direct' && (
               <label className="block text-[11px] font-semibold text-[#2C4A5C]">
                 备注名（仅自己可见）
                 <input
@@ -5838,7 +5975,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                 onClick={() => setChatSettingsDraft({ ...chatSettingsDraft, blocked: !chatSettingsDraft.blocked })}
                 className={`w-full rounded-xl py-2 text-xs font-semibold ${chatSettingsDraft.blocked ? 'bg-slate-100 text-slate-700' : 'bg-rose-50 text-rose-700'}`}
               >
-                {chatSettingsDraft.blocked ? '取消拉黑' : '拉黑'}
+                {chatSettingsDraft.blocked ? '解除拉黑' : '拉黑'}
               </button>
             ) : (
               <button onClick={dissolveChat} className="w-full rounded-xl bg-rose-50 py-2 text-xs font-semibold text-rose-700">

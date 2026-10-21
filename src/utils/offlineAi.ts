@@ -102,6 +102,41 @@ const transcript = (story: OfflineStory, messages: OfflineMessage[], userName: s
 export type OfflineGenMode = 'continue' | 'opening';
 
 const CHOICES_MARKER = '【行动建议】';
+const OFFLINE_SUMMARY_CHUNK_CHARS = 9000;
+
+const formatSummaryDate = (value: string) => {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? '日期未记录'
+    : `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日 ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+};
+
+export const buildOfflineSummarySegments = (
+  story: OfflineStory,
+  userName: string,
+  characterNames: string[]
+) => {
+  const speakerNames = characterNames.length > 0 ? characterNames.join('、') : '登场角色';
+  const segments: Array<{ from: string; to: string; text: string }> = [];
+  let current: string[] = [];
+  let currentLength = 0;
+  let from = '';
+  let to = '';
+  for (const message of story.messages) {
+    const line = `[${formatSummaryDate(message.createdAt)}] ${message.role === 'user' ? `${userName}（玩家）行动/发言` : `${speakerNames}的剧情记录`}：\n${currentVersionText(message)}`;
+    if (current.length > 0 && currentLength + line.length > OFFLINE_SUMMARY_CHUNK_CHARS) {
+      segments.push({ from, to, text: current.join('\n\n') });
+      current = [];
+      currentLength = 0;
+    }
+    if (current.length === 0) from = message.createdAt;
+    current.push(line);
+    currentLength += line.length;
+    to = message.createdAt;
+  }
+  if (current.length > 0) segments.push({ from, to, text: current.join('\n\n') });
+  return segments;
+};
 
 /** 把“正文 + 行动建议标记 + 三条建议”拆开；没有标记时整段都是正文。 */
 const splitChoices = (raw: string): { text: string; choices: string[] } => {
@@ -174,17 +209,25 @@ export const summarizeOfflineStory = async (
   preset: OfflinePreset | undefined
 ): Promise<string> => {
   const { system, userName } = buildSystem(story, preset);
-  let body = story.messages
-    .map((m) => `${m.role === 'user' ? `【${userName}】` : '【剧情】'}${currentVersionText(m)}`)
-    .join('\n\n');
-  if (body.length > 14000) body = `${body.slice(0, 3000)}\n……（中间部分省略）……\n${body.slice(-11000)}`;
   const characterNames = readOfflineContacts()
     .filter((c) => story.characterIds.includes(c.id))
-    .map((c) => c.name)
-    .join('、');
-  return requestConfiguredAiText(
-    system,
-    `以下是这段线下剧情的全文：\n\n${body}\n\n请把这段线下剧情总结成一份供角色（${characterNames || '登场角色'}）日后回忆的记忆摘要：第三人称、客观陈述，200~400 字，包含时间地点、发生的关键事件、重要的对话与承诺、双方的情绪变化与关系变化、留下的悬念或约定。只输出摘要正文，不要标题和多余说明。`,
-    { temperature: 0.5, maxTokens: 1200 }
-  );
+    .map((c) => c.name);
+  const segments = buildOfflineSummarySegments(story, userName, characterNames);
+  if (segments.length === 0) throw new Error('这段线下剧情没有可整理的内容。');
+  const summaries: string[] = [];
+  for (const [index, segment] of segments.entries()) {
+    const period = `${formatSummaryDate(segment.from)} 至 ${formatSummaryDate(segment.to)}`;
+    const summary = await requestConfiguredAiText(
+      system,
+      [
+        `【线下剧情记录 ${index + 1}/${segments.length}；时间：${period}】`,
+        segment.text,
+        `请将以上这一段剧情整理为供角色日后回忆的客观事件记录。必须全程使用第三人称和真实姓名，明确写出玩家姓名“${userName}”以及角色姓名“${characterNames.join('、') || '登场角色'}”；禁止使用“我”“玩家”“对方”“他们”等代称替代姓名。按时间顺序逐项写出本段发生的每一件事，给每件事标注记录中对应的具体年月日（YYYY年M月D日）；不得用“后来”“之后”“某天”等模糊表述代替具体日期。保留具体言行、人物、地点、物品、数字、事件结果、情绪变化、关系变化、承诺、约定、悬念和来源；禁止省略事件、把多件事笼统合并、模糊化细节、杜撰记录中没有的信息。只可精简重复措辞，不能删减事实。只输出正文，不要标题、说明或评价。`,
+      ].join('\n\n'),
+      { temperature: 0.2, maxTokens: Math.max(1600, Math.min(8000, Math.ceil(segment.text.length / 2))) }
+    );
+    if (!summary.trim()) throw new Error(`线下剧情 ${index + 1}/${segments.length} 的摘要为空，未保存不完整摘要。`);
+    summaries.push(`【${period}】\n${summary.trim()}`);
+  }
+  return summaries.join('\n\n');
 };

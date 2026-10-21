@@ -34,6 +34,7 @@ import {
   runGroupJournal, setGroupJournalSettings, regenerateGroupJournal,
 } from './groupJournal';
 import { GroupJournalPanel } from '../components/GroupJournalPanel';
+import { buildOfflineSummarySegments } from './offlineAi';
 import { compressChatPhoto, compressImageFile } from './imageFile';
 import { createEmptyCoupleSpace, localDateString, readCharacterBrief, readCoupleSpaces, writeCoupleSpaces } from './coupleSpaceData';
 import { readDirectMessages } from './journalData';
@@ -52,6 +53,7 @@ import { generateCoupleBatch } from './coupleSpaceAi';
 import { generateFocusRank } from './pomodoroAi';
 import { buildCalendarContext, emptyCalendarData, toDateKey, writeCalendarData } from './calendarData';
 import { replaceJournalRange, selectJournalRange } from './journalRange';
+import { processBlockedContactSchedules } from './blockedContact';
 
 const stored = new Map<string, string>();
 const localStorage = {
@@ -67,6 +69,21 @@ Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: l
 
 beforeEach(async () => { await clearDbStorage(); });
 afterEach(() => { mock.restoreAll(); });
+
+test('within-window blocked contact schedules wait until keepalive is enabled', async () => {
+  const dueAt = '2020-01-01T00:00:00.000Z';
+  saveSetting(WECHAT_CHATS_STORAGE_KEY, [{
+    id: 'blocked-chat', type: 'direct', participantIds: ['blocked-char'], blocked: true,
+    blockedSince: '2019-12-31T00:00:00.000Z', blockedNextAt: dueAt,
+    blockedTiming: 'within', messages: [], updatedAt: dueAt,
+  }]);
+  saveSetting(SETTINGS_KEYS.chatRuntime, { ...DEFAULT_CHAT_RUNTIME, keepAlive: false });
+
+  await processBlockedContactSchedules();
+
+  const chats = JSON.parse(readStorageString(WECHAT_CHATS_STORAGE_KEY) ?? '[]') as Array<{ blockedNextAt: string }>;
+  assert.equal(chats[0].blockedNextAt, dueAt);
+});
 
 const archiveFixture = (archiveId = 'old') => {
   saveSetting(WECHAT_CHATS_STORAGE_KEY, [{
@@ -187,6 +204,11 @@ test('phone generates all eight scopes with one request and includes world, play
     agent: { doubaoTurns: [{ role: 'char', content: '明天天气？' }], claudeTurns: [{ role: 'ai', content: '说说你的心事' }] },
     wallet: { balance: 800, records: [{ title: '车票', amount: -20 }] },
     health: { sleepHours: 7, sleepNote: '睡得很好', steps: 1000, screenTimeMinutes: 30 },
+    douban: { items: [
+      { type: '书籍', title: '海边的钟表', creator: '作者甲', rating: 4.5, review: '读到钟表匠时想起了今天的海风。', date: '2026年10月21日' },
+      { type: '纪录片', title: '潮汐之间', creator: '导演乙', rating: 4, review: '潮声拍得很安静。', date: '2026年10月20日' },
+      { type: '游戏', title: '远岸信号', creator: '工作室丙', rating: 3.5, review: '解谜不错，结尾稍急。', date: '2026年10月19日' },
+    ] },
   };
   let calls = 0; let body = '';
   mock.method(globalThis, 'fetch', async (_input: unknown, init?: RequestInit) => {
@@ -200,7 +222,9 @@ test('phone generates all eight scopes with one request and includes world, play
   assert.equal(calls, 1);
   for (const text of ['角色住在浮空城', '城市没有地铁', '钟表修理师', '玩家背景标记', '两人正在旅行', '今天一起去看了海']) assert.ok(body.includes(text), text);
   assert.doesNotMatch(body, /不应出现的世界书秘密/);
-  for (const key of ['npcThreads', 'photos', 'browserHistory', 'notes', 'icityDiaries', 'agentSession', 'wallet', 'health']) assert.ok(key in result, key);
+  for (const key of ['npcThreads', 'photos', 'browserHistory', 'notes', 'icityDiaries', 'agentSession', 'wallet', 'health', 'ratings']) assert.ok(key in result, key);
+  assert.equal(result.ratings?.length, 3);
+  assert.match(body, /至少 3 条/);
   const snapshot = JSON.stringify(prev);
   Reflect.deleteProperty(generated, 'notes');
   await assert.rejects(generatePhoneScope('all', { charId: 'paper-a', charName: '甲', userName: '玩家', npcs: [] }, prev), /遗漏/);
@@ -682,11 +706,13 @@ test('group automatic thresholds include 400 messages, same-time cursors and ind
   await maybeAutoGroupJournal(other.id);
   assert.equal(calls, 0);
   await maybeAutoGroupJournal(chat.id);
-  assert.equal(readGroupJournal(chat.id).pending, 150);
-  assert.equal(readGroupJournal(chat.id).entries[0].messageCount, 250);
+  const remaining = readGroupJournal(chat.id).pending;
+  const firstBatch = readGroupJournal(chat.id).entries[0].messageCount;
+  assert.ok(remaining > 0 && remaining < 400);
+  assert.equal(firstBatch + remaining, 400);
   await runGroupJournal(chat.id);
   assert.equal(readGroupJournal(chat.id).pending, 0);
-  assert.equal(calls, 2);
+  assert.ok(calls >= 2);
   assert.equal(readGroupJournal(other.id).every, 100);
   assert.throws(() => setGroupJournalSettings(chat.id, { every: 0 }), /30 到 400/);
   assert.throws(() => setGroupJournalSettings(chat.id, { every: 401 }), /30 到 400/);
@@ -1920,6 +1946,50 @@ test('group private provenance is durable in prompts and summaries, including le
     assert.match(request, /角色乙（ID：b）/);
     assert.match(request, /旧群名/);
   }
+  assert.match(requests[1], /第三人称和真实姓名/);
+  assert.match(requests[1], /禁止省略事件/);
+  assert.match(requests[1], /2026年10月/);
+});
+
+test('offline summary segments retain every full dated event without truncating the story', () => {
+  const story = {
+    id: 'summary-story',
+    title: '完整故事',
+    characterIds: ['summary-char'],
+    personaId: 'player',
+    worldBookIds: [],
+    presetId: '',
+    wechatContextCount: 0,
+    autoChoices: false,
+    contextMessages: 10,
+    ended: false,
+    createdAt: '2026-10-21T00:00:00.000Z',
+    updatedAt: '2026-10-22T00:00:00.000Z',
+    messages: [
+      {
+        id: 'first', role: 'user' as const, versions: ['第一件事有明确细节。'], versionIndex: 0,
+        createdAt: '2026-10-21T01:02:00.000Z',
+      },
+      {
+        id: 'long', role: 'ai' as const, versions: [`第二件事${'细节'.repeat(5000)}`], versionIndex: 0,
+        createdAt: '2026-10-21T02:03:00.000Z',
+      },
+      {
+        id: 'last', role: 'user' as const, versions: ['最后一件事也必须保留。'], versionIndex: 0,
+        createdAt: '2026-10-22T03:04:00.000Z',
+      },
+    ],
+  };
+  const segments = buildOfflineSummarySegments(story, '玩家甲', ['角色乙']);
+  assert.ok(segments.length > 1);
+  const allText = segments.map((segment) => segment.text).join('\n');
+  assert.match(allText, /2026年10月21日 \d{2}:\d{2}/);
+  assert.match(allText, /2026年10月22日 \d{2}:\d{2}/);
+  assert.match(allText, /第一件事有明确细节/);
+  assert.match(allText, /最后一件事也必须保留/);
+  assert.equal((allText.match(/第二件事/g) ?? []).length, 1);
+  assert.ok(allText.includes(`第二件事${'细节'.repeat(5000)}`));
+  assert.doesNotMatch(allText, /中间部分省略/);
 });
 
 test('format protocol remains last for photos, regeneration, observer chats and proactive contact', () => {

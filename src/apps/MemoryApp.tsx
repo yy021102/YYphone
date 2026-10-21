@@ -67,6 +67,9 @@ export const MemoryApp: React.FC<MemoryAppProps> = ({ onBack }) => {
   const [editing, setEditing] = useState<MemoryItem | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [busy, setBusy] = useState('');
+  const [secondaryModels, setSecondaryModels] = useState<Array<{ id: string; label: string }>>([]);
+  const [isLoadingSecondaryModels, setIsLoadingSecondaryModels] = useState(false);
+  const [secondaryModelMessage, setSecondaryModelMessage] = useState('');
   const [notice, setNotice] = useState('');
   const [review, setReview] = useState<{ charId: string; cursor: string; candidates: Candidate[]; assertArchive: () => void } | null>(null);
   const [testQuery, setTestQuery] = useState('');
@@ -261,6 +264,96 @@ export const MemoryApp: React.FC<MemoryAppProps> = ({ onBack }) => {
       showYyError(error instanceof Error ? error.message : String(error), '向量化接口测试失败');
     } finally {
       setBusy('');
+    }
+  };
+
+  const fetchSecondaryModels = async () => {
+    const { endpoint, apiKey } = settings.secondaryApi;
+    if (!endpoint.trim() || !apiKey.trim()) {
+      setSecondaryModelMessage('请先填写副 API 地址和 Key。');
+      return;
+    }
+    let modelsUrl: URL;
+    try {
+      modelsUrl = new URL(endpoint.trim());
+      if (modelsUrl.protocol !== 'http:' && modelsUrl.protocol !== 'https:') {
+        throw new Error('接口地址必须使用 HTTP 或 HTTPS。');
+      }
+    } catch (error) {
+      setSecondaryModelMessage(error instanceof Error ? error.message : '副 API 地址无效。');
+      return;
+    }
+    const isGemini = modelsUrl.hostname.includes('generativelanguage.googleapis.com') ||
+      /\/v1beta(?:\/|$)/i.test(modelsUrl.pathname);
+    const path = modelsUrl.pathname.replace(/\/+$/, '');
+    if (isGemini) {
+      modelsUrl.pathname = path
+        .replace(/\/models(?:\/[^/]+)?$/i, '')
+        .replace(/\/[^/]+:generateContent$/i, '');
+      if (!/\/v1beta$/i.test(modelsUrl.pathname)) {
+        modelsUrl.pathname = `${modelsUrl.pathname.replace(/\/+$/, '')}/v1beta`;
+      }
+      modelsUrl.pathname = `${modelsUrl.pathname.replace(/\/+$/, '')}/models`;
+      modelsUrl.search = `key=${encodeURIComponent(apiKey.trim())}`;
+    } else {
+      modelsUrl.pathname = path
+        .replace(/\/chat\/completions$/i, '')
+        .replace(/\/completions$/i, '')
+        .replace(/\/models$/i, '');
+      modelsUrl.pathname = `${modelsUrl.pathname.replace(/\/+$/, '')}/models`;
+      modelsUrl.search = '';
+    }
+    modelsUrl.hash = '';
+
+    setIsLoadingSecondaryModels(true);
+    setSecondaryModels([]);
+    setSecondaryModelMessage('');
+    try {
+      const response = await fetch(modelsUrl.toString(), {
+        method: 'GET',
+        headers: isGemini
+          ? { 'Content-Type': 'application/json' }
+          : { Authorization: `Bearer ${apiKey.trim()}`, 'Content-Type': 'application/json' },
+      });
+      if (!response.ok) {
+        const detail = await response.text();
+        throw new Error(`模型拉取失败（HTTP ${response.status}）：${detail || response.statusText}`);
+      }
+      const payload: unknown = await response.json();
+      if (!payload || typeof payload !== 'object') throw new Error('接口返回的数据格式无效。');
+      const rawModels = Array.isArray((payload as { data?: unknown }).data)
+        ? (payload as { data: unknown[] }).data
+        : Array.isArray((payload as { models?: unknown }).models)
+          ? (payload as { models: unknown[] }).models
+          : [];
+      const models = rawModels.flatMap((item): Array<{ id: string; label: string }> => {
+        if (!item || typeof item !== 'object') return [];
+        const record = item as Record<string, unknown>;
+        if (Array.isArray(record.supportedGenerationMethods) &&
+          !record.supportedGenerationMethods.includes('generateContent')) return [];
+        const id = typeof record.id === 'string'
+          ? record.id
+          : typeof record.name === 'string'
+            ? record.name.replace(/^models\//, '')
+            : '';
+        if (!id) return [];
+        return [{
+          id,
+          label: typeof record.displayName === 'string' ? `${record.displayName} (${id})` : id,
+        }];
+      });
+      if (models.length === 0) throw new Error('接口已响应，但没有找到可用模型；请确认模型列表接口已开放。');
+      setSecondaryModels(models);
+      setSecondaryModelMessage(`已拉取 ${models.length} 个模型。`);
+    } catch (error) {
+      console.error('Could not fetch memory secondary API models.', error);
+      setSecondaryModelMessage(
+        error instanceof Error
+          ? `${error.message}${error instanceof TypeError ? '；也可能是反代未允许浏览器跨域请求（CORS）。' : ''}`
+          : '模型拉取失败，请检查副 API 地址、Key 及网络。'
+      );
+    } finally {
+      setIsLoadingSecondaryModels(false);
     }
   };
 
@@ -602,6 +695,31 @@ export const MemoryApp: React.FC<MemoryAppProps> = ({ onBack }) => {
                     <input aria-label="记忆副 API 地址" className={inputClass} placeholder="接口地址（OpenAI 兼容或 Gemini）" value={settings.secondaryApi.endpoint} onChange={(e) => persistSettings({ ...settings, secondaryApi: { ...settings.secondaryApi, endpoint: e.target.value } })} />
                     <input aria-label="记忆副 API 密钥" className={inputClass} type="password" placeholder="API Key" value={settings.secondaryApi.apiKey} onChange={(e) => persistSettings({ ...settings, secondaryApi: { ...settings.secondaryApi, apiKey: e.target.value } })} />
                     <input aria-label="记忆副 API 模型" className={inputClass} placeholder="模型名称" value={settings.secondaryApi.model} onChange={(e) => persistSettings({ ...settings, secondaryApi: { ...settings.secondaryApi, model: e.target.value } })} />
+                    <button type="button" className={pillBtn} disabled={isLoadingSecondaryModels} onClick={() => void fetchSecondaryModels()}>
+                      {isLoadingSecondaryModels ? '正在拉取模型…' : '拉取模型'}
+                    </button>
+                    {secondaryModels.length > 0 && (
+                      <label className="block space-y-1 text-slate-600">
+                        <span>选择模型</span>
+                        <select
+                          aria-label="选择记忆副 API 模型"
+                          className={inputClass}
+                          value={secondaryModels.some((model) => model.id === settings.secondaryApi.model) ? settings.secondaryApi.model : ''}
+                          onChange={(event) => persistSettings({
+                            ...settings,
+                            secondaryApi: { ...settings.secondaryApi, model: event.target.value },
+                          })}
+                        >
+                          <option value="">请选择已拉取的模型</option>
+                          {secondaryModels.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
+                        </select>
+                      </label>
+                    )}
+                    {secondaryModelMessage && (
+                      <p role="status" className={`text-[10px] ${secondaryModelMessage.includes('已拉取') ? 'text-emerald-600' : 'text-rose-500'}`}>
+                        {secondaryModelMessage}
+                      </p>
+                    )}
                   </>
                 )}
               </section>

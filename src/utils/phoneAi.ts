@@ -5,6 +5,7 @@ import type {
   PhoneIcityDiary,
   PhoneNoteItem,
   PhonePhotoItem,
+  PhoneRatingItem,
   PhoneWeChatThread,
 } from '../apps/PhoneExplorerApp';
 import { requestConfiguredAiText } from './aiApi';
@@ -13,8 +14,8 @@ import { PhoneHealth, PhoneWallet, readCharacterWallet, readRecentMoneyEvents } 
 import { buildPrompt } from './buildPrompt';
 import { readStorageString } from './localStorage';
 
-export type PhoneGenScope = 'wechat' | 'album' | 'browser' | 'notes' | 'icity' | 'agent' | 'wallet' | 'health';
-export const PHONE_GEN_SCOPES: PhoneGenScope[] = ['wechat', 'album', 'browser', 'notes', 'icity', 'agent', 'wallet', 'health'];
+export type PhoneGenScope = 'wechat' | 'album' | 'browser' | 'notes' | 'icity' | 'agent' | 'wallet' | 'health' | 'douban';
+export const PHONE_GEN_SCOPES: PhoneGenScope[] = ['wechat', 'album', 'browser', 'notes', 'icity', 'agent', 'wallet', 'health', 'douban'];
 
 export interface PhoneGenContext {
   charId: string;
@@ -60,6 +61,7 @@ const SCOPE_LABEL: Record<PhoneGenScope, string> = {
   agent: '与 AI 助手（豆包、Claude）的对话记录',
   wallet: '钱包（资产与收支）',
   health: '健康数据（睡眠、步数、屏幕使用时间）',
+  douban: '豆瓣（近期读过的书、看过的电影/纪录片、玩过的游戏及评分短评）',
 };
 
 const scopeSpec = (scope: PhoneGenScope, ctx: PhoneGenContext, prevWallet: PhoneWallet | null): string => {
@@ -100,6 +102,9 @@ ${money || '（暂无）'}
     case 'health':
       return `生成今日的健康数据，要与角色人设、作息、现在的时间相符（现在是 ${new Date().toLocaleString('zh-CN')}，今日步数和屏幕使用时间不能超过到目前为止合理的量）。
 返回 JSON：{"sleepHours":昨晚睡眠小时数(一位小数),"sleepNote":"一句睡眠备注，如 入睡较晚 / 中途醒过两次","steps":今日步数整数,"screenTimeMinutes":今日屏幕使用分钟数整数}`;
+    case 'douban':
+      return `生成至少 3 条角色最近实际读过、看过或玩过的书籍、电影、纪录片、游戏等作品评分记录。必须结合角色「${ctx.charName}」的人设和最近剧情：选出符合其兴趣、工作学业、生活处境或近期聊天/剧情话题的具体作品，评价要像角色本人写的豆瓣短评，具体、有个人判断，不要模板化；不虚构作品本身的不存在情节，不把未发生的经历说成事实。条目类型从“书籍、电影、纪录片、游戏、其他”中选；评分 1.0 到 5.0，允许一位小数；日期用“YYYY年M月D日”。至少 3 条，类型尽量多样，标题不可重复，每条短评说明喜欢或不喜欢的具体原因。
+返回 JSON：{"items":[{"type":"书籍|电影|纪录片|游戏|其他","title":"作品名","creator":"作者/导演/开发者，可留空","rating":4.5,"review":"角色口吻的具体短评","date":"2026年10月21日"}]}`;
   }
 };
 
@@ -268,6 +273,24 @@ const parsePhoneScope = (
         screenTimeMinutes: Math.max(0, Math.round(num(result.screenTimeMinutes, 120))),
       };
       return { health };
+    }
+    case 'douban': {
+      const ratings: PhoneRatingItem[] = list(result.items).slice(0, 20).map((item) => {
+        const rating = num(item.rating, NaN);
+        const type: PhoneRatingItem['type'] = item.type === '书籍' || item.type === '电影' ||
+          item.type === '纪录片' || item.type === '游戏' ? item.type : '其他';
+        return {
+          id: uid('rating'),
+          type,
+          title: str(item.title, 100),
+          creator: str(item.creator, 80),
+          rating: Number.isFinite(rating) ? Math.min(5, Math.max(1, Math.round(rating * 10) / 10)) : 0,
+          review: str(item.review, 800),
+          date: str(item.date, 24),
+        };
+      }).filter((item) => item.title && item.review && item.rating > 0);
+      if (ratings.length < 3) throw new Error('豆瓣内容至少需要 3 条有效评分记录，未保存，请重试。');
+      return { ratings };
     }
   }
 };

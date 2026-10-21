@@ -21,6 +21,8 @@ import {
   Download,
   Trash2,
   X,
+  BookOpen,
+  Star,
 } from 'lucide-react';
 import { readAlipayContacts, AlipayContact } from '../utils/alipayData';
 import { showYyError } from '../components/ErrorDialog';
@@ -49,7 +51,7 @@ const getCharAvatar = (charObj: unknown): string => {
   return '';
 };
 
-type SubAppKey = 'home' | 'wechat' | 'album' | 'browser' | 'notes' | 'icity' | 'agent' | 'wallet' | 'maps' | 'health';
+type SubAppKey = 'home' | 'wechat' | 'album' | 'browser' | 'notes' | 'icity' | 'agent' | 'wallet' | 'maps' | 'health' | 'douban';
 
 const scopeForApp = (app: SubAppKey): 'all' | PhoneGenScope =>
   app === 'home' ? 'all' : app === 'maps' ? 'album' : app;
@@ -98,6 +100,16 @@ export interface PhoneNoteItem {
   updatedAt: string;
 }
 
+export interface PhoneRatingItem {
+  id: string;
+  type: '书籍' | '电影' | '纪录片' | '游戏' | '其他';
+  title: string;
+  creator: string;
+  rating: number;
+  review: string;
+  date: string;
+}
+
 export interface PhoneIcityDiary {
   id: string;
   dateStr: string;
@@ -132,6 +144,7 @@ export interface CharacterPhoneData {
   agentSession: PhoneAgentSession;
   wallet?: PhoneWallet;
   health?: PhoneHealth;
+  ratings?: PhoneRatingItem[];
 }
 
 const readRealUserMessagesForChar = (
@@ -440,12 +453,23 @@ export const CheckPhoneApp: React.FC<CheckPhoneAppProps> = ({ onBack }) => {
           detail: `昨晚睡眠 ${health.sleepHours} 小时${health.sleepNote ? `（${health.sleepNote}）` : ''}；今日步数 ${health.steps}；今日屏幕使用 ${Math.floor(health.screenTimeMinutes / 60)} 小时 ${health.screenTimeMinutes % 60} 分钟`,
         };
       }
+      case 'douban': {
+        const ratings = currentPhone.ratings ?? [];
+        if (ratings.length === 0) return null;
+        return {
+          appLabel: '豆瓣评分',
+          summary: `${ratings.length} 条近期读看玩记录：${ratings.slice(0, 3).map((item) => item.title).join('、')}`,
+          detail: ratings.map((item) =>
+            `${item.date}｜${item.type}《${item.title}》${item.creator ? `（${item.creator}）` : ''}｜${item.rating.toFixed(1)}分\n${item.review}`
+          ).join('\n\n'),
+        };
+      }
       default:
         return null;
     }
   };
 
-  const SHAREABLE_APPS: SubAppKey[] = ['wechat', 'album', 'browser', 'notes', 'icity', 'agent', 'wallet', 'health'];
+  const SHAREABLE_APPS: SubAppKey[] = ['wechat', 'album', 'browser', 'notes', 'icity', 'agent', 'wallet', 'health', 'douban'];
   const shareButton = SHAREABLE_APPS.includes(activeSubApp) ? (
     <button
       type="button"
@@ -647,6 +671,13 @@ export const CheckPhoneApp: React.FC<CheckPhoneAppProps> = ({ onBack }) => {
                   icon: Bot,
                   bg: '#E4E8EC',
                   color: '#5C6873',
+                },
+                {
+                  key: 'douban',
+                  label: '豆瓣',
+                  icon: BookOpen,
+                  bg: '#E5EEE5',
+                  color: '#4D795A',
                 },
               ].map((app) => {
                 const IconComp = app.icon;
@@ -911,6 +942,40 @@ export const CheckPhoneApp: React.FC<CheckPhoneAppProps> = ({ onBack }) => {
               );
             })}
           </div>
+        </div>
+      )}
+
+      {activeSubApp === 'douban' && (
+        <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar p-4 space-y-3">
+          <div className="rounded-[24px] border border-white bg-[#F4F8F2]/90 p-4 shadow-2xs">
+            <p className="text-[10px] font-semibold tracking-[0.2em] text-[#6D9272]">DOUBAN · TA 的最近记录</p>
+            <h3 className="mt-1 text-base font-bold text-[#3E6548]">{currentChar.name}最近读过、看过和玩过的</h3>
+            <p className="mt-1 text-[10px] leading-relaxed text-slate-500">根据角色人设与近期剧情生成的评分和短评；点右上角 ✦ 可更新。</p>
+          </div>
+          {(currentPhone.ratings ?? []).length === 0 && (
+            <p className="py-10 text-center text-[11px] text-slate-400">还没有评分记录，点右上角 ✦ 生成至少三条。</p>
+          )}
+          {(currentPhone.ratings ?? []).map((item) => (
+            <article key={item.id} className="rounded-[22px] border border-white bg-white/85 p-4 shadow-2xs">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <span className="rounded-full bg-[#E8F0E6] px-2 py-0.5 text-[9px] font-bold text-[#5F8665]">{item.type}</span>
+                  <h4 className="mt-1.5 text-sm font-bold leading-snug text-slate-700">{item.title}</h4>
+                  {item.creator && <p className="mt-0.5 text-[10px] text-slate-400">{item.creator}</p>}
+                </div>
+                <div className="shrink-0 text-right">
+                  <div className="flex items-center justify-end gap-0.5 text-amber-500" aria-label={`${item.rating}分`}>
+                    {Array.from({ length: 5 }, (_, index) => (
+                      <Star key={index} className={`h-3 w-3 ${index < Math.round(item.rating / 2) ? 'fill-current' : ''}`} />
+                    ))}
+                  </div>
+                  <p className="mt-0.5 text-sm font-bold text-[#64896A]">{item.rating.toFixed(1)}</p>
+                </div>
+              </div>
+              <p className="mt-3 whitespace-pre-wrap text-[11px] leading-relaxed text-slate-600">{item.review}</p>
+              <p className="mt-2 text-right text-[9px] text-slate-400">{item.date}</p>
+            </article>
+          ))}
         </div>
       )}
 
