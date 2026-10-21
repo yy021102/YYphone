@@ -86,7 +86,10 @@ export const extractMemoryCandidates = async (charId: string): Promise<Extractio
   const charName = contact?.name ?? '角色';
   const userName = readUserName();
   const userPersona = readActiveUserPersona();
-  const worldBooks = getWorldBookEntriesForContacts([charId]);
+  const worldBooks = getWorldBookEntriesForContacts(
+    [charId],
+    settings.worldBookIdsByCharacter?.[charId]
+  );
   const relationContexts = getChatRelationContexts([charId]);
   const all = readNewMessages(charId, settings.cursors[charId] ?? '', charName, userName);
   if (all.length === 0) return { candidates: [], newCursor: settings.cursors[charId] ?? '', messageCount: 0 };
@@ -118,7 +121,11 @@ export const extractMemoryCandidates = async (charId: string): Promise<Extractio
     `【新的聊天记录】\n${batch.map((m) => m.line).join('\n')}`,
   ].filter(Boolean).join('\n\n');
 
-  const text = await requestMemoryAiText(system, user, { json: true, temperature: 0.3 });
+  const text = await requestMemoryAiText(system, user, {
+    json: true,
+    temperature: 0.3,
+    includeGlobalWorldBooks: false,
+  });
   assertArchive();
   let parsed: unknown;
   try {

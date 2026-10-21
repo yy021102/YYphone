@@ -53,6 +53,8 @@ export interface MemorySettings {
   autoEvery: number;
   /** 手动整理后先让玩家确认再写入 */
   confirmManual: boolean;
+  /** Per-character world books used during memory extraction; missing entries use global + linked books. */
+  worldBookIdsByCharacter?: Record<string, string[]>;
   /** 每个角色上次整理到的消息时间 */
   cursors: Record<string, string>;
   lastAutoError: string;
@@ -119,6 +121,15 @@ export const readMemorySettings = (): MemorySettings => {
     autoExtract: stored.autoExtract === true,
     autoEvery: Math.round(num(stored.autoEvery, 30, 10, 300)),
     confirmManual: stored.confirmManual !== false,
+    ...(isRecord(stored.worldBookIdsByCharacter)
+      ? {
+          worldBookIdsByCharacter: Object.fromEntries(
+            Object.entries(stored.worldBookIdsByCharacter).flatMap(([charId, ids]) =>
+              Array.isArray(ids) && ids.every((id) => typeof id === 'string') ? [[charId, ids]] : []
+            )
+          ),
+        }
+      : {}),
     cursors: readArchiveCursors(MEMORY_SETTINGS_KEY, 'cursors'),
     lastAutoError: typeof stored.lastAutoError === 'string' ? stored.lastAutoError : '',
   };

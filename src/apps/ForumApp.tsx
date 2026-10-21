@@ -19,6 +19,7 @@ import {
   RefreshCw,
   Palette,
   Save,
+  BookOpen,
 } from 'lucide-react';
 import { AppHeader } from '../components/AppHeader';
 import { showYyError } from '../components/ErrorDialog';
@@ -28,7 +29,11 @@ import { parseAiJson, parseForumPost } from '../utils/aiResponse';
 import { normalizeForumHandle, readGeneratedForumHandles, resolveForumHandle } from '../utils/forumIdentity';
 import { readStorageString, readStoredValue, writeStoredValue } from '../utils/localStorage';
 import { compressImage } from '../utils/imageFile';
-import { withWorldBooksForContacts } from '../utils/worldBookPrompt';
+import {
+  getAutomaticWorldBookIdsForContacts,
+  readWorldBookOptions,
+  withWorldBooksForContacts,
+} from '../utils/worldBookPrompt';
 import { getChatRelationContexts } from '../utils/chatContext';
 
 interface ForumAppProps {
@@ -185,6 +190,7 @@ const FORUM_STORAGE_KEYS = {
   themePresets: 'yyphone:forum-theme-presets',
   activePresetId: 'yyphone:forum-active-preset-id',
   currentTheme: 'yyphone:forum-current-theme',
+  worldBookIds: 'yyphone:forum-world-book-ids',
   chats: 'yyphone:wechat-chats',
   forwards: 'yyphone:forum-forwards',
 } as const;
@@ -446,7 +452,13 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
     readStoredValue(FORUM_STORAGE_KEYS.currentTheme, DEFAULT_FORUM_PRESET, isForumThemePreset)
   );
   const [newPresetName, setNewPresetName] = useState<string>('');
-  const [menuTab, setMenuTab] = useState<'theme' | 'data'>('theme');
+  const [menuTab, setMenuTab] = useState<'theme' | 'data' | 'worldBooks'>('theme');
+  const [worldBookOptions] = useState(() => readWorldBookOptions());
+  const [selectedForumWorldBookIds, setSelectedForumWorldBookIds] = useState<string[] | null>(() =>
+    readStoredValue(FORUM_STORAGE_KEYS.worldBookIds, null, (value): value is string[] | null =>
+      value === null || (Array.isArray(value) && value.every((id) => typeof id === 'string'))
+    )
+  );
 
   // ==================== 3. 玩家非匿名板块资料设定 ====================
   const [playerProfiles, setPlayerProfiles] = useState<Record<string, PlayerForumProfile>>(() =>
@@ -554,11 +566,12 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
       writeStoredValue(FORUM_STORAGE_KEYS.themePresets, themePresets);
       writeStoredValue(FORUM_STORAGE_KEYS.activePresetId, activePresetId);
       writeStoredValue(FORUM_STORAGE_KEYS.currentTheme, currentTheme);
+      writeStoredValue(FORUM_STORAGE_KEYS.worldBookIds, selectedForumWorldBookIds);
     } catch (error) {
       console.error('Could not persist forum data.', error);
       setNoticeBanner('论坛数据保存失败，请检查浏览器本地存储空间。');
     }
-  }, [boards, posts, playerProfiles, playerAccounts, activePlayerAccounts, themePresets, activePresetId, currentTheme]);
+  }, [boards, posts, playerProfiles, playerAccounts, activePlayerAccounts, themePresets, activePresetId, currentTheme, selectedForumWorldBookIds]);
 
   // 当前选中的发帖角色名下的 NPC 列表
   const npcsForSelectedPostChar =
@@ -903,10 +916,14 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
           relationContexts.length
             ? `参与角色的对话关系补充（用于理解关系和背景）：\n${relationContexts.join('\n\n')}`
             : '',
-          withWorldBooksForContacts(systemPrompt, worldBookContactIds),
+          withWorldBooksForContacts(
+            systemPrompt,
+            worldBookContactIds,
+            selectedForumWorldBookIds ?? undefined
+          ),
         ].filter(Boolean).join('\n\n'),
         userPrompt,
-        { json: true }
+        { json: true, includeGlobalWorldBooks: false }
       ));
       if (isChar && !isAnon) {
         const author = contacts.find((contact) => contact.id === charId);
@@ -1023,7 +1040,8 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
             : '',
           withWorldBooksForContacts(
             '你是中文社交平台评论续写器。只返回合法 JSON，不要使用 Markdown。严格只使用提供的评论者名单，不得创作未授权角色或 NPC。非匿名板块的角色评论必须附 authorHandle：优先用名单中的 forumHandle，若未提供，按人设生成特别的网名式 ID，2–40 个字母、数字、汉字、下划线、短横线或英文句点，不加 @，不用角色内部编号。同一角色保持一致。',
-            commenterContactIds
+            commenterContactIds,
+            selectedForumWorldBookIds ?? undefined
           ),
         ].filter(Boolean).join('\n\n'),
         JSON.stringify({
@@ -1042,7 +1060,7 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
             comments: 'array of exactly 6 items; each item has speakerType, speakerId, authorName (passerby only), authorHandle (char only), content',
           },
         }),
-        { json: true }
+        { json: true, includeGlobalWorldBooks: false }
       )) as unknown;
       if (!isRecord(generated) || !Array.isArray(generated.comments)) {
         throw new Error('AI 返回的评论数据格式不正确，请重试。');
@@ -1216,6 +1234,8 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
     ...bindCharacterProfile(post),
     comments: post.comments.map(bindCharacterProfile),
   }));
+  const forumWorldBookIdsForDisplay = selectedForumWorldBookIds ??
+    getAutomaticWorldBookIdsForContacts(contacts.map((contact) => contact.id));
 
   return (
     <div
@@ -2279,7 +2299,7 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
               </button>
             </div>
 
-            <div className="grid grid-cols-2 p-1 bg-slate-100 rounded-2xl">
+            <div className="grid grid-cols-3 p-1 bg-slate-100 rounded-2xl">
               <button
                 onClick={() => setMenuTab('theme')}
                 className={`py-1.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1 cursor-pointer ${
@@ -2298,7 +2318,59 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
                 <Download className="w-3.5 h-3.5 text-sky-400" />
                 <span>数据导入/导出</span>
               </button>
+              <button
+                onClick={() => setMenuTab('worldBooks')}
+                className={`py-1.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1 cursor-pointer ${
+                  menuTab === 'worldBooks' ? 'bg-white text-slate-800 shadow-2xs' : 'text-slate-500'
+                }`}
+              >
+                <BookOpen className="w-3.5 h-3.5 text-indigo-400" />
+                <span>世界书</span>
+              </button>
             </div>
+
+            {menuTab === 'worldBooks' && (
+              <div className="space-y-3 text-xs">
+                <div className="flex items-start justify-between gap-2 rounded-2xl bg-indigo-50/70 p-3">
+                  <p className="text-[10px] leading-relaxed text-slate-500">
+                    {selectedForumWorldBookIds === null
+                      ? '自动模式：生成时使用全局世界书和本次参与角色已绑定的世界书。'
+                      : '自选模式：论坛生成只使用下方勾选的世界书。'}
+                  </p>
+                  {selectedForumWorldBookIds !== null && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedForumWorldBookIds(null)}
+                      className="shrink-0 rounded-full bg-white px-2.5 py-1 text-[10px] font-semibold text-indigo-500"
+                    >
+                      恢复自动
+                    </button>
+                  )}
+                </div>
+                <div className="max-h-64 space-y-1 overflow-y-auto rounded-2xl bg-white/80 p-2">
+                  {worldBookOptions.length === 0 && (
+                    <p className="p-2 text-[10px] text-slate-400">尚未创建世界书。</p>
+                  )}
+                  {worldBookOptions.map((book) => {
+                    return (
+                      <label key={book.id} className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-[11px] text-slate-600 hover:bg-slate-50">
+                        <input
+                          type="checkbox"
+                          checked={forumWorldBookIdsForDisplay.includes(book.id)}
+                          onChange={(event) => {
+                            const next = [...forumWorldBookIdsForDisplay.filter((id) => id !== book.id)];
+                            if (event.target.checked) next.push(book.id);
+                            setSelectedForumWorldBookIds(next);
+                          }}
+                        />
+                        <span className="min-w-0 flex-1 truncate">{book.name}</span>
+                        {book.isGlobal && <span className="text-[9px] text-sky-500">全局</span>}
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {menuTab === 'theme' && (
               <div className="space-y-3 text-xs">

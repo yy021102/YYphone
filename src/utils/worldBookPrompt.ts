@@ -66,8 +66,56 @@ export const getGlobalWorldBookEntries = (depth: WorldBookDepth): string[] =>
         .map((entry) => `【${book.name} / ${entry.title}】\n${entry.content}`)
     );
 
-export const getWorldBookEntriesForContacts = (contactIds: string[]): string[] => {
+export interface WorldBookOption {
+  id: string;
+  name: string;
+  isGlobal: boolean;
+}
+
+export const readWorldBookOptions = (): WorldBookOption[] =>
+  readStoredWorldBooks().map(({ id, name, isGlobal }) => ({ id, name, isGlobal: isGlobal === true }));
+
+export const getAutomaticWorldBookIdsForContacts = (contactIds: string[]): string[] => {
   const books = readStoredWorldBooks();
+  const linkedBookIds = new Set<string>();
+  try {
+    const raw = readStorageString('pocketos:wechat-contacts');
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    if (Array.isArray(parsed)) {
+      for (const contact of parsed as unknown[]) {
+        if (!contact || typeof contact !== 'object' || !('id' in contact) ||
+          typeof contact.id !== 'string' || !contactIds.includes(contact.id) ||
+          !('worldBooks' in contact) || !Array.isArray(contact.worldBooks)) continue;
+        for (const link of contact.worldBooks) {
+          if (link && typeof link === 'object' && 'bookId' in link && typeof link.bookId === 'string') {
+            linkedBookIds.add(link.bookId);
+          }
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Could not read character world-book links.', error);
+  }
+  return books
+    .filter((book) => book.isGlobal || linkedBookIds.has(book.id))
+    .map((book) => book.id);
+};
+
+export const getWorldBookEntriesForContacts = (
+  contactIds: string[],
+  selectedBookIds?: string[]
+): string[] => {
+  const books = readStoredWorldBooks();
+  if (selectedBookIds !== undefined) {
+    const selected = new Set(selectedBookIds);
+    return books
+      .filter((book) => selected.has(book.id))
+      .flatMap((book) =>
+        book.entries
+          .filter((entry) => entry.content.trim())
+          .map((entry) => `【${book.name} / ${entry.title}】\n${entry.content}`)
+      );
+  }
   const contactSet = new Set(contactIds);
   const linksByContact = new Map<string, StoredWorldBookLink[]>();
   try {
@@ -115,8 +163,12 @@ export const getWorldBookEntriesForContacts = (contactIds: string[]): string[] =
   return entries;
 };
 
-export const withWorldBooksForContacts = (systemPrompt: string, contactIds: string[]): string => {
-  const entries = getWorldBookEntriesForContacts(contactIds);
+export const withWorldBooksForContacts = (
+  systemPrompt: string,
+  contactIds: string[],
+  selectedBookIds?: string[]
+): string => {
+  const entries = getWorldBookEntriesForContacts(contactIds, selectedBookIds);
   return entries.length > 0
     ? `可参考的世界书（仅用于理解设定与事实，优先遵守本次任务和聊天记录，不要复述无关条目）：\n${entries.join('\n\n')}\n\n${systemPrompt}`
     : systemPrompt;

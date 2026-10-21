@@ -2344,6 +2344,10 @@ test('forum and memory generation use applicable world books and memory candidat
   assert.match(forumPrompt, /全局世界书标记/);
   assert.match(forumPrompt, /角色世界书标记/);
   assert.doesNotMatch(forumPrompt, /不应注入的私有世界书/);
+  const forumSelectedPrompt = withWorldBooksForContacts('论坛生成提示', ['memory-world-char'], ['character-book']);
+  assert.doesNotMatch(forumSelectedPrompt, /全局世界书标记/);
+  assert.match(forumSelectedPrompt, /角色世界书标记/);
+  assert.doesNotMatch(forumSelectedPrompt, /不应注入的私有世界书/);
   const forumRelationContexts = getChatRelationContexts(['memory-world-char']);
   assert.match(forumRelationContexts.join('\n'), /双方关系补充标记：已经交往半年/);
   assert.doesNotMatch(forumRelationContexts.join('\n'), /不应混入的其他角色关系补充/);
@@ -2362,6 +2366,14 @@ test('forum and memory generation use applicable world books and memory candidat
   ]) assert.ok(requestBody.includes(marker), marker);
   assert.doesNotMatch(requestBody, /不应注入的私有世界书|不应混入的其他角色关系补充/);
   assert.ok(result.candidates.reduce((sum, candidate) => sum + Array.from(candidate.content).length, 0) <= 500);
+
+  writeMemorySettings({
+    ...readMemorySettings(),
+    worldBookIdsByCharacter: { 'memory-world-char': ['character-book'] },
+  });
+  await extractMemoryCandidates('memory-world-char');
+  assert.match(requestBody, /角色世界书标记/);
+  assert.doesNotMatch(requestBody, /全局世界书标记|不应注入的私有世界书/);
 });
 
 test('memory secondary API also supports Gemini without a configured main API', async () => {

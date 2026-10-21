@@ -29,6 +29,7 @@ import {
 import { advanceMemoryCursor, countNewMessages, extractMemoryCandidates } from '../utils/memoryAi';
 import { GrowthPanel, JournalPanel } from '../components/MemoryJournalGrowth';
 import { activeMemoryArchive, guardMemoryArchive, memoryArchiveLabel } from '../utils/memoryArchives';
+import { getAutomaticWorldBookIdsForContacts, readWorldBookOptions } from '../utils/worldBookPrompt';
 
 interface MemoryAppProps {
   onBack: () => void;
@@ -60,6 +61,7 @@ export const MemoryApp: React.FC<MemoryAppProps> = ({ onBack }) => {
   const [contacts] = useState<OfflineContact[]>(() => readOfflineContacts());
   const [memories, setMemories] = useState<MemoryItem[]>(() => readMemories());
   const [settings, setSettings] = useState<MemorySettings>(() => readMemorySettings());
+  const [worldBookOptions] = useState(() => readWorldBookOptions());
   const [embeddedIds, setEmbeddedIds] = useState<Set<string>>(() => new Set());
   const [ownerId, setOwnerId] = useState<string>(() => readOfflineContacts()[0]?.id ?? SHARED_MEMORY_ID);
   const [category, setCategory] = useState<'all' | MemoryCategory>('all');
@@ -136,6 +138,19 @@ export const MemoryApp: React.FC<MemoryAppProps> = ({ onBack }) => {
   );
   const embeddedCount = mine.filter((item) => embeddedIds.has(item.id)).length;
   const configured = embeddingConfigured(settings.embedding);
+  const selectedMemoryWorldBookIds = ownerId === SHARED_MEMORY_ID
+    ? []
+    : settings.worldBookIdsByCharacter?.[ownerId] ?? getAutomaticWorldBookIdsForContacts([ownerId]);
+  const isMemoryWorldBookAuto = ownerId === SHARED_MEMORY_ID ||
+    settings.worldBookIdsByCharacter?.[ownerId] === undefined;
+  const setMemoryWorldBookMode = (bookIds: string[] | undefined) => {
+    if (ownerId === SHARED_MEMORY_ID) return;
+    const current = settings.worldBookIdsByCharacter ?? {};
+    const nextWorldBooks = { ...current };
+    if (bookIds === undefined) delete nextWorldBooks[ownerId];
+    else nextWorldBooks[ownerId] = bookIds;
+    persistSettings({ ...settings, worldBookIdsByCharacter: nextWorldBooks });
+  };
 
   // ---------- 向量化（后台，失败只提示，不影响保存） ----------
   const embedInBackground = async (items: MemoryItem[]) => {
@@ -683,6 +698,47 @@ export const MemoryApp: React.FC<MemoryAppProps> = ({ onBack }) => {
               <button type="button" aria-label="关闭" onClick={() => setSettingsOpen(false)} className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 text-slate-400"><X className="h-4 w-4" /></button>
             </div>
             <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-0.5 text-xs">
+              <section className="space-y-2">
+                <h4 className="font-bold text-[#6F7F8E]">记忆整理世界书</h4>
+                {ownerId === SHARED_MEMORY_ID ? (
+                  <p className="text-[10px] leading-relaxed text-slate-400">请选择一个角色查看和设置该角色的记忆整理世界书。</p>
+                ) : (
+                  <>
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-[10px] leading-relaxed text-slate-400">
+                        {isMemoryWorldBookAuto
+                          ? '自动使用全局世界书和该角色已绑定的世界书。'
+                          : '仅使用下方勾选的世界书进行记忆整理。'}
+                      </p>
+                      {!isMemoryWorldBookAuto && (
+                        <button type="button" className={pillBtn} onClick={() => setMemoryWorldBookMode(undefined)}>
+                          恢复自动
+                        </button>
+                      )}
+                    </div>
+                    <div className="max-h-32 space-y-1 overflow-y-auto rounded-xl bg-white/70 p-2">
+                      {worldBookOptions.length === 0 && (
+                        <p className="text-[10px] text-slate-400">尚未创建世界书。</p>
+                      )}
+                      {worldBookOptions.map((book) => (
+                        <label key={book.id} className="flex items-center gap-2 text-[11px] text-slate-600">
+                          <input
+                            type="checkbox"
+                            checked={selectedMemoryWorldBookIds.includes(book.id)}
+                            onChange={(event) => {
+                              const selected = selectedMemoryWorldBookIds.filter((id) => id !== book.id);
+                              if (event.target.checked) selected.push(book.id);
+                              setMemoryWorldBookMode(selected);
+                            }}
+                          />
+                          <span className="min-w-0 flex-1 truncate">{book.name}</span>
+                          {book.isGlobal && <span className="text-[9px] text-sky-500">全局</span>}
+                        </label>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </section>
               <section className="space-y-2">
                 <h4 className="font-bold text-[#6F7F8E]">记忆专用副 API</h4>
                 <label className="flex items-center gap-2 text-slate-600">
