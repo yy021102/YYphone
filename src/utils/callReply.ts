@@ -20,7 +20,8 @@ export const normalizeCallReplyParts = (
     .slice(0, 4000);
   if (!speech) return [];
 
-  const normalized: NormalizedCallReplyPart[] = [{ text: speech, kind: 'text' }];
+  const fullSpeech = /[。！？.!?…]$/.test(speech) ? speech : `${speech}。`;
+  const normalized: NormalizedCallReplyPart[] = [{ text: fullSpeech, kind: 'text' }];
   if (mode === 'video') {
     const narration = parts
       .filter((part) => part.kind === 'narration')

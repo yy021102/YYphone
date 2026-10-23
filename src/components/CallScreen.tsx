@@ -18,6 +18,9 @@ interface CallScreenProps {
   myName: string;
   myAvatar: string;
   lines: CallLine[];
+  onPlayLine: (id: string) => void;
+  playingLineId: string;
+  loadingLineId: string;
   draft: string;
   onDraftChange: (value: string) => void;
   onSend: () => void;
@@ -33,7 +36,7 @@ interface CallScreenProps {
 const formatDuration = (seconds: number) =>
   `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
 
-/** 语音 / 视频通话页：先“呼叫”，对方接听后开始计时；对话仍然是文字，会记进聊天。 */
+/** 语音 / 视频通话页：先生成完整台词，再由用户点击播放。 */
 export const CallScreen: React.FC<CallScreenProps> = ({
   incoming = false,
   onMissed,
@@ -43,6 +46,9 @@ export const CallScreen: React.FC<CallScreenProps> = ({
   myName,
   myAvatar,
   lines,
+  onPlayLine,
+  playingLineId,
+  loadingLineId,
   draft,
   onDraftChange,
   onSend,
@@ -60,7 +66,11 @@ export const CallScreen: React.FC<CallScreenProps> = ({
   const [speakerOn, setSpeakerOn] = useState(true);
   const [cameraOff, setCameraOff] = useState(false);
   const missedHandler = useRef(onMissed);
+  const linesContainerRef = useRef<HTMLDivElement>(null);
   useEffect(() => { missedHandler.current = onMissed; }, [onMissed]);
+  useEffect(() => {
+    if (linesContainerRef.current) linesContainerRef.current.scrollTop = linesContainerRef.current.scrollHeight;
+  }, [lines.at(-1)?.id]);
 
   // 呼叫 1.5~2.5 秒后“对方接听”
   useEffect(() => {
@@ -145,25 +155,32 @@ export const CallScreen: React.FC<CallScreenProps> = ({
         <p className="text-lg font-semibold">{peerName}</p>
         <p className={`rounded-full px-3 py-1 text-[11px] transition-all ${hintClass}`}>{hintText}</p>
         {connected && !showConnectedHint && (
-          <p className={`text-[10px] ${video ? 'text-white/55' : 'text-slate-300'}`}>文字模拟通话 · 对话会记进聊天</p>
+          <p className={`text-[10px] ${video ? 'text-white/55' : 'text-slate-300'}`}>点击角色回复播放语音 · 对话会记进聊天</p>
         )}
       </div>
 
-      <div className="relative z-10 max-h-[30%] space-y-1.5 overflow-y-auto px-4 pb-2">
+      <div ref={linesContainerRef} className="relative z-10 max-h-[30%] space-y-1.5 overflow-y-auto px-4 pb-2">
         {lines.map((line) => (
-          <p
-            key={line.id}
-            className={`max-w-[82%] rounded-2xl px-3 py-1.5 text-xs leading-relaxed backdrop-blur-md ${
+          <div key={line.id} className={`flex flex-col gap-1 ${line.mine ? 'items-end' : line.narration ? 'items-center' : 'items-start'}`}>
+            <p className={`max-w-[82%] rounded-2xl px-3 py-1.5 text-xs leading-relaxed backdrop-blur-md ${
               line.narration
-                ? `mx-auto bg-white/25 text-center italic ${video ? 'text-white/80' : 'text-slate-500'}`
+                ? `bg-white/25 text-center italic ${video ? 'text-white/80' : 'text-slate-500'}`
                 : line.mine
-                ? 'ml-auto bg-[#fbd5e3]/85 text-[#7a5568]'
+                ? 'bg-[#fbd5e3]/85 text-[#7a5568]'
                 : video ? 'bg-black/30 text-white' : 'bg-white/75 text-slate-600'
-            }`}
-          >
-            {line.narration && <span className="mr-1 font-semibold not-italic">【旁白】</span>}
-            {line.text}
-          </p>
+            }`}>
+              {line.narration && <span className="mr-1 font-semibold not-italic">【旁白】</span>}
+              {line.text}
+            </p>
+            {!line.mine && !line.narration && connected && (
+              <button type="button" onClick={() => onPlayLine(line.id)}
+                aria-label={playingLineId === line.id || loadingLineId === line.id ? '停止角色语音' : '播放角色语音'}
+                className={`flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] ${video ? 'bg-black/35 text-white' : 'bg-white/70 text-slate-600'}`}>
+                <Volume2 className="h-3.5 w-3.5" />
+                {loadingLineId === line.id ? '合成中…' : playingLineId === line.id ? '停止' : '点击播放'}
+              </button>
+            )}
+          </div>
         ))}
       </div>
 

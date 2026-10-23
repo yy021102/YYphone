@@ -306,6 +306,12 @@ interface GeneratedAiMessage {
   orderMode?: 'self' | 'gift';
 }
 
+const VOICE_MESSAGE_PREFIX = /^(?:\[语音(?:消息)?\]|【语音(?:消息)?】|（语音(?:消息)?）|语音(?:消息)?[：:])\s*/;
+const stripVoiceMessagePrefix = (text: string) => {
+  const stripped = text.replace(VOICE_MESSAGE_PREFIX, '').trim();
+  return stripped !== text.trim() ? stripped : null;
+};
+
 interface PendingShare {
   targetCharId: string;
   message: ChatMessage;
@@ -1012,11 +1018,10 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
   const [voicePlaybackMessageId, setVoicePlaybackMessageId] = useState('');
   const [voiceLoadingMessageId, setVoiceLoadingMessageId] = useState('');
   const voiceAudioRef = useRef<HTMLAudioElement | null>(null);
+  const voiceAudioContextRef = useRef<AudioContext | null>(null);
+  const voiceAudioSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const voiceStopRef = useRef<(() => void) | null>(null);
   const voiceCacheRef = useRef(new Map<string, string>());
-  const callVoiceQueueRef = useRef<Promise<void>>(Promise.resolve());
-  const callVoiceSessionRef = useRef(0);
-  const callVoicePlayedRef = useRef(new Set<string>());
   const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
   const [hiddenMessageIds, setHiddenMessageIds] = useState<string[]>([]);
   const HISTORY_PAGE_SIZE = 15;
@@ -2376,7 +2381,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
     voiceStopRef.current = null;
   };
 
-  // Resolves when playback ends, is stopped, or fails, so call lines can be queued one after another.
+  // A tapped voice line is synthesized once, cached, and can be stopped or replayed.
   const playCharacterVoice = async (message: ChatMessage, speaker: ContactPersona) => {
     // Video-call lines start with bracketed action descriptions that should not be spoken.
     const speech = message.text.replace(/[（(][^（）()]*[）)]/g, ' ').replace(/\s+/g, ' ').trim();
@@ -2389,6 +2394,8 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       cancelled = true;
       voiceAudioRef.current?.pause();
       voiceAudioRef.current = null;
+      try { voiceAudioSourceRef.current?.stop(); } catch { /* 音频可能刚好播放完毕。 */ }
+      voiceAudioSourceRef.current = null;
       setVoicePlaybackMessageId('');
       setVoiceLoadingMessageId('');
       finish();
@@ -2407,19 +2414,39 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       setVoiceLoadingMessageId('');
       const audio = new Audio(objectUrl);
       voiceAudioRef.current = audio;
-      audio.onended = () => {
-        if (voiceStopRef.current === stopSelf) voiceStopRef.current = null;
+      const onEnded = () => {
+        if (voiceStopRef.current !== stopSelf) { finish(); return; }
+        voiceStopRef.current = null;
         if (voiceAudioRef.current === audio) voiceAudioRef.current = null;
+        voiceAudioSourceRef.current = null;
         setVoicePlaybackMessageId('');
         finish();
       };
+      audio.onended = onEnded;
       setVoicePlaybackMessageId(message.id);
-      await audio.play();
+      try {
+        await audio.play();
+      } catch (playError) {
+        const context = voiceAudioContextRef.current;
+        if (!context || cancelled) throw playError;
+        const encoded = await (await fetch(objectUrl)).arrayBuffer();
+        const decoded = await context.decodeAudioData(encoded);
+        if (cancelled) return;
+        await context.resume();
+        const source = context.createBufferSource();
+        source.buffer = decoded;
+        source.connect(context.destination);
+        source.onended = onEnded;
+        voiceAudioRef.current = null;
+        voiceAudioSourceRef.current = source;
+        source.start();
+      }
     } catch (error) {
       if (!cancelled) {
         console.error('Could not play character voice.', error);
         setChatError(error instanceof Error ? error.message : '语音播放失败，请检查语音模型配置和网络。');
         stopSelf();
+        if (voiceStopRef.current === stopSelf) voiceStopRef.current = null;
       }
     }
     return done;
@@ -2431,6 +2458,10 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
     if (voicePlaybackMessageId === message.id || voiceLoadingMessageId === message.id) {
       stopCharacterVoice();
     } else {
+      try {
+        voiceAudioContextRef.current ??= new AudioContext();
+        if (voiceAudioContextRef.current.state === 'suspended') void voiceAudioContextRef.current.resume().catch(() => undefined);
+      } catch { /* 浏览器不支持 Web Audio 时继续使用音频元素。 */ }
       void playCharacterVoice(message, speaker);
     }
     return true;
@@ -2464,9 +2495,9 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
 
   useEffect(() => () => {
     voiceStopRef.current?.();
-    callVoiceSessionRef.current += 1;
     voiceCacheRef.current.forEach((url) => URL.revokeObjectURL(url));
     voiceCacheRef.current.clear();
+    void voiceAudioContextRef.current?.close();
   }, []);
 
   const deleteSelectedMessages = () => {
@@ -2821,8 +2852,6 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
     setIncomingCallMessageId('');
     setCallConnectedAt(null);
     setChatError('');
-    callVoiceSessionRef.current += 1;
-    callVoiceQueueRef.current = Promise.resolve();
     stopCharacterVoice();
   };
 
@@ -3119,6 +3148,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         allowIncomingCall
           ? '允许在合适时机主动发起一次视频来电：返回一条 {"kind":"video-call","text":"视频来电"}，用户必须自行接通。不要描述为已接听或正在通话。'
           : '本轮禁止返回 video-call，不得主动拨打电话。',
+        '如果角色选择发送语音条，reply 中对应消息必须是 {"kind":"voice","text":"完整的语音转写文字"}；不要把语音写成普通字符串，也不要只在正文前加“【语音】”却省略 kind。语音正文保留正常标点。',
         `以${chat.type === 'direct' ? `${contact.name}的` : '其中一位角色或 NPC 群成员的'}身份自然回复。只返回 JSON 对象，至少包含 reply、thought、speakerId 字段。thought 是该角色此刻的内心独白：必须用第一人称（“我”），完全符合人设，写出没能说出口的真心话、阴暗面、隐秘的在意、不安或脆弱，细腻、真实、有情绪层次；不得是对剧情的第三人称概括，不要复述 reply 里已经说出口的话，不要写成给玩家的发言，约 40-120 字。reply 必须是${activeCallMode ? '一条完整角色台词组成的数组；视频通话可额外附一条旁白（旁白不计入角色台词）' : `恰好 ${targetReplyCount} 条独立消息组成的数组`}；普通消息可写字符串，也可写对象 {"kind":"消息类型","text":"消息/语音转写/图片描述","title":"可选标题","source":"可选来源","content":"可选摘要","amount":"可选金额","quantity":可选红包个数,"stickerId":"可选表情包ID"}。支持类型：text、image（文字描述图片）、voice（语音转写）、sticker、video-call、location、red-packet、transfer、link、pat。pat 表示角色拍了拍玩家（类似微信拍一拍，text 可留空或写简短后缀如“的脑袋”），仅在情境自然时偶尔使用。${chat.narratorEnabled || chat.type === 'observer' ? '本对话已开启旁白：可在 reply 中穿插 {"kind":"narration","text":"旁白内容"} 项，旁白用第三人称简短描述角色此刻的动作、表情、神态、衣着或周围氛围，必须控制在 50 字以内（越短越好），不要包含角色台词，也不要替玩家行动；旁白同样计入 reply 条数，通常每轮最多 1 条，且不要全是旁白。' : ''}链接请提供 title/source/content；红包和转账必须给正数 amount，收款对象只能是玩家 user，群聊红包可提供 quantity。不要编造图片 URL；image 使用文字图卡。【表情包】玩家导入了一批表情包，你可以像真人聊天一样，根据人设、性格和当下情绪，在合适的时候主动发表情包（比如开心、撒娇、无语、委屈、吐槽时），一般可单独作为一条 {"kind":"sticker","stickerId":"表情包ID"}，也可在文字消息后附带一条；偏活泼的人设可以更常用，内敛冷淡的人设就少用，不要每轮都发，也不要连发多个。表情包不只是表达情绪，也可以用来糊弄回复、反讽、玩梗、做社交缓冲（不知道说什么、尴尬、不想认真回答时）；但不要过度解读表情包的含义，也不要给它强加深意。根据当前对话氛围和人设选择性地发，同一个表情包不要反复发（回看历史，近期发过的就换一个或不发）。只能从下列表情包里选（按分类列出，格式 分类：[ID|名称]，请根据名称含义挑选贴切的）：${stickerPromptList}。${allStickers.length === 0 ? '（目前没有表情包，不要发 sticker。）' : ''}请仅在剧情自然、确有必要时使用附件，普通文字聊天优先，不要为了凑数强行发送附件。${regenerate ? '本次是重生成，不得再次发红包、转账或礼物，以免重复入账。' : '角色发给玩家的红包和转账需玩家手动领取或确认收款后才加入支付宝个人余额，不会扣玩家的钱；待收转账可退回。可选 gift 字段仅允许 {"existingProductId":"现有商品ID"} 或 {"title":"新商品名","desc":"描述","price":数字,"category":"shopping或eleme","emoji":"emoji"}，只在剧情自然时由主要角色提供；NPC不使用 gift 字段。'}${chat.type === 'group' && chat.allowAgentGroupRename ? '可选 groupTitle 和 groupNicknames 字段，只在情节自然需要时修改群名或昵称。' : ''}群聊的 speakerId 必须从以下成员 ID 中选择：${chatMembers.map((member) => `${member.id}（${member.name}）`).join(', ')}。${chat.type === 'group' && chat.allowAgentGroupRename ? 'groupNicknames 的键只能使用上方成员 ID。' : ''}${chat.type === 'observer' ? '这是旁观群聊，user不在群里；不得生成发给玩家的红包、转账或礼物；根据角色之间的对话和旁白情境继续由群成员发言。' : ''}`,
         ...(activeCallMode === 'video' && callConnectedAt
           ? [`当前为视频通话（已通话 ${Math.floor((Date.now() - callConnectedAt) / 60000)} 分钟）。本轮必须只生成一条完整、连贯的角色台词（reply 数组中唯一的非旁白项），口语自然，可以比普通微信消息稍长；不要拆成多条碎片消息。可以额外生成一条 {"kind":"narration","text":"旁白内容"}，用第三人称描写角色的动作、表情或神态，内容独立于台词，不能混进角色台词，也不要用括号动作文字包裹台词；旁白不计入语音。只允许一条角色台词和最多一条旁白，不要其他消息或附件。`]
@@ -3205,7 +3235,8 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         }
         if (typeof record.reply === 'string') {
           reply = record.reply.trim();
-          replyParts = reply ? [{ text: reply }] : [];
+          const voiceText = !activeCallMode ? stripVoiceMessagePrefix(reply) : null;
+          replyParts = reply ? [voiceText ? { kind: 'voice', text: voiceText } : { text: reply }] : [];
         } else if (Array.isArray(record.reply)) {
           const allowedKinds = [
             'text', 'image', 'voice', 'sticker', 'video-call', 'location',
@@ -3215,14 +3246,19 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
             if (typeof rawPart === 'string') {
               const text = rawPart.trim();
               if (!text) throw new Error('AI 返回了空消息，请检查模型配置后重试。');
-              return { text };
+              const voiceText = !activeCallMode ? stripVoiceMessagePrefix(text) : null;
+              return voiceText ? { kind: 'voice', text: voiceText } : { text };
             }
             if (!rawPart || typeof rawPart !== 'object' || Array.isArray(rawPart)) {
               throw new Error('AI 返回的消息格式无效。');
             }
             const part = rawPart as Record<string, unknown>;
-            const kind = typeof part.kind === 'string' && allowedKinds.includes(part.kind as typeof allowedKinds[number])
-              ? part.kind as GeneratedAiMessage['kind']
+            const rawKind = part.kind ?? part.type ?? part.messageType;
+            const normalizedKind = typeof rawKind === 'string' ? rawKind.trim().toLowerCase() : '';
+            let kind = allowedKinds.includes(normalizedKind as typeof allowedKinds[number])
+              ? normalizedKind as GeneratedAiMessage['kind']
+              : ['语音', '语音消息', 'audio', 'voice-message', 'voice_message'].includes(normalizedKind)
+                ? 'voice' as const
               : undefined;
             if (part.kind !== undefined && !kind) throw new Error(`AI 返回了不支持的消息类型：${String(part.kind)}`);
             if (activeCallMode && kind && kind !== 'text' && kind !== 'voice' && kind !== 'narration') {
@@ -3235,6 +3271,9 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
             let text = typeof part.text === 'string'
               ? part.text.trim().slice(0, 1000)
               : kind === 'link' ? title ?? '' : content ?? '';
+            const voiceText = !activeCallMode && (kind === undefined || kind === 'text' || kind === 'voice')
+              ? stripVoiceMessagePrefix(text) : null;
+            if (voiceText) { kind = 'voice'; text = voiceText; }
             const message: GeneratedAiMessage = { text, ...(kind ? { kind } : {}) };
             if (title) message.title = title;
             if (typeof part.quote === 'string' && part.quote.trim()) message.quoteText = part.quote.trim().slice(0, 80);
@@ -3814,31 +3853,6 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
     setChatSettingsOpen(false);
     setChatSettingsDraft(null);
   };
-
-  // A call reply is normalized to one character message, so synthesize one complete utterance.
-  useEffect(() => {
-    if (!activeCallMode || !callConnectedAt) {
-      callVoicePlayedRef.current.clear();
-      return;
-    }
-    const chat = chats.find((item) => item.id === activeChatId);
-    if (!chat) return;
-    const session = callVoiceSessionRef.current;
-    chat.messages
-      .filter((message) => Date.parse(message.createdAt) >= callConnectedAt &&
-        (!message.kind || message.kind === 'text' || message.kind === 'voice') &&
-        !callVoicePlayedRef.current.has(message.id) &&
-        !!getVoiceSpeaker(message))
-      .forEach((message) => {
-        callVoicePlayedRef.current.add(message.id);
-        const speaker = getVoiceSpeaker(message);
-        if (!speaker) return;
-        callVoiceQueueRef.current = callVoiceQueueRef.current.then(() =>
-          session === callVoiceSessionRef.current ? playCharacterVoice(message, speaker) : undefined
-        );
-      });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeCallMode, callConnectedAt, chats, activeChatId, contacts]);
 
   const activeChat = chats.find((chat) => chat.id === activeChatId);
   const selectedGame = WECHAT_GAMES.find((game) => game.id === discoverPage);
@@ -6941,7 +6955,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                       <option>西班牙语</option>
                     </select>
                   </label>
-                  <p className="text-[10px] leading-relaxed text-slate-400">开启后，角色发送的语音消息点击语音条即可播放，语音/视频通话中角色说的话会自动朗读；普通文字消息不会合成语音。需先在系统设置配置语音模型。</p>
+                  <p className="text-[10px] leading-relaxed text-slate-400">开启后，角色发送的语音消息点击语音条即可合成播放；语音/视频通话会先生成完整台词，点击台词下方的播放按钮后再合成。普通文字消息不会合成语音。需先在系统设置配置语音模型。</p>
                 </>
               )}
             </section>
@@ -7239,11 +7253,11 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
             </header>
             <button type="button" onClick={() => startCall('voice')} className="flex w-full items-center gap-3 rounded-2xl bg-slate-50 p-4 text-left hover:bg-slate-100">
               <Phone className="h-5 w-5 text-teal-700" />
-              <span><strong className="block text-sm text-slate-700">语音通话</strong><small className="text-[10px] text-slate-500">模拟通话界面，以文字进行对话</small></span>
+              <span><strong className="block text-sm text-slate-700">语音通话</strong><small className="text-[10px] text-slate-500">先生成台词，点击播放角色语音</small></span>
             </button>
             <button type="button" onClick={() => startCall('video')} className="flex w-full items-center gap-3 rounded-2xl bg-slate-50 p-4 text-left hover:bg-slate-100">
               <Video className="h-5 w-5 text-sky-700" />
-              <span><strong className="block text-sm text-slate-700">视频通话</strong><small className="text-[10px] text-slate-500">角色回复会附带括号动作描写</small></span>
+              <span><strong className="block text-sm text-slate-700">视频通话</strong><small className="text-[10px] text-slate-500">台词可点击播放，动作旁白单独显示</small></span>
             </button>
             <p className="text-center text-[10px] text-slate-400">均为本地模拟，不会实际拨出</p>
           </section>
@@ -7290,6 +7304,17 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
             myName={getChatParticipantName(activeChat, 'user')}
             myAvatar={activeChat.avatars.user || personaDraft.avatarUrl || ''}
             lines={callLines}
+            onPlayLine={(id) => {
+              const line = activeChat.messages.find((message) => message.id === id);
+              if (!line || line.senderId === 'user' || line.senderId === 'narrator') return;
+              if (!getVoiceSpeaker(line)) {
+                setChatError('请先在该角色资料中开启语音播放并设置语音 ID。');
+                return;
+              }
+              toggleCharacterVoice(line);
+            }}
+            playingLineId={voicePlaybackMessageId}
+            loadingLineId={voiceLoadingMessageId}
             draft={chatMessageDraft}
             onDraftChange={setChatMessageDraft}
             onSend={sendChatMessage}
