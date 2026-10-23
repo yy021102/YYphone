@@ -35,6 +35,8 @@
       background-color: #1c2631;
     }
 
+    [class~="bg-[#ededed]"] { background-color: #111820; }
+
     [class~="bg-[#DFF1FA]"], [class~="bg-[#DCEEFF]"],
     [class~="bg-sky-50"], [class~="bg-sky-100"], [class~="bg-blue-50"], [class~="bg-blue-100"] {
       background-color: #233648;
@@ -165,6 +167,33 @@ body {
   background-color: white;
 }
 
+/* Soft glass surfaces and pastel UNO cards. */
+.uno-game .uno-hero {
+  background: linear-gradient(120deg, rgba(199, 233, 251, .78), rgba(251, 211, 230, .76));
+  color: #4d6277;
+  backdrop-filter: blur(22px) saturate(1.2);
+  -webkit-backdrop-filter: blur(22px) saturate(1.2);
+  box-shadow: 0 12px 28px rgba(128, 151, 164, .13);
+}
+.uno-game [class*="bg-[#293947]"] {
+  background: linear-gradient(135deg, rgba(255, 217, 234, .82), rgba(205, 238, 253, .82));
+  color: #4f6574;
+  border: 1px solid rgba(255,255,255,.75);
+  backdrop-filter: blur(22px) saturate(1.15);
+  -webkit-backdrop-filter: blur(22px) saturate(1.15);
+  box-shadow: 0 14px 30px rgba(124, 155, 170, .15);
+}
+.uno-game [class~="bg-rose-500"] { background-color: #e9b4c7; color: #4d6070; }
+.uno-game [class~="border-rose-400"] { border-color: #e7b7ca; }
+.uno-game [class~="text-rose-600"] { color: #a67a94; }
+.uno-game [class~="bg-slate-900"] { background-color: #a9bed0; }
+.uno-game [class~="bg-slate-600"] { background-color: rgba(184, 213, 231, .68); color: #4d6578; }
+.uno-game [class~="bg-amber-400"] { background-color: #f5dfa1; color: #665f54; }
+.uno-game [class~="bg-amber-100"] { background-color: #fff1c9; color: #7c735e; }
+.uno-game [class~="bg-white\/90"] { background-color: rgba(255, 255, 255, .72); backdrop-filter: blur(14px); }
+.uno-game [class~="bg-gradient-to-br"][class~="text-white"] { color: #4e6270; }
+.uno-game [class~="text-white\/70"] { color: rgba(77, 98, 115, .72); }
+
 /* Glassmorphism utility classes */
 .glass-card {
   background: rgba(255, 255, 255, 0.42);
@@ -187,6 +216,29 @@ body {
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border-bottom: 1px solid rgba(255, 255, 255, 0.6);
+}
+
+.wechat-app.wechat-main-tabs > header.glass-nav {
+  background: #ededed;
+  border-bottom: 0;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: none;
+}
+
+.wechat-app.wechat-main-tabs > header.glass-nav h1,
+.wechat-app.wechat-main-tabs > header.glass-nav button {
+  color: #191919;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root[data-follow-system-dark="true"] .wechat-app.wechat-main-tabs > header.glass-nav {
+    background: #111820;
+  }
+  :root[data-follow-system-dark="true"] .wechat-app.wechat-main-tabs > header.glass-nav h1,
+  :root[data-follow-system-dark="true"] .wechat-app.wechat-main-tabs > header.glass-nav button {
+    color: #dce7ef;
+  }
 }
 
 /* Hide scrollbar for native touch feel */

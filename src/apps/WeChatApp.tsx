@@ -35,9 +35,24 @@ import {
   Layers,
   MessagesSquare,
   Moon,
+  BookOpen,
+  Lightbulb,
+  Settings,
+  Bookmark,
+  Palette,
+  Clapperboard,
+  Hourglass,
+  Monitor,
 } from 'lucide-react';
 import { AppHeader } from '../components/AppHeader';
 import { MomentsTab } from '../components/MomentsTab';
+import { GomokuGame } from '../components/GomokuGame';
+import { UnoGame } from '../components/UnoGame';
+import { GuessWordGame } from '../components/GuessWordGame';
+import { WerewolfGame } from '../components/WerewolfGame';
+import { ScriptMysteryGame } from '../components/ScriptMysteryGame';
+import { TurtleSoupGame } from '../components/TurtleSoupGame';
+import { importMysteryScript } from '../components/scriptMysteryData';
 import { ColorWheel, hexToRgba } from '../components/ColorWheel';
 import { musicPlayer } from '../utils/musicPlayer';
 import { findMusicTrackByTitle, readMusicPlaybackSnapshot } from '../utils/musicPlayback';
@@ -100,6 +115,7 @@ import {
 } from '../utils/characterNpcs';
 import { synthesizeVoice } from '../utils/voiceModel';
 import { normalizeCallReplyParts } from '../utils/callReply';
+import { mutateDirectChat } from '../utils/coupleSpaceData';
 
 interface WeChatAppProps {
   onBack: () => void;
@@ -111,15 +127,22 @@ interface WeChatAppProps {
 }
 
 type WeChatTab = 'chats' | 'contacts' | 'discover' | 'me';
+type ChatBanner = { text: string; align: 'left' | 'center' };
+const CHAT_BANNER_KEY = 'yyphone:wechat:chat-banner';
+const DEFAULT_CHAT_BANNER: ChatBanner = { text: 'Windows 微信已登录', align: 'left' };
+const isChatBanner = (value: unknown): value is ChatBanner => !!value && typeof value === 'object' &&
+  typeof (value as ChatBanner).text === 'string' && ((value as ChatBanner).align === 'left' || (value as ChatBanner).align === 'center');
 
 const WECHAT_GAMES = [
   { id: 'gomoku', name: '五子棋', description: '黑白对弈，连成五子', icon: Grid3X3, color: 'bg-amber-50 text-amber-700' },
   { id: 'uno', name: 'UNO', description: '缤纷手牌，欢乐出牌', icon: Layers, color: 'bg-rose-50 text-rose-600' },
-  { id: 'guess-word', name: '你说我猜（猜词）', description: '用描述传递线索，猜出答案', icon: MessagesSquare, color: 'bg-sky-50 text-sky-600' },
+  { id: 'guess-word', name: '猜词', description: '双人猜词或多人传词', icon: MessagesSquare, color: 'bg-sky-50 text-sky-600' },
   { id: 'werewolf', name: '狼人杀', description: '隐藏身份，推理与发言', icon: Moon, color: 'bg-violet-50 text-violet-600' },
+  { id: 'script-mystery', name: '剧本杀', description: '搜集线索，揭开真相', icon: BookOpen, color: 'bg-teal-50 text-teal-700' },
+  { id: 'turtle-soup', name: '海龟汤', description: '提问解谜，揭开汤底', icon: Lightbulb, color: 'bg-cyan-50 text-cyan-700' },
 ] as const;
 
-type DiscoverPage = 'home' | 'moments' | 'games' | typeof WECHAT_GAMES[number]['id'];
+type DiscoverPage = 'home' | 'moments' | 'games' | 'channels' | 'time-capsule' | typeof WECHAT_GAMES[number]['id'];
 
 interface ContactWorldBookLink {
   bookId: string;
@@ -447,6 +470,7 @@ const getAttachedHistoryCount = (chat: ChatConversation, sourceChatId: string) =
 const DEFAULT_PERSONA: UserPersona = {
   id: 'persona-default',
   name: '默认人设',
+  wechatId: '',
   avatarUrl: '',
   identity: '',
   personality: '',
@@ -469,6 +493,7 @@ const isPersonaCollection = (value: unknown): value is PersonaCollection => {
         !!profile &&
         typeof profile.id === 'string' &&
         typeof profile.name === 'string' &&
+        (profile.wechatId === undefined || typeof profile.wechatId === 'string') &&
         (profile.avatarUrl === undefined || typeof profile.avatarUrl === 'string') &&
         typeof profile.identity === 'string' &&
         typeof profile.personality === 'string' &&
@@ -787,7 +812,15 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
   const delivery = useRef({ isVisible, activeChatId: '', onMessage, onIncomingCall, runtimeSettings });
   const [activeTab, setActiveTab] = useState<WeChatTab>('chats');
   const [discoverPage, setDiscoverPage] = useState<DiscoverPage>('home');
+  const [mePage, setMePage] = useState<'home' | 'settings' | 'beauty' | 'favorites'>('home');
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchFocused, setSearchFocused] = useState(false);
+  const [chatBanner, setChatBanner] = useState(() => readStoredValue(CHAT_BANNER_KEY, DEFAULT_CHAT_BANNER, isChatBanner));
+  const [chatBannerDraft, setChatBannerDraft] = useState(chatBanner);
+  const [chatBannerEditing, setChatBannerEditing] = useState(false);
+  const chatBannerPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (chatBannerPressTimer.current) clearTimeout(chatBannerPressTimer.current); }, []);
+  const [contactSearchQuery, setContactSearchQuery] = useState('');
   const [personaCollection, setPersonaCollection] = useState(() =>
     readSetting(SETTINGS_KEYS.personas, DEFAULT_PERSONAS, isPersonaCollection)
   );
@@ -1016,6 +1049,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
   const [editingMessage, setEditingMessage] = useState<{ id: string; text: string } | null>(null);
   const [activeThought, setActiveThought] = useState<{ name: string; thought: string } | null>(null);
   const [forumCardPreview, setForumCardPreview] = useState<ChatMessage | null>(null);
+  const [guessRecordPreview, setGuessRecordPreview] = useState<ChatMessage | null>(null);
   const [activePaymentId, setActivePaymentId] = useState('');
 
   useEffect(() => {
@@ -3800,10 +3834,26 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
   const activeChat = chats.find((chat) => chat.id === activeChatId);
   const selectedGame = WECHAT_GAMES.find((game) => game.id === discoverPage);
   const isDiscoverSubpage = activeTab === 'discover' && discoverPage !== 'home';
+  const isMeSubpage = activeTab === 'me' && mePage !== 'home';
+  const stopChatBannerPress = () => {
+    if (chatBannerPressTimer.current) clearTimeout(chatBannerPressTimer.current);
+    chatBannerPressTimer.current = null;
+  };
+  const openChatBannerEditor = () => {
+    stopChatBannerPress();
+    setChatBannerDraft(chatBanner);
+    setChatBannerEditing(true);
+  };
+  const saveChatBanner = () => {
+    const next = { ...chatBannerDraft, text: chatBannerDraft.text.trim().slice(0, 160) };
+    writeStoredValue(CHAT_BANNER_KEY, next);
+    setChatBanner(next);
+    setChatBannerEditing(false);
+  };
 
   return (
-    <div className="wechat-app relative flex-1 min-h-0 w-full flex flex-col bg-[#F3F7FA] overflow-hidden">
-      <AppHeader
+    <div className={`wechat-app relative flex-1 min-h-0 w-full flex flex-col overflow-hidden ${activeChat ? 'bg-[#F3F7FA]' : 'bg-[#ededed]'} ${!activeChat && !isDiscoverSubpage && !isMeSubpage ? 'wechat-main-tabs' : ''}`}>
+      {(activeTab !== 'me' || mePage !== 'home') && !(activeTab === 'discover' && discoverPage === 'moments') && <AppHeader
         title={
           activeChat
             ? isGeneratingReply ? '对方正在输入...' : getChatTitle(activeChat)
@@ -3813,13 +3863,15 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
             ? '通讯录'
             : activeTab === 'discover'
             ? selectedGame?.name ?? (discoverPage === 'moments' ? '朋友圈' : discoverPage === 'games' ? '游戏' : '发现')
-            : '我'
+            : mePage === 'settings' ? '设置' : mePage === 'beauty' ? '美化' : mePage === 'favorites' ? '收藏' : '我'
         }
         onBack={() => {
           if (activeChat) {
             setActiveChatId('');
           } else if (isDiscoverSubpage) {
             setDiscoverPage(selectedGame ? 'games' : 'home');
+          } else if (isMeSubpage) {
+            setMePage('home');
           } else {
             onBack();
           }
@@ -3860,7 +3912,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
             </button>
           ) : null
         }
-      />
+      />}
       {!activeChat && activeTab === 'chats' && chatCreateMenuOpen && (
         <>
         <div className="absolute inset-0 z-30" onClick={() => setChatCreateMenuOpen(false)} aria-hidden="true" />
@@ -4361,11 +4413,13 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                           </div>
                         </div>
                       ) : message.kind === 'link' ? (
-                        <div className="min-w-40 rounded-xl bg-white/80 p-2.5">
+                        <button type="button" disabled={!['微信游戏 · 猜词', '微信游戏 · 狼人杀', '微信游戏 · 剧本杀', '微信游戏 · 海龟汤'].includes(message.source || '') || selectMode}
+                          onClick={(event) => { event.stopPropagation(); setGuessRecordPreview(message); }}
+                          className="min-w-40 rounded-xl bg-white/80 p-2.5 text-left disabled:cursor-default">
                           <div className="flex items-center gap-1.5 font-semibold"><Link className="h-3.5 w-3.5 text-sky-600" />{message.title}</div>
                           {message.content && <p className="mt-1 line-clamp-3 text-[10px] text-slate-500">{message.content}</p>}
-                          {message.source && <p className="mt-1 text-[9px] text-slate-400">{message.source}</p>}
-                        </div>
+                          {message.source && <p className="mt-1 text-[9px] text-slate-400">{message.source}{['微信游戏 · 猜词', '微信游戏 · 狼人杀', '微信游戏 · 剧本杀', '微信游戏 · 海龟汤'].includes(message.source) && ' · 点击查看完整记录'}</p>}
+                        </button>
                       ) : message.kind === 'sticker' && message.imageUrl ? (
                         <img src={message.imageUrl} alt={message.text} className="h-24 w-24 rounded-xl object-contain" />
 
@@ -4756,21 +4810,33 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
           </div>
         )}
         {activeTab === 'chats' && !activeChat && (
-          <div className="flex flex-col pb-4">
-            <div className="p-3 pb-1">
-              <div className="flex items-center gap-2 bg-white/70 border border-white/80 rounded-xl px-3 py-1.5 shadow-2xs">
-                <Search className="w-4 h-4 text-slate-400" />
+          <div className="flex min-h-full flex-col bg-[#ededed] pb-4">
+            <div className="px-4 py-2">
+              <div className="relative rounded-lg bg-white px-3 py-1.5">
+                {!searchQuery && !searchFocused && <span aria-hidden="true" className="pointer-events-none absolute inset-0 flex items-center justify-center gap-1.5 text-xs text-[#a9a9a9]"><Search className="h-4 w-4" />搜索</span>}
                 <input
                   type="text"
-                  placeholder="搜索聊天"
+                  aria-label="搜索聊天"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="bg-transparent border-none outline-none text-xs text-[#2C4A5C] placeholder-slate-400 w-full"
+                  onFocus={() => setSearchFocused(true)}
+                  onBlur={() => setSearchFocused(false)}
+                  className="w-full border-none bg-transparent text-center text-xs text-[#222] outline-none focus:text-left"
                 />
               </div>
             </div>
+            <div className="border-b border-[#d8d8d8] bg-[#ededed]">
+              <button type="button" aria-label="长按编辑消息页文字" title="长按编辑文字" onPointerDown={(event) => { if (event.pointerType === 'mouse' && event.button !== 0) return; stopChatBannerPress(); chatBannerPressTimer.current = setTimeout(openChatBannerEditor, 550); }} onPointerUp={stopChatBannerPress} onPointerCancel={stopChatBannerPress} onPointerLeave={stopChatBannerPress} onContextMenu={(event) => { event.preventDefault(); openChatBannerEditor(); }} onDoubleClick={openChatBannerEditor} className={`flex min-h-10 w-full items-center gap-3 px-4 py-2 text-[12px] text-[#777] active:bg-[#e5e5e5] ${chatBanner.align === 'center' ? 'justify-center text-center' : 'text-left'}`}>
+                <Monitor className="h-4 w-4 shrink-0" /><span className="min-w-0 break-words">{chatBanner.text || '长按编辑文字'}</span>
+              </button>
+              {chatBannerEditing && <div className="space-y-2 border-t border-[#d8d8d8] bg-white px-4 py-3">
+                <label className="block text-xs font-semibold text-[#444]">显示文字<textarea value={chatBannerDraft.text} onChange={(event) => setChatBannerDraft((draft) => ({ ...draft, text: event.target.value.slice(0, 160) }))} maxLength={160} rows={2} className="mt-1 w-full resize-none rounded-lg border border-[#ddd] p-2.5 font-normal outline-none" /></label>
+                <div className="flex gap-2 text-xs"><button type="button" onClick={() => setChatBannerDraft((draft) => ({ ...draft, align: 'left' }))} className={`flex-1 rounded-lg py-2 ${chatBannerDraft.align === 'left' ? 'bg-[#dcebe3] text-[#236545]' : 'bg-[#f1f1f1]'}`}>靠左</button><button type="button" onClick={() => setChatBannerDraft((draft) => ({ ...draft, align: 'center' }))} className={`flex-1 rounded-lg py-2 ${chatBannerDraft.align === 'center' ? 'bg-[#dcebe3] text-[#236545]' : 'bg-[#f1f1f1]'}`}>居中</button></div>
+                <div className="flex justify-end gap-3 text-xs"><button type="button" onClick={() => setChatBannerEditing(false)} className="px-2 py-1.5 text-[#777]">取消</button><button type="button" onClick={saveChatBanner} className="rounded-lg bg-[#07b75a] px-4 py-1.5 font-semibold text-white">保存</button></div>
+              </div>}
+            </div>
 
-            <div className="divide-y divide-slate-100/70 mt-1">
+            <div className="bg-white">
               {[...chats]
                 .filter((chat) => {
                   const title = getChatTitle(chat);
@@ -4782,7 +4848,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                   const avatarUrl = getChatAvatar(chat);
                   const lastMessage = chat.messages.at(-1)?.text ?? '暂无消息';
                   return (
-                    <div key={chat.id}>
+                    <div key={chat.id} className={chat.pinned ? 'border-b border-[#d2d2d2]' : 'border-b border-[#ededed]'}>
                       <div
                         onClick={() => {
                           if (suppressNextChatClickRef.current) {
@@ -4801,14 +4867,13 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                         onMouseDown={() => startChatLongPress(chat.id)}
                         onMouseUp={clearContactPress}
                         onMouseLeave={clearContactPress}
-                        className="flex items-center gap-3 px-4 py-3 hover:bg-white/40 active:bg-white/60 select-none"
+                        className={`flex items-center gap-3 px-4 py-3 active:bg-[#e5e5e5] select-none ${chat.pinned ? 'bg-[#ededed] hover:bg-[#e7e7e7]' : 'bg-white hover:bg-[#f7f7f7]'}`}
                       >
                         <div className="h-11 w-11 shrink-0 overflow-hidden rounded-2xl bg-gradient-to-tr from-sky-300 to-teal-200 text-sky-900 font-bold flex items-center justify-center text-sm">
                           {avatarUrl ? <img src={avatarUrl} alt="" className="h-full w-full object-cover" /> : chat.type === 'direct' ? contactName(chat.participantIds[0]).charAt(0) : <Users className="h-5 w-5" />}
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-1.5">
-                            {chat.pinned && <Pin className="h-3 w-3 shrink-0 fill-amber-400 text-amber-500" />}
                             <h3 className="truncate text-xs font-bold text-[#2C4A5C]">{getChatTitle(chat)}</h3>
                             {chat.type === 'observer' && <span className="text-[9px] text-slate-400">旁观</span>}
                             {chat.blocked && <span className="text-[9px] text-rose-500">已拉黑</span>}
@@ -4844,13 +4909,15 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
 
         {/* TAB 2: CONTACTS */}
         {activeTab === 'contacts' && (
-          <div className="flex flex-col p-3 space-y-3 pb-4">
+          <div className="flex min-h-full flex-col bg-white pb-4">
+            <div className="bg-[#ededed] px-3 py-2"><div className="flex items-center gap-2 rounded-lg bg-white px-3 py-2"><Search className="h-4 w-4 text-slate-400" /><input value={contactSearchQuery} onChange={(event) => setContactSearchQuery(event.target.value)} placeholder="搜索" aria-label="搜索通讯录" className="w-full bg-transparent text-xs text-[#222] outline-none placeholder:text-slate-400" /></div></div>
+            <div className="space-y-3 px-3 pt-3">
             <section className="space-y-1.5">
               <h3 className="px-1 text-[11px] font-bold text-slate-400">
                 新的朋友{blockedInteractions.filter((item) => item.type === 'friend-request' && item.status === 'pending').length > 0
                   ? ` · ${blockedInteractions.filter((item) => item.type === 'friend-request' && item.status === 'pending').length}` : ''}
               </h3>
-              <div className="glass-card divide-y divide-slate-100/60 overflow-hidden rounded-2xl">
+              <div className="divide-y divide-[#ededed] overflow-hidden rounded-lg bg-white">
                 {blockedInteractions.filter((item) => item.type === 'friend-request' && item.status === 'pending').map((request) => (
                   <div key={request.id} className="p-3">
                     <div className="flex items-center justify-between gap-2">
@@ -4886,11 +4953,11 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                 )}
               </div>
             </section>
-            {Object.keys(contactsByGroup).sort((a, b) => a.localeCompare(b, 'zh-CN')).map((group) => (
+            {Object.keys(contactsByGroup).filter((group) => contactsByGroup[group].some((contact) => contact.name.toLowerCase().includes(contactSearchQuery.toLowerCase()))).sort((a, b) => a.localeCompare(b, 'zh-CN')).map((group) => (
               <section key={group} className="space-y-1.5">
                 <h3 className="px-1 text-[11px] font-bold text-slate-400">{group}</h3>
-                <div className="glass-card rounded-2xl divide-y divide-slate-100/60 overflow-hidden">
-                  {contactsByGroup[group].map((contact) => (
+                <div className="divide-y divide-[#ededed] overflow-hidden rounded-lg bg-white">
+                  {contactsByGroup[group].filter((contact) => contact.name.toLowerCase().includes(contactSearchQuery.toLowerCase())).map((contact) => (
                     <div key={contact.id}>
                       <div className="flex items-center gap-3 px-3 py-2.5 hover:bg-white/40">
                         <div className="w-10 h-10 shrink-0 overflow-hidden rounded-xl bg-gradient-to-tr from-sky-300 to-teal-200 text-sky-900 font-bold flex items-center justify-center text-sm">
@@ -4929,12 +4996,13 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
               </section>
             ))}
             {contacts.length === 0 && (
-              <div className="glass-card rounded-2xl p-8 text-center">
+              <div className="rounded-lg bg-white p-8 text-center">
                 <p className="text-sm font-semibold text-slate-600">通讯录还是空的</p>
                 <p className="mt-1 text-xs text-slate-400">点击右上角 + 新增或导入角色人设</p>
               </div>
             )}
             {importError && <p role="alert" className="px-1 text-center text-[11px] text-rose-600">{importError}</p>}
+            </div>
           </div>
         )}
 
@@ -4950,6 +5018,12 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
               <span className="flex-1 text-[15px] text-slate-800">朋友圈</span>
               <ChevronRight className="h-4 w-4 text-slate-400" />
             </button>
+            <button type="button" onClick={() => setDiscoverPage('channels')} className="mt-3 flex w-full items-center gap-4 bg-white px-5 py-4 text-left active:bg-slate-50">
+              <Clapperboard className="h-6 w-6 shrink-0 text-orange-500" /><span className="flex-1 text-[15px] text-slate-800">视频号</span><ChevronRight className="h-4 w-4 text-slate-400" />
+            </button>
+            <button type="button" onClick={() => setDiscoverPage('time-capsule')} className="mt-3 flex w-full items-center gap-4 bg-white px-5 py-4 text-left active:bg-slate-50">
+              <Hourglass className="h-6 w-6 shrink-0 text-sky-500" /><span className="flex-1 text-[15px] text-slate-800">时间胶囊</span><ChevronRight className="h-4 w-4 text-slate-400" />
+            </button>
             <button
               type="button"
               onClick={() => setDiscoverPage('games')}
@@ -4961,17 +5035,25 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
             </button>
           </div>
         )}
+        {activeTab === 'discover' && (discoverPage === 'channels' || discoverPage === 'time-capsule') && (
+          <div className="flex min-h-full flex-col items-center justify-center bg-[#ededed] px-6 text-center text-slate-500">
+            {discoverPage === 'channels' ? <Clapperboard className="h-12 w-12 text-orange-400" /> : <Hourglass className="h-12 w-12 text-sky-400" />}
+            <p className="mt-4 text-sm font-semibold text-slate-700">{discoverPage === 'channels' ? '视频号' : '时间胶囊'}</p>
+            <p className="mt-2 text-xs">内容即将开放</p>
+          </div>
+        )}
         {activeTab === 'discover' && discoverPage === 'moments' && (
           <MomentsTab
             userName={personaDraft.name}
             userAvatarUrl={personaDraft.avatarUrl ?? ''}
             contacts={contacts}
             npcs={characterNpcs}
+            onBack={() => setDiscoverPage('home')}
           />
         )}
         {activeTab === 'discover' && discoverPage === 'games' && (
           <div className="p-4">
-            <p className="mb-4 text-xs text-slate-500">游戏大厅 · 敬请期待</p>
+            <p className="mb-4 text-xs text-slate-500">选个游戏，和角色一起玩</p>
             <div className="overflow-hidden rounded-2xl bg-white divide-y divide-slate-100">
               {WECHAT_GAMES.map(({ id, name, description, icon: GameIcon, color }) => (
                 <button
@@ -4987,14 +5069,416 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                     <span className="block text-sm font-semibold text-slate-800">{name}</span>
                     <span className="mt-1 block text-xs text-slate-500">{description}</span>
                   </span>
-                  <span className="shrink-0 text-[10px] text-slate-400">筹备中</span>
+                  <span className="shrink-0 text-[10px] text-slate-400">开始游戏</span>
                   <ChevronRight className="h-4 w-4 shrink-0 text-slate-400" />
                 </button>
               ))}
             </div>
           </div>
         )}
-        {activeTab === 'discover' && selectedGame && (
+        {activeTab === 'discover' && discoverPage === 'gomoku' && (
+          <GomokuGame
+            contacts={contacts.map(({ id, name }) => ({ id, name }))}
+            userName={personaDraft.name.trim() || '我'}
+            onTalk={async (opponentId, message, gameHistory, situation, mode) => {
+              const apiPresets = readSetting(SETTINGS_KEYS.apiPresets, [] as ApiPreset[], isApiPresetList);
+              const activeId = readSetting(SETTINGS_KEYS.activeApiPreset, apiPresets[0]?.id ?? '', (value): value is string => typeof value === 'string');
+              const apiPreset = apiPresets.find(preset => preset.id === activeId) ?? apiPresets.find(preset => preset.endpoint.trim() && preset.apiKey.trim());
+              if (!apiPreset?.endpoint.trim() || !apiPreset.apiKey.trim()) throw new Error('请先在设置里配置聊天 API，才能和角色对话。');
+              const opponent = contacts.find(item => item.id === opponentId);
+              if (!opponent) throw new Error('角色已不在通讯录中。');
+              const direct = readStoredValue(CHATS_STORAGE_KEY, [] as ChatConversation[], isChatList)
+                .find(chat => chat.type === 'direct' && chat.participantIds.length === 1 && chat.participantIds[0] === opponentId);
+              const memoryInjection = await buildMemoryInjection([opponentId], 'direct', message || situation, id => contacts.find(item => item.id === id)?.name, { localOnly: true });
+              const prompt = buildPrompt({
+                chatId: direct?.id ?? '',
+                backgroundCharacterId: opponentId,
+                currentInput: message || (mode === 'undo-request' ? '玩家请求悔棋' : '棋局进行中'),
+                historyLimit: 60,
+                memoryInjection,
+              });
+              prompt.push({
+                role: 'system',
+                content: `【当前唯一任务：五子棋局内聊天】你是${opponent.name}，正在和玩家下五子棋。上面的微信聊天、人设、世界书和记忆是你了解玩家和做决定的背景；不要按微信聊天协议生成附件或执行社交动作。${mode === 'undo-request' ? '玩家请求撤回最近一轮的落子。请依据人设、关系和当前棋局决定是否同意；只在明确同意时 approveUndo 为 true。回复要清楚表态。' : mode === 'auto' ? '这是你偶尔主动说一句棋局中的话，玩家刚刚没有发消息。根据当前棋势、你的人设和关系自然开口，不要反复说相同的话，不要编造玩家刚说过的话。若你真想悔棋，可以自然提出，并设置 requestUndo 为 true；只能在已经下过至少两手时提出。' : '请自然回复玩家刚在棋局中说的话，简短口语化。你可以自行决定是否让棋，依据人设、关系和当前局面，不要总是答应。'}只有在回复玩家且你明确愿意在接下来的两步放松防守时，yieldMove 才为 true；其他情况为 false。只返回 JSON：{"reply":["一句回复"],"yieldMove":false,"approveUndo":false,"requestUndo":false}。`,
+              });
+              prompt.push({
+                role: 'user',
+                content: `棋局情况：${situation}\n本局聊天：${gameHistory.slice(-12).map(item => `${item.from === 'user' ? personaDraft.name || '玩家' : opponent.name}：${item.text}`).join('\n') || '暂无'}\n${mode === 'undo-request' ? '请决定是否同意玩家悔棋。' : mode === 'auto' ? '请你偶尔主动说一句；如果想悔棋，请明确请求。' : '请回复玩家最后一句，并决定是否让棋。'}`,
+              });
+              const response = await requestChatReply(prompt, apiPreset, () => {}, undefined, { retryOnFormatError: false });
+              const first = Array.isArray(response.reply) ? response.reply[0] : '';
+              const text = typeof first === 'string' ? first : first && typeof first === 'object' && 'text' in first && typeof first.text === 'string' ? first.text : '';
+              if (!text.trim()) throw new Error('角色没有返回有效回复，请重试。');
+              return {
+                text: text.trim(),
+                yieldMove: mode === 'user' && response.yieldMove === true,
+                approveUndo: mode === 'undo-request' && response.approveUndo === true,
+                requestUndo: mode === 'auto' && response.requestUndo === true,
+              };
+            }}
+            onShare={(result, recipients) => {
+              for (const charId of recipients) {
+                mutateDirectChat(charId, (chat) => {
+                  if (chat.messages.some(message => message.id === `gomoku-${result.id}-${charId}`)) return;
+                  chat.messages.push({
+                    id: `gomoku-${result.id}-${charId}`,
+                    senderId: 'user',
+                    kind: 'link',
+                    title: '五子棋对局结果',
+                    source: '微信游戏 · 五子棋',
+                    content: result.summary,
+                    text: result.summary,
+                    createdAt: new Date().toISOString(),
+                  });
+                });
+              }
+              setChats(readStoredValue(CHATS_STORAGE_KEY, [] as ChatConversation[], isChatList));
+            }}
+          />
+        )}
+        {activeTab === 'discover' && discoverPage === 'uno' && (
+          <UnoGame
+            people={[
+              ...contacts.map(({ id, name }) => ({ id, name, kind: '角色' as const })),
+              ...characterNpcs.map(({ id, name }) => ({ id: npcParticipantId(id), name, kind: 'NPC' as const })),
+            ]}
+            contacts={[
+              ...contacts.map(({ id, name }) => ({ id, name, kind: '角色' as const })),
+              ...characterNpcs.map(({ id, name }) => ({ id: npcParticipantId(id), name, kind: 'NPC' as const })),
+            ]}
+            userName={personaDraft.name.trim() || '我'}
+            onShare={(result, recipients) => {
+              for (const charId of recipients) {
+                mutateDirectChat(charId, chat => {
+                  if (chat.messages.some(message => message.id === `${result.id}-${charId}`)) return;
+                  chat.messages.push({
+                    id: `${result.id}-${charId}`,
+                    senderId: 'user',
+                    kind: 'link',
+                    title: 'UNO 对局结果',
+                    source: '微信游戏 · UNO',
+                    content: result.summary,
+                    text: result.summary,
+                    createdAt: new Date().toISOString(),
+                  });
+                });
+              }
+              setChats(readStoredValue(CHATS_STORAGE_KEY, [] as ChatConversation[], isChatList));
+            }}
+          />
+        )}
+        {activeTab === 'discover' && discoverPage === 'guess-word' && (
+          <GuessWordGame
+            people={[
+              ...contacts.map(({ id, name }) => ({ id, name, kind: '角色' as const })),
+              ...characterNpcs.map(({ id, name }) => ({ id: npcParticipantId(id), name, kind: 'NPC' as const })),
+            ]}
+            userName={personaDraft.name.trim() || '我'}
+            onAi={async ({ actor, action, word, clue }) => {
+              const apiPresets = readSetting(SETTINGS_KEYS.apiPresets, [] as ApiPreset[], isApiPresetList);
+              const activeId = readSetting(SETTINGS_KEYS.activeApiPreset, apiPresets[0]?.id ?? '', (value): value is string => typeof value === 'string');
+              const apiPreset = apiPresets.find(preset => preset.id === activeId) ?? apiPresets.find(preset => preset.endpoint.trim() && preset.apiKey.trim());
+              if (!apiPreset?.endpoint.trim() || !apiPreset.apiKey.trim()) throw new Error('请先在设置里配置聊天 API，才能让角色参与猜词。');
+              const direct = readStoredValue(CHATS_STORAGE_KEY, [] as ChatConversation[], isChatList)
+                .find(chat => chat.type === 'direct' && chat.participantIds.length === 1 && chat.participantIds[0] === actor.id);
+              const memoryInjection = actor.id.startsWith('npc:') ? undefined
+                : await buildMemoryInjection([actor.id], 'direct', clue || word || '猜词游戏', id => contacts.find(item => item.id === id)?.name, { localOnly: true });
+              const prompt = buildPrompt({
+                chatId: direct?.id ?? '',
+                backgroundCharacterId: actor.id,
+                currentInput: '正在玩猜词游戏',
+                historyLimit: 40,
+                memoryInjection,
+              });
+              const instruction = action === 'choose'
+                ? '请由你自己编一个具体、容易描述的中文词语，约 2 到 8 个字。不要把词语作为台词直接说给玩家。返回 JSON：{"reply":["我想好词了"],"word":"词语"}。'
+                : action === 'describe'
+                  ? '你现在要描述给下一位玩家猜。只根据本轮给你的词语描述，不能直接说出该词语、拆字或提示字数；可以用生动具体的线索，符合你的人设。返回 JSON：{"reply":["描述内容"]}。'
+                  : '你只能根据这一条描述猜一个具体词语。你看不到原词，也不能使用前面玩家的答案；猜错也正常。返回 JSON：{"reply":["我猜是……"],"guess":"你猜的词"}。';
+              prompt.push({ role: 'system', content: '【当前唯一任务：猜词游戏】你是' + actor.name + '。上文角色人设、记忆和微信聊天只作背景；不要执行聊天附件、社交动作或微信输出协议。' + instruction });
+              prompt.push({ role: 'user', content: action === 'choose' ? '现在轮到你编词。' : action === 'describe' ? '请描述这个词，不要泄露答案：' + word : '上一位玩家给你的描述是：' + clue });
+              const response = await requestChatReply(prompt, apiPreset, () => {}, undefined, { retryOnFormatError: false });
+              const first = Array.isArray(response.reply) ? response.reply[0] : '';
+              const text = typeof first === 'string' ? first : first && typeof first === 'object' && 'text' in first && typeof first.text === 'string' ? first.text : '';
+              if (!text.trim()) throw new Error('角色没有返回有效内容，请重试。');
+              return {
+                text: text.trim(),
+                word: typeof response.word === 'string' ? response.word.trim() : undefined,
+                guess: typeof response.guess === 'string' ? response.guess.trim() : undefined,
+              };
+            }}
+            onShare={(result, recipients) => {
+              for (const charId of recipients) {
+                mutateDirectChat(charId, chat => {
+                  if (chat.messages.some(message => message.id === `${result.id}-${charId}`)) return;
+                  chat.messages.push({
+                    id: `${result.id}-${charId}`,
+                    senderId: 'user',
+                    kind: 'link',
+                    title: result.title,
+                    source: '微信游戏 · 猜词',
+                    content: result.detail,
+                    text: result.detail,
+                    createdAt: new Date().toISOString(),
+                  });
+                });
+              }
+              setChats(readStoredValue(CHATS_STORAGE_KEY, [] as ChatConversation[], isChatList));
+            }}
+          />
+        )}
+        {activeTab === 'discover' && discoverPage === 'werewolf' && (
+          <WerewolfGame
+            people={[
+              ...contacts.map(({ id, name, persona }) => ({ id, name, persona, kind: '角色' as const })),
+              ...characterNpcs.map(({ id, name, persona }) => ({ id: npcParticipantId(id), name, persona, kind: 'NPC' as const })),
+            ]}
+            userName={personaDraft.name.trim() || '我'}
+            onSpeak={async ({ actor, people: players, roles, alive, day, announcement, userSpeech, history, known, previousSpeeches }) => {
+              const apiPresets = readSetting(SETTINGS_KEYS.apiPresets, [] as ApiPreset[], isApiPresetList);
+              const activeId = readSetting(SETTINGS_KEYS.activeApiPreset, apiPresets[0]?.id ?? '', (value): value is string => typeof value === 'string');
+              const apiPreset = apiPresets.find(preset => preset.id === activeId) ?? apiPresets.find(preset => preset.endpoint.trim() && preset.apiKey.trim());
+              if (!apiPreset?.endpoint.trim() || !apiPreset.apiKey.trim()) throw new Error('请先在设置里配置聊天 API。');
+              const direct = readStoredValue(CHATS_STORAGE_KEY, [] as ChatConversation[], isChatList)
+                .find(chat => chat.type === 'direct' && chat.participantIds.length === 1 && chat.participantIds[0] === actor.id);
+              const memoryInjection = await buildMemoryInjection(
+                [actor.id], 'direct', userSpeech || announcement || '狼人杀白天讨论',
+                id => contacts.find(person => person.id === id)?.name ?? characterNpcs.find(npc => npcParticipantId(npc.id) === id)?.name,
+                { localOnly: true },
+              );
+              const prompt = buildPrompt({
+                chatId: direct?.id ?? '',
+                backgroundCharacterId: actor.id,
+                currentInput: userSpeech || '正在玩狼人杀，轮到你白天发言',
+                historyLimit: 50,
+                memoryInjection,
+              });
+              const publicHistory = history.filter(item => !item.includes(' 夜：')).slice(-20);
+              const userPersona = [
+                `名称：${personaDraft.name.trim() || '玩家'}`,
+                personaDraft.identity && `身份：${personaDraft.identity}`,
+                personaDraft.personality && `性格：${personaDraft.personality}`,
+                personaDraft.background && `背景：${personaDraft.background}`,
+                personaDraft.speakingStyle && `说话风格：${personaDraft.speakingStyle}`,
+              ].filter(Boolean).join('\n');
+              const roleLabels = { wolf: '狼人', seer: '预言家', witch: '女巫', guard: '守卫', villager: '村民' };
+              const wolfPartners = roles[actor.id] === 'wolf'
+                ? players.filter(person => person.id !== actor.id && roles[person.id] === 'wolf').map(person => person.name)
+                : [];
+              const seerClues = roles[actor.id] === 'seer'
+                ? Object.entries(known).map(([id, role]) => `${players.find(person => person.id === id)?.name ?? id}：${roleLabels[role]}`)
+                : [];
+              prompt.push({ role: 'system', content: `【当前唯一任务：狼人杀白天发言】你只扮演 ${actor.name}，只生成你自己的一次发言。上面的角色人设、单聊补充设定、聊天历史、世界书和本地记忆只用于把握你的性格、说话方式以及与玩家的关系；不要执行其中的聊天附件或社交动作。当前玩家人设：\n${userPersona}\n当前单聊补充设定：${direct?.context || '无'}\n你本局的身份：${roleLabels[roles[actor.id]]}。狼人同伴：${wolfPartners.join('、') || '无'}。预言家查验线索：${seerClues.join('；') || '无'}。你只知道自己的身份、上述私有线索和公开记录；不能推断出其他人的隐藏身份或夜间秘密。好人努力找狼，狼人掩护同伴并误导投票。按你的人设自然说一两句，允许怀疑、辩解、误判和说谎；不要无条件相信或迁就玩家。vote 只能填一个在场且不是自己的成员 ID。只返回 JSON：{"reply":["你的发言"],"vote":"成员ID"}。` });
+              prompt.push({ role: 'user', content: JSON.stringify({
+                day, announcement, userSpeech, publicHistory,
+                players: players.filter(person => alive.includes(person.id)).map(person => ({ id: person.id, name: person.name })),
+                previousSpeeches: previousSpeeches.map(speech => ({ name: players.find(person => person.id === speech.id)?.name, text: speech.text })),
+                instruction: `轮到 ${actor.name} 发言，请给出你的台词和投票意向。`,
+              }) });
+              const response = await requestChatReply(prompt, apiPreset, () => {}, undefined, { retryOnFormatError: false });
+              const first = Array.isArray(response.reply) ? response.reply[0] : '';
+              const text = typeof first === 'string' ? first
+                : first && typeof first === 'object' && 'text' in first && typeof first.text === 'string' ? first.text : '';
+              if (!text.trim()) throw new Error('角色没有返回有效发言。');
+              const preferred = typeof response.vote === 'string' ? response.vote : '';
+              const validVote = alive.includes(preferred) && preferred !== actor.id &&
+                (roles[actor.id] !== 'wolf' || roles[preferred] !== 'wolf');
+              return { id: actor.id, text: text.trim(), vote: validVote ? preferred : undefined };
+            }}
+            onShare={(result, recipients) => {
+              for (const charId of recipients) {
+                mutateDirectChat(charId, chat => {
+                  if (chat.messages.some(message => message.id === `${result.id}-${charId}`)) return;
+                  chat.messages.push({
+                    id: `${result.id}-${charId}`,
+                    senderId: 'user',
+                    kind: 'link',
+                    title: '狼人杀完整战报',
+                    source: '微信游戏 · 狼人杀',
+                    content: result.detail,
+                    text: result.detail,
+                    createdAt: new Date().toISOString(),
+                  });
+                });
+              }
+              setChats(readStoredValue(CHATS_STORAGE_KEY, [] as ChatConversation[], isChatList));
+            }}
+          />
+        )}
+        {activeTab === 'discover' && discoverPage === 'script-mystery' && (
+          <ScriptMysteryGame
+            people={[
+              ...contacts.map(({ id, name, persona }) => ({ id, name, persona, kind: '角色' as const })),
+              ...characterNpcs.map(({ id, name, persona }) => ({ id: npcParticipantId(id), name, persona, kind: 'NPC' as const })),
+            ]}
+            userName={personaDraft.name.trim() || '我'}
+            onGenerateScript={async (genre, description, roleCount) => {
+              const apiPresets = readSetting(SETTINGS_KEYS.apiPresets, [] as ApiPreset[], isApiPresetList);
+              const activeId = readSetting(SETTINGS_KEYS.activeApiPreset, apiPresets[0]?.id ?? '', (value): value is string => typeof value === 'string');
+              const apiPreset = apiPresets.find(preset => preset.id === activeId) ?? apiPresets.find(preset => preset.endpoint.trim() && preset.apiKey.trim());
+              if (!apiPreset?.endpoint.trim() || !apiPreset.apiKey.trim()) throw new Error('请先在设置里配置聊天 API，才能生成剧本。');
+              const prompt = [
+                { role: 'system' as const, content: `你是一名剧本杀作者。请用中文创作一部原创、可实际游玩的双幕剧本杀。只返回 JSON 对象，格式为 {"reply":["剧本已完成"],"script":{"title":"...","subtitle":"...","content":"第一幕公开剧情","actTwo":"第二幕公开剧情","truth":"完整真相","culpritRoleId":"r1","roles":[{"id":"r1","title":"角色称谓","publicStatement":"公开自我介绍","privateBrief":"仅此角色知道的具体时间线、关系与秘密","goal":"行动目标"}],"clues":[{"act":1,"place":"地点","title":"线索名","teaser":"未发现前的提示","detail":"具体证据内容","key":true}]}}。script.roles 必须恰好 ${roleCount} 人，包含之后由玩家扮演的角色；不要预设哪个角色由玩家、哪个角色由任何 AI 角色或 NPC 扮演，也不要另写专属玩家身份。id 分别为 r1、r2 等，culpritRoleId 必须对应其中一人的 id。每个角色都有不同的动机、时间线和能被追问的细节；真相人物也要有可辩解但终究能被证据揭穿的说法。第一幕和第二幕各至少两条线索，至少两条 key 为 true，证据链必须能支持唯一真相。公开剧情与线索不能直接泄露真凶；privateBrief 只能给对应角色，不能把别人的秘密写进去。剧情完整、有起因、转折和结案逻辑，避免空泛描写。只生成剧本，不代替玩家进行调查。` },
+                { role: 'user' as const, content: `类型：${genre}\n角色人数：${roleCount}\n用户设想：${description || '自由创作一个有氛围、可推理的原创案件。'}` },
+              ];
+              const response = await requestChatReply(prompt, apiPreset, () => {}, undefined, { retryOnFormatError: false });
+              if (!response.script || typeof response.script !== 'object' || Array.isArray(response.script)) throw new Error('AI 未返回完整剧本，请重试。');
+              const generated = importMysteryScript(JSON.stringify(response.script), 'AI生成剧本.json');
+              if (generated.roles.length !== roleCount) throw new Error('AI 生成的角色人数不符合选择，请重试。');
+              return generated;
+            }}
+            onReply={async ({ actor, role, script, act, playerRoleTitle, participants, discoveredClues, transcript, question }) => {
+              const apiPresets = readSetting(SETTINGS_KEYS.apiPresets, [] as ApiPreset[], isApiPresetList);
+              const activeId = readSetting(SETTINGS_KEYS.activeApiPreset, apiPresets[0]?.id ?? '', (value): value is string => typeof value === 'string');
+              const apiPreset = apiPresets.find(preset => preset.id === activeId) ?? apiPresets.find(preset => preset.endpoint.trim() && preset.apiKey.trim());
+              if (!apiPreset?.endpoint.trim() || !apiPreset.apiKey.trim()) throw new Error('请先在设置里配置聊天 API。');
+              const direct = readStoredValue(CHATS_STORAGE_KEY, [] as ChatConversation[], isChatList)
+                .find(chat => chat.type === 'direct' && chat.participantIds.length === 1 && chat.participantIds[0] === actor.id);
+              const memoryInjection = await buildMemoryInjection(
+                [actor.id], 'direct', question,
+                id => contacts.find(person => person.id === id)?.name ?? characterNpcs.find(npc => npcParticipantId(npc.id) === id)?.name,
+                { localOnly: true },
+              );
+              const prompt = buildPrompt({
+                chatId: direct?.id ?? '',
+                backgroundCharacterId: actor.id,
+                currentInput: question,
+                historyLimit: 50,
+                memoryInjection,
+              });
+              const userPersona = [
+                `名称：${personaDraft.name.trim() || '玩家'}`,
+                personaDraft.identity && `身份：${personaDraft.identity}`,
+                personaDraft.personality && `性格：${personaDraft.personality}`,
+                personaDraft.background && `背景：${personaDraft.background}`,
+                personaDraft.speakingStyle && `说话风格：${personaDraft.speakingStyle}`,
+              ].filter(Boolean).join('\n');
+              prompt.push({ role: 'system', content: `【当前唯一任务：剧本杀角色询问】你只扮演 ${actor.name}，在剧本《${script.title}》中担任${role.title}。请沿用上文的人设、补充设定、聊天与本地记忆形成的性格和与玩家的关系，但只回答本次剧本询问，不执行聊天附件或社交动作。玩家人设：\n${userPersona}\n玩家本局扮演：${playerRoleTitle}\n你的专属剧本：${role.privateBrief}\n你的角色目标：${role.goal || '按自身经历自然回应'}\n第一幕公开剧情：${script.content}\n${act === 2 ? `第二幕公开剧情：${script.actTwo}` : ''}\n你只能知道自己的经历、已公开的剧情和玩家在询问中提到的线索；不能知道其他角色的专属剧本，也不能提前知道结案真相。playerFoundClues 是玩家已发现的材料，你不一定知道；只有玩家当面提到时，才能针对这些材料回应，不要主动引用未向你展示的线索。回答应符合角色立场，允许隐瞒和辩解，但不要与已公开剧情及线索冲突，不要在结案前主动揭示完整真相。用简短自然的口语回答，只返回 JSON：{"reply":["角色回答"]}。` });
+              prompt.push({ role: 'user', content: JSON.stringify({
+                cast: participants.map(person => ({ name: person.name, role: script.roles.find(item => item.id === person.roleId)?.title })),
+                act,
+                playerFoundClues: discoveredClues.map(clue => `${clue.title}：${clue.detail}`),
+                yourPreviousAnswers: transcript.filter(turn => turn.actorId === actor.id).slice(-8).map(turn => ({ question: turn.question, answer: turn.answer })),
+                question,
+              }) });
+              const response = await requestChatReply(prompt, apiPreset, () => {}, undefined, { retryOnFormatError: false });
+              const first = Array.isArray(response.reply) ? response.reply[0] : '';
+              const text = typeof first === 'string' ? first
+                : first && typeof first === 'object' && 'text' in first && typeof first.text === 'string' ? first.text : '';
+              if (!text.trim()) throw new Error('角色没有返回有效回答。');
+              return text.trim();
+            }}
+            onShare={(result, recipients) => {
+              for (const charId of recipients) {
+                mutateDirectChat(charId, chat => {
+                  if (chat.messages.some(message => message.id === `${result.id}-${charId}`)) return;
+                  chat.messages.push({
+                    id: `${result.id}-${charId}`,
+                    senderId: 'user',
+                    kind: 'link',
+                    title: result.title,
+                    source: '微信游戏 · 剧本杀',
+                    content: result.detail,
+                    text: result.detail,
+                    createdAt: new Date().toISOString(),
+                  });
+                });
+              }
+              setChats(readStoredValue(CHATS_STORAGE_KEY, [] as ChatConversation[], isChatList));
+            }}
+          />
+        )}
+        {activeTab === 'discover' && discoverPage === 'turtle-soup' && (
+          <TurtleSoupGame
+            people={[
+              ...contacts.map(({ id, name }) => ({ id, name, kind: '角色' as const })),
+              ...characterNpcs.map(({ id, name }) => ({ id: npcParticipantId(id), name, kind: 'NPC' as const })),
+            ]}
+            userName={personaDraft.name.trim() || '我'}
+            onGenerate={async (style) => {
+              const apiPresets = readSetting(SETTINGS_KEYS.apiPresets, [] as ApiPreset[], isApiPresetList);
+              const activeId = readSetting(SETTINGS_KEYS.activeApiPreset, apiPresets[0]?.id ?? '', (value): value is string => typeof value === 'string');
+              const apiPreset = apiPresets.find(preset => preset.id === activeId) ?? apiPresets.find(preset => preset.endpoint.trim() && preset.apiKey.trim());
+              if (!apiPreset?.endpoint.trim() || !apiPreset.apiKey.trim()) throw new Error('请先在设置里配置聊天 API，才能生成海龟汤。');
+              const response = await requestChatReply([
+                { role: 'system', content: '你是海龟汤出题人。创作一个原创、逻辑自洽、仅靠是/不是/无关提问可以还原的短故事。汤面要吸引人但不能直接泄露汤底；汤底要具体说明人物、关键误会或隐藏条件及事件经过，不依赖超自然或任意巧合。只返回 JSON：{"reply":["已出题"],"puzzle":{"title":"题名","surface":"汤面","truth":"完整汤底","difficulty":"入门或进阶"}}。不要在 reply 中写汤底。' },
+                { role: 'user', content: `请生成一则${style}风格的海龟汤，避免沿用鱼缸、盲文信、对面楼闪灯这些现有题目。` },
+              ], apiPreset, () => {}, undefined, { retryOnFormatError: false });
+              const puzzle = response.puzzle;
+              if (!puzzle || typeof puzzle !== 'object' || Array.isArray(puzzle)) throw new Error('AI 没有返回完整的海龟汤，请重试。');
+              const record = puzzle as Record<string, unknown>;
+              if (typeof record.title !== 'string' || typeof record.surface !== 'string' || typeof record.truth !== 'string' ||
+                !record.title.trim() || !record.surface.trim() || !record.truth.trim()) throw new Error('AI 返回的汤面或汤底不完整，请重试。');
+              return { id: '', title: record.title.trim().slice(0, 80), surface: record.surface.trim().slice(0, 1000),
+                truth: record.truth.trim().slice(0, 4000), difficulty: typeof record.difficulty === 'string' ? record.difficulty.trim().slice(0, 20) : style };
+            }}
+            onHost={async ({ host, puzzle, history, mode, question }) => {
+              const apiPresets = readSetting(SETTINGS_KEYS.apiPresets, [] as ApiPreset[], isApiPresetList);
+              const activeId = readSetting(SETTINGS_KEYS.activeApiPreset, apiPresets[0]?.id ?? '', (value): value is string => typeof value === 'string');
+              const apiPreset = apiPresets.find(preset => preset.id === activeId) ?? apiPresets.find(preset => preset.endpoint.trim() && preset.apiKey.trim());
+              if (!apiPreset?.endpoint.trim() || !apiPreset.apiKey.trim()) throw new Error('请先在设置里配置聊天 API，才能让角色主持。');
+              const direct = readStoredValue(CHATS_STORAGE_KEY, [] as ChatConversation[], isChatList)
+                .find(chat => chat.type === 'direct' && chat.participantIds.length === 1 && chat.participantIds[0] === host.id);
+              const memoryInjection = await buildMemoryInjection(
+                [host.id], 'direct', question,
+                id => contacts.find(person => person.id === id)?.name ?? characterNpcs.find(npc => npcParticipantId(npc.id) === id)?.name,
+                { localOnly: true },
+              );
+              const prompt = buildPrompt({ chatId: direct?.id ?? '', backgroundCharacterId: host.id,
+                currentInput: question, historyLimit: 40, memoryInjection });
+              prompt.push({ role: 'system', content: `【当前唯一任务：海龟汤主持】你是${host.name}，请沿用已有的人设、补充设定、与玩家的聊天及本地记忆所形成的说话方式，但本轮只主持海龟汤，不执行聊天附件或社交动作。玩家是${personaDraft.name.trim() || '玩家'}。汤面：${puzzle.surface}\n保密汤底：${puzzle.truth}\n你必须严格以汤底为准，不能临时改写真相或编造新的关键设定。${mode === 'question' ? '玩家正在提问。判断问题是否能根据汤底回答“是”“不是”或“无关”；若问题不能二分，简短引导玩家换个问法，verdict 设为 irrelevant。只提供一个简短自然的回答，不透露汤底、幕后人物或尚未被问到的线索。' : '玩家正在提交完整推理。只有当推理说中核心事件及关键隐藏条件时 solved 才为 true；只说中枝节时为 false。错误时简短指出尚未说中的方向，不揭晓答案；正确时简短肯定，完整汤底会由页面揭晓。'}只返回 JSON：{"reply":["一句主持人回答"],"verdict":"yes或no或irrelevant","solved":false}。` });
+              prompt.push({ role: 'user', content: JSON.stringify({ mode, question,
+                recentHistory: history.slice(-20).map(turn => ({ kind: turn.kind, question: turn.question, answer: turn.answer, verdict: turn.verdict })) }) });
+              const response = await requestChatReply(prompt, apiPreset, () => {}, undefined, { retryOnFormatError: false });
+              const first = Array.isArray(response.reply) ? response.reply[0] : '';
+              const answer = typeof first === 'string' ? first : first && typeof first === 'object' && 'text' in first && typeof first.text === 'string' ? first.text : '';
+              if (!answer.trim()) throw new Error('主持人没有返回有效回答，请重试。');
+              const verdict = response.verdict === '是' ? 'yes' : response.verdict === '不是' || response.verdict === '否' ? 'no'
+                : response.verdict === '无关' ? 'irrelevant' : response.verdict;
+              if (mode === 'question' && verdict !== 'yes' && verdict !== 'no' && verdict !== 'irrelevant') throw new Error('主持人的判断格式不正确，请重试。');
+              return { verdict: verdict === 'yes' || verdict === 'no' ? verdict : 'irrelevant', answer: answer.trim(), solved: mode === 'guess' && response.solved === true };
+            }}
+            onSolver={async ({ actor, title, surface, history }) => {
+              const apiPresets = readSetting(SETTINGS_KEYS.apiPresets, [] as ApiPreset[], isApiPresetList);
+              const activeId = readSetting(SETTINGS_KEYS.activeApiPreset, apiPresets[0]?.id ?? '', (value): value is string => typeof value === 'string');
+              const apiPreset = apiPresets.find(preset => preset.id === activeId) ?? apiPresets.find(preset => preset.endpoint.trim() && preset.apiKey.trim());
+              if (!apiPreset?.endpoint.trim() || !apiPreset.apiKey.trim()) throw new Error('请先在设置里配置聊天 API，才能让角色猜汤。');
+              const direct = readStoredValue(CHATS_STORAGE_KEY, [] as ChatConversation[], isChatList)
+                .find(chat => chat.type === 'direct' && chat.participantIds.length === 1 && chat.participantIds[0] === actor.id);
+              const recent = history.slice(-8).map(turn => `${actor.name}${turn.kind === 'guess' ? '猜' : '问'}：${turn.question}；主持人回答：${turn.answer}`).join('\n');
+              const memoryInjection = await buildMemoryInjection(
+                [actor.id], 'direct', `${surface}\n${recent}`,
+                id => contacts.find(person => person.id === id)?.name ?? characterNpcs.find(npc => npcParticipantId(npc.id) === id)?.name,
+                { localOnly: true },
+              );
+              const prompt = buildPrompt({ chatId: direct?.id ?? '', backgroundCharacterId: actor.id,
+                currentInput: `${surface}\n${recent}`, historyLimit: 40, memoryInjection });
+              prompt.push({ role: 'system', content: `【当前唯一任务：海龟汤猜汤】你只扮演${actor.name}。沿用上文人设、补充设定、聊天与本地记忆塑造的性格及与玩家的关系，但本轮只玩海龟汤，不执行聊天附件或社交动作。玩家${personaDraft.name.trim() || '玩家'}是主持人，只有玩家知道汤底。你只知道题名“${title}”、汤面“${surface}”以及下面的公开问答；绝不能假装知道汤底，也不要从角色记忆中捏造这道题的答案。每次只提出一个能够用“是／不是／无关”回答的问题。积累到足够线索后可以提交一次完整推理，此时 action 为 guess，reply 写出你认为发生的具体经过。此前 action 为 question。不要自己代替主持人回答，不要在同一次回复中连续提问。只返回 JSON：{"reply":["一句问题或完整推理"],"action":"question或guess"}。` });
+              prompt.push({ role: 'user', content: JSON.stringify({ surface, history: history.slice(-24).map(turn => ({
+                action: turn.kind, yourQuestionOrGuess: turn.question, hostVerdict: turn.verdict, hostAnswer: turn.answer,
+              })), instruction: '轮到你问一个问题，或者在把握足够时提交完整推理。' }) });
+              const response = await requestChatReply(prompt, apiPreset, () => {}, undefined, { retryOnFormatError: false });
+              const first = Array.isArray(response.reply) ? response.reply[0] : '';
+              const line = typeof first === 'string' ? first : first && typeof first === 'object' && 'text' in first && typeof first.text === 'string' ? first.text : '';
+              if (!line.trim()) throw new Error('角色没有提出有效问题，请重试。');
+              const action = response.action === 'guess' || response.action === '推理' ? 'guess' :
+                response.action === 'question' || response.action === 'ask' || response.action === '提问' ? 'question' : null;
+              if (!action) throw new Error('角色的提问格式不正确，请重试。');
+              return { kind: action, text: line.trim().slice(0, 500) };
+            }}
+            onShare={(result, recipients) => {
+              for (const charId of recipients) {
+                mutateDirectChat(charId, chat => {
+                  if (chat.messages.some(message => message.id === `${result.id}-${charId}`)) return;
+                  chat.messages.push({ id: `${result.id}-${charId}`, senderId: 'user', kind: 'link', title: result.title,
+                    source: '微信游戏 · 海龟汤', content: result.detail, text: result.detail, createdAt: new Date().toISOString() });
+                });
+              }
+              setChats(readStoredValue(CHATS_STORAGE_KEY, [] as ChatConversation[], isChatList));
+            }}
+          />
+        )}
+        {activeTab === 'discover' && selectedGame && discoverPage !== 'gomoku' && discoverPage !== 'uno' && discoverPage !== 'guess-word' && discoverPage !== 'werewolf' && discoverPage !== 'script-mystery' && discoverPage !== 'turtle-soup' && (
           <section className="flex min-h-full flex-col items-center justify-center px-6 py-12 text-center">
             <div className={`flex h-20 w-20 items-center justify-center rounded-3xl ${selectedGame.color}`}>
               <selectedGame.icon className="h-10 w-10" />
@@ -5013,7 +5497,28 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         )}
 
         {/* TAB 4: ME */}
-        {activeTab === 'me' && (
+        {activeTab === 'me' && mePage === 'home' && (
+          <div className="min-h-full bg-[#ededed] pb-6">
+            <button type="button" onClick={() => setMePage('settings')} className="flex w-full items-center gap-4 bg-white px-6 pb-9 pt-14 text-left active:bg-slate-50">
+              <span className="flex h-[68px] w-[68px] shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[#dce9e7] text-2xl font-bold text-[#486c69]">
+                {personaDraft.avatarUrl ? <img src={personaDraft.avatarUrl} alt="我的头像" className="h-full w-full object-cover" /> : (personaDraft.name.trim().charAt(0) || '我')}
+              </span>
+              <span className="min-w-0 flex-1"><strong className="block truncate text-[20px] font-semibold text-[#191919]">{personaDraft.name.trim() || '未设置姓名'}</strong><span className="mt-2 block truncate text-[13px] text-[#888]">微信号：{personaDraft.wechatId?.trim() || '未设置'}</span></span>
+              <ChevronRight className="h-5 w-5 shrink-0 text-[#b4b4b4]" />
+            </button>
+            <div className="mt-3 bg-white">
+              <button type="button" onClick={() => setMePage('favorites')} className="flex w-full items-center gap-4 px-6 py-4 text-left active:bg-slate-50"><Bookmark className="h-5 w-5 text-amber-500" /><span className="flex-1 text-[15px] text-[#222]">收藏</span><ChevronRight className="h-4 w-4 text-[#b4b4b4]" /></button>
+            </div>
+            <div className="mt-3 bg-white">
+              <button type="button" onClick={() => setMePage('beauty')} className="flex w-full items-center gap-4 px-6 py-4 text-left active:bg-slate-50"><Palette className="h-5 w-5 text-violet-500" /><span className="flex-1 text-[15px] text-[#222]">美化</span><ChevronRight className="h-4 w-4 text-[#b4b4b4]" /></button>
+            </div>
+            <div className="mt-3 bg-white">
+              <button type="button" onClick={() => setMePage('settings')} className="flex w-full items-center gap-4 px-6 py-4 text-left active:bg-slate-50"><Settings className="h-5 w-5 text-sky-600" /><span className="flex-1 text-[15px] text-[#222]">设置</span><ChevronRight className="h-4 w-4 text-[#b4b4b4]" /></button>
+            </div>
+          </div>
+        )}
+        {activeTab === 'me' && mePage === 'favorites' && <div className="flex min-h-full flex-col items-center justify-center bg-[#ededed] text-slate-500"><Bookmark className="h-12 w-12 text-amber-400" /><p className="mt-4 text-sm">收藏内容即将开放</p></div>}
+        {activeTab === 'me' && mePage === 'settings' && (
           <div className="p-4 space-y-3 pb-4">
             <section className="glass-card rounded-2xl p-3.5 space-y-3">
               <div>
@@ -5088,6 +5593,10 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                 />
               </label>
               <label className="block text-[11px] font-semibold text-[#2C4A5C]">
+                微信号
+                <input value={personaDraft.wechatId ?? ''} onChange={(event) => updatePersonaField('wechatId', event.target.value.slice(0, 40))} maxLength={40} placeholder="设置你的微信号" className="mt-1 w-full bg-white/70 border border-white rounded-xl px-3 py-2 text-xs outline-none" />
+              </label>
+              <label className="block text-[11px] font-semibold text-[#2C4A5C]">
                 简单介绍
                 <textarea
                   value={personaDraft.identity}
@@ -5126,6 +5635,10 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
               {personaStatus && <p role="status" className="text-[11px] text-emerald-700">{personaStatus}</p>}
               {personaError && <p role="alert" className="text-[11px] text-rose-600">{personaError}</p>}
             </section>
+          </div>
+        )}
+        {activeTab === 'me' && mePage === 'beauty' && (
+          <div className="p-4 space-y-3 pb-4">
             <section className="glass-card rounded-2xl p-3.5 space-y-3">
               <div>
                 <h3 className="text-xs font-bold text-[#2C4A5C]">聊天美化</h3>
@@ -6960,6 +7473,19 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
           </section>
         </div>
       )}
+      {guessRecordPreview && (
+        <div className="absolute inset-0 z-[85] flex items-center justify-center bg-black/40 p-5 backdrop-blur-sm"
+          onClick={(event) => { if (event.target === event.currentTarget) setGuessRecordPreview(null); }}>
+          <section role="dialog" aria-modal="true" aria-label="游戏完整记录"
+            className="flex max-h-[85%] w-full max-w-md flex-col overflow-hidden rounded-3xl border border-white/80 bg-white/95 shadow-2xl">
+            <header className="flex items-center justify-between border-b border-slate-100 p-4">
+              <div><p className="text-[10px] text-sky-600">{guessRecordPreview.source}</p><h2 className="text-sm font-bold text-[#2C4A5C]">{guessRecordPreview.title}</h2></div>
+              <button type="button" aria-label="关闭完整记录" onClick={() => setGuessRecordPreview(null)} className="rounded-full p-2 text-slate-500"><X className="h-4 w-4"/></button>
+            </header>
+            <pre className="min-h-0 flex-1 overflow-y-auto whitespace-pre-wrap break-words p-4 font-sans text-xs leading-relaxed text-slate-700">{guessRecordPreview.content || guessRecordPreview.text}</pre>
+          </section>
+        </div>
+      )}
       {forumCardPreview && (
         <div
           className="absolute inset-0 z-[85] flex items-center justify-center bg-black/40 p-5 backdrop-blur-sm"
@@ -7000,7 +7526,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         </div>
       )}
       {/* WeChat Bottom Sub-Tab Bar */}
-      {!activeChat && !isDiscoverSubpage && <div className="wechat-tab-bar border-t border-slate-100 bg-white px-2 pt-1 pb-1 flex items-center justify-around z-20 shrink-0 mt-auto">
+      {!activeChat && !isDiscoverSubpage && !isMeSubpage && <div className="wechat-tab-bar border-t border-slate-100 bg-white px-2 pt-1 pb-1 flex items-center justify-around z-20 shrink-0 mt-auto">
         {([
         { key: 'chats', label: '消息', icon: MessageSquare },
           { key: 'contacts', label: '通讯录', icon: Users },
@@ -7014,6 +7540,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
               onClick={() => {
                 setActiveTab(key);
                 setDiscoverPage('home');
+                setMePage('home');
                 setActiveChatId('');
                 setChatSettingsOpen(false);
               }}
@@ -7029,7 +7556,9 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
           );
         })}
       </div>}
-      <div aria-hidden="true" className="wechat-bottom-safe shrink-0 bg-white" style={{ height: 'calc(env(safe-area-inset-bottom, 0px) + 8px)' }} />
+      {activeChat && (
+        <div aria-hidden="true" className="wechat-bottom-safe shrink-0 bg-white" style={{ height: 'calc(env(safe-area-inset-bottom, 0px) + 2px)' }} />
+      )}
     </div>
   );
 };

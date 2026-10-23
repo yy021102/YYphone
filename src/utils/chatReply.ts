@@ -103,7 +103,8 @@ export const requestChatReply = async (
   messages: OpenAiMessage[],
   api: ApiConnection,
   onUsage: (usage: { input: number; output: number }) => void,
-  speakers?: ChatSpeakerContext
+  speakers?: ChatSpeakerContext,
+  options: { retryOnFormatError?: boolean } = {}
 ): Promise<Record<string, unknown>> => {
   let input = 0;
   let output = 0;
@@ -120,6 +121,7 @@ export const requestChatReply = async (
     return validateChatSpeakerPrefix(parseChatResponse(text), speakers);
   } catch (error) {
     if (!(error instanceof Error)) throw error;
+    if (options.retryOnFormatError === false) throw error;
     formatError = error.message;
     console.warn('AI chat response failed format validation; attempting one correction.', formatError);
   }

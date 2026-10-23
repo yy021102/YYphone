@@ -1,6 +1,7 @@
 import React, { useMemo, useRef, useState } from 'react';
 import {
   Camera,
+  ChevronLeft,
   Heart,
   Link2,
   Lock,
@@ -48,6 +49,7 @@ interface MomentsTabProps {
   userAvatarUrl: string;
   contacts: MomentsTabContact[];
   npcs: CharacterNpc[];
+  onBack: () => void;
 }
 
 const Avatar: React.FC<{ src: string; name: string; className: string }> = ({ src, name, className }) =>
@@ -85,7 +87,7 @@ const MODE_OPTIONS: Array<[MomentGenerationMode, string]> = [
   ['card', '文字+文字图'],
 ];
 
-export const MomentsTab: React.FC<MomentsTabProps> = ({ userName, userAvatarUrl, contacts, npcs }) => {
+export const MomentsTab: React.FC<MomentsTabProps> = ({ userName, userAvatarUrl, contacts, npcs, onBack }) => {
   const posts = useMoments();
   const actors = useMemo(() => buildMomentActors(contacts, npcs), [contacts, npcs]);
   const [cover, setCover] = useState(() =>
@@ -367,36 +369,33 @@ export const MomentsTab: React.FC<MomentsTabProps> = ({ userName, userAvatarUrl,
             type="button"
             onClick={() => { setCoverOpen(true); setError(''); }}
             aria-label="更换朋友圈背景"
-            className="block h-44 w-full cursor-pointer bg-gradient-to-br from-sky-200 via-pink-100 to-blue-200 bg-cover bg-center"
+            className="block h-64 w-full cursor-pointer bg-gradient-to-br from-sky-200 via-pink-100 to-blue-200 bg-cover bg-center"
             style={cover ? { backgroundImage: `url("${cover}")` } : undefined}
+          />
+          <button
+            type="button"
+            onClick={onBack}
+            aria-label="返回发现"
+            className="absolute left-3 top-3 z-10 flex h-9 w-9 items-center justify-center text-white [filter:drop-shadow(0_1px_3px_rgba(0,0,0,0.45))]"
           >
-            {!cover && (
-              <span className="absolute left-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/60 text-[#587589]">
-                <Camera className="w-3.5 h-3.5" />
-              </span>
-            )}
-            {cover && (
-              <span className="absolute left-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-full bg-white/40 text-white">
-                <Camera className="w-3.5 h-3.5" />
-              </span>
-            )}
+            <ChevronLeft className="h-7 w-7" />
           </button>
-          <div className="absolute right-3 top-3 flex items-center gap-2">
+          <div className="absolute right-3 top-3 z-10 flex items-center gap-2">
             <button
               type="button"
               onClick={() => { setRefreshOpen(true); setError(''); }}
-              aria-label="刷新朋友圈"
-              className="flex h-8 w-8 items-center justify-center rounded-full bg-white/55 text-[#587589] backdrop-blur-md cursor-pointer active:scale-95"
+              aria-label="AI 生成朋友圈"
+              className="flex h-9 w-9 items-center justify-center rounded-full bg-black/20 text-white backdrop-blur-sm cursor-pointer active:scale-95"
             >
-              <Sparkles className="w-4 h-4" />
+              <Sparkles className="h-5 w-5" />
             </button>
             <button
               type="button"
               onClick={() => openComposer()}
               aria-label="我要发圈"
-              className="flex h-8 w-8 items-center justify-center rounded-full bg-white/55 text-[#587589] backdrop-blur-md cursor-pointer active:scale-95"
+              className="flex h-9 w-9 items-center justify-center rounded-full bg-black/20 text-white backdrop-blur-sm cursor-pointer active:scale-95"
             >
-              <Plus className="w-4 h-4" />
+              <Plus className="h-6 w-6" />
             </button>
           </div>
           <span className="absolute bottom-2 right-[88px] max-w-[55%] truncate text-sm font-bold text-white [text-shadow:0_1px_4px_rgba(0,0,0,0.45)]">

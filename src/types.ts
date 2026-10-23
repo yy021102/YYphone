@@ -60,6 +60,7 @@ export interface UserProfile {
 export interface UserPersona {
   id: string;
   name: string;
+  wechatId?: string;
   avatarUrl?: string;
   identity: string;
   personality: string;
