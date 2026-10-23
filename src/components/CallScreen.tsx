@@ -6,6 +6,7 @@ export interface CallLine {
   mine: boolean;
   name: string;
   text: string;
+  narration?: boolean;
 }
 
 interface CallScreenProps {
@@ -153,11 +154,14 @@ export const CallScreen: React.FC<CallScreenProps> = ({
           <p
             key={line.id}
             className={`max-w-[82%] rounded-2xl px-3 py-1.5 text-xs leading-relaxed backdrop-blur-md ${
-              line.mine
+              line.narration
+                ? `mx-auto bg-white/25 text-center italic ${video ? 'text-white/80' : 'text-slate-500'}`
+                : line.mine
                 ? 'ml-auto bg-[#fbd5e3]/85 text-[#7a5568]'
                 : video ? 'bg-black/30 text-white' : 'bg-white/75 text-slate-600'
             }`}
           >
+            {line.narration && <span className="mr-1 font-semibold not-italic">【旁白】</span>}
             {line.text}
           </p>
         ))}

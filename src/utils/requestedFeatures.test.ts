@@ -14,6 +14,7 @@ import { extractMemoryCandidates, requestMemoryAiText } from './memoryAi';
 import { withWorldBooksForContacts } from './worldBookPrompt';
 import { getChatRelationContexts } from './chatContext';
 import { withForumBreakLimit } from './forumPrompt';
+import { normalizeCallReplyParts } from './callReply';
 import { createJournalEntry, generateGrowthNote, regenerateJournal, runJournal, updateJournalEntryContent } from './journalAi';
 import { buildGrowthInjection, buildJournalInjection, deleteJournalEntry, readGrowthNotes, readJournalEntries, readJournalSettings, writeGrowthNotes, writeJournalEntries, writeJournalSettings } from './journalData';
 import { activeMemoryArchive, deleteCharacterMemoryArchives, deleteMemoryArchive, guardMemoryArchive, invalidateMemoryArchive, memoryArchiveLabel, prepareMemoryArchiveSwitch } from './memoryArchives';
@@ -1236,8 +1237,26 @@ test('messaging prompts distinguish asynchronous messages from explicitly connec
   for (const callMode of ['voice', 'video'] as const) {
     const prompt = buildPrompt({ chatId: 'call-context', callMode })[0].content;
     assert.match(prompt, new RegExp(`已接通的${callMode === 'voice' ? '语音' : '视频'}通话`));
+    assert.match(prompt, /一整段连贯的角色台词/);
     assert.doesNotMatch(prompt, /微信里异步发消息/);
   }
+});
+
+test('call replies combine into one synthesized utterance and keep video narration separate', () => {
+  const parts = [
+    { text: '等一下', kind: 'text' },
+    { text: '我刚把灯打开了', kind: 'text' },
+    { text: '她抬手理了理头发', kind: 'narration' },
+    { text: '你好', kind: 'voice' },
+  ];
+  assert.deepEqual(normalizeCallReplyParts(parts, 'voice'), [
+    { text: '等一下 我刚把灯打开了 你好', kind: 'text' },
+  ]);
+  assert.deepEqual(normalizeCallReplyParts(parts, 'video'), [
+    { text: '等一下 我刚把灯打开了 你好', kind: 'text' },
+    { text: '她抬手理了理头发', kind: 'narration' },
+  ]);
+  assert.deepEqual(normalizeCallReplyParts([{ text: '旁白', kind: 'narration' }], 'voice'), []);
 });
 
 test('phone context follows configured message counts, defaults to 200 and keeps full message text', async () => {

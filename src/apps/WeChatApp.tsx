@@ -93,6 +93,7 @@ import {
   writeCharacterNpcs,
 } from '../utils/characterNpcs';
 import { synthesizeVoice } from '../utils/voiceModel';
+import { normalizeCallReplyParts } from '../utils/callReply';
 
 interface WeChatAppProps {
   onBack: () => void;
@@ -898,6 +899,15 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
   const [tokenPreviewBusy, setTokenPreviewBusy] = useState(false);
   const [tokenPreviewError, setTokenPreviewError] = useState('');
   const [chatMessageDraft, setChatMessageDraft] = useState('');
+  const chatComposerTextareaRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const textarea = chatComposerTextareaRef.current;
+    if (!textarea) return;
+    textarea.style.height = 'auto';
+    const maxHeight = 128;
+    textarea.style.height = `${Math.min(textarea.scrollHeight, maxHeight)}px`;
+    textarea.style.overflowY = textarea.scrollHeight > maxHeight ? 'auto' : 'hidden';
+  }, [chatMessageDraft]);
   const [activeChatMenuId, setActiveChatMenuId] = useState('');
   const [isProcessingChatImage, setIsProcessingChatImage] = useState(false);
   const chatImportRef = useRef<HTMLInputElement>(null);
@@ -2950,7 +2960,9 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
     try {
       const currentInput = proactive ? '' : [...chat.messages].reverse().find((message) => message.senderId === 'user')?.text ?? '';
       const replyRange = getReplyMessageRange(chat);
-      const targetReplyCount = previewOnly ? replyRange.max : replyRange.min + Math.floor(
+      const targetReplyCount = activeCallMode
+        ? 1
+        : previewOnly ? replyRange.max : replyRange.min + Math.floor(
         Math.random() * (replyRange.max - replyRange.min + 1)
       );
       const momentsInjection: MomentsInjection = buildMomentsInjection(
@@ -3048,12 +3060,12 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         allowIncomingCall
           ? '允许在合适时机主动发起一次视频来电：返回一条 {"kind":"video-call","text":"视频来电"}，用户必须自行接通。不要描述为已接听或正在通话。'
           : '本轮禁止返回 video-call，不得主动拨打电话。',
-        `以${chat.type === 'direct' ? `${contact.name}的` : '其中一位角色或 NPC 群成员的'}身份自然回复。只返回 JSON 对象，至少包含 reply、thought、speakerId 字段。thought 是该角色此刻的内心独白：必须用第一人称（“我”），完全符合人设，写出没能说出口的真心话、阴暗面、隐秘的在意、不安或脆弱，细腻、真实、有情绪层次；不得是对剧情的第三人称概括，不要复述 reply 里已经说出口的话，不要写成给玩家的发言，约 40-120 字。reply 必须是恰好 ${targetReplyCount} 条独立消息组成的数组；普通消息可写字符串，也可写对象 {"kind":"消息类型","text":"消息/语音转写/图片描述","title":"可选标题","source":"可选来源","content":"可选摘要","amount":"可选金额","quantity":可选红包个数,"stickerId":"可选表情包ID"}。支持类型：text、image（文字描述图片）、voice（语音转写）、sticker、video-call、location、red-packet、transfer、link、pat。pat 表示角色拍了拍玩家（类似微信拍一拍，text 可留空或写简短后缀如“的脑袋”），仅在情境自然时偶尔使用。${chat.narratorEnabled || chat.type === 'observer' ? '本对话已开启旁白：可在 reply 中穿插 {"kind":"narration","text":"旁白内容"} 项，旁白用第三人称简短描述角色此刻的动作、表情、神态、衣着或周围氛围，必须控制在 50 字以内（越短越好），不要包含角色台词，也不要替玩家行动；旁白同样计入 reply 条数，通常每轮最多 1 条，且不要全是旁白。' : ''}链接请提供 title/source/content；红包和转账必须给正数 amount，收款对象只能是玩家 user，群聊红包可提供 quantity。不要编造图片 URL；image 使用文字图卡。【表情包】玩家导入了一批表情包，你可以像真人聊天一样，根据人设、性格和当下情绪，在合适的时候主动发表情包（比如开心、撒娇、无语、委屈、吐槽时），一般可单独作为一条 {"kind":"sticker","stickerId":"表情包ID"}，也可在文字消息后附带一条；偏活泼的人设可以更常用，内敛冷淡的人设就少用，不要每轮都发，也不要连发多个。表情包不只是表达情绪，也可以用来糊弄回复、反讽、玩梗、做社交缓冲（不知道说什么、尴尬、不想认真回答时）；但不要过度解读表情包的含义，也不要给它强加深意。根据当前对话氛围和人设选择性地发，同一个表情包不要反复发（回看历史，近期发过的就换一个或不发）。只能从下列表情包里选（按分类列出，格式 分类：[ID|名称]，请根据名称含义挑选贴切的）：${stickerPromptList}。${allStickers.length === 0 ? '（目前没有表情包，不要发 sticker。）' : ''}请仅在剧情自然、确有必要时使用附件，普通文字聊天优先，不要为了凑数强行发送附件。${regenerate ? '本次是重生成，不得再次发红包、转账或礼物，以免重复入账。' : '角色发给玩家的红包和转账需玩家手动领取或确认收款后才加入支付宝个人余额，不会扣玩家的钱；待收转账可退回。可选 gift 字段仅允许 {"existingProductId":"现有商品ID"} 或 {"title":"新商品名","desc":"描述","price":数字,"category":"shopping或eleme","emoji":"emoji"}，只在剧情自然时由主要角色提供；NPC不使用 gift 字段。'}${chat.type === 'group' && chat.allowAgentGroupRename ? '可选 groupTitle 和 groupNicknames 字段，只在情节自然需要时修改群名或昵称。' : ''}群聊的 speakerId 必须从以下成员 ID 中选择：${chatMembers.map((member) => `${member.id}（${member.name}）`).join(', ')}。${chat.type === 'group' && chat.allowAgentGroupRename ? 'groupNicknames 的键只能使用上方成员 ID。' : ''}${chat.type === 'observer' ? '这是旁观群聊，user不在群里；不得生成发给玩家的红包、转账或礼物；根据角色之间的对话和旁白情境继续由群成员发言。' : ''}`,
+        `以${chat.type === 'direct' ? `${contact.name}的` : '其中一位角色或 NPC 群成员的'}身份自然回复。只返回 JSON 对象，至少包含 reply、thought、speakerId 字段。thought 是该角色此刻的内心独白：必须用第一人称（“我”），完全符合人设，写出没能说出口的真心话、阴暗面、隐秘的在意、不安或脆弱，细腻、真实、有情绪层次；不得是对剧情的第三人称概括，不要复述 reply 里已经说出口的话，不要写成给玩家的发言，约 40-120 字。reply 必须是${activeCallMode ? '一条完整角色台词组成的数组；视频通话可额外附一条旁白（旁白不计入角色台词）' : `恰好 ${targetReplyCount} 条独立消息组成的数组`}；普通消息可写字符串，也可写对象 {"kind":"消息类型","text":"消息/语音转写/图片描述","title":"可选标题","source":"可选来源","content":"可选摘要","amount":"可选金额","quantity":可选红包个数,"stickerId":"可选表情包ID"}。支持类型：text、image（文字描述图片）、voice（语音转写）、sticker、video-call、location、red-packet、transfer、link、pat。pat 表示角色拍了拍玩家（类似微信拍一拍，text 可留空或写简短后缀如“的脑袋”），仅在情境自然时偶尔使用。${chat.narratorEnabled || chat.type === 'observer' ? '本对话已开启旁白：可在 reply 中穿插 {"kind":"narration","text":"旁白内容"} 项，旁白用第三人称简短描述角色此刻的动作、表情、神态、衣着或周围氛围，必须控制在 50 字以内（越短越好），不要包含角色台词，也不要替玩家行动；旁白同样计入 reply 条数，通常每轮最多 1 条，且不要全是旁白。' : ''}链接请提供 title/source/content；红包和转账必须给正数 amount，收款对象只能是玩家 user，群聊红包可提供 quantity。不要编造图片 URL；image 使用文字图卡。【表情包】玩家导入了一批表情包，你可以像真人聊天一样，根据人设、性格和当下情绪，在合适的时候主动发表情包（比如开心、撒娇、无语、委屈、吐槽时），一般可单独作为一条 {"kind":"sticker","stickerId":"表情包ID"}，也可在文字消息后附带一条；偏活泼的人设可以更常用，内敛冷淡的人设就少用，不要每轮都发，也不要连发多个。表情包不只是表达情绪，也可以用来糊弄回复、反讽、玩梗、做社交缓冲（不知道说什么、尴尬、不想认真回答时）；但不要过度解读表情包的含义，也不要给它强加深意。根据当前对话氛围和人设选择性地发，同一个表情包不要反复发（回看历史，近期发过的就换一个或不发）。只能从下列表情包里选（按分类列出，格式 分类：[ID|名称]，请根据名称含义挑选贴切的）：${stickerPromptList}。${allStickers.length === 0 ? '（目前没有表情包，不要发 sticker。）' : ''}请仅在剧情自然、确有必要时使用附件，普通文字聊天优先，不要为了凑数强行发送附件。${regenerate ? '本次是重生成，不得再次发红包、转账或礼物，以免重复入账。' : '角色发给玩家的红包和转账需玩家手动领取或确认收款后才加入支付宝个人余额，不会扣玩家的钱；待收转账可退回。可选 gift 字段仅允许 {"existingProductId":"现有商品ID"} 或 {"title":"新商品名","desc":"描述","price":数字,"category":"shopping或eleme","emoji":"emoji"}，只在剧情自然时由主要角色提供；NPC不使用 gift 字段。'}${chat.type === 'group' && chat.allowAgentGroupRename ? '可选 groupTitle 和 groupNicknames 字段，只在情节自然需要时修改群名或昵称。' : ''}群聊的 speakerId 必须从以下成员 ID 中选择：${chatMembers.map((member) => `${member.id}（${member.name}）`).join(', ')}。${chat.type === 'group' && chat.allowAgentGroupRename ? 'groupNicknames 的键只能使用上方成员 ID。' : ''}${chat.type === 'observer' ? '这是旁观群聊，user不在群里；不得生成发给玩家的红包、转账或礼物；根据角色之间的对话和旁白情境继续由群成员发言。' : ''}`,
         ...(activeCallMode === 'video' && callConnectedAt
-          ? [`当前为视频通话${callConnectedAt ? `（已通话 ${Math.floor((Date.now() - callConnectedAt) / 60000)} 分钟）` : ''}，请在角色的每次回复最前方先写一段用小括号包裹的可视动作描写，再接角色说的话；通话中说话要口语化、简短，不要发图片、表情包、红包、转账、链接等附件。`]
+          ? [`当前为视频通话（已通话 ${Math.floor((Date.now() - callConnectedAt) / 60000)} 分钟）。本轮必须只生成一条完整、连贯的角色台词（reply 数组中唯一的非旁白项），口语自然，可以比普通微信消息稍长；不要拆成多条碎片消息。可以额外生成一条 {"kind":"narration","text":"旁白内容"}，用第三人称描写角色的动作、表情或神态，内容独立于台词，不能混进角色台词，也不要用括号动作文字包裹台词；旁白不计入语音。只允许一条角色台词和最多一条旁白，不要其他消息或附件。`]
           : []),
         ...(activeCallMode === 'voice' && callConnectedAt
-          ? [`当前正在语音通话中${callConnectedAt ? `（已通话 ${Math.floor((Date.now() - callConnectedAt) / 60000)} 分钟）` : ''}：你们是在“说话”，请用口语化的短句直接说，像真的在讲话，可以有语气词、停顿、笑声；不要发图片、表情包、红包、转账、链接、位置等附件，也不要括号动作描写；每次回复保持简短。`]
+          ? [`当前正在语音通话中（已通话 ${Math.floor((Date.now() - callConnectedAt) / 60000)} 分钟）：reply 必须只有一条完整连贯的角色台词，不要拆成多条消息。请口语化地直接说，像真的在讲话，可以有语气词、停顿、笑声；不要旁白、括号动作描写或任何附件。`]
           : []),
         ...(momentsInjection.marks.length > 0
           ? ['上文【朋友圈动态】区分了首次看到的动态与已读动态的新评论。请遵循每条已读标记；仅有新评论时，不得声称刚看到原动态。可以在 reply 中自然提及更新；也可以额外返回可选字段 momentActions（最多 3 项）：[{"postId":"朋友圈ID","charId":"主要角色ID","type":"like 或 comment","content":"评论内容（type 为 comment 时必填，不超过 40 字）","replyToName":"可选，被回复者姓名"}]。postId 和 charId 必须来自上文，没有想互动时不要返回该字段。']
@@ -3140,7 +3152,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
             'text', 'image', 'voice', 'sticker', 'video-call', 'location',
             'red-packet', 'transfer', 'link', 'pat', 'narration',
           ] as const;
-          replyParts = record.reply.slice(0, targetReplyCount).map((rawPart): GeneratedAiMessage => {
+          replyParts = record.reply.slice(0, activeCallMode ? 20 : targetReplyCount).map((rawPart): GeneratedAiMessage => {
             if (typeof rawPart === 'string') {
               const text = rawPart.trim();
               if (!text) throw new Error('AI 返回了空消息，请检查模型配置后重试。');
@@ -3154,7 +3166,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
               ? part.kind as GeneratedAiMessage['kind']
               : undefined;
             if (part.kind !== undefined && !kind) throw new Error(`AI 返回了不支持的消息类型：${String(part.kind)}`);
-            if (activeCallMode && kind && kind !== 'text' && kind !== 'narration') {
+            if (activeCallMode && kind && kind !== 'text' && kind !== 'voice' && kind !== 'narration') {
               throw new Error('通话中只能生成文字消息，AI 返回了附件，已取消本次回复。');
             }
             if (kind === 'video-call' && !allowIncomingCall) throw new Error('当前设置不允许角色主动来电，已取消本次回复。');
@@ -3210,6 +3222,10 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
             }
             return message;
           }).filter((part) => part.text || part.kind === 'link');
+          reply = replyParts.map((part) => part.text).join('\n');
+        }
+        if (activeCallMode) {
+          replyParts = normalizeCallReplyParts(replyParts, activeCallMode);
           reply = replyParts.map((part) => part.text).join('\n');
         }
         if (typeof record.thought === 'string') thought = record.thought.trim();
@@ -3414,7 +3430,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       }
       const replyTimestamp = Date.now();
       const replyBatchId = `reply-${replyTimestamp}-${Math.random().toString(36).slice(2, 7)}`;
-      const keepNarration = chat.narratorEnabled || chat.type === 'observer';
+      const keepNarration = activeCallMode === 'video' || chat.narratorEnabled || chat.type === 'observer';
       const deliverableParts = replyParts.filter((part) => part.kind !== 'narration' || keepNarration);
       const replyMessages: ChatMessage[] = deliverableParts.map((part, index) => {
         const speakerName = getChatParticipantName(chat, speakerId);
@@ -3446,8 +3462,6 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
           senderId: speakerId,
           text: partKind === 'pat'
             ? `“${speakerName}” 拍了拍你${part.text && part.text.length <= 12 ? ` ${part.text}` : ''}`
-            : activeCallMode === 'video' && !/^\s*[（(].*[）)]/.test(part.text)
-            ? `（${speakerName}看向镜头，轻轻开口）${part.text}`
             : part.text,
           thought,
           createdAt: new Date(replyTimestamp + index).toISOString(),
@@ -3742,7 +3756,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
     setChatSettingsDraft(null);
   };
 
-  // During a connected voice/video call, speak each new line from a voice-enabled character in order.
+  // A call reply is normalized to one character message, so synthesize one complete utterance.
   useEffect(() => {
     if (!activeCallMode || !callConnectedAt) {
       callVoicePlayedRef.current.clear();
@@ -4002,16 +4016,19 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                   </div>
                 );
                 const editor = editingMessage?.id === message.id && (
-                  <div className="mt-1 flex items-center gap-1.5">
-                    <input
+                  <div className="mt-1 space-y-1.5">
+                    <textarea
                       autoFocus
                       value={editingMessage.text}
                       onChange={(event) => setEditingMessage({ id: message.id, text: event.target.value })}
                       aria-label="编辑消息"
-                      className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs outline-none"
+                      rows={4}
+                      className="min-h-24 w-full resize-y rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs leading-relaxed outline-none"
                     />
-                    <button type="button" onClick={saveEditedMessage} className="rounded-lg bg-sky-500 px-2 py-1 text-[10px] text-white">保存</button>
-                    <button type="button" onClick={() => setEditingMessage(null)} className="rounded-lg bg-slate-200 px-2 py-1 text-[10px] text-slate-600">取消</button>
+                    <div className="flex justify-end gap-1.5">
+                      <button type="button" onClick={saveEditedMessage} className="rounded-lg bg-sky-500 px-3 py-1.5 text-[10px] text-white">保存</button>
+                      <button type="button" onClick={() => setEditingMessage(null)} className="rounded-lg bg-slate-200 px-3 py-1.5 text-[10px] text-slate-600">取消</button>
+                    </div>
                   </div>
                 );
                 if (message.kind === 'context-note') {
@@ -4436,15 +4453,23 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                   event.preventDefault();
                   sendObserverNarration();
                 }}
-                className="yy-chat-composer relative flex items-center gap-2 border-t border-white/70 bg-white/80 p-3"
+                className="yy-chat-composer relative flex items-end gap-2 border-t border-white/70 bg-white/80 p-3"
               >
                 <span className="shrink-0 rounded-lg bg-slate-200 px-2 py-2 text-[10px] font-semibold text-slate-600">旁白</span>
-                <input
+                <textarea
+                  ref={chatComposerTextareaRef}
                   value={chatMessageDraft}
                   onChange={(event) => setChatMessageDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                      event.preventDefault();
+                      sendObserverNarration();
+                    }
+                  }}
                   placeholder="以旁白身份描述场景或情境"
                   aria-label="输入旁白"
-                  className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none"
+                  rows={1}
+                  className="min-h-9 min-w-0 flex-1 resize-none overflow-y-hidden rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs leading-relaxed outline-none"
                 />
                 <button type="submit" aria-label="发送旁白" className="yy-chat-send flex h-9 w-9 shrink-0 items-center justify-center rounded-xl" style={{ backgroundColor: '#F0E1F0', color: '#88758A' }}>
                   {chatAppearance.sendIconUrl
@@ -4477,7 +4502,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                   event.preventDefault();
                   sendChatMessage();
                 }}
-                className="yy-chat-composer relative flex items-center gap-2 border-t border-white/70 bg-white/70 p-3"
+                className="yy-chat-composer relative flex items-end gap-2 border-t border-white/70 bg-white/70 p-3"
               >
                 <button
                   type="button"
@@ -4497,13 +4522,21 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                 >
                   <Smile className="h-4 w-4" />
                 </button>
-                <input
+                <textarea
+                  ref={chatComposerTextareaRef}
                   value={chatMessageDraft}
                   onChange={(event) => setChatMessageDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                      event.preventDefault();
+                      sendChatMessage();
+                    }
+                  }}
                   placeholder="输入消息"
                   aria-label="输入聊天消息"
                   enterKeyHint="send"
-                  className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs outline-none"
+                  rows={1}
+                  className="min-h-9 min-w-0 flex-1 resize-none overflow-y-hidden rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs leading-relaxed outline-none"
                 />
                 <button
                   type="button"
@@ -6612,13 +6645,24 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       {activeCallMode && activeChat && (() => {
         const peerId = activeChat.participantIds[0] ?? '';
         const callLines = activeChat.messages
-          .filter((message) => message.createdAt >= callStartedAt && message.senderId !== 'narrator' && message.kind !== 'video-call' && message.kind !== 'pat' && message.text)
+          .filter((message) =>
+            message.createdAt >= callStartedAt &&
+            message.kind !== 'video-call' &&
+            message.kind !== 'pat' &&
+            message.text &&
+            (message.senderId !== 'narrator' || activeCallMode === 'video')
+          )
           .slice(-8)
           .map((message) => ({
             id: message.id,
             mine: message.senderId === 'user',
-            name: message.senderId === 'user' ? getChatParticipantName(activeChat, 'user') : getChatParticipantName(activeChat, message.senderId),
+            name: message.senderId === 'narrator'
+              ? '旁白'
+              : message.senderId === 'user'
+                ? getChatParticipantName(activeChat, 'user')
+                : getChatParticipantName(activeChat, message.senderId),
             text: message.text,
+            narration: message.senderId === 'narrator',
           }));
         return (
           <CallScreen
