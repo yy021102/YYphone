@@ -77,6 +77,47 @@ const chooseMove = (board: Stone[], own: Stone, other: Stone, difficulty: Diffic
   return best;
 };
 
+const describeBoardSituation = (board: Stone[], moves: number[], blackName: string, whiteName: string) => {
+  const assess = (color: Stone) => {
+    let openFour = 0, closedFour = 0, openThree = 0, openTwo = 0;
+    for (let index = 0; index < board.length; index++) {
+      if (board[index] !== color) continue;
+      const x = index % SIZE, y = Math.floor(index / SIZE);
+      for (const [dx, dy] of directions) {
+        if (inside(x - dx, y - dy) && board[at(x - dx, y - dy)] === color) continue;
+        let length = 0;
+        while (inside(x + dx * length, y + dy * length) && board[at(x + dx * length, y + dy * length)] === color) length++;
+        const beforeX = x - dx, beforeY = y - dy;
+        const afterX = x + dx * length, afterY = y + dy * length;
+        const openEnds = Number(inside(beforeX, beforeY) && board[at(beforeX, beforeY)] === 0)
+          + Number(inside(afterX, afterY) && board[at(afterX, afterY)] === 0);
+        if (length === 4 && openEnds === 2) openFour++;
+        else if (length === 4 && openEnds === 1) closedFour++;
+        else if (length === 3 && openEnds === 2) openThree++;
+        else if (length === 2 && openEnds === 2) openTwo++;
+      }
+    }
+    const winningMoves = board.reduce<number[]>((found, stone, index) => {
+      if (stone !== 0) return found;
+      const next = [...board]; next[index] = color;
+      if (lineAt(next, index, color).length) found.push(index);
+      return found;
+    }, []);
+    return { openFour, closedFour, openThree, openTwo, winningMoves };
+  };
+  const black = assess(1), white = assess(2);
+  const describeThreats = (name: string, info: ReturnType<typeof assess>) =>
+    `${name}：下一手可成五的落点${info.winningMoves.length}处，活四${info.openFour}处，冲四${info.closedFour}处，活三${info.openThree}处，活二${info.openTwo}处`;
+  const last = moves.at(-1);
+  const lastMoveText = last === undefined ? '尚未落子' :
+    `上一手是${board[last] === 1 ? blackName : whiteName}落在第${Math.floor(last / SIZE) + 1}行第${last % SIZE + 1}列`;
+  const recent = moves.slice(-6).map(index =>
+    `${board[index] === 1 ? '黑' : '白'}${Math.floor(index / SIZE) + 1}行${index % SIZE + 1}列`).join('、');
+  const diagram = Array.from({ length: SIZE }, (_, row) =>
+    `${String(row + 1).padStart(2, '0')} ${board.slice(row * SIZE, (row + 1) * SIZE).map(stone => stone === 1 ? '●' : stone === 2 ? '○' : '·').join('')}`).join('\n');
+  return `${lastMoveText}；最近落点：${recent || '无'}。${describeThreats(blackName, black)}；${describeThreats(whiteName, white)}。棋盘（●黑、○白、·空；从左到右为第1至15列）：\n${diagram}`;
+};
+
 export function GomokuGame({ contacts, userName, onShare, onTalk }: Props) {
   const [opponentId, setOpponentId] = useState(contacts[0]?.id ?? '');
   const [userColor, setUserColor] = useState<Stone>(1);
@@ -183,13 +224,13 @@ export function GomokuGame({ contacts, userName, onShare, onTalk }: Props) {
   useEffect(() => {
     const steps = history.length;
     if (!opponent || !autoChatEnabled || result || talkBusy || pendingCharacterUndo || autoCount >= 3 ||
-        steps < 6 || steps % 2 !== 0 || steps - lastManualStep < 4 ||
-        (autoCount > 0 && steps - lastAutoStep < 6)) return;
+        steps < 10 || steps % 2 !== 0 || steps - lastManualStep < 10 ||
+        (autoCount > 0 && steps - lastAutoStep < 10)) return;
     const session = sessionRef.current;
     setAutoCount(count => count + 1);
     setLastAutoStep(steps);
     setTalkBusy(true);
-    const situation = `当前${blackName}执黑${history.filter(x => x === 1).length}步，${whiteName}执白${history.filter(x => x === 2).length}步；轮到${turn === userColor ? userName : opponent.name}落子；难度：${difficulty}`;
+    const situation = `当前${blackName}执黑${history.filter(x => x === 1).length}步，${whiteName}执白${history.filter(x => x === 2).length}步；轮到${turn === userColor ? userName : opponent.name}落子；难度：${difficulty}。${describeBoardSituation(board, moveIndices, blackName, whiteName)}`;
     void onTalk(opponentId, '', talk, situation, 'auto')
       .then(response => {
         if (session !== sessionRef.current) return;
