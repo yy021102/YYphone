@@ -120,6 +120,7 @@ import { mutateDirectChat } from '../utils/coupleSpaceData';
 interface WeChatAppProps {
   onBack: () => void;
   isVisible: boolean;
+  followSystemDark: boolean;
   runtimeSettings: ChatRuntimeSettings;
   requestedChat: { id: string; at: number } | null;
   onMessage: (message: ChatNotification) => void;
@@ -805,8 +806,16 @@ const readContactWorldBooks = (): ContactWorldBook[] => {
 };
 
 export const WeChatApp: React.FC<WeChatAppProps> = ({
-  onBack, isVisible, runtimeSettings, requestedChat, onMessage, onIncomingCall,
+  onBack, isVisible, followSystemDark, runtimeSettings, requestedChat, onMessage, onIncomingCall,
 }) => {
+  const [systemPrefersDark, setSystemPrefersDark] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
+  useEffect(() => {
+    const media = window.matchMedia('(prefers-color-scheme: dark)');
+    const onChange = (event: MediaQueryListEvent) => setSystemPrefersDark(event.matches);
+    media.addEventListener('change', onChange);
+    return () => media.removeEventListener('change', onChange);
+  }, []);
+  const useWeChatDark = followSystemDark && systemPrefersDark;
   const generationRunning = useRef(false);
   const scheduledTick = useRef<() => Promise<void>>(async () => {});
   const delivery = useRef({ isVisible, activeChatId: '', onMessage, onIncomingCall, runtimeSettings });
@@ -1148,8 +1157,8 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       styleElement.textContent = [
         '.yy-chat-surface .yy-chat-message-bubble:not(.is-special) { background-color: var(--yy-character-bubble-color); -webkit-backdrop-filter: blur(10px) saturate(1.3); backdrop-filter: blur(10px) saturate(1.3); border: 1px solid rgba(255,255,255,0.55); box-shadow: 0 2px 10px rgba(120,140,170,0.12); }',
         '.yy-chat-surface .yy-chat-message-bubble.is-user:not(.is-special) { background-color: var(--yy-user-bubble-color); }',
-        scopeChatCss(chatAppearance.bubbleCss ?? ''),
-        scopeChatCss(chatAppearance.layoutCss ?? ''),
+        useWeChatDark ? '' : scopeChatCss(chatAppearance.bubbleCss ?? ''),
+        useWeChatDark ? '' : scopeChatCss(chatAppearance.layoutCss ?? ''),
       ].filter(Boolean).join('\n');
       document.head.appendChild(styleElement);
       setChatAppearanceError('');
@@ -1158,7 +1167,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       setChatAppearanceError(error instanceof Error ? error.message : 'CSS 样式无效，无法应用。');
     }
     return () => styleElement.remove();
-  }, [chatAppearance.bubbleCss, chatAppearance.layoutCss]);
+  }, [chatAppearance.bubbleCss, chatAppearance.layoutCss, useWeChatDark]);
 
   const savePersonaCollection = (updatedCollection: PersonaCollection) => {
     try {
@@ -3978,10 +3987,10 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
           <div
             className="yy-chat-surface flex-1 min-h-0 flex flex-col bg-[#F3F6FA]"
             style={{
-              '--yy-user-bubble-color': chatAppearance.userBubbleColor === DEFAULT_CHAT_APPEARANCE.userBubbleColor
+              '--yy-user-bubble-color': useWeChatDark ? '#20b565' : chatAppearance.userBubbleColor === DEFAULT_CHAT_APPEARANCE.userBubbleColor
                 ? `var(--yy-default-user-bubble-color, ${hexToRgba(chatAppearance.userBubbleColor, chatAppearance.userBubbleOpacity ?? 0.78)})`
                 : hexToRgba(chatAppearance.userBubbleColor, chatAppearance.userBubbleOpacity ?? 0.78),
-              '--yy-character-bubble-color': chatAppearance.characterBubbleColor === DEFAULT_CHAT_APPEARANCE.characterBubbleColor
+              '--yy-character-bubble-color': useWeChatDark ? '#2c2c2c' : chatAppearance.characterBubbleColor === DEFAULT_CHAT_APPEARANCE.characterBubbleColor
                 ? `var(--yy-default-character-bubble-color, ${hexToRgba(chatAppearance.characterBubbleColor, chatAppearance.characterBubbleOpacity ?? 0.78)})`
                 : hexToRgba(chatAppearance.characterBubbleColor, chatAppearance.characterBubbleOpacity ?? 0.78),
             } as React.CSSProperties}
@@ -4001,7 +4010,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                 setReactionMenuId('');
                 setActiveChatMenuId('');
               }}
-              style={chatAppearance.backgroundUrl ? {
+              style={!useWeChatDark && chatAppearance.backgroundUrl ? {
                 backgroundImage: `linear-gradient(rgba(243,246,250,.38), rgba(243,246,250,.38)), url("${chatAppearance.backgroundUrl}")`,
                 backgroundSize: 'cover',
                 backgroundPosition: 'center',
@@ -4192,7 +4201,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                         aria-label="双击拍一拍自己"
                         onClick={() => handleAvatarTap('user')}
                         style={{
-                          ...avatarFrameWrapStyle(chatAppearance.userAvatarFrame),
+                          ...avatarFrameWrapStyle(useWeChatDark ? undefined : chatAppearance.userAvatarFrame),
                           width: `calc(${32 + Math.max(0, (activeChat.fontSize ?? 12) - 12)}px * var(--font-scale, 1))`,
                           height: `calc(${32 + Math.max(0, (activeChat.fontSize ?? 12) - 12)}px * var(--font-scale, 1))`,
                         }}
@@ -4200,7 +4209,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                       >
                         <span
                           className="flex h-full w-full items-center justify-center overflow-hidden rounded-[inherit]"
-                          style={chatAppearance.userAvatarFrame?.enabled ? { borderRadius: `calc(0.75rem - ${chatAppearance.userAvatarFrame.width}px)` } : undefined}
+                          style={!useWeChatDark && chatAppearance.userAvatarFrame?.enabled ? { borderRadius: `calc(0.75rem - ${chatAppearance.userAvatarFrame.width}px)` } : undefined}
                         >
                           {(activeChat.avatars.user || personaDraft.avatarUrl)
                             ? <img src={activeChat.avatars.user || personaDraft.avatarUrl} alt="" className="h-full w-full object-cover" />
@@ -4216,7 +4225,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                         }))}
                         aria-label={`查看${sender?.name ?? '角色'}的心声`}
                         style={{
-                          ...avatarFrameWrapStyle(chatAppearance.characterAvatarFrame),
+                          ...avatarFrameWrapStyle(useWeChatDark ? undefined : chatAppearance.characterAvatarFrame),
                           width: `calc(${32 + Math.max(0, (activeChat.fontSize ?? 12) - 12)}px * var(--font-scale, 1))`,
                           height: `calc(${32 + Math.max(0, (activeChat.fontSize ?? 12) - 12)}px * var(--font-scale, 1))`,
                         }}
@@ -4224,7 +4233,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                       >
                         <span
                           className="flex h-full w-full items-center justify-center overflow-hidden rounded-[inherit]"
-                          style={chatAppearance.characterAvatarFrame?.enabled ? { borderRadius: `calc(0.75rem - ${chatAppearance.characterAvatarFrame.width}px)` } : undefined}
+                          style={!useWeChatDark && chatAppearance.characterAvatarFrame?.enabled ? { borderRadius: `calc(0.75rem - ${chatAppearance.characterAvatarFrame.width}px)` } : undefined}
                         >
                           {(activeChat.avatars[message.senderId] || sender?.avatarUrl)
                             ? <img src={activeChat.avatars[message.senderId] || sender?.avatarUrl} alt="" className="h-full w-full object-cover" />
@@ -4552,7 +4561,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                   className="min-h-9 min-w-0 flex-1 resize-none overflow-y-hidden rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs leading-relaxed outline-none"
                 />
                 <button type="submit" aria-label="发送旁白" className="yy-chat-send flex h-9 w-9 shrink-0 items-center justify-center rounded-xl" style={{ backgroundColor: '#F0E1F0', color: '#88758A' }}>
-                  {chatAppearance.sendIconUrl
+                  {!useWeChatDark && chatAppearance.sendIconUrl
                     ? <img src={chatAppearance.sendIconUrl} alt="" className="h-5 w-5 object-contain" />
                     : <Send className="h-4 w-4" />}
                 </button>
@@ -4629,7 +4638,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                   ♡
                 </button>
                 {emojiPanelOpen && (
-                  <div className="absolute bottom-full left-2 right-2 z-40 mb-2 rounded-2xl border border-white/80 bg-gradient-to-b from-white/95 to-[#f4f8fc]/95 p-2.5 shadow-xl backdrop-blur">
+                  <div className="yy-chat-emoji-panel absolute bottom-full left-2 right-2 z-40 mb-2 rounded-2xl border border-white/80 bg-gradient-to-b from-white/95 to-[#f4f8fc]/95 p-2.5 shadow-xl backdrop-blur">
                     <div className="flex items-center gap-1.5">
                       <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto">
                         {stickerCategories.map((name) => (
@@ -4728,7 +4737,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                 )}
                 {composerOpen && (
                   <div
-                    className="absolute bottom-full left-0 right-0 z-30 border-t border-white/70 bg-gradient-to-b from-white/95 to-[#f4f8fc]/95 px-4 pb-2 pt-4 shadow-[0_-8px_20px_rgba(15,23,42,0.08)]"
+                    className="yy-chat-attachment-panel absolute bottom-full left-0 right-0 z-30 border-t border-white/70 bg-gradient-to-b from-white/95 to-[#f4f8fc]/95 px-4 pb-2 pt-4 shadow-[0_-8px_20px_rgba(15,23,42,0.08)]"
                     onTouchStart={(event) => { composerTouchStartX.current = event.touches[0].clientX; }}
                     onTouchEnd={(event) => {
                       const deltaX = event.changedTouches[0].clientX - composerTouchStartX.current;
@@ -4759,7 +4768,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                       } },
                     ]).filter((item) => item.page === composerPage).map(({ title, icon: Icon, run }) => (
                       <button key={title} type="button" onClick={run} className="flex flex-col items-center gap-1.5 text-[10px] text-slate-600">
-                        <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-pink-50 to-sky-50 text-[#6F8CA0] shadow-sm">
+                        <span className="yy-chat-attachment-icon flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-pink-50 to-sky-50 text-[#6F8CA0] shadow-sm">
                           <Icon className="h-5 w-5" />
                         </span>
                         {title}
@@ -4825,7 +4834,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                 />
               </div>
             </div>
-            <div className="border-b border-[#d8d8d8] bg-[#ededed]">
+            <div className="yy-chat-banner border-b border-[#d8d8d8] bg-[#ededed]">
               <button type="button" aria-label="长按编辑消息页文字" title="长按编辑文字" onPointerDown={(event) => { if (event.pointerType === 'mouse' && event.button !== 0) return; stopChatBannerPress(); chatBannerPressTimer.current = setTimeout(openChatBannerEditor, 550); }} onPointerUp={stopChatBannerPress} onPointerCancel={stopChatBannerPress} onPointerLeave={stopChatBannerPress} onContextMenu={(event) => { event.preventDefault(); openChatBannerEditor(); }} onDoubleClick={openChatBannerEditor} className={`flex min-h-10 w-full items-center gap-3 px-4 py-2 text-[12px] text-[#777] active:bg-[#e5e5e5] ${chatBanner.align === 'center' ? 'justify-center text-center' : 'text-left'}`}>
                 <Monitor className="h-4 w-4 shrink-0" /><span className="min-w-0 break-words">{chatBanner.text || '长按编辑文字'}</span>
               </button>
@@ -4867,7 +4876,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                         onMouseDown={() => startChatLongPress(chat.id)}
                         onMouseUp={clearContactPress}
                         onMouseLeave={clearContactPress}
-                        className={`flex items-center gap-3 px-4 py-3 active:bg-[#e5e5e5] select-none ${chat.pinned ? 'bg-[#ededed] hover:bg-[#e7e7e7]' : 'bg-white hover:bg-[#f7f7f7]'}`}
+                        className={`flex items-center gap-3 px-4 py-3 active:bg-[#e5e5e5] select-none ${chat.pinned ? 'yy-chat-list-pinned bg-[#ededed] hover:bg-[#e7e7e7]' : 'bg-white hover:bg-[#f7f7f7]'}`}
                       >
                         <div className="h-11 w-11 shrink-0 overflow-hidden rounded-2xl bg-gradient-to-tr from-sky-300 to-teal-200 text-sky-900 font-bold flex items-center justify-center text-sm">
                           {avatarUrl ? <img src={avatarUrl} alt="" className="h-full w-full object-cover" /> : chat.type === 'direct' ? contactName(chat.participantIds[0]).charAt(0) : <Users className="h-5 w-5" />}
@@ -5012,22 +5021,22 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
             <button
               type="button"
               onClick={() => setDiscoverPage('moments')}
-              className="flex w-full items-center gap-4 bg-white px-5 py-4 text-left active:bg-slate-50"
+              className="flex w-full items-center gap-4 bg-white px-5 py-3 text-left active:bg-slate-50"
             >
               <Compass className="h-6 w-6 shrink-0 text-sky-600" />
               <span className="flex-1 text-[15px] text-slate-800">朋友圈</span>
               <ChevronRight className="h-4 w-4 text-slate-400" />
             </button>
-            <button type="button" onClick={() => setDiscoverPage('channels')} className="mt-3 flex w-full items-center gap-4 bg-white px-5 py-4 text-left active:bg-slate-50">
+            <button type="button" onClick={() => setDiscoverPage('channels')} className="mt-3 flex w-full items-center gap-4 bg-white px-5 py-3 text-left active:bg-slate-50">
               <Clapperboard className="h-6 w-6 shrink-0 text-orange-500" /><span className="flex-1 text-[15px] text-slate-800">视频号</span><ChevronRight className="h-4 w-4 text-slate-400" />
             </button>
-            <button type="button" onClick={() => setDiscoverPage('time-capsule')} className="mt-3 flex w-full items-center gap-4 bg-white px-5 py-4 text-left active:bg-slate-50">
+            <button type="button" onClick={() => setDiscoverPage('time-capsule')} className="mt-3 flex w-full items-center gap-4 bg-white px-5 py-3 text-left active:bg-slate-50">
               <Hourglass className="h-6 w-6 shrink-0 text-sky-500" /><span className="flex-1 text-[15px] text-slate-800">时间胶囊</span><ChevronRight className="h-4 w-4 text-slate-400" />
             </button>
             <button
               type="button"
               onClick={() => setDiscoverPage('games')}
-              className="mt-3 flex w-full items-center gap-4 bg-white px-5 py-4 text-left active:bg-slate-50"
+              className="mt-3 flex w-full items-center gap-4 bg-white px-5 py-3 text-left active:bg-slate-50"
             >
               <Gamepad2 className="h-6 w-6 shrink-0 text-emerald-600" />
               <span className="flex-1 text-[15px] text-slate-800">游戏</span>
@@ -5052,24 +5061,19 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
           />
         )}
         {activeTab === 'discover' && discoverPage === 'games' && (
-          <div className="p-4">
-            <p className="mb-4 text-xs text-slate-500">选个游戏，和角色一起玩</p>
-            <div className="overflow-hidden rounded-2xl bg-white divide-y divide-slate-100">
-              {WECHAT_GAMES.map(({ id, name, description, icon: GameIcon, color }) => (
+          <div className="min-h-full bg-[#ededed] pt-3">
+            <div className="w-full divide-y divide-[#ededed] bg-white">
+              {WECHAT_GAMES.map(({ id, name, icon: GameIcon, color }) => (
                 <button
                   key={id}
                   type="button"
                   onClick={() => setDiscoverPage(id)}
-                  className="flex w-full items-center gap-3 p-4 text-left active:bg-slate-50"
+                  className="flex w-full items-center gap-4 px-5 py-4 text-left active:bg-slate-50"
                 >
                   <span className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl ${color}`}>
                     <GameIcon className="h-6 w-6" />
                   </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-sm font-semibold text-slate-800">{name}</span>
-                    <span className="mt-1 block text-xs text-slate-500">{description}</span>
-                  </span>
-                  <span className="shrink-0 text-[10px] text-slate-400">开始游戏</span>
+                  <span className="min-w-0 flex-1 text-[15px] text-[#222]">{name}</span>
                   <ChevronRight className="h-4 w-4 shrink-0 text-slate-400" />
                 </button>
               ))}
@@ -5499,7 +5503,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         {/* TAB 4: ME */}
         {activeTab === 'me' && mePage === 'home' && (
           <div className="min-h-full bg-[#ededed] pb-6">
-            <button type="button" onClick={() => setMePage('settings')} className="flex w-full items-center gap-4 bg-white px-6 pb-9 pt-14 text-left active:bg-slate-50">
+            <button type="button" onClick={() => setMePage('settings')} className="flex w-full items-center gap-4 bg-white px-6 pb-9 pt-20 text-left active:bg-slate-50">
               <span className="flex h-[68px] w-[68px] shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[#dce9e7] text-2xl font-bold text-[#486c69]">
                 {personaDraft.avatarUrl ? <img src={personaDraft.avatarUrl} alt="我的头像" className="h-full w-full object-cover" /> : (personaDraft.name.trim().charAt(0) || '我')}
               </span>
@@ -5507,13 +5511,13 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
               <ChevronRight className="h-5 w-5 shrink-0 text-[#b4b4b4]" />
             </button>
             <div className="mt-3 bg-white">
-              <button type="button" onClick={() => setMePage('favorites')} className="flex w-full items-center gap-4 px-6 py-4 text-left active:bg-slate-50"><Bookmark className="h-5 w-5 text-amber-500" /><span className="flex-1 text-[15px] text-[#222]">收藏</span><ChevronRight className="h-4 w-4 text-[#b4b4b4]" /></button>
+              <button type="button" onClick={() => setMePage('favorites')} className="flex w-full items-center gap-4 px-6 py-3 text-left active:bg-slate-50"><Bookmark className="h-5 w-5 text-amber-500" /><span className="flex-1 text-[15px] text-[#222]">收藏</span><ChevronRight className="h-4 w-4 text-[#b4b4b4]" /></button>
             </div>
             <div className="mt-3 bg-white">
-              <button type="button" onClick={() => setMePage('beauty')} className="flex w-full items-center gap-4 px-6 py-4 text-left active:bg-slate-50"><Palette className="h-5 w-5 text-violet-500" /><span className="flex-1 text-[15px] text-[#222]">美化</span><ChevronRight className="h-4 w-4 text-[#b4b4b4]" /></button>
+              <button type="button" onClick={() => setMePage('beauty')} className="flex w-full items-center gap-4 px-6 py-3 text-left active:bg-slate-50"><Palette className="h-5 w-5 text-violet-500" /><span className="flex-1 text-[15px] text-[#222]">美化</span><ChevronRight className="h-4 w-4 text-[#b4b4b4]" /></button>
             </div>
             <div className="mt-3 bg-white">
-              <button type="button" onClick={() => setMePage('settings')} className="flex w-full items-center gap-4 px-6 py-4 text-left active:bg-slate-50"><Settings className="h-5 w-5 text-sky-600" /><span className="flex-1 text-[15px] text-[#222]">设置</span><ChevronRight className="h-4 w-4 text-[#b4b4b4]" /></button>
+              <button type="button" onClick={() => setMePage('settings')} className="flex w-full items-center gap-4 px-6 py-3 text-left active:bg-slate-50"><Settings className="h-5 w-5 text-sky-600" /><span className="flex-1 text-[15px] text-[#222]">设置</span><ChevronRight className="h-4 w-4 text-[#b4b4b4]" /></button>
             </div>
           </div>
         )}
@@ -7526,7 +7530,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         </div>
       )}
       {/* WeChat Bottom Sub-Tab Bar */}
-      {!activeChat && !isDiscoverSubpage && !isMeSubpage && <div className="wechat-tab-bar border-t border-slate-100 bg-white px-2 pt-1 pb-1 flex items-center justify-around z-20 shrink-0 mt-auto">
+      {!activeChat && !isDiscoverSubpage && !isMeSubpage && <div className="wechat-tab-bar border-t border-slate-100 bg-white px-2 pt-1 pb-3 flex items-center justify-around z-20 shrink-0 mt-auto">
         {([
         { key: 'chats', label: '消息', icon: MessageSquare },
           { key: 'contacts', label: '通讯录', icon: Users },

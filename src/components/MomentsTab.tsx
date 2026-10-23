@@ -376,11 +376,11 @@ export const MomentsTab: React.FC<MomentsTabProps> = ({ userName, userAvatarUrl,
             type="button"
             onClick={onBack}
             aria-label="返回发现"
-            className="absolute left-3 top-3 z-10 flex h-9 w-9 items-center justify-center text-white [filter:drop-shadow(0_1px_3px_rgba(0,0,0,0.45))]"
+            className="absolute left-3 top-[calc(env(safe-area-inset-top,0px)+12px)] z-10 flex h-9 w-9 items-center justify-center text-white [filter:drop-shadow(0_1px_3px_rgba(0,0,0,0.45))]"
           >
             <ChevronLeft className="h-7 w-7" />
           </button>
-          <div className="absolute right-3 top-3 z-10 flex items-center gap-2">
+          <div className="absolute right-3 top-[calc(env(safe-area-inset-top,0px)+12px)] z-10 flex items-center gap-2">
             <button
               type="button"
               onClick={() => { setRefreshOpen(true); setError(''); }}

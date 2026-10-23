@@ -745,6 +745,7 @@ export default function App() {
               <WeChatApp
                 onBack={handleBackToHome}
                 isVisible={activeApp === 'wechat' && !isLocked}
+                followSystemDark={followSystemDark}
                 runtimeSettings={runtimeSettings}
                 requestedChat={requestedChat}
                 onMessage={handleChatNotification}

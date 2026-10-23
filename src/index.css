@@ -275,3 +275,138 @@ body {
     background-color: #DFF1FA;
   }
 }
+
+/* WeChat's system dark appearance temporarily replaces its light customization. */
+@media (prefers-color-scheme: dark) {
+  :root[data-follow-system-dark="true"] .wechat-app {
+    --yy-default-user-bubble-color: #20b565;
+    --yy-default-character-bubble-color: #2c2c2c;
+    background: #111 !important;
+    color: #ededed;
+  }
+
+  :root[data-follow-system-dark="true"] .wechat-app :is(.glass-nav, .wechat-tab-bar) {
+    background: #181818 !important;
+    border-color: #292929 !important;
+    box-shadow: none !important;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  :root[data-follow-system-dark="true"] .wechat-app.wechat-main-tabs > header.glass-nav {
+    background: #111 !important;
+  }
+
+  :root[data-follow-system-dark="true"] .wechat-app :is(.glass-card, .glass-dock) {
+    background: #202020 !important;
+    border-color: #303030 !important;
+    box-shadow: none !important;
+  }
+
+  :root[data-follow-system-dark="true"] .wechat-app [class~="bg-[#ededed]"],
+  :root[data-follow-system-dark="true"] .wechat-app [class~="bg-[#F3F7FA]"],
+  :root[data-follow-system-dark="true"] .wechat-app [class~="bg-[#F3F6FA]"] {
+    background-color: #111 !important;
+  }
+
+  :root[data-follow-system-dark="true"] .wechat-app [class*="bg-white"],
+  :root[data-follow-system-dark="true"] .wechat-app [class*="bg-slate-50"],
+  :root[data-follow-system-dark="true"] .wechat-app [class*="bg-slate-100"],
+  :root[data-follow-system-dark="true"] .wechat-app [class*="bg-gray-50"],
+  :root[data-follow-system-dark="true"] .wechat-app [class*="bg-gray-100"] {
+    background-color: #1c1c1c !important;
+  }
+
+  :root[data-follow-system-dark="true"] .wechat-app [class*="bg-[#e5e5e5]"],
+  :root[data-follow-system-dark="true"] .wechat-app [class*="bg-[#e7e7e7]"] {
+    background-color: #292929 !important;
+  }
+
+  :root[data-follow-system-dark="true"] .wechat-app .yy-chat-banner,
+  :root[data-follow-system-dark="true"] .wechat-app .yy-chat-list-pinned {
+    background-color: #222 !important;
+  }
+
+  :root[data-follow-system-dark="true"] .wechat-app [class*="border-[#d2d2d2]"],
+  :root[data-follow-system-dark="true"] .wechat-app [class*="border-[#d8d8d8]"],
+  :root[data-follow-system-dark="true"] .wechat-app [class*="border-[#ededed]"],
+  :root[data-follow-system-dark="true"] .wechat-app [class*="border-slate-"],
+  :root[data-follow-system-dark="true"] .wechat-app [class*="border-white"] {
+    border-color: #303030 !important;
+  }
+
+  :root[data-follow-system-dark="true"] .wechat-app [class*="text-[#191919]"],
+  :root[data-follow-system-dark="true"] .wechat-app [class*="text-[#222]"],
+  :root[data-follow-system-dark="true"] .wechat-app [class*="text-[#2C4A5C]"],
+  :root[data-follow-system-dark="true"] .wechat-app [class*="text-slate-700"],
+  :root[data-follow-system-dark="true"] .wechat-app [class*="text-slate-800"],
+  :root[data-follow-system-dark="true"] .wechat-app [class*="text-slate-900"] {
+    color: #e9e9e9 !important;
+  }
+
+  :root[data-follow-system-dark="true"] .wechat-app [class*="text-[#777]"],
+  :root[data-follow-system-dark="true"] .wechat-app [class*="text-[#888]"],
+  :root[data-follow-system-dark="true"] .wechat-app [class*="text-slate-400"],
+  :root[data-follow-system-dark="true"] .wechat-app [class*="text-slate-500"],
+  :root[data-follow-system-dark="true"] .wechat-app [class*="text-slate-600"] {
+    color: #8e8e8e !important;
+  }
+
+  :root[data-follow-system-dark="true"] .wechat-app .wechat-tab-bar .text-teal-700 {
+    color: #20b565 !important;
+  }
+
+  :root[data-follow-system-dark="true"] .wechat-app .yy-chat-surface,
+  :root[data-follow-system-dark="true"] .wechat-app .yy-chat-surface > div[style*="background-image"] {
+    background: #111 !important;
+  }
+
+  :root[data-follow-system-dark="true"] .wechat-app .yy-chat-message-bubble:not(.is-special) {
+    background: #2c2c2c !important;
+    color: #f2f2f2 !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+
+  :root[data-follow-system-dark="true"] .wechat-app .yy-chat-message-bubble.is-user:not(.is-special) {
+    background: #20b565 !important;
+    color: #111 !important;
+  }
+
+  :root[data-follow-system-dark="true"] .wechat-app .yy-chat-composer {
+    background: #202020 !important;
+    border-color: #303030 !important;
+  }
+
+  :root[data-follow-system-dark="true"] .wechat-app .yy-chat-composer textarea,
+  :root[data-follow-system-dark="true"] .wechat-app input,
+  :root[data-follow-system-dark="true"] .wechat-app textarea {
+    color: #eee;
+    caret-color: #20b565;
+  }
+
+  :root[data-follow-system-dark="true"] .wechat-app .yy-chat-composer textarea {
+    background: #2c2c2c !important;
+    border-color: #383838 !important;
+  }
+
+  :root[data-follow-system-dark="true"] .wechat-app .yy-chat-composer :is(.yy-chat-attachments, .yy-chat-emoji, .yy-chat-generate, .yy-chat-send) {
+    background: #292929 !important;
+    color: #d2d2d2 !important;
+    border-color: #555 !important;
+  }
+
+  :root[data-follow-system-dark="true"] .wechat-app :is(.yy-chat-attachment-panel, .yy-chat-emoji-panel) {
+    background: #202020 !important;
+    border-color: #303030 !important;
+    box-shadow: none !important;
+  }
+
+  :root[data-follow-system-dark="true"] .wechat-app .yy-chat-attachment-icon {
+    background: #2d2d2d !important;
+    color: #d0d0d0 !important;
+    box-shadow: none !important;
+  }
+}
