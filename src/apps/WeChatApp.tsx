@@ -29,6 +29,12 @@ import {
   Archive,
   Phone,
   Pencil,
+  ChevronRight,
+  Gamepad2,
+  Grid3X3,
+  Layers,
+  MessagesSquare,
+  Moon,
 } from 'lucide-react';
 import { AppHeader } from '../components/AppHeader';
 import { MomentsTab } from '../components/MomentsTab';
@@ -38,7 +44,7 @@ import { findMusicTrackByTitle, readMusicPlaybackSnapshot } from '../utils/music
 import { PersonaCollection, UserPersona } from '../types';
 import { readStorageString, readStoredValue, writeStorageString, writeStoredValue } from '../utils/localStorage';
 import { readSetting, saveSetting, SETTINGS_KEYS } from '../utils/settings';
-import { compressChatPhoto, compressImageFile } from '../utils/imageFile';
+import { compressChatPhoto, compressImageFile, compressWallpaper } from '../utils/imageFile';
 import { buildPrompt } from '../utils/buildPrompt';
 import { buildGroupPrivateContext } from '../utils/chatHistory';
 import { deleteGroupJournal, invalidateGroupJournal, maybeAutoGroupJournal } from '../utils/groupJournal';
@@ -104,7 +110,16 @@ interface WeChatAppProps {
   onIncomingCall: () => void;
 }
 
-type WeChatTab = 'chats' | 'contacts' | 'moments' | 'me';
+type WeChatTab = 'chats' | 'contacts' | 'discover' | 'me';
+
+const WECHAT_GAMES = [
+  { id: 'gomoku', name: '五子棋', description: '黑白对弈，连成五子', icon: Grid3X3, color: 'bg-amber-50 text-amber-700' },
+  { id: 'uno', name: 'UNO', description: '缤纷手牌，欢乐出牌', icon: Layers, color: 'bg-rose-50 text-rose-600' },
+  { id: 'guess-word', name: '你说我猜（猜词）', description: '用描述传递线索，猜出答案', icon: MessagesSquare, color: 'bg-sky-50 text-sky-600' },
+  { id: 'werewolf', name: '狼人杀', description: '隐藏身份，推理与发言', icon: Moon, color: 'bg-violet-50 text-violet-600' },
+] as const;
+
+type DiscoverPage = 'home' | 'moments' | 'games' | typeof WECHAT_GAMES[number]['id'];
 
 interface ContactWorldBookLink {
   bookId: string;
@@ -771,6 +786,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
   const scheduledTick = useRef<() => Promise<void>>(async () => {});
   const delivery = useRef({ isVisible, activeChatId: '', onMessage, onIncomingCall, runtimeSettings });
   const [activeTab, setActiveTab] = useState<WeChatTab>('chats');
+  const [discoverPage, setDiscoverPage] = useState<DiscoverPage>('home');
   const [searchQuery, setSearchQuery] = useState('');
   const [personaCollection, setPersonaCollection] = useState(() =>
     readSetting(SETTINGS_KEYS.personas, DEFAULT_PERSONAS, isPersonaCollection)
@@ -1240,7 +1256,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
     setIsProcessingChatImage(true);
     setChatAppearanceError('');
     try {
-      const backgroundUrl = await compressImageFile(file);
+      const backgroundUrl = await compressWallpaper(file);
       updateChatAppearance({ backgroundUrl });
     } catch (error) {
       setChatAppearanceError(error instanceof Error ? error.message : '背景图片处理失败。');
@@ -3782,6 +3798,8 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
   }, [activeCallMode, callConnectedAt, chats, activeChatId, contacts]);
 
   const activeChat = chats.find((chat) => chat.id === activeChatId);
+  const selectedGame = WECHAT_GAMES.find((game) => game.id === discoverPage);
+  const isDiscoverSubpage = activeTab === 'discover' && discoverPage !== 'home';
 
   return (
     <div className="wechat-app relative flex-1 min-h-0 w-full flex flex-col bg-[#F3F7FA] overflow-hidden">
@@ -3793,11 +3811,19 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
             ? '微信'
             : activeTab === 'contacts'
             ? '通讯录'
-            : activeTab === 'moments'
-            ? '朋友圈'
+            : activeTab === 'discover'
+            ? selectedGame?.name ?? (discoverPage === 'moments' ? '朋友圈' : discoverPage === 'games' ? '游戏' : '发现')
             : '我'
         }
-        onBack={() => (activeChat ? setActiveChatId('') : onBack())}
+        onBack={() => {
+          if (activeChat) {
+            setActiveChatId('');
+          } else if (isDiscoverSubpage) {
+            setDiscoverPage(selectedGame ? 'games' : 'home');
+          } else {
+            onBack();
+          }
+        }}
         rightAction={
           activeChat ? (
             <button
@@ -3894,7 +3920,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       />
 
       {/* Main Content Area */}
-      <div className={`flex-1 min-h-0 ${activeChat || activeTab === 'moments' ? 'overflow-hidden flex flex-col' : 'overflow-y-auto no-scrollbar'}`}>
+      <div className={`flex-1 min-h-0 ${activeChat || (activeTab === 'discover' && discoverPage === 'moments') ? 'overflow-hidden flex flex-col' : 'overflow-y-auto no-scrollbar'}`}>
         {/* TAB 1: CHATS */}
         {activeTab === 'chats' && activeChat && (
           <div
@@ -4912,14 +4938,78 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
           </div>
         )}
 
-        {/* TAB 3: MOMENTS */}
-        {activeTab === 'moments' && (
+        {/* TAB 3: DISCOVER */}
+        {activeTab === 'discover' && discoverPage === 'home' && (
+          <div className="min-h-full bg-[#ededed] pt-3">
+            <button
+              type="button"
+              onClick={() => setDiscoverPage('moments')}
+              className="flex w-full items-center gap-4 bg-white px-5 py-4 text-left active:bg-slate-50"
+            >
+              <Compass className="h-6 w-6 shrink-0 text-sky-600" />
+              <span className="flex-1 text-[15px] text-slate-800">朋友圈</span>
+              <ChevronRight className="h-4 w-4 text-slate-400" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setDiscoverPage('games')}
+              className="mt-3 flex w-full items-center gap-4 bg-white px-5 py-4 text-left active:bg-slate-50"
+            >
+              <Gamepad2 className="h-6 w-6 shrink-0 text-emerald-600" />
+              <span className="flex-1 text-[15px] text-slate-800">游戏</span>
+              <ChevronRight className="h-4 w-4 text-slate-400" />
+            </button>
+          </div>
+        )}
+        {activeTab === 'discover' && discoverPage === 'moments' && (
           <MomentsTab
             userName={personaDraft.name}
             userAvatarUrl={personaDraft.avatarUrl ?? ''}
             contacts={contacts}
             npcs={characterNpcs}
           />
+        )}
+        {activeTab === 'discover' && discoverPage === 'games' && (
+          <div className="p-4">
+            <p className="mb-4 text-xs text-slate-500">游戏大厅 · 敬请期待</p>
+            <div className="overflow-hidden rounded-2xl bg-white divide-y divide-slate-100">
+              {WECHAT_GAMES.map(({ id, name, description, icon: GameIcon, color }) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setDiscoverPage(id)}
+                  className="flex w-full items-center gap-3 p-4 text-left active:bg-slate-50"
+                >
+                  <span className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl ${color}`}>
+                    <GameIcon className="h-6 w-6" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-semibold text-slate-800">{name}</span>
+                    <span className="mt-1 block text-xs text-slate-500">{description}</span>
+                  </span>
+                  <span className="shrink-0 text-[10px] text-slate-400">筹备中</span>
+                  <ChevronRight className="h-4 w-4 shrink-0 text-slate-400" />
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {activeTab === 'discover' && selectedGame && (
+          <section className="flex min-h-full flex-col items-center justify-center px-6 py-12 text-center">
+            <div className={`flex h-20 w-20 items-center justify-center rounded-3xl ${selectedGame.color}`}>
+              <selectedGame.icon className="h-10 w-10" />
+            </div>
+            <h2 className="mt-5 text-lg font-bold text-[#2C4A5C]">{selectedGame.name}</h2>
+            <p className="mt-2 text-sm text-slate-500">{selectedGame.description}</p>
+            <p className="mt-4 text-xs leading-relaxed text-slate-400">游戏正在筹备中，玩法暂未开放。</p>
+            <button
+              type="button"
+              onClick={() => setDiscoverPage('games')}
+              className="mt-6 rounded-xl bg-white px-6 py-3 text-sm font-semibold text-teal-700 shadow-sm"
+            >
+              返回游戏大厅
+            </button>
+          </section>
         )}
 
         {/* TAB 4: ME */}
@@ -6910,19 +7000,20 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         </div>
       )}
       {/* WeChat Bottom Sub-Tab Bar */}
-      {!activeChat && <div className="wechat-tab-bar border-t border-slate-100 bg-white px-2 pt-1 pb-1 flex items-center justify-around z-20 shrink-0 mt-auto">
-        {[
+      {!activeChat && !isDiscoverSubpage && <div className="wechat-tab-bar border-t border-slate-100 bg-white px-2 pt-1 pb-1 flex items-center justify-around z-20 shrink-0 mt-auto">
+        {([
         { key: 'chats', label: '消息', icon: MessageSquare },
           { key: 'contacts', label: '通讯录', icon: Users },
-          { key: 'moments', label: '朋友圈', icon: Compass },
+          { key: 'discover', label: '发现', icon: Compass },
           { key: 'me', label: '我', icon: User },
-      ].map(({ key, label, icon: TabIcon }) => {
+      ] as const).map(({ key, label, icon: TabIcon }) => {
           const isActive = activeTab === key;
           return (
             <button
               key={key}
               onClick={() => {
-                setActiveTab(key as WeChatTab);
+                setActiveTab(key);
+                setDiscoverPage('home');
                 setActiveChatId('');
                 setChatSettingsOpen(false);
               }}

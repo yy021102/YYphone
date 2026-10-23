@@ -16,7 +16,7 @@ import {
   BeautySettings,
   CustomWallpapers,
 } from '../types';
-import { compressImageFile } from '../utils/imageFile';
+import { compressImageFile, compressWallpaper } from '../utils/imageFile';
 import { readSetting, saveSetting, SETTINGS_KEYS } from '../utils/settings';
 import { isHomeAppearance } from '../utils/homeAppearance';
 import { DEFAULT_LOCK_APPEARANCE, isLockScreenAppearance } from '../utils/lockAppearance';
@@ -126,7 +126,7 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
     setProcessing(field);
     setError('');
     try {
-      const image = await compressImageFile(file);
+      const image = await       compressWallpaper(file);
       setWallpaperDraft((current) => ({ ...current, [field]: image }));
       setStatus('');
     } catch (uploadError) {

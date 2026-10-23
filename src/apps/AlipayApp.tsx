@@ -38,7 +38,7 @@ import {
   requestIntimatePay,
 } from '../utils/alipayData';
 import { readStoredValue, writeStoredValue } from '../utils/localStorage';
-import { compressImageFile } from '../utils/imageFile';
+import { compressWallpaper } from '../utils/imageFile';
 
 interface AlipayAppProps {
   onBack: () => void;
@@ -897,7 +897,7 @@ export const AlipayApp: React.FC<AlipayAppProps> = ({ onBack }) => {
                         const file = event.target.files?.[0];
                         if (!file) return;
                         try {
-                          setWallpaperDraft(await compressImageFile(file));
+                          setWallpaperDraft(await compressWallpaper(file));
                         } catch (error) {
                           showYyError(error instanceof Error ? error.message : '壁纸处理失败。', '壁纸处理失败');
                         } finally {

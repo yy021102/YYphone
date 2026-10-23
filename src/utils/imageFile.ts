@@ -4,6 +4,8 @@ const MAX_IMAGE_DIMENSION = 300;
 export interface CompressImageOptions {
   maxDimension?: number;
   maxBytes?: number;
+  initialQuality?: number;
+  minQuality?: number;
 }
 
 export async function compressImage(file: File, options: CompressImageOptions = {}): Promise<string> {
@@ -34,11 +36,12 @@ export async function compressImage(file: File, options: CompressImageOptions = 
           canvas.height = Math.max(1, Math.round(image.height * scale));
           context.clearRect(0, 0, canvas.width, canvas.height);
           context.drawImage(image, 0, 0, canvas.width, canvas.height);
-          let quality = 0.7;
+          const minQuality = options.minQuality ?? 0.35;
+          let quality = options.initialQuality ?? 0.7;
           let dataUrl = canvas.toDataURL('image/jpeg', quality);
 
-          while (dataUrlBytes(dataUrl) > maxBytes && quality > 0.35) {
-            quality = Math.max(0.35, quality - 0.1);
+          while (dataUrlBytes(dataUrl) > maxBytes && quality > minQuality) {
+            quality = Math.max(minQuality, quality - 0.1);
             dataUrl = canvas.toDataURL('image/jpeg', quality);
           }
 
@@ -75,6 +78,9 @@ const dataUrlBytes = (dataUrl: string) => {
 };
 
 export const compressImageFile = compressImage;
+
+export const compressWallpaper = (file: File): Promise<string> =>
+  compressImage(file, { maxDimension: 1920, maxBytes: 1200 * 1024, initialQuality: 0.92, minQuality: 0.6 });
 
 export const compressChatPhoto = (file: File): Promise<string> =>
   compressImage(file, { maxDimension: 1280, maxBytes: 400 * 1024 });
