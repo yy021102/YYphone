@@ -35,50 +35,97 @@ const nearbyMoves = (board: Stone[]) => board.map((stone, index) => stone === 0 
   const x = index % SIZE, y = Math.floor(index / SIZE);
   return [-2, -1, 0, 1, 2].some(dx => [-2, -1, 0, 1, 2].some(dy => inside(x + dx, y + dy) && board[at(x + dx, y + dy)] !== 0));
 });
-const placementScore = (board: Stone[], index: number, color: Stone) => {
-  const x = index % SIZE, y = Math.floor(index / SIZE);
-  let score = 0, strongThreats = 0;
-  for (const [dx, dy] of directions) {
-    let count = 1, open = 0;
-    for (const sign of [-1, 1]) {
-      let step = 1;
-      while (inside(x + dx * step * sign, y + dy * step * sign) && board[at(x + dx * step * sign, y + dy * step * sign)] === color) { count++; step++; }
-      if (inside(x + dx * step * sign, y + dy * step * sign) && board[at(x + dx * step * sign, y + dy * step * sign)] === 0) open++;
+const WINDOWS: number[][] = [];
+const WINDOWS_AT: number[][][] = Array.from({ length: SIZE * SIZE }, () => []);
+for (let y = 0; y < SIZE; y++) for (let x = 0; x < SIZE; x++) for (const [dx, dy] of directions) {
+  if (!inside(x + dx * 4, y + dy * 4)) continue;
+  const window = Array.from({ length: 5 }, (_, step) => at(x + dx * step, y + dy * step));
+  WINDOWS.push(window);
+  window.forEach(index => WINDOWS_AT[index].push(window));
+}
+const WINDOW_VALUE = [0, 2, 20, 220, 4000, 1_000_000];
+const otherColor = (color: Stone): Stone => color === 1 ? 2 : 1;
+const centerBonus = (index: number) => 7 - Math.max(Math.abs(index % SIZE - 7), Math.abs(Math.floor(index / SIZE) - 7));
+const scoreBoard = (board: Stone[], color: Stone) => {
+  let score = 0;
+  const other = otherColor(color);
+  for (const window of WINDOWS) {
+    let mine = 0, theirs = 0;
+    for (const index of window) {
+      if (board[index] === color) mine++;
+      else if (board[index] === other) theirs++;
     }
-    if (count >= 5) return 1_000_000;
-    const value = count === 4 ? (open === 2 ? 50_000 : open === 1 ? 12_000 : 0)
-      : count === 3 ? (open === 2 ? 3_000 : open === 1 ? 160 : 0)
-      : count === 2 ? (open === 2 ? 90 : open === 1 ? 12 : 0) : open === 2 ? 3 : 0;
-    score += value;
-    if (value >= 3_000) strongThreats++;
+    if (mine && !theirs) score += WINDOW_VALUE[mine];
+    else if (theirs && !mine) score -= WINDOW_VALUE[theirs] * 1.04;
   }
-  return score + (strongThreats >= 2 ? 20_000 : 0);
+  return score;
 };
-const rankedMoves = (board: Stone[], own: Stone, other: Stone, limit: number) => nearbyMoves(board)
-  .map(index => ({ index, score: placementScore(board, index, own) + placementScore(board, index, other) * 0.95 }))
-  .sort((a, b) => b.score - a.score).slice(0, limit);
-const chooseHardMove = (board: Stone[], own: Stone, other: Stone) => {
-  const moves = rankedMoves(board, own, other, 8);
-  let best = moves[0]?.index ?? board.findIndex(stone => stone === 0), bestValue = -Infinity;
-  for (const move of moves) {
-    const afterOwn = [...board]; afterOwn[move.index] = own;
-    if (lineAt(afterOwn, move.index, own).length) return move.index;
-    let worstReply = Infinity;
-    for (const reply of rankedMoves(afterOwn, other, own, 6)) {
-      const afterOther = [...afterOwn]; afterOther[reply.index] = other;
-      if (lineAt(afterOther, reply.index, other).length) { worstReply = -1_000_000; break; }
-      const nextOwn = rankedMoves(afterOther, own, other, 5);
-      let continuation = -Infinity;
-      for (const follow of nextOwn) {
-        const afterFollow = [...afterOther]; afterFollow[follow.index] = own;
-        if (lineAt(afterFollow, follow.index, own).length) { continuation = 800_000; break; }
-        const enemyThreat = rankedMoves(afterFollow, other, own, 1)[0]?.score ?? 0;
-        continuation = Math.max(continuation, follow.score - enemyThreat * 0.9);
-      }
-      worstReply = Math.min(worstReply, continuation - reply.score * 0.35);
+const pointPotential = (board: Stone[], index: number, color: Stone) => {
+  let score = centerBonus(index) * 0.5;
+  const other = otherColor(color);
+  for (const window of WINDOWS_AT[index]) {
+    let mine = 0, theirs = 0;
+    for (const cell of window) {
+      if (board[cell] === color) mine++;
+      else if (board[cell] === other) theirs++;
     }
-    const value = worstReply + move.score * 0.15;
-    if (value > bestValue) { bestValue = value; best = move.index; }
+    if (!theirs) score += WINDOW_VALUE[mine + 1] - WINDOW_VALUE[mine];
+    if (!mine) score += (WINDOW_VALUE[theirs + 1] - WINDOW_VALUE[theirs]) * 0.95;
+  }
+  return score;
+};
+const winningMoves = (board: Stone[], color: Stone, candidates: number[]) => candidates.filter(index => {
+  board[index] = color;
+  const wins = lineAt(board, index, color).length > 0;
+  board[index] = 0;
+  return wins;
+});
+const hardCandidates = (board: Stone[], color: Stone, limit: number) => {
+  const nearby = nearbyMoves(board);
+  if (!nearby.length) return board.findIndex(stone => stone === 0) < 0 ? [] : [at(7, 7)];
+  const ownWins = winningMoves(board, color, nearby);
+  if (ownWins.length) return ownWins;
+  const forcedBlocks = winningMoves(board, otherColor(color), nearby);
+  if (forcedBlocks.length) return forcedBlocks;
+  return nearby.map(index => ({ index, score: pointPotential(board, index, color) }))
+    .sort((a, b) => b.score - a.score || centerBonus(b.index) - centerBonus(a.index))
+    .slice(0, limit).map(move => move.index);
+};
+const chooseHardMove = (board: Stone[], own: Stone, other: Stone) => {
+  const root = hardCandidates(board, own, 12);
+  if (root.length === 0) return -1;
+  const ownWins = winningMoves(board, own, root);
+  if (ownWins.length) return ownWins[0];
+  const enemyWins = winningMoves(board, other, nearbyMoves(board));
+  if (enemyWins.length === 1) return enemyWins[0];
+  let visited = 0;
+  const search = (side: Stone, depth: number, alpha: number, beta: number, lastMove: number): number => {
+    if (lineAt(board, lastMove, otherColor(side)).length) return side === own ? -100_000_000 - depth : 100_000_000 + depth;
+    if (depth === 0 || visited > 2500 || !board.includes(0)) return scoreBoard(board, own);
+    const moves = hardCandidates(board, side, depth === 3 ? 7 : depth === 2 ? 6 : 4);
+    if (!moves.length) return scoreBoard(board, own);
+    const maximizing = side === own;
+    let best = maximizing ? -Infinity : Infinity;
+    for (const move of moves) {
+      board[move] = side;
+      visited++;
+      const score = search(otherColor(side), depth - 1, alpha, beta, move);
+      board[move] = 0;
+      best = maximizing ? Math.max(best, score) : Math.min(best, score);
+      if (maximizing) alpha = Math.max(alpha, best);
+      else beta = Math.min(beta, best);
+      if (beta <= alpha) break;
+    }
+    return best;
+  };
+  let best = root[0], bestScore = -Infinity;
+  for (const move of root) {
+    const initiative = pointPotential(board, move, own) * 0.002;
+    board[move] = own;
+    const reply = search(other, 3, -Infinity, Infinity, move);
+    board[move] = 0;
+    const score = reply + initiative;
+    if (score > bestScore) { bestScore = score; best = move; }
   }
   return best;
 };
@@ -196,6 +243,7 @@ export function GomokuGame({ contacts, userName, onShare, onTalk }: Props) {
   const [lastMove, setLastMove] = useState(-1);
   const [pendingMove, setPendingMove] = useState(-1);
   const [pendingCharacterUndo, setPendingCharacterUndo] = useState(false);
+  const [undoReply, setUndoReply] = useState('');
   const [background, setBackground] = useState(() => readStoredValue(BACKGROUND_KEY, '', (value): value is string => typeof value === 'string'));
   const [backgroundDialogOpen, setBackgroundDialogOpen] = useState(false);
   const [backgroundDraft, setBackgroundDraft] = useState('');
@@ -212,7 +260,7 @@ export function GomokuGame({ contacts, userName, onShare, onTalk }: Props) {
     setWinningLine([]); setResult(null); setSelected(id ? [id] : []); setShared(false);
     setUserColor(color); setOpponentId(id); setTalk([]); setTalkError(''); setMercyMoves(0);
     setCharacterRaisedDifficulty(false);
-    setAutoCount(0); setLastAutoStep(0); setLastManualStep(-10); setLastMove(-1); setPendingMove(-1); setTalkBusy(false); setPendingCharacterUndo(false);
+    setAutoCount(0); setLastAutoStep(0); setLastManualStep(-10); setLastMove(-1); setPendingMove(-1); setTalkBusy(false); setPendingCharacterUndo(false); setUndoReply('');
   };
   const move = (i: number, color: Stone) => {
     if (winner || board[i] || turn !== color) return;
@@ -354,7 +402,7 @@ export function GomokuGame({ contacts, userName, onShare, onTalk }: Props) {
     <div className="mx-auto mt-4 max-w-[420px] overflow-hidden rounded-[22px] border border-white/90 bg-white/85 shadow-[0_8px_28px_rgba(68,97,78,0.08)]">
       <div className="flex items-center justify-between border-b border-emerald-50 px-4 py-3"><div className="flex items-center gap-2"><span className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700"><MessageCircle size={17}/></span><div><p className="text-sm font-bold">棋局小聊</p><p className="text-[10px] text-slate-400">和{opponent?.name}边下边聊</p></div></div><label className="flex items-center gap-1.5 text-[10px] text-slate-500"><input type="checkbox" checked={autoChatEnabled} onChange={e => setAutoChatEnabled(e.target.checked)} className="accent-emerald-600"/>主动发言</label></div>
       <div ref={chatScrollRef} className="max-h-44 min-h-16 space-y-2 overflow-y-auto px-4 py-3">{talk.length ? talk.map((item, i) => <div key={i} className={`flex ${item.from === 'user' ? 'justify-end' : 'justify-start'}`}><p className={`max-w-[86%] rounded-2xl px-3 py-2 text-xs leading-5 ${item.from === 'user' ? 'rounded-br-sm bg-emerald-600 text-white' : 'rounded-bl-sm bg-[#f1f5f0] text-slate-700'}`}>{item.text}</p></div>) : <p className="py-2 text-center text-xs text-slate-400">落子之间，和 TA 聊两句吧</p>}{talkBusy && <p className="text-[11px] text-slate-400">{opponent?.name}正在想怎么说…</p>}</div>
-      {pendingCharacterUndo && <div className="mx-3 mb-3 rounded-xl border border-amber-200 bg-amber-50 p-3"><p className="text-xs font-semibold text-amber-900">{opponent?.name}想悔棋，你同意吗？</p><p className="mt-1 text-[11px] text-amber-700">同意后撤回最近一轮落子。</p><div className="mt-2 flex gap-2"><button type="button" onClick={() => { setTalk(previous => [...previous, { from: 'user', text: '好，这轮悔棋吧。' }]); undoRound(); }} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white">同意</button><button type="button" onClick={() => { setPendingCharacterUndo(false); setLastManualStep(history.length); setTalk(previous => [...previous, { from: 'user', text: '这轮不悔棋。' }]); }} className="rounded-lg bg-white px-3 py-1.5 text-xs text-slate-600">不同意</button></div></div>}
+      {pendingCharacterUndo && <div className="mx-3 mb-3 rounded-xl border border-amber-200 bg-amber-50 p-3"><p className="text-xs font-semibold text-amber-900">{opponent?.name}想悔棋，你同意吗？</p><p className="mt-1 text-[11px] text-amber-700">同意后撤回最近一轮落子。可以自己写一句回复，留空则只撤棋。</p><input aria-label="同意悔棋时的回复" value={undoReply} onChange={event => setUndoReply(event.target.value)} maxLength={160} placeholder="想怎么回答 TA？（可留空）" className="mt-2 w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs outline-none focus:border-emerald-400"/><div className="mt-2 flex gap-2"><button type="button" onClick={() => { const reply = undoReply.trim(); if (reply) setTalk(previous => [...previous, { from: 'user', text: reply }]); setUndoReply(''); undoRound(); }} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white">同意悔棋</button><button type="button" onClick={() => { setPendingCharacterUndo(false); setUndoReply(''); setLastManualStep(history.length); setTalk(previous => [...previous, { from: 'user', text: '这轮不悔棋。' }]); }} className="rounded-lg bg-white px-3 py-1.5 text-xs text-slate-600">不同意</button></div></div>}
       {mercyMoves > 0 && <p className="mt-2 text-xs text-amber-700">角色接下来的 {mercyMoves} 手会放松防守</p>}
       {talkError && <p role="alert" className="px-4 text-xs text-rose-600">{talkError}</p>}
       <div className="flex gap-2 border-t border-emerald-50 p-3"><input value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') void sendTalk(); }} placeholder="说点什么，或请 TA 让一让…" className="min-w-0 flex-1 rounded-xl bg-[#f3f7f3] px-3 py-2.5 text-xs outline-none"/><button type="button" disabled={talkBusy || !draft.trim()} onClick={() => void sendTalk()} className="flex w-10 items-center justify-center rounded-xl bg-emerald-600 text-white shadow-sm disabled:opacity-50" aria-label="发送游戏聊天"><Send size={16}/></button></div>

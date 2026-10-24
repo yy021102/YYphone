@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { candidatesAt, createSudoku, findLogicalMove, type SudokuDifficulty } from '../utils/sudoku';
 import { readStoredValue, writeStoredValue } from '../utils/localStorage';
-import { isSudokuProgress, SUDOKU_PROGRESS_KEY, type SudokuCharacterMode, type SudokuProgress } from '../utils/sudokuProgress';
+import { isSudokuProgress, SUDOKU_PROGRESS_KEY, type SudokuCharacterMode, type SudokuChatLine, type SudokuProgress } from '../utils/sudokuProgress';
 
 type Contact = { id: string; name: string };
 type CharacterMode = SudokuCharacterMode;
 type Props = {
   contacts: Contact[];
-  onTalk: (id: string, mode: 'hint' | 'watch' | 'move', context: string) => Promise<string>;
+  onTalk: (id: string, mode: 'hint' | 'watch' | 'move' | 'chat', context: string, history: SudokuChatLine[]) => Promise<string>;
   onShare: (result: { id: string; summary: string }, recipients: string[]) => void;
 };
 
@@ -24,8 +24,9 @@ export function SudokuGame({ contacts, onTalk, onShare }: Props) {
   const [pencil, setPencil] = useState(restored?.pencil ?? false);
   const [mode, setMode] = useState<CharacterMode>(restored?.mode ?? 'off');
   const [characterId, setCharacterId] = useState(restored?.characterId ?? contacts[0]?.id ?? '');
-  const [speech, setSpeech] = useState(() => restored?.speechHistory.at(-1) ?? '');
   const [speechHistory, setSpeechHistory] = useState<string[]>(restored?.speechHistory ?? []);
+  const [chatHistory, setChatHistory] = useState<SudokuChatLine[]>(restored?.chatHistory ?? (restored?.speechHistory ?? []).map(line => ({ from: 'character', name: line.split('：')[0] || '角色', text: line.split('：').slice(1).join('：') || line })));
+  const [chatDraft, setChatDraft] = useState('');
   const [characterCells, setCharacterCells] = useState<number[]>(restored?.characterCells ?? []);
   const [recipients, setRecipients] = useState<string[]>(restored?.recipients ?? []);
   const [shared, setShared] = useState(restored?.shared ?? false);
@@ -44,13 +45,13 @@ export function SudokuGame({ contacts, onTalk, onShare }: Props) {
   useEffect(() => {
     const progress: SudokuProgress = {
       version: 1, difficulty, nextDifficulty, puzzle: game.puzzle, solution: game.solution, grid,
-      gameId, selected, notes, pencil, mode, characterId, speechHistory, characterCells,
+      gameId, selected, notes, pencil, mode, characterId, speechHistory, chatHistory, characterCells,
       recipients, shared, shareNote, hintIndex, correctMoves,
       seenCorrect: [...seenCorrect.current], nextCommentAt: nextCommentAt.current,
     };
     writeStoredValue(SUDOKU_PROGRESS_KEY, progress);
   }, [difficulty, nextDifficulty, game, grid, gameId, selected, notes, pencil, mode, characterId,
-    speechHistory, characterCells, recipients, shared, shareNote, hintIndex, correctMoves]);
+    speechHistory, chatHistory, characterCells, recipients, shared, shareNote, hintIndex, correctMoves]);
   useEffect(() => () => { session.current++; turnLock.current = false; }, []);
 
   const newGame = (level: SudokuDifficulty = nextDifficulty) => {
@@ -58,20 +59,25 @@ export function SudokuGame({ contacts, onTalk, onShare }: Props) {
     const next = createSudoku(level);
     setDifficulty(level); setNextDifficulty(level);
     setGameId(crypto.randomUUID()); setRecipients([]); setShared(false); setShareNote('');
-    setGame(next); setGrid([...next.puzzle]); setSelected(-1); setNotes({}); setSpeech(''); setSpeechHistory([]); setCharacterCells([]);
+    setGame(next); setGrid([...next.puzzle]); setSelected(-1); setNotes({}); setSpeechHistory([]); setChatHistory([]); setChatDraft(''); setCharacterCells([]);
     turnLock.current = false;
     setError(''); setHintIndex(-1); setCorrectMoves(0); setBusy(false); nextCommentAt.current = 5; seenCorrect.current.clear();
   };
   const boardContext = (current: number[]) =>
     Array.from({ length: 9 }, (_, row) => current.slice(row * 9, row * 9 + 9).map(value => value || '.').join('')).join('/');
-  const ask = async (requestMode: 'hint' | 'watch' | 'move', context: string, onSuccess?: () => void) => {
+  const ask = async (requestMode: 'hint' | 'watch' | 'move' | 'chat', context: string, onSuccess?: () => void, history = chatHistory) => {
     if (!characterId || turnLock.current) return;
     const active = session.current;
     turnLock.current = true;
     setBusy(true); setError('');
     try {
-      const line = await onTalk(characterId, requestMode, context);
-      if (active === session.current) { onSuccess?.(); setSpeech(line); setSpeechHistory(previous => [...previous, `${contacts.find(item => item.id === characterId)?.name ?? '角色'}：${line}`]); }
+      const line = await onTalk(characterId, requestMode, context, history);
+      if (active === session.current) {
+        const name = contacts.find(item => item.id === characterId)?.name ?? '角色';
+        onSuccess?.();
+        setSpeechHistory(previous => [...previous, `${name}：${line}`]);
+        setChatHistory(previous => [...previous, { from: 'character', name, text: line }]);
+      }
     } catch (cause) {
       if (active === session.current) setError(cause instanceof Error ? cause.message : '角色暂时没有回应。');
     } finally { if (active === session.current) { turnLock.current = false; setBusy(false); } }
@@ -98,7 +104,8 @@ export function SudokuGame({ contacts, onTalk, onShare }: Props) {
       const move = next.every((number, index) => !number || number === game.solution[index]) ? findLogicalMove(next) : null;
       if (!move || move.value !== game.solution[move.index]) {
         const line = '我先看着，这一轮还没有能确定的格子。';
-        setSpeech(line); setSpeechHistory(previous => [...previous, `${character.name}：${line}`]);
+        setSpeechHistory(previous => [...previous, `${character.name}：${line}`]);
+        setChatHistory(previous => [...previous, { from: 'character', name: character.name, text: line }]);
       } else {
         void ask('move', `玩家刚在第${Math.floor(selected / 9) + 1}行第${selected % 9 + 1}列填入${value}。轮到你。公开棋盘：${boardContext(next)}。程序已用排除法确认第${Math.floor(move.index / 9) + 1}行第${move.index % 9 + 1}列填${move.value}；理由：${move.reason}。请只说这一步的思路，不要提出其他未经验证的落点。`, () => {
           setGrid(current => { if (current[move.index]) return current; const updated = [...current]; updated[move.index] = move.value; return updated; });
@@ -121,6 +128,13 @@ export function SudokuGame({ contacts, onTalk, onShare }: Props) {
     const target = open.find(index => candidatesAt(verifiedGrid, index).length === 1) ?? open[0];
     setHintIndex(target); setSelected(target);
     void ask('hint', `玩家求助。棋盘：${boardContext(grid)}。只提示第${Math.floor(target / 9) + 1}行第${target % 9 + 1}列应填${game.solution[target]}。${grid[target] ? '玩家此格目前填错，请温和指出并建议修改。' : candidatesAt(verifiedGrid, target).length === 1 ? '这格可由已有正确数字排除得出，可简短解释行、列或宫。' : '这格当前不是显而易见的唯一候选，只给一个方向和正确数字，不要假装有简单的唯一候选推理。'}不要透露其他格的答案。`);
+  };
+  const sendChat = () => {
+    const text = chatDraft.trim().slice(0, 300);
+    if (!text || !character || busy || turnLock.current) return;
+    const next: SudokuChatLine[] = [...chatHistory, { from: 'user', name: '我', text }];
+    setChatHistory(next); setChatDraft('');
+    void ask('chat', `玩家在数独局内对你说：“${text}”。当前难度：${difficulty === 'hard' ? '困难' : '普通'}；已填 ${filled}/81 格，玩家正确填入 ${correctMoves} 格。公开棋盘：${boardContext(grid)}。可以闲聊，也可以聊当前盘面；不要透露尚未能由盘面确定的数字。`, undefined, next);
   };
   return <section className="min-h-full bg-[#f4f5f2] px-3 pb-8 pt-4 text-[#273f37]">
     <div className="mx-auto max-w-[440px]">
@@ -145,20 +159,22 @@ export function SudokuGame({ contacts, onTalk, onShare }: Props) {
         <p className="mt-1 text-center text-xs">{difficulty === 'hard' ? '困难' : '普通'} · {game.puzzle.filter(Boolean).length} 个提示数 · {characterCells.length ? `角色参与填入 ${characterCells.length} 格` : '玩家独立完成'}</p>
         <div className="mt-3 border-t border-emerald-200 pt-3"><p className="text-xs font-semibold">分享完成卡片给角色</p>
           <textarea aria-label="分享附言" value={shareNote} onChange={event => setShareNote(event.target.value.slice(0, 300))} placeholder="附带消息（选填）" className="mt-2 h-16 w-full resize-none rounded-lg bg-white p-2 text-xs outline-none" />
-          {!!speechHistory.length && <p className="mt-1 text-[11px] text-emerald-800">卡片会附上本局角色消息（最近 {Math.min(8, speechHistory.length)} 条）。</p>}
+          {!!chatHistory.length && <p className="mt-1 text-[11px] text-emerald-800">卡片会附上本局对话（最近 {Math.min(12, chatHistory.length)} 条）。</p>}
           <div className="mt-2 max-h-32 overflow-y-auto">{contacts.map(item => <label key={item.id} className="flex items-center gap-2 py-1 text-xs"><input type="checkbox" checked={recipients.includes(item.id)} disabled={shared} onChange={event => setRecipients(previous => event.target.checked ? [...previous, item.id] : previous.filter(id => id !== item.id))}/>{item.name}</label>)}</div>
           <button type="button" disabled={!recipients.length || shared} onClick={() => {
-            onShare({ id: gameId, summary: `数独挑战完成：${difficulty === 'hard' ? '困难' : '普通'}难度，${game.puzzle.filter(Boolean).length} 个提示数，${characterCells.length ? `角色参与填入 ${characterCells.length} 格` : '玩家独立完成'}。${shareNote.trim() ? `\n附言：${shareNote.trim()}` : ''}${speechHistory.length ? `\n本局角色消息：${speechHistory.slice(-8).join('；')}` : ''}` }, recipients);
+            onShare({ id: gameId, summary: `数独挑战完成：${difficulty === 'hard' ? '困难' : '普通'}难度，${game.puzzle.filter(Boolean).length} 个提示数，${characterCells.length ? `角色参与填入 ${characterCells.length} 格` : '玩家独立完成'}。${shareNote.trim() ? `\n附言：${shareNote.trim()}` : ''}${chatHistory.length ? `\n本局对话：${chatHistory.slice(-12).map(line => `${line.name}：${line.text}`).join('；')}` : ''}` }, recipients);
             setShared(true);
           }} className="mt-2 w-full rounded-xl bg-emerald-700 py-2.5 text-xs font-bold text-white disabled:opacity-50">{shared ? '已分享到聊天' : '分享完成卡片'}</button>
         </div>
       </div>}
       <div className="mt-5 rounded-2xl bg-white p-4 shadow-sm"><h3 className="text-sm font-bold">角色参与</h3>
-        <div className="mt-3 flex gap-2"><select aria-label="参与角色" value={characterId} onChange={event => { session.current++; turnLock.current = false; setBusy(false); setCharacterId(event.target.value); setSpeech(''); }} className="min-w-0 flex-1 rounded-lg bg-slate-50 p-2 text-xs"><option value="">选择角色</option>{contacts.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select><select aria-label="参与方式" value={mode} onChange={event => { session.current++; turnLock.current = false; setBusy(false); setMode(event.target.value as CharacterMode); setSpeech(''); }} className="rounded-lg bg-slate-50 p-2 text-xs"><option value="off">不参与</option><option value="help">求助</option><option value="participate">参与</option><option value="watch">旁观</option></select></div>
+        <div className="mt-3 flex gap-2"><select aria-label="参与角色" value={characterId} onChange={event => { session.current++; turnLock.current = false; setBusy(false); setCharacterId(event.target.value); }} className="min-w-0 flex-1 rounded-lg bg-slate-50 p-2 text-xs"><option value="">选择角色</option>{contacts.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select><select aria-label="参与方式" value={mode} onChange={event => { session.current++; turnLock.current = false; setBusy(false); setMode(event.target.value as CharacterMode); }} className="rounded-lg bg-slate-50 p-2 text-xs"><option value="off">不参与</option><option value="help">求助</option><option value="participate">参与</option><option value="watch">旁观</option></select></div>
         {mode === 'help' && <button type="button" disabled={!character || busy || solved} onClick={requestHint} className="mt-3 rounded-lg bg-emerald-600 px-4 py-2 text-xs font-semibold text-white disabled:opacity-40">向角色求助</button>}
         {mode === 'watch' && <p className="mt-2 text-[11px] text-slate-500">每正确填入约 4–6 格，角色偶尔会点评。</p>}
         {mode === 'participate' && <p className="mt-2 text-[11px] text-slate-500">你填对一格后轮到角色。角色只填能从盘面确定的数字；蓝色数字是角色填的。</p>}
-        {busy && <p className="mt-3 text-xs text-slate-400">{character?.name}正在想…</p>}{speech && <div aria-label="角色消息" className="mt-3 max-h-48 space-y-2 overflow-y-auto">{speechHistory.slice(-8).map((line, index) => <p key={index} className="rounded-xl bg-emerald-50 p-3 text-xs leading-5">{line}</p>)}</div>}{error && <p role="alert" className="mt-3 text-xs text-rose-600">{error}</p>}
+        <div aria-label="数独局内对话" className="mt-3 max-h-52 min-h-16 space-y-2 overflow-y-auto rounded-xl bg-slate-50 p-2">{chatHistory.length ? chatHistory.map((line, index) => <div key={index} className={`flex ${line.from === 'user' ? 'justify-end' : 'justify-start'}`}><p className={`max-w-[88%] rounded-xl px-3 py-2 text-xs leading-5 ${line.from === 'user' ? 'bg-emerald-700 text-white' : 'bg-white text-slate-700'}`}><b className="mb-0.5 block text-[10px]">{line.name}</b>{line.text}</p></div>) : <p className="py-3 text-center text-xs text-slate-400">和角色聊聊这道题吧</p>}{busy && <p className="text-xs text-slate-400">{character?.name}正在想…</p>}</div>
+        <div className="mt-2 flex gap-2"><input aria-label="数独局内聊天" value={chatDraft} onChange={event => setChatDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') sendChat(); }} maxLength={300} disabled={!character} placeholder="对角色说点什么…" className="min-w-0 flex-1 rounded-lg bg-slate-50 px-3 py-2.5 text-xs outline-none disabled:opacity-50"/><button type="button" disabled={!character || busy || !chatDraft.trim()} onClick={sendChat} className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-bold text-white disabled:opacity-40">发送</button></div>
+        {error && <p role="alert" className="mt-3 text-xs text-rose-600">{error}</p>}
       </div>
     </div>
   </section>;

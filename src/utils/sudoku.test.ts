@@ -42,6 +42,11 @@ test('saved progress accepts a valid board and rejects a changed clue', () => {
     characterCells: [], recipients: [], shared: false, shareNote: '', hintIndex: -1,
     correctMoves: 0, seenCorrect: [], nextCommentAt: 5 };
   assert.equal(isSudokuProgress(progress), true);
+  assert.equal(isSudokuProgress({ ...progress, chatHistory: [
+    { from: 'user', name: '我', text: '这一步你怎么看？' },
+    { from: 'character', name: '角色', text: '先看这一列。' },
+  ] }), true);
+  assert.equal(isSudokuProgress({ ...progress, chatHistory: [{ from: 'invalid', name: '角色', text: '无效' }] }), false);
   const index = game.puzzle.findIndex(Boolean);
   const changed = { ...progress, grid: [...progress.grid] };
   changed.grid[index] = 0;

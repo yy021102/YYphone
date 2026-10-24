@@ -2,6 +2,7 @@ import type { SudokuDifficulty } from './sudoku';
 
 export const SUDOKU_PROGRESS_KEY = 'yyphone:sudoku:progress';
 export type SudokuCharacterMode = 'off' | 'help' | 'participate' | 'watch';
+export type SudokuChatLine = { from: 'user' | 'character'; name: string; text: string };
 export interface SudokuProgress {
   version: 1;
   difficulty: SudokuDifficulty;
@@ -16,6 +17,7 @@ export interface SudokuProgress {
   mode: SudokuCharacterMode;
   characterId: string;
   speechHistory: string[];
+  chatHistory?: SudokuChatLine[];
   characterCells: number[];
   recipients: string[];
   shared: boolean;
@@ -41,7 +43,10 @@ export const isSudokuProgress = (value: unknown): value is SudokuProgress => {
     !item.notes || typeof item.notes !== 'object' || Array.isArray(item.notes) ||
     !Object.values(item.notes).every(value => Array.isArray(value) && value.every(n => Number.isInteger(n) && n >= 1 && n <= 9)) ||
     typeof item.pencil !== 'boolean' || !['off', 'help', 'participate', 'watch'].includes(item.mode ?? '') ||
-    typeof item.characterId !== 'string' || !strings(item.speechHistory) || !indexes(item.characterCells) ||
+    typeof item.characterId !== 'string' || !strings(item.speechHistory) ||
+    (item.chatHistory !== undefined && (!Array.isArray(item.chatHistory) || !item.chatHistory.every(line =>
+      !!line && (line.from === 'user' || line.from === 'character') && typeof line.name === 'string' && typeof line.text === 'string'))) ||
+    !indexes(item.characterCells) ||
     !strings(item.recipients) || typeof item.shared !== 'boolean' || typeof item.shareNote !== 'string' ||
     !Number.isInteger(item.hintIndex) || item.hintIndex! < -1 || item.hintIndex! > 80 ||
     !Number.isInteger(item.correctMoves) || item.correctMoves! < 0 || !indexes(item.seenCorrect) ||
