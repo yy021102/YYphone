@@ -1,4 +1,5 @@
 import { PersonaCollection, UserPersona } from '../types';
+import { getUserRealName } from './userPersona';
 import { readAlipayData } from './alipayData';
 import { readSetting, SETTINGS_KEYS } from './settings';
 import { CharacterNpc, getNpcByParticipantId, readCharacterNpcs } from './characterNpcs';
@@ -185,7 +186,8 @@ const isPromptChatMessage = (value: unknown): value is PromptChatMessage =>
 const getPersonaText = (persona: UserPersona | undefined) => {
   if (!persona) return '未设置玩家人设。';
   return [
-    `名称：${persona.name}`,
+    persona.nickname?.trim() && `微信网名：${persona.nickname.trim()}。聊天中称呼玩家时，可按关系和语境使用这个网名。`,
+    getUserRealName(persona) && `真名：${getUserRealName(persona)}`,
     persona.identity && `身份：${persona.identity}`,
     persona.personality && `个性：${persona.personality}`,
     persona.background && `背景：${persona.background}`,
@@ -200,7 +202,7 @@ const getSpeakerName = (
   npcs: CharacterNpc[],
   persona: UserPersona | undefined
 ) => {
-  if (senderId === 'user') return persona?.name || '玩家';
+  if (senderId === 'user') return persona?.nickname?.trim() || '玩家';
   if (senderId === 'narrator') return '旁白';
   return conversation.groupNicknames?.[senderId]?.trim() ||
     getNpcByParticipantId(npcs, senderId)?.name ||
@@ -250,6 +252,8 @@ const isPersonaCollection = (value: unknown): value is PersonaCollection =>
     isRecord(profile) &&
     typeof profile.id === 'string' &&
     typeof profile.name === 'string' &&
+    (profile.nickname === undefined || typeof profile.nickname === 'string') &&
+    (profile.realName === undefined || typeof profile.realName === 'string') &&
     typeof profile.identity === 'string' &&
     typeof profile.personality === 'string' &&
     typeof profile.background === 'string' &&
@@ -500,7 +504,7 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
     const source = describeChatSource(
       conversation,
       (id) => contacts.find((contact) => contact.id === id)?.name || getNpcByParticipantId(characterNpcs, id)?.name,
-      persona?.name || '玩家'
+      persona?.nickname?.trim() || '玩家'
     );
     sources.set(conversation.id, source);
     return source;

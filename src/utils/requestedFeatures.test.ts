@@ -29,6 +29,7 @@ import { BUILTIN_STICKERS, CHAT_STICKERS_STORAGE_KEY, readAvailableChatStickers 
 import { LITTLE_P_MESSAGES_KEY, LITTLE_P_VISIBLE_KEY, littlePHistory, littlePSystemPrompt, parseLittlePReply, readLittlePMessages, writeLittlePMessages, type LittlePMessage } from './littleP';
 import { requestConfiguredAiText } from './aiApi';
 import { buildPrompt, type OpenAiMessage } from './buildPrompt';
+import { getUserRealName } from './userPersona';
 import { toGeminiContents, toOpenAiMessages } from './chatVision';
 import { requestChatReply, validateChatSpeakerPrefix, withChatResponseFormat } from './chatReply';
 import { buildGroupPrivateContext, describeChatSource } from './chatHistory';
@@ -73,6 +74,36 @@ Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: l
 
 beforeEach(async () => { await clearDbStorage(); });
 afterEach(() => { mock.restoreAll(); });
+
+test('WeChat persona keeps nickname, real name and preset label separate in chat prompts', () => {
+  const storageKeys = [SETTINGS_KEYS.personas, WECHAT_CHATS_STORAGE_KEY, 'pocketos:wechat-contacts'];
+  const previous = storageKeys.map((key) => localStorage.getItem(key));
+  saveSetting(SETTINGS_KEYS.personas, {
+    activeProfileId: 'nickname-test',
+    profiles: [{
+      id: 'nickname-test', name: '夜行预设', nickname: '小夜', realName: '林月',
+      identity: '', personality: '', background: '', speakingStyle: '',
+    }],
+  });
+  saveSetting(WECHAT_CHATS_STORAGE_KEY, [{
+    id: 'nickname-chat', type: 'direct', participantIds: ['nickname-character'],
+    noteName: '', context: '',
+    messages: [{ id: 'nickname-message', senderId: 'user', text: '你好', createdAt: '2026-10-18T10:00:00Z' }],
+  }]);
+  saveSetting('pocketos:wechat-contacts', [{ id: 'nickname-character', name: '朋友', persona: '', worldBooks: [] }]);
+
+  const prompt = buildPrompt({ chatId: 'nickname-chat' }).map((item) => item.content).join('\n');
+  assert.match(prompt, /微信网名：小夜/);
+  assert.match(prompt, /真名：林月/);
+  assert.doesNotMatch(prompt, /夜行预设/);
+  assert.match(prompt, /聊天成员：小夜/);
+  assert.equal(prompt.endsWith('你好'), true);
+  assert.equal(getUserRealName({ id: 'old', name: '旧姓名', identity: '', personality: '', background: '', speakingStyle: '' }), '旧姓名');
+  storageKeys.forEach((key, index) => {
+    if (previous[index] === null) localStorage.removeItem(key);
+    else localStorage.setItem(key, previous[index]);
+  });
+});
 
 test('within-window blocked contact schedules wait until keepalive is enabled', async () => {
   const dueAt = '2020-01-01T00:00:00.000Z';

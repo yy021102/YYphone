@@ -74,6 +74,7 @@ import { ColorWheel, hexToRgba } from '../components/ColorWheel';
 import { musicPlayer } from '../utils/musicPlayer';
 import { findMusicTrackByTitle, readMusicPlaybackSnapshot } from '../utils/musicPlayback';
 import { PersonaCollection, UserPersona } from '../types';
+import { getUserRealName } from '../utils/userPersona';
 import { readStorageString, readStoredValue, writeStorageString, writeStoredValue } from '../utils/localStorage';
 import { readSetting, saveSetting, SETTINGS_KEYS } from '../utils/settings';
 import { compressChatPhoto, compressImageFile, compressWallpaper } from '../utils/imageFile';
@@ -508,6 +509,8 @@ const getAttachedHistoryCount = (chat: ChatConversation, sourceChatId: string) =
 const DEFAULT_PERSONA: UserPersona = {
   id: 'persona-default',
   name: '默认人设',
+  nickname: '',
+  realName: '',
   wechatId: '',
   avatarUrl: '',
   identity: '',
@@ -531,6 +534,8 @@ const isPersonaCollection = (value: unknown): value is PersonaCollection => {
         !!profile &&
         typeof profile.id === 'string' &&
         typeof profile.name === 'string' &&
+        (profile.nickname === undefined || typeof profile.nickname === 'string') &&
+        (profile.realName === undefined || typeof profile.realName === 'string') &&
         (profile.wechatId === undefined || typeof profile.wechatId === 'string') &&
         (profile.avatarUrl === undefined || typeof profile.avatarUrl === 'string') &&
         typeof profile.identity === 'string' &&
@@ -882,6 +887,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       (persona) => persona.id === personaCollection.activeProfileId
     ) ?? DEFAULT_PERSONA;
   const [personaDraft, setPersonaDraft] = useState(selectedPersona);
+  const personaNickname = personaDraft.nickname?.trim() || '我';
   const [personaStatus, setPersonaStatus] = useState('');
   const [personaError, setPersonaError] = useState('');
   useErrorDialog(personaError);
@@ -1235,6 +1241,8 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
     const updatedPersona = {
       ...personaDraft,
       name: personaDraft.name.trim() || '未命名人设',
+      nickname: personaDraft.nickname?.trim() || '',
+      realName: getUserRealName(personaDraft),
     };
     const updatedCollection = {
       ...personaCollection,
@@ -1269,6 +1277,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       ...personaDraft,
       id: `persona-${Date.now()}`,
       name,
+      realName: getUserRealName(personaDraft),
     };
     const updatedCollection = {
       profiles: [...personaCollection.profiles, newPersona],
@@ -1968,7 +1977,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
     if (nickname) return nickname;
     const npc = getNpcByParticipantId(characterNpcs, participantId);
     return participantId === 'user'
-      ? personaDraft.name.trim() || '我'
+      ? personaNickname
       : nickname || (npc ? `${npc.name}（NPC）` : contactName(participantId));
   };
 
@@ -2334,7 +2343,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
 
   const makeReplyRef = (chat: ChatConversation, target: ChatMessage) => ({
     id: target.id,
-    senderName: target.senderId === 'user' ? (personaDraft.name.trim() || '我') : getChatParticipantName(chat, target.senderId),
+    senderName: target.senderId === 'user' ? personaNickname : getChatParticipantName(chat, target.senderId),
     text: describeMessageBrief(target).slice(0, 60),
   });
 
@@ -2577,7 +2586,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
     const now = new Date().toISOString();
     const newId = () => `message-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const speakerName = (message: ChatMessage) =>
-      message.senderId === 'user' ? (personaDraft.name.trim() || '我') : getChatParticipantName(chat, message.senderId);
+      message.senderId === 'user' ? personaNickname : getChatParticipantName(chat, message.senderId);
     const buildForward = (): ChatMessage => {
       if (picked.length === 1 && picked[0].senderId !== 'narrator') {
         const { thought: _thought, replyBatchId: _batch, ...rest } = picked[0];
@@ -3736,7 +3745,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         const privateContext = buildGroupPrivateContext(
           chat,
           (id) => latestContacts.find((item) => item.id === id)?.name || getNpcByParticipantId(characterNpcs, id)?.name,
-          personaDraft.name.trim() || '玩家',
+          personaNickname,
           socialActions.privateMessage.reason
         );
         const updatedDirect = {
@@ -3998,7 +4007,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
     const prompt = buildPrompt({ chatId: direct?.id ?? '', backgroundCharacterId: opponentId,
       currentInput: message || `${gameName}棋局进行中`, historyLimit: 35, memoryInjection });
     prompt.push({ role: 'system', content: `【当前唯一任务：${gameName}局内聊天】你是${actor.name}，正在和玩家玩手机小游戏「${gameName}」。根据你的人设、记忆、补充设定、世界书、双方关系及公开棋盘，像真人一样说一句简短的话。本局对话比旧微信聊天更接近眼前，请接续本局已经聊过的内容，不要重复自己之前说过的句子。${message ? '玩家刚发了消息，请自然回应；也可以接着之前的话题。' : '这次是你偶尔主动发言，玩家刚刚没有发消息；可以针对最新局势或此前对话开口，不要假装玩家刚提问。'}可以评价局势、开玩笑、表达情绪或反问；不要编造没有发生的落子，不要假装真实世界发生了棋盘上的事。棋步和规则由程序决定，你不能在回复里擅自落子、悔棋或宣布胜负。不要执行微信聊天动作。只返回 JSON：{"reply":["一句口语化回复"]}。` });
-    prompt.push({ role: 'user', content: `棋盘情况：${context}\n本局对话（按时间顺序）：${history.slice(-30).map((line) => `${line.from === 'user' ? personaDraft.name.trim() || '玩家' : actor.name}：${line.text}`).join('\n') || '暂无'}\n${message ? `玩家刚说：${message}` : '请根据当前棋局和此前局内对话，自然地主动说一句。'}` });
+    prompt.push({ role: 'user', content: `棋盘情况：${context}\n本局对话（按时间顺序）：${history.slice(-30).map((line) => `${line.from === 'user' ? personaNickname : actor.name}：${line.text}`).join('\n') || '暂无'}\n${message ? `玩家刚说：${message}` : '请根据当前棋局和此前局内对话，自然地主动说一句。'}` });
     const response = await requestChatReply(prompt, apiPreset, () => {}, undefined, { retryOnFormatError: false });
     const first = Array.isArray(response.reply) ? response.reply[0] : '';
     const line = typeof first === 'string' ? first : first && typeof first === 'object' && 'text' in first && typeof first.text === 'string' ? first.text : '';
@@ -4376,7 +4385,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                         >
                           {(activeChat.avatars.user || personaDraft.avatarUrl)
                             ? <img src={activeChat.avatars.user || personaDraft.avatarUrl} alt="" className="h-full w-full object-cover" />
-                            : personaDraft.name.trim().charAt(0) || '我'}
+                            : personaNickname.charAt(0)}
                         </span>
                       </button>
                     ) : (
@@ -5214,10 +5223,10 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
             </button>
           </div>
         )}
-        {activeTab === 'discover' && discoverPage === 'channels' && <ChannelsApp userName={personaDraft.name.trim() || '我'} avatarUrl={personaDraft.avatarUrl} contacts={contacts.map(({ id, name }) => ({ id, name }))} />}
+        {activeTab === 'discover' && discoverPage === 'channels' && <ChannelsApp userName={personaNickname} avatarUrl={personaDraft.avatarUrl} contacts={contacts.map(({ id, name }) => ({ id, name }))} />}
         {activeTab === 'discover' && discoverPage === 'wechat-reading' && <WeChatReadingApp
           contacts={contacts.map(({ id, name }) => ({ id, name }))}
-          userName={personaDraft.name.trim() || '我'}
+          userName={personaNickname}
           onRespond={async (request) => {
             const actor = contacts.find(item => item.id === request.characterId);
             if (!actor) throw new Error('共读角色已不在通讯录中。');
@@ -5263,7 +5272,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
             setChats(readStoredValue(CHATS_STORAGE_KEY, [] as ChatConversation[], isChatList));
           }}
         />}
-        {activeTab === 'discover' && discoverPage === 'text-adventure' && <TextAdventureApp userName={personaDraft.name.trim() || '我'} contacts={contacts.map(({ id, name }) => ({ id, name }))} worldBooks={readContactWorldBooks().map(({ id, name }) => ({ id, name }))} onAdvance={async (request: AdventureRequest) => {
+        {activeTab === 'discover' && discoverPage === 'text-adventure' && <TextAdventureApp userName={personaNickname} contacts={contacts.map(({ id, name }) => ({ id, name }))} worldBooks={readContactWorldBooks().map(({ id, name }) => ({ id, name }))} onAdvance={async (request: AdventureRequest) => {
           const apiPresets = readSetting(SETTINGS_KEYS.apiPresets, [] as ApiPreset[], isApiPresetList);
           const activeId = readSetting(SETTINGS_KEYS.activeApiPreset, apiPresets[0]?.id ?? '', (value): value is string => typeof value === 'string');
           const apiPreset = apiPresets.find(preset => preset.id === activeId) ?? apiPresets.find(preset => preset.endpoint.trim() && preset.apiKey.trim());
@@ -5281,7 +5290,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
           if (boundWorldBooks) prompt.push({ role: 'system', content: `【本次冒险绑定的世界书】\n${boundWorldBooks}\n仅将它们用于这场沉浸式文字冒险。与世界基础设定冲突时优先遵循绑定世界书，但不要推翻本局已经发生的事实。` });
           prompt.push({ role: 'system', content: `【文字冒险番外·叙事引擎】你是主持人，负责推进一个可持续的互动世界。世界档案：${JSON.stringify(lore)}。这些秘密供主持人使用，不要一次性剧透；人物只知道自己能够知道的事。固定开场已经发生，此后根据选择、之前的后果和 NPC 自身目标推进，不要重复预设章节，不要强迫回到唯一主线。保持规则、物资、伤势、关系、地点和时间连续；允许失败、损失、歧路及温柔时刻，但不要无预兆地杀死玩家或让剧情卡死。玩家行动仅由玩家决定，不替玩家写内心、台词或不可逆选择。${actor ? `同行者是${actor.name}，与玩家同为主角而非随从。根据他/她原有人设、记忆、关系和世界书，让其保有独立目标、判断和选择。每次生成新场景时，必须在同一次回复的 companionAction 中写出 TA 针对刚才行动或新局面的自然反应，可以是倾向、评价、提议、疑问、闲聊、拒绝或实际行动；不要总是只认可玩家，也不要让 TA 永远被动。若本轮由同行角色决定下一步，companionAction 必须明确写出 TA 自己选了什么、为什么，场景结果要与其行动一致。穿越是番外，不改写原聊天正史。` : '本局没有同行角色，companionAction 留空。'}每次只推进一个有变化的场景，正文约180～450字，显示 NPC 的目标与反应，留下2～4个有明显差异的选项，同时允许玩家自由输入。物品只有在本回合结果里确实得到时才填 gainedItem，不能因“尝试取得”就发放。每四回合写约150～300字的累计纪要，继承上一次纪要并补充本阶段的重要事实、人物动机、未解决线索、物资与关系变化；其他回合 summary 为空。只返回 JSON 对象，格式：{"reply":["本回合场景正文"],"chapter":"章节名","place":"地点","title":"场景标题","choices":[{"title":"行动","detail":"可能的方向，不保证结果","trait":"courage|insight|fate"}],"companionAction":"同行角色对本回合的即时反应，没有角色则为空","gainedItem":"本回合实际得到的物品，没有则为空","summary":"仅第4、8、12等回合填写"}。不要加入聊天消息、支付等动作。` });
           prompt.push({ role: 'user', content: JSON.stringify({
-            player: personaDraft.name.trim() || '玩家', turn: request.turn,
+            player: personaNickname, turn: request.turn,
             previousScene: request.scene, decision: request.decision, decisionBy: request.decisionBy,
             recentEvents: request.recentEvents, latestCumulativeSummary: request.summaries.at(-1) ?? '',
             items: request.items, stats: request.stats, recentInteractions: request.recentInteractions,
@@ -5335,7 +5344,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
           setChats(readStoredValue(CHATS_STORAGE_KEY, [] as ChatConversation[], isChatList));
         }} />}
         {activeTab === 'discover' && discoverPage === 'time-capsule' && (
-          <TimeCapsuleApp userName={personaDraft.name.trim() || '我'} contacts={contacts.map(({ id, name }) => ({ id, name }))}
+          <TimeCapsuleApp userName={personaNickname} contacts={contacts.map(({ id, name }) => ({ id, name }))}
             onCharacterWrite={async (characterId, unlockDate, topic) => {
               const apiPresets = readSetting(SETTINGS_KEYS.apiPresets, [] as ApiPreset[], isApiPresetList);
               const activeId = readSetting(SETTINGS_KEYS.activeApiPreset, apiPresets[0]?.id ?? '', (value): value is string => typeof value === 'string');
@@ -5361,7 +5370,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         )}
         {activeTab === 'discover' && discoverPage === 'moments' && (
           <MomentsTab
-            userName={personaDraft.name}
+            userName={personaNickname}
             userAvatarUrl={personaDraft.avatarUrl ?? ''}
             contacts={contacts}
             npcs={characterNpcs}
@@ -5399,7 +5408,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         {activeTab === 'discover' && discoverPage === 'gomoku' && (
           <GomokuGame
             contacts={contacts.map(({ id, name }) => ({ id, name }))}
-            userName={personaDraft.name.trim() || '我'}
+            userName={personaNickname}
             onTalk={async (opponentId, message, gameHistory, situation, mode) => {
               const apiPresets = readSetting(SETTINGS_KEYS.apiPresets, [] as ApiPreset[], isApiPresetList);
               const activeId = readSetting(SETTINGS_KEYS.activeApiPreset, apiPresets[0]?.id ?? '', (value): value is string => typeof value === 'string');
@@ -5427,7 +5436,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
               });
               prompt.push({
                 role: 'user',
-                content: `棋局情况：${situation}\n本局聊天（按时间顺序）：${gameHistory.slice(-30).map(item => `${item.from === 'user' ? personaDraft.name || '玩家' : opponent.name}：${item.text}`).join('\n') || '暂无'}\n${mode === 'undo-request' ? '请决定是否同意玩家悔棋。' : mode === 'auto' ? '请接续本局对话和新局势偶尔主动说一句；如果想悔棋，请明确请求。' : '请回复玩家最后一句，并决定是否让棋。'}`,
+                content: `棋局情况：${situation}\n本局聊天（按时间顺序）：${gameHistory.slice(-30).map(item => `${item.from === 'user' ? personaNickname : opponent.name}：${item.text}`).join('\n') || '暂无'}\n${mode === 'undo-request' ? '请决定是否同意玩家悔棋。' : mode === 'auto' ? '请接续本局对话和新局势偶尔主动说一句；如果想悔棋，请明确请求。' : '请回复玩家最后一句，并决定是否让棋。'}`,
               });
               const response = await requestChatReply(prompt, apiPreset, () => {}, undefined, { retryOnFormatError: false });
               const first = Array.isArray(response.reply) ? response.reply[0] : '';
@@ -5462,7 +5471,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
           />
         )}
         {activeTab === 'discover' && discoverPage === 'go' && (
-          <GoGame contacts={contacts.map(({ id, name }) => ({ id, name }))} userName={personaDraft.name.trim() || '我'} onTalk={talkInBoardGame}
+          <GoGame contacts={contacts.map(({ id, name }) => ({ id, name }))} userName={personaNickname} onTalk={talkInBoardGame}
             onShare={(result, recipients) => {
               for (const charId of recipients) mutateDirectChat(charId, chat => {
                 if (chat.messages.some(message => message.id === `${result.id}-${charId}`)) return;
@@ -5474,7 +5483,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
             }} />
         )}
         {activeTab === 'discover' && discoverPage === 'reversi' && (
-          <ReversiGame contacts={contacts.map(({ id, name }) => ({ id, name }))} userName={personaDraft.name.trim() || '我'} onTalk={talkInBoardGame}
+          <ReversiGame contacts={contacts.map(({ id, name }) => ({ id, name }))} userName={personaNickname} onTalk={talkInBoardGame}
             onShare={(result, recipients) => {
               for (const charId of recipients) mutateDirectChat(charId, chat => {
                 if (chat.messages.some(message => message.id === `${result.id}-${charId}`)) return;
@@ -5523,7 +5532,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         {activeTab === 'discover' && discoverPage === 'zha-jin-hua' && (
           <ZhaJinHuaGame
             contacts={contacts.map(({ id, name }) => ({ id, name }))}
-            userName={personaDraft.name.trim() || '我'}
+            userName={personaNickname}
             onTalk={async (characterId, message, context, history) => {
               const actor = contacts.find(contact => contact.id === characterId);
               if (!actor) return '';
@@ -5560,7 +5569,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         {activeTab === 'discover' && discoverPage === 'liars-bar' && (
           <LiarsBarGame
             contacts={contacts.map(({ id, name }) => ({ id, name }))}
-            userName={personaDraft.name.trim() || '我'}
+            userName={personaNickname}
             onTalk={async (characterId, situation) => {
               const actor = contacts.find((contact) => contact.id === characterId);
               if (!actor) return '';
@@ -5603,7 +5612,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
               ...contacts.map(({ id, name }) => ({ id, name, kind: '角色' as const })),
               ...characterNpcs.map(({ id, name }) => ({ id: npcParticipantId(id), name, kind: 'NPC' as const })),
             ]}
-            userName={personaDraft.name.trim() || '我'}
+            userName={personaNickname}
             onShare={(result, recipients) => {
               for (const charId of recipients) {
                 mutateDirectChat(charId, chat => {
@@ -5630,7 +5639,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
               ...contacts.map(({ id, name }) => ({ id, name, kind: '角色' as const })),
               ...characterNpcs.map(({ id, name }) => ({ id: npcParticipantId(id), name, kind: 'NPC' as const })),
             ]}
-            userName={personaDraft.name.trim() || '我'}
+            userName={personaNickname}
             onAi={async ({ actor, action, word, clue }) => {
               const apiPresets = readSetting(SETTINGS_KEYS.apiPresets, [] as ApiPreset[], isApiPresetList);
               const activeId = readSetting(SETTINGS_KEYS.activeApiPreset, apiPresets[0]?.id ?? '', (value): value is string => typeof value === 'string');
@@ -5690,7 +5699,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
               ...contacts.map(({ id, name, persona }) => ({ id, name, persona, kind: '角色' as const })),
               ...characterNpcs.map(({ id, name, persona }) => ({ id: npcParticipantId(id), name, persona, kind: 'NPC' as const })),
             ]}
-            userName={personaDraft.name.trim() || '我'}
+            userName={personaNickname}
             onSpeak={async ({ actor, people: players, roles, alive, day, announcement, userSpeech, history, known, previousSpeeches }) => {
               const apiPresets = readSetting(SETTINGS_KEYS.apiPresets, [] as ApiPreset[], isApiPresetList);
               const activeId = readSetting(SETTINGS_KEYS.activeApiPreset, apiPresets[0]?.id ?? '', (value): value is string => typeof value === 'string');
@@ -5712,7 +5721,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
               });
               const publicHistory = history.filter(item => !item.includes(' 夜：')).slice(-20);
               const userPersona = [
-                `名称：${personaDraft.name.trim() || '玩家'}`,
+                `名称：${personaNickname}`,
                 personaDraft.identity && `身份：${personaDraft.identity}`,
                 personaDraft.personality && `性格：${personaDraft.personality}`,
                 personaDraft.background && `背景：${personaDraft.background}`,
@@ -5768,7 +5777,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
               ...contacts.map(({ id, name, persona }) => ({ id, name, persona, kind: '角色' as const })),
               ...characterNpcs.map(({ id, name, persona }) => ({ id: npcParticipantId(id), name, persona, kind: 'NPC' as const })),
             ]}
-            userName={personaDraft.name.trim() || '我'}
+            userName={personaNickname}
             onGenerateScript={async (genre, description, roleCount) => {
               const apiPresets = readSetting(SETTINGS_KEYS.apiPresets, [] as ApiPreset[], isApiPresetList);
               const activeId = readSetting(SETTINGS_KEYS.activeApiPreset, apiPresets[0]?.id ?? '', (value): value is string => typeof value === 'string');
@@ -5804,7 +5813,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                 memoryInjection,
               });
               const userPersona = [
-                `名称：${personaDraft.name.trim() || '玩家'}`,
+                `名称：${personaNickname}`,
                 personaDraft.identity && `身份：${personaDraft.identity}`,
                 personaDraft.personality && `性格：${personaDraft.personality}`,
                 personaDraft.background && `背景：${personaDraft.background}`,
@@ -5851,7 +5860,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
               ...contacts.map(({ id, name }) => ({ id, name, kind: '角色' as const })),
               ...characterNpcs.map(({ id, name }) => ({ id: npcParticipantId(id), name, kind: 'NPC' as const })),
             ]}
-            userName={personaDraft.name.trim() || '我'}
+            userName={personaNickname}
             onGenerate={async (style) => {
               const apiPresets = readSetting(SETTINGS_KEYS.apiPresets, [] as ApiPreset[], isApiPresetList);
               const activeId = readSetting(SETTINGS_KEYS.activeApiPreset, apiPresets[0]?.id ?? '', (value): value is string => typeof value === 'string');
@@ -5883,7 +5892,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
               );
               const prompt = buildPrompt({ chatId: direct?.id ?? '', backgroundCharacterId: host.id,
                 currentInput: question, historyLimit: 40, memoryInjection });
-              prompt.push({ role: 'system', content: `【当前唯一任务：海龟汤主持】你是${host.name}，请沿用已有的人设、补充设定、与玩家的聊天及本地记忆所形成的说话方式，但本轮只主持海龟汤，不执行聊天附件或社交动作。玩家是${personaDraft.name.trim() || '玩家'}。汤面：${puzzle.surface}\n保密汤底：${puzzle.truth}\n你必须严格以汤底为准，不能临时改写真相或编造新的关键设定。${mode === 'question' ? '玩家正在提问。判断问题是否能根据汤底回答“是”“不是”或“无关”；若问题不能二分，简短引导玩家换个问法，verdict 设为 irrelevant。只提供一个简短自然的回答，不透露汤底、幕后人物或尚未被问到的线索。' : '玩家正在提交完整推理。只有当推理说中核心事件及关键隐藏条件时 solved 才为 true；只说中枝节时为 false。错误时简短指出尚未说中的方向，不揭晓答案；正确时简短肯定，完整汤底会由页面揭晓。'}只返回 JSON：{"reply":["一句主持人回答"],"verdict":"yes或no或irrelevant","solved":false}。` });
+              prompt.push({ role: 'system', content: `【当前唯一任务：海龟汤主持】你是${host.name}，请沿用已有的人设、补充设定、与玩家的聊天及本地记忆所形成的说话方式，但本轮只主持海龟汤，不执行聊天附件或社交动作。玩家是${personaNickname}。汤面：${puzzle.surface}\n保密汤底：${puzzle.truth}\n你必须严格以汤底为准，不能临时改写真相或编造新的关键设定。${mode === 'question' ? '玩家正在提问。判断问题是否能根据汤底回答“是”“不是”或“无关”；若问题不能二分，简短引导玩家换个问法，verdict 设为 irrelevant。只提供一个简短自然的回答，不透露汤底、幕后人物或尚未被问到的线索。' : '玩家正在提交完整推理。只有当推理说中核心事件及关键隐藏条件时 solved 才为 true；只说中枝节时为 false。错误时简短指出尚未说中的方向，不揭晓答案；正确时简短肯定，完整汤底会由页面揭晓。'}只返回 JSON：{"reply":["一句主持人回答"],"verdict":"yes或no或irrelevant","solved":false}。` });
               prompt.push({ role: 'user', content: JSON.stringify({ mode, question,
                 recentHistory: history.slice(-20).map(turn => ({ kind: turn.kind, question: turn.question, answer: turn.answer, verdict: turn.verdict })) }) });
               const response = await requestChatReply(prompt, apiPreset, () => {}, undefined, { retryOnFormatError: false });
@@ -5910,7 +5919,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
               );
               const prompt = buildPrompt({ chatId: direct?.id ?? '', backgroundCharacterId: actor.id,
                 currentInput: `${surface}\n${recent}`, historyLimit: 40, memoryInjection });
-              prompt.push({ role: 'system', content: `【当前唯一任务：海龟汤猜汤】你只扮演${actor.name}。沿用上文人设、补充设定、聊天与本地记忆塑造的性格及与玩家的关系，但本轮只玩海龟汤，不执行聊天附件或社交动作。玩家${personaDraft.name.trim() || '玩家'}是主持人，只有玩家知道汤底。你只知道题名“${title}”、汤面“${surface}”以及下面的公开问答；绝不能假装知道汤底，也不要从角色记忆中捏造这道题的答案。每次只提出一个能够用“是／不是／无关”回答的问题。积累到足够线索后可以提交一次完整推理，此时 action 为 guess，reply 写出你认为发生的具体经过。此前 action 为 question。不要自己代替主持人回答，不要在同一次回复中连续提问。只返回 JSON：{"reply":["一句问题或完整推理"],"action":"question或guess"}。` });
+              prompt.push({ role: 'system', content: `【当前唯一任务：海龟汤猜汤】你只扮演${actor.name}。沿用上文人设、补充设定、聊天与本地记忆塑造的性格及与玩家的关系，但本轮只玩海龟汤，不执行聊天附件或社交动作。玩家${personaNickname}是主持人，只有玩家知道汤底。你只知道题名“${title}”、汤面“${surface}”以及下面的公开问答；绝不能假装知道汤底，也不要从角色记忆中捏造这道题的答案。每次只提出一个能够用“是／不是／无关”回答的问题。积累到足够线索后可以提交一次完整推理，此时 action 为 guess，reply 写出你认为发生的具体经过。此前 action 为 question。不要自己代替主持人回答，不要在同一次回复中连续提问。只返回 JSON：{"reply":["一句问题或完整推理"],"action":"question或guess"}。` });
               prompt.push({ role: 'user', content: JSON.stringify({ surface, history: history.slice(-24).map(turn => ({
                 action: turn.kind, yourQuestionOrGuess: turn.question, hostVerdict: turn.verdict, hostAnswer: turn.answer,
               })), instruction: '轮到你问一个问题，或者在把握足够时提交完整推理。' }) });
@@ -5958,9 +5967,9 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
           <div className="min-h-full bg-[#ededed] pb-6">
             <button type="button" onClick={() => setMePage('settings')} className="flex w-full items-center gap-4 bg-white px-6 pb-9 pt-20 text-left active:bg-slate-50">
               <span className="flex h-[68px] w-[68px] shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[#dce9e7] text-2xl font-bold text-[#486c69]">
-                {personaDraft.avatarUrl ? <img src={personaDraft.avatarUrl} alt="我的头像" className="h-full w-full object-cover" /> : (personaDraft.name.trim().charAt(0) || '我')}
+                {personaDraft.avatarUrl ? <img src={personaDraft.avatarUrl} alt="我的头像" className="h-full w-full object-cover" /> : personaNickname.charAt(0)}
               </span>
-              <span className="min-w-0 flex-1"><strong className="block truncate text-[20px] font-semibold text-[#191919]">{personaDraft.name.trim() || '未设置姓名'}</strong><span className="mt-2 block truncate text-[13px] text-[#888]">微信号：{personaDraft.wechatId?.trim() || '未设置'}</span></span>
+              <span className="min-w-0 flex-1"><strong className="block truncate text-[20px] font-semibold text-[#191919]">{personaDraft.nickname?.trim() || '未设置网名'}</strong><span className="mt-2 block truncate text-[13px] text-[#888]">微信号：{personaDraft.wechatId?.trim() || '未设置'}</span></span>
               <ChevronRight className="h-5 w-5 shrink-0 text-[#b4b4b4]" />
             </button>
             <div className="mt-3 bg-white">
@@ -6012,7 +6021,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                     <img src={personaDraft.avatarUrl} alt="AI 人设头像" className="w-full h-full rounded-[14px] object-cover" />
                   ) : (
                     <div className="w-full h-full rounded-[14px] bg-white flex items-center justify-center text-lg font-bold text-[#2C4A5C]">
-                      {personaDraft.name.trim().charAt(0) || '?'}
+                      {personaNickname.charAt(0)}
                     </div>
                   )}
                 </div>
@@ -6041,11 +6050,31 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                 />
               </label>
               <label className="block text-[11px] font-semibold text-[#2C4A5C]">
-                名称
+                人设预设名称
                 <input
                   value={personaDraft.name}
                   onChange={(event) => updatePersonaField('name', event.target.value)}
                   maxLength={40}
+                  className="mt-1 w-full bg-white/70 border border-white rounded-xl px-3 py-2 text-xs outline-none"
+                />
+              </label>
+              <label className="block text-[11px] font-semibold text-[#2C4A5C]">
+                微信网名
+                <input
+                  value={personaDraft.nickname ?? ''}
+                  onChange={(event) => updatePersonaField('nickname', event.target.value)}
+                  maxLength={40}
+                  placeholder="显示在「我」页面，也会让角色知道"
+                  className="mt-1 w-full bg-white/70 border border-white rounded-xl px-3 py-2 text-xs outline-none"
+                />
+              </label>
+              <label className="block text-[11px] font-semibold text-[#2C4A5C]">
+                真名
+                <input
+                  value={getUserRealName(personaDraft)}
+                  onChange={(event) => updatePersonaField('realName', event.target.value)}
+                  maxLength={40}
+                  placeholder="填写在人设中，不显示在「我」页面"
                   className="mt-1 w-full bg-white/70 border border-white rounded-xl px-3 py-2 text-xs outline-none"
                 />
               </label>
@@ -6193,7 +6222,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                 value={chatAppearance.userAvatarFrame}
                 onChange={(next) => updateChatAppearance({ userAvatarFrame: next })}
                 previewUrl={personaDraft.avatarUrl}
-                previewText={personaDraft.name.trim().charAt(0) || '我'}
+                previewText={personaNickname.charAt(0)}
                 radiusClass="rounded-xl"
               />
               <AvatarFrameEditor

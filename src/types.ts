@@ -59,7 +59,10 @@ export interface UserProfile {
 
 export interface UserPersona {
   id: string;
+  /** Name of this saved persona preset. */
   name: string;
+  nickname?: string;
+  realName?: string;
   wechatId?: string;
   avatarUrl?: string;
   identity: string;

@@ -65,7 +65,11 @@ const readActiveUserPersona = () => {
     isRecord(item) && item.id === parsed.activeProfileId);
   if (!isRecord(persona)) return '';
   return [
-    `名称：${typeof persona.name === 'string' ? persona.name : ''}`,
+    typeof persona.nickname === 'string' && persona.nickname.trim() ? `微信网名：${persona.nickname.trim()}` : '',
+    typeof persona.realName === 'string' && persona.realName.trim()
+      ? `真名：${persona.realName.trim()}`
+      : persona.realName === undefined && typeof persona.name === 'string' && !['默认人设', '未命名人设'].includes(persona.name.trim())
+        ? `真名：${persona.name.trim()}` : '',
     typeof persona.identity === 'string' && persona.identity ? `身份：${persona.identity}` : '',
     typeof persona.personality === 'string' && persona.personality ? `个性：${persona.personality}` : '',
     typeof persona.background === 'string' && persona.background ? `背景：${persona.background}` : '',
