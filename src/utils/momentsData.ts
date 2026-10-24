@@ -5,6 +5,7 @@ import { CharacterNpc, readCharacterNpcs } from './characterNpcs';
 export const MOMENTS_STORAGE_KEY = 'yyphone:wechat-moments';
 export const MOMENTS_COVER_STORAGE_KEY = 'yyphone:wechat-moments-cover';
 export const MOMENT_USER_ID = 'user';
+const CHATS_STORAGE_KEY = 'yyphone:wechat-chats';
 
 export type MomentAuthorType = 'user' | 'char' | 'npc';
 
@@ -65,6 +66,22 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const stringList = (value: unknown): string[] =>
   Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+
+/** A blocked one-to-one chat blocks that character's access to the player's moments. */
+export const readBlockedMomentActorIds = (): Set<string> => {
+  const chats = readStoredValue<unknown>(CHATS_STORAGE_KEY, [], (value): value is unknown => true);
+  if (!Array.isArray(chats)) return new Set();
+  return new Set(chats.flatMap((chat) =>
+    isRecord(chat) && chat.type === 'direct' && chat.blocked === true &&
+    Array.isArray(chat.participantIds) && chat.participantIds.length === 1 &&
+    typeof chat.participantIds[0] === 'string'
+      ? [chat.participantIds[0]] : []
+  ));
+};
+
+export const isBlockedMomentActor = (actor: MomentActor, blockedIds: Set<string>) =>
+  blockedIds.has(actor.id) ||
+  (actor.type === 'npc' && (blockedIds.has(`npc:${actor.id}`) || actor.linkedCharIds.some((id) => blockedIds.has(id))));
 
 export const createMomentId = (prefix: string) =>
   `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -197,7 +214,8 @@ const isActorVisible = (rule: MomentVisibilityRule | undefined, actor: MomentAct
 /** Characters/NPCs that may like or comment on a post. */
 export const getInteractionCandidates = (post: MomentPost, actors: MomentActor[]): MomentActor[] => {
   if (post.authorType === 'user') {
-    return actors.filter((actor) => isActorVisible(post.visibilityRule, actor));
+    const blockedIds = readBlockedMomentActorIds();
+    return actors.filter((actor) => isActorVisible(post.visibilityRule, actor) && !isBlockedMomentActor(actor, blockedIds));
   }
   const author = actors.find((actor) => actor.id === post.authorId);
   const linked = author?.linkedCharIds ?? (post.parentCharId ? [post.parentCharId] : []);
@@ -260,7 +278,8 @@ export const buildMomentsInjection = (
   nameOf: (charId: string) => string | undefined
 ): MomentsInjection => {
   if (isObserver) return EMPTY_MOMENTS_INJECTION;
-  const charIds = participantIds.filter((id) => !id.startsWith('npc:'));
+  const blockedIds = readBlockedMomentActorIds();
+  const charIds = participantIds.filter((id) => !id.startsWith('npc:') && !blockedIds.has(id));
   if (charIds.length === 0) return EMPTY_MOMENTS_INJECTION;
 
   const posts = readMoments();
@@ -337,9 +356,10 @@ export interface MomentChatAction {
 export const applyMomentsAfterChat = (injection: MomentsInjection, actions: MomentChatAction[]) => {
   if (injection.marks.length === 0) return;
   const now = new Date().toISOString();
+  const blockedIds = readBlockedMomentActorIds();
   updateMoments((posts) =>
     posts.map((post) => {
-      const marks = injection.marks.filter((mark) => mark.postId === post.id);
+      const marks = injection.marks.filter((mark) => mark.postId === post.id && !blockedIds.has(mark.charId));
       if (marks.length === 0) return post;
       const seenByCharIds = new Set(post.seenByCharIds);
       const seenCommentIdsByChar = { ...post.seenCommentIdsByChar };

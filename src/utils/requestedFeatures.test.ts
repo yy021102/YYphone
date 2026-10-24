@@ -18,7 +18,7 @@ import { normalizeCallReplyParts } from './callReply';
 import { createJournalEntry, generateGrowthNote, regenerateJournal, runJournal, updateJournalEntryContent } from './journalAi';
 import { buildGrowthInjection, buildJournalInjection, deleteJournalEntry, readGrowthNotes, readJournalEntries, readJournalSettings, writeGrowthNotes, writeJournalEntries, writeJournalSettings } from './journalData';
 import { activeMemoryArchive, deleteCharacterMemoryArchives, deleteMemoryArchive, guardMemoryArchive, invalidateMemoryArchive, memoryArchiveLabel, prepareMemoryArchiveSwitch } from './memoryArchives';
-import { applyMomentsAfterChat, buildMomentsInjection, MomentPost, MOMENTS_STORAGE_KEY, readMoments } from './momentsData';
+import { applyMomentsAfterChat, buildMomentsInjection, getInteractionCandidates, MomentActor, MomentPost, MOMENTS_STORAGE_KEY, readMoments } from './momentsData';
 import { readSetting, saveSetting, SETTINGS_KEYS } from './settings';
 import { emptyAlipayData, grantIntimatePay, readAlipayContacts, readAlipayData, requestIntimatePay, settleIncomingChatPayment, updateAlipayBalance, writeAlipayData, WECHAT_CHATS_STORAGE_KEY } from './alipayData';
 import { parseAiJson, parseChatResponse, parseForumPost } from './aiResponse';
@@ -2286,6 +2286,36 @@ test('only delivered comments become read, and observer chats get no moments', (
   applyMomentsAfterChat(first, []);
   assert.deepEqual(inject().marks[0].commentIds, ['comment-0', 'comment-1']);
   assert.equal(buildMomentsInjection(['char-1'], true, () => '').text, '');
+});
+
+test('blocked characters cannot read or interact with player moments, including an in-flight reply', () => {
+  const previousChats = localStorage.getItem(WECHAT_CHATS_STORAGE_KEY);
+  const actors: MomentActor[] = [
+    { id: 'blocked-char', name: '被拉黑角色', avatarUrl: '', persona: '', type: 'char', linkedCharIds: ['blocked-char'] },
+    { id: 'active-char', name: '正常角色', avatarUrl: '', persona: '', type: 'char', linkedCharIds: ['active-char'] },
+    { id: 'linked-npc', name: '关联 NPC', avatarUrl: '', persona: '', type: 'npc', linkedCharIds: ['blocked-char'] },
+  ];
+  const direct = { id: 'blocked-moment-chat', type: 'direct', blocked: false, participantIds: ['blocked-char'], messages: [] };
+  try {
+    saveSetting(WECHAT_CHATS_STORAGE_KEY, [direct]);
+    saveSetting(MOMENTS_STORAGE_KEY, [post()]);
+    const pending = buildMomentsInjection(['blocked-char'], false, () => '被拉黑角色');
+    assert.equal(pending.marks.length, 1);
+
+    saveSetting(WECHAT_CHATS_STORAGE_KEY, [{ ...direct, blocked: true }]);
+    assert.deepEqual(getInteractionCandidates(post(), actors).map((actor) => actor.id), ['active-char']);
+    assert.equal(buildMomentsInjection(['blocked-char', 'active-char'], false, (id) => id).marks.some((mark) => mark.charId === 'blocked-char'), false);
+    applyMomentsAfterChat(pending, [{ postId: 'post-1', charId: 'blocked-char', charName: '被拉黑角色', type: 'like' }]);
+    assert.deepEqual(readMoments()[0].likes, []);
+    assert.deepEqual(readMoments()[0].seenByCharIds, []);
+
+    saveSetting(WECHAT_CHATS_STORAGE_KEY, [direct]);
+    assert.equal(buildMomentsInjection(['blocked-char'], false, () => '被拉黑角色').marks.length, 1);
+    assert.equal(getInteractionCandidates(post(), actors).length, 3);
+  } finally {
+    if (previousChats === null) localStorage.removeItem(WECHAT_CHATS_STORAGE_KEY);
+    else localStorage.setItem(WECHAT_CHATS_STORAGE_KEY, previousChats);
+  }
 });
 
 test('complete home appearance snapshots round-trip without profile identity fields', () => {

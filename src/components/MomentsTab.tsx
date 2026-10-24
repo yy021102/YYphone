@@ -22,6 +22,7 @@ import { readSetting, SETTINGS_KEYS } from '../utils/settings';
 import {
   buildMomentActors,
   createMomentId,
+  getInteractionCandidates,
   MOMENT_USER_ID,
   MOMENTS_COVER_STORAGE_KEY,
   MomentActor,
@@ -265,39 +266,39 @@ export const MomentsTab: React.FC<MomentsTabProps> = ({ userName, userAvatarUrl,
     setNotice('');
     try {
       const result = await generateMomentInteractions(post, actors);
+      let addedLikes = 0;
+      let addedComments = 0;
       updateMoments((current) =>
         current.map((item) =>
-          item.id !== post.id
-            ? item
-            : {
-                ...item,
-                likes: [
-                  ...item.likes,
-                  ...result.likes.filter((like) => !item.likes.some((existing) => existing.id === like.id)),
-                ],
-                comments: [...item.comments, ...result.comments],
-                ...((item.updatedAt ?? '') === (post.updatedAt ?? '') ? {
-                  seenByCharIds: [...new Set([
-                    ...item.seenByCharIds,
-                    ...result.likes.map((like) => like.id),
-                    ...result.comments.map((comment) => comment.authorId),
-                  ])],
-                  seenCommentIdsByChar: {
-                    ...item.seenCommentIdsByChar,
-                    ...Object.fromEntries(
-                      [...new Set([...result.likes.map((like) => like.id), ...result.comments.map((comment) => comment.authorId)])]
-                        .map((id) => [id, [...new Set([
-                          ...(item.seenCommentIdsByChar[id] ?? []),
-                          ...post.comments.map((comment) => comment.id),
-                          ...result.comments.map((comment) => comment.id),
-                        ])]])
-                    ),
-                  },
-                } : {}),
-              }
+          item.id !== post.id ? item : (() => {
+            const allowedIds = new Set(getInteractionCandidates(item, actors).map((actor) => actor.id));
+            const likes = result.likes.filter((like) => allowedIds.has(like.id) && !item.likes.some((existing) => existing.id === like.id));
+            const comments = result.comments.filter((comment) => allowedIds.has(comment.authorId));
+            addedLikes = likes.length;
+            addedComments = comments.length;
+            const interactedIds = [...new Set([...likes.map((like) => like.id), ...comments.map((comment) => comment.authorId)])];
+            return {
+              ...item,
+              likes: [...item.likes, ...likes],
+              comments: [...item.comments, ...comments],
+              ...((item.updatedAt ?? '') === (post.updatedAt ?? '') ? {
+                seenByCharIds: [...new Set([...item.seenByCharIds, ...interactedIds])],
+                seenCommentIdsByChar: {
+                  ...item.seenCommentIdsByChar,
+                  ...Object.fromEntries(interactedIds.map((id) => [id, [...new Set([
+                    ...(item.seenCommentIdsByChar[id] ?? []),
+                    ...post.comments.map((comment) => comment.id),
+                    ...comments.map((comment) => comment.id),
+                  ])]])),
+                },
+              } : {}),
+            };
+          })()
         )
       );
-      setNotice(`已生成 ${result.likes.length} 个点赞、${result.comments.length} 条评论。`);
+      setNotice(addedLikes + addedComments > 0
+        ? `已生成 ${addedLikes} 个点赞、${addedComments} 条评论。`
+        : '当前没有可新增的互动，可能角色已被拉黑。');
     } catch (err) {
       console.error('Could not generate moment interactions.', err);
       setError(err instanceof Error ? err.message : '生成评论失败，请检查网络与 API 配置。');

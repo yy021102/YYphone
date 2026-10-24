@@ -4034,7 +4034,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
 
   return (
     <div className={`wechat-app relative flex-1 min-h-0 w-full flex flex-col overflow-hidden ${activeChat ? 'bg-[#F3F7FA]' : 'bg-[#ededed]'} ${!activeChat && !isDiscoverSubpage && !isMeSubpage ? 'wechat-main-tabs' : ''}`}>
-      {(activeTab !== 'me' || mePage !== 'home') && !(activeTab === 'discover' && discoverPage === 'moments') && <AppHeader
+      {(activeTab !== 'me' || mePage !== 'home') && !(activeTab === 'discover' && (discoverPage === 'moments' || discoverPage === 'channels')) && <AppHeader
         title={
           activeChat
             ? isGeneratingReply ? '对方正在输入...' : getChatTitle(activeChat)
@@ -5223,7 +5223,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
             </button>
           </div>
         )}
-        {activeTab === 'discover' && discoverPage === 'channels' && <ChannelsApp userName={personaNickname} avatarUrl={personaDraft.avatarUrl} contacts={contacts.map(({ id, name }) => ({ id, name }))} />}
+        {activeTab === 'discover' && discoverPage === 'channels' && <ChannelsApp userName={personaNickname} avatarUrl={personaDraft.avatarUrl} contacts={contacts.map(({ id, name, avatarUrl, persona }) => ({ id, name, avatarUrl, persona }))} onBack={() => setDiscoverPage('home')} />}
         {activeTab === 'discover' && discoverPage === 'wechat-reading' && <WeChatReadingApp
           contacts={contacts.map(({ id, name }) => ({ id, name }))}
           userName={personaNickname}

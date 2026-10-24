@@ -32,6 +32,7 @@ export interface AlipayData {
   allowedViewers: string[];
   lastInterestDate: string;
   chatSettlements?: Record<string, 'received' | 'returned'>;
+  channelGiftSettlements?: Record<string, 'sent' | 'received'>;
 }
 
 export interface AlipayContact {
@@ -97,6 +98,13 @@ const normalizeAlipayData = (value: unknown): AlipayData => {
         )
       ) as Record<string, number>
     : {};
+  const giftSettlements: Record<string, 'sent' | 'received'> = {
+    ...(Array.isArray(value.ledgerList) ? Object.fromEntries(value.ledgerList.filter(validLedgerItem)
+      .filter((item) => item.id.startsWith('channel-gift-'))
+      .map((item) => [item.id.slice('channel-gift-'.length), item.isExpense ? 'sent' : 'received'])) : {}),
+    ...(isRecord(value.channelGiftSettlements) ? Object.fromEntries(Object.entries(value.channelGiftSettlements)
+      .filter((entry): entry is [string, 'sent' | 'received'] => entry[1] === 'sent' || entry[1] === 'received')) : {}),
+  };
   return {
     balance: typeof value.balance === 'number' && Number.isFinite(value.balance) ? Math.max(0, value.balance) : 0,
     yuebao: typeof value.yuebao === 'number' && Number.isFinite(value.yuebao) ? Math.max(0, value.yuebao) : 0,
@@ -111,7 +119,9 @@ const normalizeAlipayData = (value: unknown): AlipayData => {
         })
       : [],
     monthlyBudgets: budgets,
-    ledgerList: Array.isArray(value.ledgerList) ? value.ledgerList.filter(validLedgerItem) : [],
+    ledgerList: Array.isArray(value.ledgerList)
+      ? value.ledgerList.filter(validLedgerItem).filter((item) => !item.id.startsWith('channel-gift-'))
+      : [],
     allowedViewers: Array.isArray(value.allowedViewers)
       ? value.allowedViewers.filter((id): id is string => typeof id === 'string')
       : [],
@@ -123,13 +133,17 @@ const normalizeAlipayData = (value: unknown): AlipayData => {
           (entry): entry is [string, 'received' | 'returned'] => entry[1] === 'received' || entry[1] === 'returned'
         ))
       : {},
+    ...(Object.keys(giftSettlements).length ? { channelGiftSettlements: giftSettlements } : {}),
   };
 };
 
 export const readAlipayData = (): AlipayData => {
   try {
     const raw = readStorageString(ALIPAY_STORAGE_KEY);
-    const account = normalizeAlipayData(raw ? JSON.parse(raw) : null);
+    const stored = raw ? JSON.parse(raw) : null;
+    const account = normalizeAlipayData(stored);
+    const hasLegacyGiftLedger = isRecord(stored) && Array.isArray(stored.ledgerList) &&
+      stored.ledgerList.some((item: unknown) => isRecord(item) && typeof item.id === 'string' && item.id.startsWith('channel-gift-'));
     const now = today();
     const lastDate = new Date(`${account.lastInterestDate}T00:00:00`);
     const todayDate = new Date(`${now}T00:00:00`);
@@ -140,7 +154,7 @@ export const readAlipayData = (): AlipayData => {
       }
       account.lastInterestDate = now;
       writeAlipayData(account);
-    } else if (!raw) {
+    } else if (!raw || hasLegacyGiftLedger) {
       writeAlipayData(account);
     }
     return account;
