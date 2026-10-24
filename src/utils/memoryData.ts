@@ -7,7 +7,15 @@ export const MEMORY_SETTINGS_KEY = 'yyphone:memory-settings';
 /** 不属于某个角色、对所有角色都生效的玩家通用记忆 */
 export const SHARED_MEMORY_ID = 'shared';
 
-export type MemoryCategory = 'core' | 'fact' | 'preference' | 'promise' | 'date' | 'emotion' | 'event';
+export type MemoryCategory = 'core' | 'fact' | 'preference' | 'promise' | 'date' | 'emotion' | 'event' | 'item';
+
+export interface GiftMemoryDetails {
+  name: string;
+  direction: 'player-to-character' | 'character-to-player';
+  date: string;
+  scene: string;
+  sourceKey?: string;
+}
 
 export const MEMORY_CATEGORIES: Array<{ id: MemoryCategory; label: string; emoji: string; hint: string }> = [
   { id: 'core', label: '核心', emoji: '💎', hint: '身份、关系基石、底线、重大事件（常驻）' },
@@ -17,6 +25,7 @@ export const MEMORY_CATEGORIES: Array<{ id: MemoryCategory; label: string; emoji
   { id: 'date', label: '日子', emoji: '📅', hint: '生日、纪念日、重要日期' },
   { id: 'emotion', label: '心事', emoji: '🫧', hint: '情绪里程碑、心结、被治愈的瞬间' },
   { id: 'event', label: '往事', emoji: '🎞️', hint: '一起经历过的事' },
+  { id: 'item', label: '物品', emoji: '🎁', hint: '玩家与角色实际互赠的物品，不含外卖' },
 ];
 
 export interface MemoryItem {
@@ -32,6 +41,7 @@ export interface MemoryItem {
   lastRecalledAt?: string;
   recallCount: number;
   source: 'chat' | 'manual' | 'import';
+  gift?: GiftMemoryDetails;
 }
 
 export interface EmbeddingConfig {
@@ -390,6 +400,7 @@ export interface MemoryCandidate {
   category: MemoryCategory;
   importance: number;
   pinned: boolean;
+  gift?: GiftMemoryDetails;
 }
 
 const normalizeText = (text: string) => text.replace(/\s+/g, '').toLowerCase();
@@ -424,6 +435,13 @@ export const addMemoryCandidates = async (
     const vector = vectors[index];
     const grams = bigrams(content);
     const duplicate = items.filter(sameOwner).find((item) => {
+      if (candidate.category === 'item' || item.category === 'item') {
+        return candidate.category === item.category && (
+          normalizeText(item.content) === normalizeText(content) ||
+          !!(candidate.gift && item.gift && candidate.gift.direction === item.gift.direction &&
+            candidate.gift.date === item.gift.date && normalizeText(candidate.gift.name) === normalizeText(item.gift.name))
+        );
+      }
       if (normalizeText(item.content) === normalizeText(content)) return true;
       const existing = store[item.id];
       if (vector && existing && existing.m === settings.embedding.model) return cosine(vector, existing.v) >= 0.88;
@@ -439,6 +457,7 @@ export const addMemoryCandidates = async (
       duplicate.updatedAt = now;
       duplicate.importance = Math.max(duplicate.importance, candidate.importance);
       duplicate.pinned = duplicate.pinned || candidate.pinned;
+      if (candidate.gift && !duplicate.gift) duplicate.gift = candidate.gift;
       merged += 1;
       return;
     }
@@ -453,6 +472,7 @@ export const addMemoryCandidates = async (
       updatedAt: now,
       recallCount: 0,
       source,
+      ...(candidate.gift ? { gift: candidate.gift } : {}),
     };
     items.push(item);
     if (vector) store[item.id] = { m: settings.embedding.model, v: vector };
@@ -506,6 +526,17 @@ export const importMemories = (
       updatedAt: now,
       recallCount: 0,
       source: 'import',
+      ...(isRecord(raw.gift) &&
+        typeof raw.gift.name === 'string' &&
+        (raw.gift.direction === 'player-to-character' || raw.gift.direction === 'character-to-player') &&
+        typeof raw.gift.date === 'string' && typeof raw.gift.scene === 'string'
+        ? { gift: {
+            name: raw.gift.name.slice(0, 100),
+            direction: raw.gift.direction,
+            date: raw.gift.date.slice(0, 10),
+            scene: raw.gift.scene.slice(0, 200),
+          } as GiftMemoryDetails }
+        : {}),
     });
   });
   if (items.length > 0) writeMemories([...existing, ...items]);

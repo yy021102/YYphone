@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { candidatesAt, createSudoku, findLogicalMove, type SudokuDifficulty } from '../utils/sudoku';
+import { readStoredValue, writeStoredValue } from '../utils/localStorage';
+import { isSudokuProgress, SUDOKU_PROGRESS_KEY, type SudokuCharacterMode, type SudokuProgress } from '../utils/sudokuProgress';
 
 type Contact = { id: string; name: string };
-type CharacterMode = 'off' | 'help' | 'participate' | 'watch';
+type CharacterMode = SudokuCharacterMode;
 type Props = {
   contacts: Contact[];
   onTalk: (id: string, mode: 'hint' | 'watch' | 'move', context: string) => Promise<string>;
@@ -10,36 +12,51 @@ type Props = {
 };
 
 export function SudokuGame({ contacts, onTalk, onShare }: Props) {
-  const [difficulty, setDifficulty] = useState<SudokuDifficulty>('normal');
-  const [game, setGame] = useState(createSudoku);
-  const [gameId, setGameId] = useState(() => crypto.randomUUID());
-  const [grid, setGrid] = useState(() => [...game.puzzle]);
-  const [selected, setSelected] = useState(-1);
-  const [notes, setNotes] = useState<Record<number, number[]>>({});
-  const [pencil, setPencil] = useState(false);
-  const [mode, setMode] = useState<CharacterMode>('off');
-  const [characterId, setCharacterId] = useState(contacts[0]?.id ?? '');
-  const [speech, setSpeech] = useState('');
-  const [speechHistory, setSpeechHistory] = useState<string[]>([]);
-  const [characterCells, setCharacterCells] = useState<number[]>([]);
-  const [recipients, setRecipients] = useState<string[]>([]);
-  const [shared, setShared] = useState(false);
-  const [shareNote, setShareNote] = useState('');
+  const [restored] = useState(() => readStoredValue(SUDOKU_PROGRESS_KEY, null as SudokuProgress | null,
+    (value): value is SudokuProgress | null => isSudokuProgress(value)));
+  const [difficulty, setDifficulty] = useState<SudokuDifficulty>(restored?.difficulty ?? 'normal');
+  const [nextDifficulty, setNextDifficulty] = useState<SudokuDifficulty>(restored?.nextDifficulty ?? restored?.difficulty ?? 'normal');
+  const [game, setGame] = useState(() => restored ? { puzzle: restored.puzzle, solution: restored.solution } : createSudoku());
+  const [gameId, setGameId] = useState(() => restored?.gameId ?? crypto.randomUUID());
+  const [grid, setGrid] = useState(() => restored?.grid ?? [...game.puzzle]);
+  const [selected, setSelected] = useState(restored?.selected ?? -1);
+  const [notes, setNotes] = useState<Record<number, number[]>>(restored?.notes ?? {});
+  const [pencil, setPencil] = useState(restored?.pencil ?? false);
+  const [mode, setMode] = useState<CharacterMode>(restored?.mode ?? 'off');
+  const [characterId, setCharacterId] = useState(restored?.characterId ?? contacts[0]?.id ?? '');
+  const [speech, setSpeech] = useState(() => restored?.speechHistory.at(-1) ?? '');
+  const [speechHistory, setSpeechHistory] = useState<string[]>(restored?.speechHistory ?? []);
+  const [characterCells, setCharacterCells] = useState<number[]>(restored?.characterCells ?? []);
+  const [recipients, setRecipients] = useState<string[]>(restored?.recipients ?? []);
+  const [shared, setShared] = useState(restored?.shared ?? false);
+  const [shareNote, setShareNote] = useState(restored?.shareNote ?? '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [hintIndex, setHintIndex] = useState(-1);
-  const [correctMoves, setCorrectMoves] = useState(0);
-  const nextCommentAt = useRef(5);
-  const seenCorrect = useRef(new Set<number>());
+  const [hintIndex, setHintIndex] = useState(restored?.hintIndex ?? -1);
+  const [correctMoves, setCorrectMoves] = useState(restored?.correctMoves ?? 0);
+  const nextCommentAt = useRef(restored?.nextCommentAt ?? 5);
+  const seenCorrect = useRef(new Set(restored?.seenCorrect ?? []));
   const session = useRef(0);
   const turnLock = useRef(false);
   const solved = grid.every((value, index) => value === game.solution[index]);
   const character = contacts.find(item => item.id === characterId);
   const filled = grid.filter(Boolean).length;
+  useEffect(() => {
+    const progress: SudokuProgress = {
+      version: 1, difficulty, nextDifficulty, puzzle: game.puzzle, solution: game.solution, grid,
+      gameId, selected, notes, pencil, mode, characterId, speechHistory, characterCells,
+      recipients, shared, shareNote, hintIndex, correctMoves,
+      seenCorrect: [...seenCorrect.current], nextCommentAt: nextCommentAt.current,
+    };
+    writeStoredValue(SUDOKU_PROGRESS_KEY, progress);
+  }, [difficulty, nextDifficulty, game, grid, gameId, selected, notes, pencil, mode, characterId,
+    speechHistory, characterCells, recipients, shared, shareNote, hintIndex, correctMoves]);
+  useEffect(() => () => { session.current++; turnLock.current = false; }, []);
 
-  const newGame = (level: SudokuDifficulty = difficulty) => {
+  const newGame = (level: SudokuDifficulty = nextDifficulty) => {
     session.current++;
     const next = createSudoku(level);
+    setDifficulty(level); setNextDifficulty(level);
     setGameId(crypto.randomUUID()); setRecipients([]); setShared(false); setShareNote('');
     setGame(next); setGrid([...next.puzzle]); setSelected(-1); setNotes({}); setSpeech(''); setSpeechHistory([]); setCharacterCells([]);
     turnLock.current = false;
@@ -108,7 +125,7 @@ export function SudokuGame({ contacts, onTalk, onShare }: Props) {
   return <section className="min-h-full bg-[#f4f5f2] px-3 pb-8 pt-4 text-[#273f37]">
     <div className="mx-auto max-w-[440px]">
       <div className="flex items-center justify-between"><div><h2 className="text-lg font-bold">数独 · 挑战</h2><p className="text-xs text-slate-500">唯一解 · {difficulty === 'hard' ? '高难题盘 · 23 个提示数' : '约 29 个提示数'}</p></div><button type="button" onClick={() => newGame()} className="rounded-xl bg-white px-3 py-2 text-xs font-semibold shadow-sm">新一局</button></div>
-      <label className="mt-3 flex items-center gap-2 text-xs">难度<select aria-label="数独难度" value={difficulty} onChange={event => { const level = event.target.value as SudokuDifficulty; setDifficulty(level); newGame(level); }} className="rounded-lg bg-white px-3 py-2 shadow-sm"><option value="normal">普通</option><option value="hard">困难</option></select><span className="text-slate-500">切换难度会开始新题</span></label>
+      <label className="mt-3 flex items-center gap-2 text-xs">下局难度<select aria-label="数独下局难度" value={nextDifficulty} onChange={event => setNextDifficulty(event.target.value as SudokuDifficulty)} className="rounded-lg bg-white px-3 py-2 shadow-sm"><option value="normal">普通</option><option value="hard">困难</option></select><span className="text-slate-500">选择后点击“新一局”生效</span></label>
       <p className="mt-3 text-xs text-slate-500">已填 {filled}/81 格 · 点格子后选数字，长按思考可以用笔记</p>
       <div className="mt-3 grid aspect-square grid-cols-9 overflow-hidden rounded-lg border-2 border-[#344e42] bg-white shadow-md">
         {grid.map((value, index) => {

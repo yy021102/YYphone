@@ -24,6 +24,7 @@ import {
 import { AppHeader } from '../components/AppHeader';
 import { showYyError, useErrorDialog } from '../components/ErrorDialog';
 import { addInventoryItem } from '../utils/inventoryData';
+import { giftDateToday, recordGiftMemory } from '../utils/giftMemory';
 import { removeContextNote, upsertContextNote } from '../utils/chatNotes';
 import {
   AlipayContact,
@@ -774,6 +775,17 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
         const recipient = contacts.find((contact) => contact.id === targetCharId);
         if (!recipient) throw new Error('找不到收礼角色。');
         const event = `玩家立即送达礼物「${checkoutProduct.title}」（¥${Number(checkoutProduct.price).toFixed(2)}），收礼对象：${recipient.name}。`;
+        if (checkoutProduct.type !== 'eleme') {
+          try {
+            recordGiftMemory(recipient.id, {
+              name: checkoutProduct.title, direction: 'player-to-character', date: giftDateToday(),
+              scene: `玩家在${checkoutProduct.type === 'xianyu' ? '闲鱼' : '淘宝'}选购并送达。${(market?.desc ?? xianyu?.desc ?? '').slice(0, 100)}`,
+              sourceKey: `purchase:${Date.now()}:${checkoutProduct.id}`,
+            });
+          } catch (error) {
+            console.warn('Could not record gift memory.', error);
+          }
+        }
         appendCharacterContextEvent(recipient.id, event, 'taobao');
         await sendCharacterDeliveryNotification(recipient.id, event, card, true);
       } else {

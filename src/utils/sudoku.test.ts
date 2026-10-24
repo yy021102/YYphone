@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { candidatesAt, countSolutions, createSudoku, findLogicalMove } from './sudoku';
+import { isSudokuProgress } from './sudokuProgress';
 
 test('generated challenge has one valid solution', () => {
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -31,4 +32,18 @@ test('hard challenge remains uniquely solvable after random transformations', ()
     assert.equal(countSolutions([...puzzle]), 1);
     for (let index = 0; index < 81; index++) if (puzzle[index]) assert.equal(puzzle[index], solution[index]);
   }
+});
+
+test('saved progress accepts a valid board and rejects a changed clue', () => {
+  const game = createSudoku();
+  const progress = { version: 1, difficulty: 'normal', nextDifficulty: 'hard', ...game,
+    grid: [...game.puzzle], gameId: 'game-1', selected: -1, notes: {}, pencil: false,
+    mode: 'participate', characterId: 'role-1', speechHistory: ['角色：我来看看'],
+    characterCells: [], recipients: [], shared: false, shareNote: '', hintIndex: -1,
+    correctMoves: 0, seenCorrect: [], nextCommentAt: 5 };
+  assert.equal(isSudokuProgress(progress), true);
+  const index = game.puzzle.findIndex(Boolean);
+  const changed = { ...progress, grid: [...progress.grid] };
+  changed.grid[index] = 0;
+  assert.equal(isSudokuProgress(changed), false);
 });

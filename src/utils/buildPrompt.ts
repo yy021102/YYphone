@@ -416,6 +416,13 @@ const toBaseMessageContent = (message: PromptChatMessage) => {
     return `[${message.senderId === 'user' ? '玩家发送' : '角色发送'}转账：¥${message.amount ?? '未知'}${message.recipientId ? `，收款方：${message.recipientId === 'user' ? '玩家' : message.recipientId}` : ''}${message.payerId ? `，由${message.payerId}的亲密付付款` : ''}；状态：${message.paymentStatus === 'pending' ? '待确认收款，尚未到账' : message.paymentStatus === 'returned' ? '已退回，未到账' : message.senderId === 'user' ? '已发出' : '已收款'}；说明：${message.text}]`;
   }
   if (message.kind === 'intimate-pay') return `[亲密付${message.senderId === 'user' ? '申请' : '决定'}；状态：${message.intimateStatus === 'pending' ? '待角色回应' : message.intimateStatus === 'granted' ? '已获准' : '已拒绝'}${message.amount ? `；月额度：¥${message.amount}` : ''}；${message.text}]`;
+  if (message.kind === 'link' && (message.source === '微信游戏 · 文字冒险' || message.source === 'text-adventure')) {
+    return [
+      '【玩家分享的沉浸式文字冒险进度卡片】',
+      '这是你和玩家在游戏中扮演角色的番外故事；卡片描述的是虚构世界内的剧情，不是真实穿越，也不应当作现实共同经历。请按你的人设自然回应玩家的分享。',
+      message.aiContext || message.content || message.text,
+    ].join('\n');
+  }
   if (message.kind === 'link') {
     return `[分享链接：${message.title || message.text}${message.source ? `；来源：${message.source}` : ''}${message.content ? `；摘要：${message.content}` : ''}]`;
   }

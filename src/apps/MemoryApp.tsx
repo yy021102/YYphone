@@ -29,6 +29,8 @@ import {
 import { advanceMemoryCursor, countNewMessages, extractMemoryCandidates } from '../utils/memoryAi';
 import { GrowthPanel, JournalPanel } from '../components/MemoryJournalGrowth';
 import { activeMemoryArchive, guardMemoryArchive, memoryArchiveLabel } from '../utils/memoryArchives';
+import { giftDateToday, giftMemoryContent } from '../utils/giftMemory';
+import type { GiftMemoryDetails } from '../utils/memoryData';
 import { getAutomaticWorldBookIdsForContacts, readWorldBookOptions } from '../utils/worldBookPrompt';
 
 interface MemoryAppProps {
@@ -67,6 +69,7 @@ export const MemoryApp: React.FC<MemoryAppProps> = ({ onBack }) => {
   const [category, setCategory] = useState<'all' | MemoryCategory>('all');
   const [search, setSearch] = useState('');
   const [editing, setEditing] = useState<MemoryItem | null>(null);
+  const [giftEditing, setGiftEditing] = useState<{ id?: string; gift: GiftMemoryDetails } | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [busy, setBusy] = useState('');
   const [secondaryModels, setSecondaryModels] = useState<Array<{ id: string; label: string }>>([]);
@@ -76,7 +79,7 @@ export const MemoryApp: React.FC<MemoryAppProps> = ({ onBack }) => {
   const [review, setReview] = useState<{ charId: string; cursor: string; candidates: Candidate[]; assertArchive: () => void } | null>(null);
   const [testQuery, setTestQuery] = useState('');
   const [testResults, setTestResults] = useState<ScoredMemory[] | null>(null);
-  const [tab, setTab] = useState<'memories' | 'journal' | 'growth'>('memories');
+  const [tab, setTab] = useState<'memories' | 'items' | 'journal' | 'growth'>('memories');
   const activeTab = ownerId === SHARED_MEMORY_ID ? 'memories' : tab;
   const importRef = useRef<HTMLInputElement>(null);
 
@@ -121,6 +124,8 @@ export const MemoryApp: React.FC<MemoryAppProps> = ({ onBack }) => {
   const owners = [...contacts.map((c) => ({ id: c.id, name: c.name })), { id: SHARED_MEMORY_ID, name: '玩家通用' }];
 
   const mine = memories.filter((item) => item.charId === ownerId);
+  const gifts = mine.filter((item) => item.category === 'item')
+    .sort((a, b) => (b.gift?.date ?? b.createdAt).localeCompare(a.gift?.date ?? a.createdAt));
   const visible = useMemo(() => {
     const keyword = search.trim().toLowerCase();
     return mine
@@ -205,6 +210,27 @@ export const MemoryApp: React.FC<MemoryAppProps> = ({ onBack }) => {
       recallCount: 0,
       source: 'manual',
     });
+  };
+
+  const saveGift = () => {
+    if (!giftEditing || !giftEditing.gift.name.trim() || !giftEditing.gift.date) return;
+    const gift = {
+      ...giftEditing.gift,
+      name: giftEditing.gift.name.trim().slice(0, 100),
+      scene: giftEditing.gift.scene.trim().slice(0, 160),
+    };
+    const content = giftMemoryContent(gift);
+    const now = new Date().toISOString();
+    const old = memories.find((item) => item.id === giftEditing.id);
+    const item: MemoryItem = old
+      ? { ...old, category: 'item', gift, content, updatedAt: now }
+      : { id: newMemoryId(), charId: ownerId, archiveKey: activeMemoryArchive(ownerId),
+          category: 'item', gift, content, importance: 3, pinned: false,
+          createdAt: now, updatedAt: now, recallCount: 0, source: 'manual' };
+    if (!persistMemories(old ? memories.map((entry) => entry.id === item.id ? item : entry) : [...memories, item])) return;
+    if (old && old.content !== content) removeEmbeddings([item.id]);
+    if (!old || old.content !== content) void embedInBackground([item]);
+    setGiftEditing(null);
   };
 
   // ---------- 整理记忆 ----------
@@ -436,8 +462,8 @@ export const MemoryApp: React.FC<MemoryAppProps> = ({ onBack }) => {
             : `当前关联微信私聊「${memoryArchiveLabel(ownerId)}」：记忆、流水账和成长笔记仅属于此档。请到聊天 → 更多 → 聊天存档切换；新档为空，删除存档会一并删除这些内容。`}
         </p>
         {ownerId !== SHARED_MEMORY_ID && (
-          <div className="grid grid-cols-3 rounded-2xl bg-white/70 p-1 text-xs">
-            {([['memories', '记忆库'], ['journal', '流水账'], ['growth', '成长笔记']] as const).map(([key, label]) => (
+          <div className="grid grid-cols-4 rounded-2xl bg-white/70 p-1 text-[11px]">
+            {([['memories', '记忆库'], ['items', '物品'], ['journal', '流水账'], ['growth', '成长笔记']] as const).map(([key, label]) => (
               <button
                 key={key}
                 type="button"
@@ -452,6 +478,43 @@ export const MemoryApp: React.FC<MemoryAppProps> = ({ onBack }) => {
 
         {activeTab === 'journal' && <JournalPanel charId={ownerId} charName={ownerName(ownerId)} flash={flash} />}
         {activeTab === 'growth' && <GrowthPanel charId={ownerId} charName={ownerName(ownerId)} flash={flash} />}
+
+        {activeTab === 'items' && (
+          <div className="space-y-3">
+            <div className={`${cardClass} p-4`}>
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <p className="text-sm font-bold text-[#4A5A6A]">🎁 互赠的物品</p>
+                  <p className="mt-1 text-[11px] text-slate-400">记录实际送出的礼物、日期与当时情景；聊天时可检索想起。</p>
+                </div>
+                <button type="button" className={gradBtn} onClick={() => setGiftEditing({ gift: { name: '', direction: 'player-to-character', date: giftDateToday(), scene: '' } })}>+ 记一件</button>
+              </div>
+              <p className="mt-2 text-[10px] text-slate-400">{gifts.length} 件 · {configured ? `${gifts.filter((item) => embeddedIds.has(item.id)).length} 件已向量化` : '使用关键词检索'}</p>
+            </div>
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-300" />
+              <input className={`${inputClass} pl-9`} placeholder="搜索物品或送礼情景…" value={search} onChange={(event) => setSearch(event.target.value)} />
+            </div>
+            {gifts.filter((item) => !search.trim() || item.content.toLowerCase().includes(search.trim().toLowerCase())).map((item) => (
+              <div key={item.id} className={`${cardClass} p-3.5`}>
+                <div className="flex items-start gap-3">
+                  <div className="rounded-2xl bg-pink-50 p-2 text-xl">🎁</div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-bold text-slate-700">{item.gift?.name ?? '送礼记录'}</p>
+                    <p className="mt-1 text-[11px] text-slate-500">{item.gift?.direction === 'player-to-character' ? '玩家 → 角色' : item.gift?.direction === 'character-to-player' ? '角色 → 玩家' : '赠送方向未标注'} · {item.gift?.date ?? item.createdAt.slice(0, 10)}</p>
+                    <p className="mt-2 whitespace-pre-wrap text-xs leading-relaxed text-slate-600">{item.gift?.scene || item.content}</p>
+                    <p className="mt-2 text-[10px] text-slate-400">{embeddedIds.has(item.id) ? '🟢 已向量化' : '⚪ 关键词可检索'}</p>
+                  </div>
+                  <div className="flex gap-1">
+                    {item.gift && <button type="button" aria-label="编辑物品" onClick={() => setGiftEditing({ id: item.id, gift: { ...item.gift! } })} className="rounded-full p-1.5 text-slate-400"><Pencil className="h-4 w-4" /></button>}
+                    <button type="button" aria-label="删除物品" onClick={() => deleteItem(item)} className="rounded-full p-1.5 text-rose-300"><Trash2 className="h-4 w-4" /></button>
+                  </div>
+                </div>
+              </div>
+            ))}
+            {gifts.length === 0 && <p className={`${cardClass} p-6 text-center text-xs text-slate-400`}>还没有送礼记录。可以手动添加，或在淘宝、闲鱼、微信聊天里互赠实物。</p>}
+          </div>
+        )}
 
         {activeTab === 'memories' && (<>
         <div className={`${cardClass} space-y-2.5 p-3.5`}>
@@ -542,7 +605,7 @@ export const MemoryApp: React.FC<MemoryAppProps> = ({ onBack }) => {
                   <button type="button" aria-label={item.pinned ? '取消置顶' : '置顶'} onClick={() => togglePin(item)} className={`rounded-full p-1.5 hover:bg-white ${item.pinned ? 'text-pink-400' : 'text-slate-300'}`}>
                     {item.pinned ? <Pin className="h-3.5 w-3.5" /> : <PinOff className="h-3.5 w-3.5" />}
                   </button>
-                  <button type="button" aria-label="编辑" onClick={() => setEditing(item)} className="rounded-full p-1.5 text-slate-400 hover:bg-white"><Pencil className="h-3.5 w-3.5" /></button>
+                  <button type="button" aria-label="编辑" onClick={() => item.category === 'item' && item.gift ? setGiftEditing({ id: item.id, gift: { ...item.gift } }) : setEditing(item)} className="rounded-full p-1.5 text-slate-400 hover:bg-white"><Pencil className="h-3.5 w-3.5" /></button>
                   <button type="button" aria-label="删除" onClick={() => deleteItem(item)} className="rounded-full p-1.5 text-rose-300 hover:bg-white"><Trash2 className="h-3.5 w-3.5" /></button>
                 </div>
               </div>
@@ -553,6 +616,18 @@ export const MemoryApp: React.FC<MemoryAppProps> = ({ onBack }) => {
       </div>
 
       {/* ---------- 编辑 / 添加 ---------- */}
+      {giftEditing && (
+        <div className="absolute inset-0 z-50 flex items-end justify-center bg-slate-900/25 backdrop-blur-xs">
+          <div className="w-full max-w-md space-y-3 rounded-t-[28px] border border-white bg-gradient-to-b from-white to-[#F6F8FC] p-4 shadow-2xl">
+            <div className="flex items-center justify-between"><h3 className="text-sm font-bold">{giftEditing.id ? '编辑物品' : '记录物品'}</h3><button type="button" aria-label="关闭" onClick={() => setGiftEditing(null)}><X className="h-4 w-4" /></button></div>
+            <input aria-label="物品名称" className={inputClass} placeholder="物品名称" maxLength={100} value={giftEditing.gift.name} onChange={(event) => setGiftEditing({ ...giftEditing, gift: { ...giftEditing.gift, name: event.target.value } })} />
+            <select aria-label="赠送方向" className={inputClass} value={giftEditing.gift.direction} onChange={(event) => setGiftEditing({ ...giftEditing, gift: { ...giftEditing.gift, direction: event.target.value as GiftMemoryDetails['direction'] } })}><option value="player-to-character">玩家送给角色</option><option value="character-to-player">角色送给玩家</option></select>
+            <label className="block text-xs text-slate-500">赠送日期<input type="date" className={`${inputClass} mt-1`} value={giftEditing.gift.date} onChange={(event) => setGiftEditing({ ...giftEditing, gift: { ...giftEditing.gift, date: event.target.value } })} /></label>
+            <textarea aria-label="送礼情景" className={`${inputClass} h-24 resize-none`} placeholder="当时为什么送？发生了什么？" maxLength={160} value={giftEditing.gift.scene} onChange={(event) => setGiftEditing({ ...giftEditing, gift: { ...giftEditing.gift, scene: event.target.value } })} />
+            <button type="button" className={`${gradBtn} w-full`} disabled={!giftEditing.gift.name.trim() || !giftEditing.gift.date} onClick={saveGift}>保存物品</button>
+          </div>
+        </div>
+      )}
       {editing && (
         <div className="absolute inset-0 z-50 flex items-end justify-center bg-slate-900/25 backdrop-blur-xs">
           <div className="flex max-h-[90%] w-full max-w-md flex-col rounded-t-[28px] border border-white bg-gradient-to-b from-white to-[#F6F8FC] p-4 shadow-2xl">
@@ -574,7 +649,7 @@ export const MemoryApp: React.FC<MemoryAppProps> = ({ onBack }) => {
               <div className="space-y-1">
                 <span className="font-semibold text-slate-600">分类</span>
                 <div className="flex flex-wrap gap-1.5">
-                  {MEMORY_CATEGORIES.map((c) => (
+                  {MEMORY_CATEGORIES.filter((c) => c.id !== 'item').map((c) => (
                     <button
                       key={c.id}
                       type="button"
@@ -635,10 +710,12 @@ export const MemoryApp: React.FC<MemoryAppProps> = ({ onBack }) => {
                     <textarea
                       className={`${inputClass} h-14 resize-none leading-relaxed`}
                       value={candidate.content}
+                      readOnly={!!candidate.gift}
                       onChange={(e) =>
                         setReview({ ...review, candidates: review.candidates.map((c) => (c.key === candidate.key ? { ...c, content: e.target.value } : c)) })
                       }
                     />
+                    {candidate.gift && <p className="text-[10px] text-slate-400">物品详情可在写入后到「物品」栏编辑。</p>}
                     <p className="text-[10px] text-slate-400">
                       {categoryOf(candidate.category).emoji} {categoryOf(candidate.category).label} · {'★'.repeat(candidate.importance)}
                       {candidate.pinned ? ' · 📌置顶' : ''}

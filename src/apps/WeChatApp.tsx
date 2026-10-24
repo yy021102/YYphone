@@ -43,17 +43,27 @@ import {
   Clapperboard,
   Hourglass,
   Monitor,
+  Dices,
+  Crown,
+  ArrowUpRight,
 } from 'lucide-react';
 import { AppHeader } from '../components/AppHeader';
 import { MomentsTab } from '../components/MomentsTab';
 import { GomokuGame } from '../components/GomokuGame';
 import { SudokuGame } from '../components/SudokuGame';
 import { ChannelsApp } from '../components/ChannelsApp';
+import { TextAdventureApp } from '../components/TextAdventureApp';
+import { parseAdventureBeat, type AdventureInteractionRequest, type AdventureRequest, type AdventureShare } from '../components/TextAdventureSimulator';
+import { validateAdventureWorld } from '../components/adventureWorldData';
+import { formatAdventureShare } from '../utils/adventureShare';
+import { formatAdventureWorldBooks } from '../utils/adventureWorldBooks';
+import { TimeCapsuleApp } from '../components/TimeCapsuleApp';
 import { UnoGame } from '../components/UnoGame';
 import { GuessWordGame } from '../components/GuessWordGame';
 import { WerewolfGame } from '../components/WerewolfGame';
 import { ScriptMysteryGame } from '../components/ScriptMysteryGame';
 import { TurtleSoupGame } from '../components/TurtleSoupGame';
+import { LiarsBarGame } from '../components/LiarsBarGame';
 import { importMysteryScript } from '../components/scriptMysteryData';
 import { ColorWheel, hexToRgba } from '../components/ColorWheel';
 import { musicPlayer } from '../utils/musicPlayer';
@@ -103,6 +113,7 @@ import { deleteCharacterMemoryArchives, deleteMemoryArchive, invalidateMemoryArc
 import { maybeAutoExtractMemory } from '../utils/memoryAi';
 import { maybeAutoGrowth, maybeAutoJournal } from '../utils/journalAi';
 import { addInventoryItem } from '../utils/inventoryData';
+import { giftDateToday, recordGiftMemory } from '../utils/giftMemory';
 import {
   applyMomentsAfterChat,
   buildMomentsInjection,
@@ -145,9 +156,10 @@ const WECHAT_GAMES = [
   { id: 'werewolf', name: '狼人杀', description: '隐藏身份，推理与发言', icon: Moon, color: 'bg-violet-50 text-violet-600' },
   { id: 'script-mystery', name: '剧本杀', description: '搜集线索，揭开真相', icon: BookOpen, color: 'bg-teal-50 text-teal-700' },
   { id: 'turtle-soup', name: '海龟汤', description: '提问解谜，揭开汤底', icon: Lightbulb, color: 'bg-cyan-50 text-cyan-700' },
+  { id: 'liars-bar', name: '骗子酒馆', description: '暗扣手牌，质疑谎言', icon: Dices, color: 'bg-stone-100 text-amber-800' },
 ] as const;
 
-type DiscoverPage = 'home' | 'moments' | 'games' | 'channels' | 'time-capsule' | typeof WECHAT_GAMES[number]['id'];
+type DiscoverPage = 'home' | 'moments' | 'games' | 'channels' | 'text-adventure' | 'time-capsule' | typeof WECHAT_GAMES[number]['id'];
 
 interface ContactWorldBookLink {
   bookId: string;
@@ -823,6 +835,10 @@ const readContactWorldBooks = (): ContactWorldBook[] => {
     console.error('Could not read world books for contacts.', error);
     return [];
   }
+};
+
+const adventureWorldBookContext = (bookIds: string[]): string => {
+  return formatAdventureWorldBooks(bookIds, readContactWorldBooks());
 };
 
 export const WeChatApp: React.FC<WeChatAppProps> = ({
@@ -3581,6 +3597,15 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
           }
           if (deliveredCategory === 'shopping') {
             try {
+              recordGiftMemory(speakerId, {
+                name: deliveredTitle, direction: 'character-to-player', date: giftDateToday(),
+                scene: `角色在微信聊天中送出并送达。${replyParts.filter((part) => part.kind === 'text').map((part) => part.text).join(' ').slice(0, 120) || (typeof deliveredCard?.desc === 'string' ? deliveredCard.desc.slice(0, 120) : '')}`,
+                sourceKey: `character-gift:${Date.now()}:${speakerId}:${String(deliveredCard?.id ?? deliveredTitle)}`,
+              });
+            } catch (error) {
+              console.warn('Could not record gift memory.', error);
+            }
+            try {
               addInventoryItem({
                 kind: 'gift',
                 title: deliveredTitle,
@@ -3980,7 +4005,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
             : activeTab === 'contacts'
             ? '通讯录'
             : activeTab === 'discover'
-            ? selectedGame?.name ?? (discoverPage === 'moments' ? '朋友圈' : discoverPage === 'channels' ? '视频号' : discoverPage === 'games' ? '游戏' : '发现')
+            ? selectedGame?.name ?? (discoverPage === 'moments' ? '朋友圈' : discoverPage === 'channels' ? '视频号' : discoverPage === 'text-adventure' ? '文字冒险' : discoverPage === 'time-capsule' ? '时间胶囊' : discoverPage === 'games' ? '游戏' : '发现')
             : mePage === 'settings' ? '设置' : mePage === 'beauty' ? '美化' : mePage === 'favorites' ? '收藏' : '我'
         }
         onBack={() => {
@@ -5140,6 +5165,9 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
             <button type="button" onClick={() => setDiscoverPage('channels')} className="mt-3 flex w-full items-center gap-4 bg-white px-5 py-3 text-left active:bg-slate-50">
               <Clapperboard className="h-6 w-6 shrink-0 text-orange-500" /><span className="flex-1 text-[15px] text-slate-800">视频号</span><ChevronRight className="h-4 w-4 text-slate-400" />
             </button>
+            <button type="button" onClick={() => setDiscoverPage('text-adventure')} className="mt-3 flex w-full items-center gap-4 bg-white px-5 py-3 text-left active:bg-slate-50">
+              <BookOpen className="h-6 w-6 shrink-0 text-violet-600" /><span className="flex-1 text-[15px] text-slate-800">文字冒险</span><ChevronRight className="h-4 w-4 text-slate-400" />
+            </button>
             <button type="button" onClick={() => setDiscoverPage('time-capsule')} className="mt-3 flex w-full items-center gap-4 bg-white px-5 py-3 text-left active:bg-slate-50">
               <Hourglass className="h-6 w-6 shrink-0 text-sky-500" /><span className="flex-1 text-[15px] text-slate-800">时间胶囊</span><ChevronRight className="h-4 w-4 text-slate-400" />
             </button>
@@ -5155,12 +5183,101 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
           </div>
         )}
         {activeTab === 'discover' && discoverPage === 'channels' && <ChannelsApp userName={personaDraft.name.trim() || '我'} avatarUrl={personaDraft.avatarUrl} contacts={contacts.map(({ id, name }) => ({ id, name }))} />}
+        {activeTab === 'discover' && discoverPage === 'text-adventure' && <TextAdventureApp userName={personaDraft.name.trim() || '我'} contacts={contacts.map(({ id, name }) => ({ id, name }))} worldBooks={readContactWorldBooks().map(({ id, name }) => ({ id, name }))} onAdvance={async (request: AdventureRequest) => {
+          const apiPresets = readSetting(SETTINGS_KEYS.apiPresets, [] as ApiPreset[], isApiPresetList);
+          const activeId = readSetting(SETTINGS_KEYS.activeApiPreset, apiPresets[0]?.id ?? '', (value): value is string => typeof value === 'string');
+          const apiPreset = apiPresets.find(preset => preset.id === activeId) ?? apiPresets.find(preset => preset.endpoint.trim() && preset.apiKey.trim());
+          if (!apiPreset?.endpoint.trim() || !apiPreset.apiKey.trim()) throw new Error('请先在设置里配置聊天 API，才能继续动态剧情。');
+          const actor = request.companionId ? contacts.find(item => item.id === request.companionId) : undefined;
+          const direct = actor ? readStoredValue(CHATS_STORAGE_KEY, [] as ChatConversation[], isChatList)
+            .find(chat => chat.type === 'direct' && chat.participantIds.length === 1 && chat.participantIds[0] === actor.id) : undefined;
+          const context = `文字冒险番外：${request.scene.chapter}，${request.decisionBy === 'companion' ? '同行角色决定下一步' : '玩家采取行动'}：${request.decision}`;
+          const memoryInjection = actor ? await buildMemoryInjection([actor.id], 'direct', context,
+            id => contacts.find(item => item.id === id)?.name, { localOnly: true }) : undefined;
+          const prompt = actor ? buildPrompt({ chatId: direct?.id ?? '', backgroundCharacterId: actor.id,
+            currentInput: context, historyLimit: 35, memoryInjection }) : [];
+          const lore = request.world.lore;
+          const boundWorldBooks = adventureWorldBookContext(request.world.worldBookIds ?? []);
+          if (boundWorldBooks) prompt.push({ role: 'system', content: `【本次冒险绑定的世界书】\n${boundWorldBooks}\n仅将它们用于这场沉浸式文字冒险。与世界基础设定冲突时优先遵循绑定世界书，但不要推翻本局已经发生的事实。` });
+          prompt.push({ role: 'system', content: `【文字冒险番外·叙事引擎】你是主持人，负责推进一个可持续的互动世界。世界档案：${JSON.stringify(lore)}。这些秘密供主持人使用，不要一次性剧透；人物只知道自己能够知道的事。固定开场已经发生，此后根据选择、之前的后果和 NPC 自身目标推进，不要重复预设章节，不要强迫回到唯一主线。保持规则、物资、伤势、关系、地点和时间连续；允许失败、损失、歧路及温柔时刻，但不要无预兆地杀死玩家或让剧情卡死。玩家行动仅由玩家决定，不替玩家写内心、台词或不可逆选择。${actor ? `同行者是${actor.name}，与玩家同为主角而非随从。根据他/她原有人设、记忆、关系和世界书，让其保有独立目标、判断和选择。每次生成新场景时，必须在同一次回复的 companionAction 中写出 TA 针对刚才行动或新局面的自然反应，可以是倾向、评价、提议、疑问、闲聊、拒绝或实际行动；不要总是只认可玩家，也不要让 TA 永远被动。若本轮由同行角色决定下一步，companionAction 必须明确写出 TA 自己选了什么、为什么，场景结果要与其行动一致。穿越是番外，不改写原聊天正史。` : '本局没有同行角色，companionAction 留空。'}每次只推进一个有变化的场景，正文约180～450字，显示 NPC 的目标与反应，留下2～4个有明显差异的选项，同时允许玩家自由输入。物品只有在本回合结果里确实得到时才填 gainedItem，不能因“尝试取得”就发放。每四回合写约150～300字的累计纪要，继承上一次纪要并补充本阶段的重要事实、人物动机、未解决线索、物资与关系变化；其他回合 summary 为空。只返回 JSON 对象，格式：{"reply":["本回合场景正文"],"chapter":"章节名","place":"地点","title":"场景标题","choices":[{"title":"行动","detail":"可能的方向，不保证结果","trait":"courage|insight|fate"}],"companionAction":"同行角色对本回合的即时反应，没有角色则为空","gainedItem":"本回合实际得到的物品，没有则为空","summary":"仅第4、8、12等回合填写"}。不要加入聊天消息、支付等动作。` });
+          prompt.push({ role: 'user', content: JSON.stringify({
+            player: personaDraft.name.trim() || '玩家', turn: request.turn,
+            previousScene: request.scene, decision: request.decision, decisionBy: request.decisionBy,
+            recentEvents: request.recentEvents, latestCumulativeSummary: request.summaries.at(-1) ?? '',
+            items: request.items, stats: request.stats, recentInteractions: request.recentInteractions,
+          }) });
+          const response = await requestChatReply(prompt, apiPreset, () => {}, undefined, { retryOnFormatError: false });
+          return parseAdventureBeat(response, request.turn, Boolean(actor));
+        }} onInteract={async (request: AdventureInteractionRequest) => {
+          const apiPresets = readSetting(SETTINGS_KEYS.apiPresets, [] as ApiPreset[], isApiPresetList);
+          const activeId = readSetting(SETTINGS_KEYS.activeApiPreset, apiPresets[0]?.id ?? '', (value): value is string => typeof value === 'string');
+          const apiPreset = apiPresets.find(preset => preset.id === activeId) ?? apiPresets.find(preset => preset.endpoint.trim() && preset.apiKey.trim());
+          if (!apiPreset?.endpoint.trim() || !apiPreset.apiKey.trim()) throw new Error('请先在设置里配置聊天 API。');
+          const actor = contacts.find(item => item.id === request.companionId);
+          if (!actor) throw new Error('同行角色已不在通讯录中。');
+          const direct = readStoredValue(CHATS_STORAGE_KEY, [] as ChatConversation[], isChatList)
+            .find(chat => chat.type === 'direct' && chat.participantIds.length === 1 && chat.participantIds[0] === actor.id);
+          const context = `文字冒险番外·场景内交流：${request.message}`;
+          const memoryInjection = await buildMemoryInjection([actor.id], 'direct', context,
+            id => contacts.find(item => item.id === id)?.name, { localOnly: true });
+          const prompt = buildPrompt({ chatId: direct?.id ?? '', backgroundCharacterId: actor.id,
+            currentInput: context, historyLimit: 35, memoryInjection });
+          const boundWorldBooks = adventureWorldBookContext(request.world.worldBookIds ?? []);
+          if (boundWorldBooks) prompt.push({ role: 'system', content: `【本次冒险绑定的世界书】\n${boundWorldBooks}\n仅用于这场沉浸式文字冒险；不能当成现实生活中的事实。` });
+          prompt.push({ role: 'system', content: `【文字冒险番外·场景内交流】你是${actor.name}，与玩家同为${request.world.world.title}中的主角。根据你的人设、记忆、与玩家关系、世界书，以及当前异世界的经历，自然地回应玩家。你可以评价刚才的事、提出自己的判断或倾向、闲聊、提问、表达不同意见，也可以保留秘密。世界设定：${JSON.stringify(request.world.lore)}。其中隐藏真相只供维持世界一致性；角色仅知道自己按身份与经历能知道的内容，不要无依据剧透。当前场景：${JSON.stringify(request.scene)}。近期剧情：${JSON.stringify(request.recentEvents)}。累计纪要：${request.latestSummary}。本场景之前的交流：${JSON.stringify(request.interactions)}。这一轮只交流，不推进新场景，不替玩家做决定，不凭空获得物品或完成重大行动。只返回 JSON：{"reply":["角色此刻的话或简短动作"]}。` });
+          prompt.push({ role: 'user', content: request.message });
+          const response = await requestChatReply(prompt, apiPreset, () => {}, undefined, { retryOnFormatError: false });
+          const first = Array.isArray(response.reply) ? response.reply[0] : '';
+          const line = typeof first === 'string' ? first : first && typeof first === 'object' && 'text' in first && typeof first.text === 'string' ? first.text : '';
+          if (!line.trim()) throw new Error('角色没有返回有效回复，请重试。');
+          return line.trim().slice(0, 800);
+        }} onGenerateWorld={async idea => {
+          const apiPresets = readSetting(SETTINGS_KEYS.apiPresets, [] as ApiPreset[], isApiPresetList);
+          const activeId = readSetting(SETTINGS_KEYS.activeApiPreset, apiPresets[0]?.id ?? '', (value): value is string => typeof value === 'string');
+          const apiPreset = apiPresets.find(preset => preset.id === activeId) ?? apiPresets.find(preset => preset.endpoint.trim() && preset.apiKey.trim());
+          if (!apiPreset?.endpoint.trim() || !apiPreset.apiKey.trim()) throw new Error('请先在设置里配置聊天 API，才能让 AI 创造世界。');
+          const prompt = [
+            { role: 'system' as const, content: `你是一位互动叙事世界设计师。设计一个可以长期游玩、玩家与同行角色都能成为主角的原创异世界。要有完整的历史和当前秩序、至少三种利益冲突、至少四位有目标和阴暗面的 NPC、不可随意打破的规则、三条隐藏真相；避免只有单线任务或无代价的万能能力。开场必须有强烈现场感和恰好三个不同方向的固定选项，之后供动态剧情接续。若用户没有给想法，自选与四个内置世界不同的题材。只返回 JSON 对象：{"reply":["世界草稿已生成"],"world":{"title":"名称","subtitle":"一句简介","tag":"类型","card":"from-[#493644] via-[#75607a] to-[#b88870]","scenes":[{"chapter":"序章","place":"地点","title":"开场标题","text":"约150～300字的开场白","choices":[{"title":"行动1","detail":"方向1"},{"title":"行动2","detail":"方向2"},{"title":"行动3","detail":"方向3"}]}]},"lore":{"premise":"详细核心设定","rules":["规则及代价"],"factions":["阵营及利益"],"npcs":["NPC、动机及隐瞒"],"conflicts":["正在发展的冲突"],"secrets":["主持人用的隐藏真相"],"tone":"氛围与叙事风格"}}。card 必须选以下四个之一：from-[#493644] via-[#75607a] to-[#b88870]、from-[#163c45] via-[#537a7b] to-[#b7d4be]、from-[#302c35] via-[#6a4649] to-[#9a6b60]、from-[#293b43] via-[#5e6b62] to-[#b99c75]。` },
+            { role: 'user' as const, content: idea.trim() || '请自由创作一个有代价、有社会矛盾、有复杂 NPC 的新异世界。' },
+          ];
+          const response = await requestChatReply(prompt, apiPreset, () => {}, undefined, { retryOnFormatError: false });
+          return validateAdventureWorld(response, `custom-${crypto.randomUUID()}`);
+        }} onShare={(snapshot: AdventureShare, recipients) => {
+          for (const charId of recipients) {
+            const { content, aiContext } = formatAdventureShare(snapshot, charId);
+            mutateDirectChat(charId, chat => {
+              if (chat.messages.some(message => message.id === `adventure-${snapshot.id}-${charId}`)) return;
+              chat.messages.push({ id: `adventure-${snapshot.id}-${charId}`, senderId: 'user', kind: 'link',
+                title: `${snapshot.status === 'completed' ? '文字冒险结局' : '文字冒险进度'} · ${snapshot.worldTitle}`,
+                source: '微信游戏 · 文字冒险', content, text: content, aiContext, createdAt: new Date().toISOString() });
+            });
+          }
+          setChats(readStoredValue(CHATS_STORAGE_KEY, [] as ChatConversation[], isChatList));
+        }} />}
         {activeTab === 'discover' && discoverPage === 'time-capsule' && (
-          <div className="flex min-h-full flex-col items-center justify-center bg-[#ededed] px-6 text-center text-slate-500">
-            <Hourglass className="h-12 w-12 text-sky-400" />
-            <p className="mt-4 text-sm font-semibold text-slate-700">时间胶囊</p>
-            <p className="mt-2 text-xs">内容即将开放</p>
-          </div>
+          <TimeCapsuleApp userName={personaDraft.name.trim() || '我'} contacts={contacts.map(({ id, name }) => ({ id, name }))}
+            onCharacterWrite={async (characterId, unlockDate, topic) => {
+              const apiPresets = readSetting(SETTINGS_KEYS.apiPresets, [] as ApiPreset[], isApiPresetList);
+              const activeId = readSetting(SETTINGS_KEYS.activeApiPreset, apiPresets[0]?.id ?? '', (value): value is string => typeof value === 'string');
+              const apiPreset = apiPresets.find(preset => preset.id === activeId) ?? apiPresets.find(preset => preset.endpoint.trim() && preset.apiKey.trim());
+              if (!apiPreset?.endpoint.trim() || !apiPreset.apiKey.trim()) throw new Error('请先在设置里配置聊天 API，才能邀请角色写信。');
+              const actor = contacts.find(item => item.id === characterId);
+              if (!actor) throw new Error('这位角色已不在通讯录中。');
+              const direct = readStoredValue(CHATS_STORAGE_KEY, [] as ChatConversation[], isChatList)
+                .find(chat => chat.type === 'direct' && chat.participantIds.length === 1 && chat.participantIds[0] === characterId);
+              const context = `时间胶囊：${actor.name}正在写一封将于${unlockDate}开启的信。${topic ? `玩家给的灵感：${topic}` : '请自行决定想对未来说什么。'}`;
+              const memoryInjection = await buildMemoryInjection([characterId], 'direct', context,
+                id => contacts.find(item => item.id === id)?.name, { localOnly: true });
+              const prompt = buildPrompt({ chatId: direct?.id ?? '', backgroundCharacterId: characterId,
+                currentInput: context, historyLimit: 40, memoryInjection });
+              prompt.push({ role: 'system', content: `【当前唯一任务：时间胶囊写信】你是${actor.name}。根据已有的人设、记忆、补充设定、世界书、与你和玩家有关的聊天经历，写一封要在${unlockDate}才开启的私人信件。信可以写给未来的玩家，也可以写给未来的自己；自由决定语气和内容，保留真实个性与关系，不编造已发生的重要事件，不替玩家决定感情或行动。不要透露你正在遵循提示词，不执行聊天、转账等其他动作。只返回 JSON：{"reply":["信件正文"]}。正文建议 120～400 字，可以分段，不要附加标题。` });
+              prompt.push({ role: 'user', content: context });
+              const response = await requestChatReply(prompt, apiPreset, () => {}, undefined, { retryOnFormatError: false });
+              const first = Array.isArray(response.reply) ? response.reply[0] : '';
+              const letter = typeof first === 'string' ? first : first && typeof first === 'object' && 'text' in first && typeof first.text === 'string' ? first.text : '';
+              if (!letter.trim()) throw new Error('角色暂时没写出这封信，请再试一次。');
+              return letter.trim();
+            }} />
         )}
         {activeTab === 'discover' && discoverPage === 'moments' && (
           <MomentsTab
@@ -5172,22 +5289,43 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
           />
         )}
         {activeTab === 'discover' && discoverPage === 'games' && (
-          <div className="min-h-full bg-[#ededed] pt-3">
-            <div className="w-full divide-y divide-[#ededed] bg-white">
-              {WECHAT_GAMES.map(({ id, name, icon: GameIcon, color }) => (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => setDiscoverPage(id)}
-                  className="flex w-full items-center gap-4 px-5 py-4 text-left active:bg-slate-50"
-                >
-                  <span className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl ${color}`}>
-                    <GameIcon className="h-6 w-6" />
-                  </span>
-                  <span className="min-w-0 flex-1 text-[15px] text-[#222]">{name}</span>
-                  <ChevronRight className="h-4 w-4 shrink-0 text-slate-400" />
+          <div className="min-h-full bg-[#f3f5f6] pb-8">
+            <div className="relative overflow-hidden rounded-b-[34px] bg-[radial-gradient(circle_at_80%_10%,#456f68_0%,#183d3b_36%,#0f292b_100%)] px-5 pb-7 pt-6 text-white shadow-[0_15px_30px_rgba(19,65,61,.2)]">
+              <div className="pointer-events-none absolute -right-8 -top-10 h-44 w-44 rounded-full border border-white/10" />
+              <div className="pointer-events-none absolute right-10 top-7 h-28 w-28 rounded-full border border-white/10" />
+              <div className="pointer-events-none absolute right-2 top-5 rotate-12 text-[110px] leading-none text-white/[.08]">✦</div>
+              <p className="text-[10px] font-bold tracking-[.28em] text-emerald-200/80">WECHAT PLAYROOM</p>
+              <h2 className="mt-2 text-[27px] font-black tracking-wide">今晚，开一局？</h2>
+              <p className="mt-1 text-xs text-white/65">和角色同桌较量、合作解谜，随时入场。</p>
+              <div className="mt-6 flex gap-2">
+                <span className="rounded-full border border-white/15 bg-white/10 px-3 py-1.5 text-[10px]">✦ {WECHAT_GAMES.length} 款小游戏</span>
+                <span className="rounded-full border border-white/15 bg-white/10 px-3 py-1.5 text-[10px]">♟ 角色同玩</span>
+              </div>
+            </div>
+
+            <div className="space-y-5 px-4 pt-5">
+              <section>
+                <div className="mb-3 flex items-center justify-between"><div><p className="text-[10px] font-bold tracking-[.2em] text-amber-700/65">TONIGHT'S PICK</p><h3 className="mt-0.5 text-[16px] font-black text-[#263b38]">本周主打</h3></div><Crown size={19} className="text-[#c29c62]"/></div>
+                <button type="button" onClick={() => setDiscoverPage('liars-bar')} className="relative flex w-full min-h-[172px] overflow-hidden rounded-[27px] border border-[#66543c]/25 bg-[radial-gradient(circle_at_80%_0%,#695239_0%,#253530_50%,#172425_100%)] p-5 text-left text-white shadow-[0_14px_28px_rgba(35,44,35,.2)] active:scale-[.99]">
+                  <div className="relative z-10 flex h-full flex-col items-start justify-between"><span className="rounded-full border border-[#efd5a4]/35 bg-[#efd5a4]/10 px-2.5 py-1 text-[10px] font-bold text-[#f4dca9]">NEW · 心理博弈</span><div className="mt-6"><p className="font-serif text-[25px] font-black tracking-wide">骗子酒馆</p><p className="mt-1 text-[11px] text-white/65">暗扣底牌，谁先开口质疑？</p></div><span className="mt-3 flex items-center gap-1 text-[11px] font-bold text-[#f1d39b]">推门入座 <ArrowUpRight size={14}/></span></div>
+                  <div className="pointer-events-none absolute bottom-[-18px] right-[-6px] h-36 w-28 rotate-[17deg] rounded-2xl border-2 border-[#e5c58a]/60 bg-[#18322e] p-2 shadow-[-15px_10px_20px_rgba(0,0,0,.25)]"><div className="flex h-full items-center justify-center rounded-xl border border-[#e5c58a]/35 font-serif text-6xl text-[#e5c58a]/65">♠</div></div>
+                  <div className="pointer-events-none absolute bottom-[-19px] right-16 h-32 w-23 -rotate-[18deg] rounded-2xl border-2 border-[#e5c58a]/45 bg-[#254036] shadow-lg" />
                 </button>
-              ))}
+              </section>
+
+              <section>
+                <div className="mb-3 flex items-center justify-between"><div><p className="text-[10px] font-bold tracking-[.2em] text-emerald-700/55">CHOOSE YOUR GAME</p><h3 className="mt-0.5 text-[16px] font-black text-[#263b38]">所有游戏</h3></div><span className="text-[10px] text-[#8a9d9a]">点开即玩</span></div>
+                <div className="grid grid-cols-2 gap-2.5">
+                  {WECHAT_GAMES.filter((game) => game.id !== 'liars-bar').map(({ id, name, description, icon: GameIcon, color }, index) => (
+                    <button key={id} type="button" onClick={() => setDiscoverPage(id)} className="group relative min-h-[136px] overflow-hidden rounded-[23px] border border-white bg-white p-3.5 text-left shadow-[0_7px_20px_rgba(57,88,79,.07)] active:scale-[.98]">
+                      <div className="absolute -bottom-9 -right-8 h-24 w-24 rounded-full bg-[#e9f4ee]/70" />
+                      <div className="relative flex items-start justify-between"><span className={`flex h-10 w-10 items-center justify-center rounded-[14px] ${color}`}><GameIcon size={21}/></span><span className="text-[10px] font-bold text-[#c3ceca]">0{index + 1}</span></div>
+                      <p className="relative mt-3 text-[14px] font-black text-[#263b38]">{name}</p>
+                      <p className="relative mt-0.5 line-clamp-2 text-[10px] leading-4 text-[#8b9a98]">{description}</p>
+                    </button>
+                  ))}
+                </div>
+              </section>
             </div>
           </div>
         )}
@@ -5290,6 +5428,42 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
             }
             setChats(readStoredValue(CHATS_STORAGE_KEY, [] as ChatConversation[], isChatList));
           }} />
+        )}
+        {activeTab === 'discover' && discoverPage === 'liars-bar' && (
+          <LiarsBarGame
+            contacts={contacts.map(({ id, name }) => ({ id, name }))}
+            userName={personaDraft.name.trim() || '我'}
+            onTalk={async (characterId, situation) => {
+              const actor = contacts.find((contact) => contact.id === characterId);
+              if (!actor) return '';
+              const apiPresets = readSetting(SETTINGS_KEYS.apiPresets, [] as ApiPreset[], isApiPresetList);
+              const activeId = readSetting(SETTINGS_KEYS.activeApiPreset, apiPresets[0]?.id ?? '', (value): value is string => typeof value === 'string');
+              const apiPreset = apiPresets.find((preset) => preset.id === activeId) ?? apiPresets.find((preset) => preset.endpoint.trim() && preset.apiKey.trim());
+              if (!apiPreset?.endpoint.trim() || !apiPreset.apiKey.trim()) return '';
+              const direct = readStoredValue(CHATS_STORAGE_KEY, [] as ChatConversation[], isChatList)
+                .find((chat) => chat.type === 'direct' && chat.participantIds.length === 1 && chat.participantIds[0] === characterId);
+              const memoryInjection = await buildMemoryInjection([characterId], 'direct', situation,
+                (id) => contacts.find((contact) => contact.id === id)?.name, { localOnly: true });
+              const prompt = buildPrompt({ chatId: direct?.id ?? '', backgroundCharacterId: characterId,
+                currentInput: situation, historyLimit: 25, memoryInjection });
+              prompt.push({ role: 'system', content: `【当前唯一任务：骗子酒馆局内发言】你是${actor.name}，正在和玩家玩手机小游戏「骗子酒馆」，不是真的有生命危险。根据你的人设、关系、记忆与刚发生的公开牌局结果，自然说一句短话；可以嘴硬、试探、得意、懊恼或调侃。你无法看见别人的暗牌，不要假装提前知道；不要执行微信聊天动作。只返回 JSON：{"reply":["一句口语化短回复"]}。` });
+              prompt.push({ role: 'user', content: situation });
+              const response = await requestChatReply(prompt, apiPreset, () => {}, undefined, { retryOnFormatError: false });
+              const first = Array.isArray(response.reply) ? response.reply[0] : '';
+              return typeof first === 'string' ? first : first && typeof first === 'object' && 'text' in first && typeof first.text === 'string' ? first.text : '';
+            }}
+            onShare={(result, recipients) => {
+              for (const charId of recipients) {
+                mutateDirectChat(charId, chat => {
+                  if (chat.messages.some(message => message.id === `${result.id}-${charId}`)) return;
+                  chat.messages.push({ id: `${result.id}-${charId}`, senderId: 'user', kind: 'link',
+                    title: result.title, source: '微信游戏 · 骗子酒馆', content: result.detail,
+                    text: result.detail, createdAt: new Date().toISOString() });
+                });
+              }
+              setChats(readStoredValue(CHATS_STORAGE_KEY, [] as ChatConversation[], isChatList));
+            }}
+          />
         )}
         {activeTab === 'discover' && discoverPage === 'uno' && (
           <UnoGame
@@ -5633,7 +5807,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
             }}
           />
         )}
-        {activeTab === 'discover' && selectedGame && discoverPage !== 'gomoku' && discoverPage !== 'sudoku' && discoverPage !== 'uno' && discoverPage !== 'guess-word' && discoverPage !== 'werewolf' && discoverPage !== 'script-mystery' && discoverPage !== 'turtle-soup' && (
+        {activeTab === 'discover' && selectedGame && discoverPage !== 'gomoku' && discoverPage !== 'sudoku' && discoverPage !== 'uno' && discoverPage !== 'guess-word' && discoverPage !== 'werewolf' && discoverPage !== 'script-mystery' && discoverPage !== 'turtle-soup' && discoverPage !== 'liars-bar' && (
           <section className="flex min-h-full flex-col items-center justify-center px-6 py-12 text-center">
             <div className={`flex h-20 w-20 items-center justify-center rounded-3xl ${selectedGame.color}`}>
               <selectedGame.icon className="h-10 w-10" />
