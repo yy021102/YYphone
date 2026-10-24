@@ -9,7 +9,7 @@ type Result = { id: string; opponentId: string; opponentName: string; userColor:
 type Talk = { from: 'user' | 'character'; text: string };
 type Difficulty = 'easy' | 'normal' | 'hard';
 type TalkMode = 'user' | 'auto' | 'undo-request';
-type TalkReply = { text: string; yieldMove: boolean; approveUndo: boolean; requestUndo: boolean };
+type TalkReply = { text: string; yieldMove: boolean; approveUndo: boolean; requestUndo: boolean; raiseDifficulty: boolean };
 type Props = { contacts: Contact[]; userName: string; onShare: (result: Result, recipients: string[]) => void; onTalk: (opponentId: string, message: string, history: Talk[], situation: string, mode: TalkMode) => Promise<TalkReply> };
 const BACKGROUND_KEY = 'yyphone:gomoku-background';
 const SIZE = 15;
@@ -31,7 +31,58 @@ const lineAt = (board: Stone[], index: number, color: Stone) => {
   }
   return [];
 };
-const chooseMove = (board: Stone[], own: Stone, other: Stone, difficulty: Difficulty, yielding = false) => {
+const nearbyMoves = (board: Stone[]) => board.map((stone, index) => stone === 0 ? index : -1).filter(index => index >= 0).filter(index => {
+  const x = index % SIZE, y = Math.floor(index / SIZE);
+  return [-2, -1, 0, 1, 2].some(dx => [-2, -1, 0, 1, 2].some(dy => inside(x + dx, y + dy) && board[at(x + dx, y + dy)] !== 0));
+});
+const placementScore = (board: Stone[], index: number, color: Stone) => {
+  const x = index % SIZE, y = Math.floor(index / SIZE);
+  let score = 0, strongThreats = 0;
+  for (const [dx, dy] of directions) {
+    let count = 1, open = 0;
+    for (const sign of [-1, 1]) {
+      let step = 1;
+      while (inside(x + dx * step * sign, y + dy * step * sign) && board[at(x + dx * step * sign, y + dy * step * sign)] === color) { count++; step++; }
+      if (inside(x + dx * step * sign, y + dy * step * sign) && board[at(x + dx * step * sign, y + dy * step * sign)] === 0) open++;
+    }
+    if (count >= 5) return 1_000_000;
+    const value = count === 4 ? (open === 2 ? 50_000 : open === 1 ? 12_000 : 0)
+      : count === 3 ? (open === 2 ? 3_000 : open === 1 ? 160 : 0)
+      : count === 2 ? (open === 2 ? 90 : open === 1 ? 12 : 0) : open === 2 ? 3 : 0;
+    score += value;
+    if (value >= 3_000) strongThreats++;
+  }
+  return score + (strongThreats >= 2 ? 20_000 : 0);
+};
+const rankedMoves = (board: Stone[], own: Stone, other: Stone, limit: number) => nearbyMoves(board)
+  .map(index => ({ index, score: placementScore(board, index, own) + placementScore(board, index, other) * 0.95 }))
+  .sort((a, b) => b.score - a.score).slice(0, limit);
+const chooseHardMove = (board: Stone[], own: Stone, other: Stone) => {
+  const moves = rankedMoves(board, own, other, 8);
+  let best = moves[0]?.index ?? board.findIndex(stone => stone === 0), bestValue = -Infinity;
+  for (const move of moves) {
+    const afterOwn = [...board]; afterOwn[move.index] = own;
+    if (lineAt(afterOwn, move.index, own).length) return move.index;
+    let worstReply = Infinity;
+    for (const reply of rankedMoves(afterOwn, other, own, 6)) {
+      const afterOther = [...afterOwn]; afterOther[reply.index] = other;
+      if (lineAt(afterOther, reply.index, other).length) { worstReply = -1_000_000; break; }
+      const nextOwn = rankedMoves(afterOther, own, other, 5);
+      let continuation = -Infinity;
+      for (const follow of nextOwn) {
+        const afterFollow = [...afterOther]; afterFollow[follow.index] = own;
+        if (lineAt(afterFollow, follow.index, own).length) { continuation = 800_000; break; }
+        const enemyThreat = rankedMoves(afterFollow, other, own, 1)[0]?.score ?? 0;
+        continuation = Math.max(continuation, follow.score - enemyThreat * 0.9);
+      }
+      worstReply = Math.min(worstReply, continuation - reply.score * 0.35);
+    }
+    const value = worstReply + move.score * 0.15;
+    if (value > bestValue) { bestValue = value; best = move.index; }
+  }
+  return best;
+};
+export const chooseMove = (board: Stone[], own: Stone, other: Stone, difficulty: Difficulty, yielding = false) => {
   const empty = board.map((v, i) => v === 0 ? i : -1).filter(i => i >= 0);
   if (empty.length === 225) return at(7, 7);
   const nearby = empty.filter(i => {
@@ -39,7 +90,7 @@ const chooseMove = (board: Stone[], own: Stone, other: Stone, difficulty: Diffic
     return [-2,-1,0,1,2].some(dx => [-2,-1,0,1,2].some(dy => inside(x+dx,y+dy) && board[at(x+dx,y+dy)] !== 0));
   });
   const candidates = nearby.length ? nearby : empty;
-  if (difficulty === 'easy' || yielding) {
+  if (yielding) {
     const safe = candidates.filter(i => {
       const next = [...board]; next[i] = own;
       return !lineAt(next, i, own).length;
@@ -50,11 +101,12 @@ const chooseMove = (board: Stone[], own: Stone, other: Stone, difficulty: Diffic
     const next = [...board]; next[i] = color;
     if (lineAt(next, i, color).length) return i;
   }
+  if (difficulty === 'hard') return chooseHardMove(board, own, other);
   let best = candidates[0], bestScore = -Infinity;
   for (const i of candidates) {
     const x = i % SIZE, y = Math.floor(i / SIZE);
     let score = 0;
-    if (difficulty === 'hard') {
+    if (difficulty === 'normal') {
       for (const color of [own, other]) for (const [dx, dy] of directions) {
         let count = 1, open = 0;
         for (const sign of [-1, 1]) {
@@ -131,6 +183,7 @@ export function GomokuGame({ contacts, userName, onShare, onTalk }: Props) {
   const [selected, setSelected] = useState<string[]>([]);
   const [shared, setShared] = useState(false);
   const [difficulty, setDifficulty] = useState<Difficulty>('normal');
+  const [characterRaisedDifficulty, setCharacterRaisedDifficulty] = useState(false);
   const [talk, setTalk] = useState<Talk[]>([]);
   const [draft, setDraft] = useState('');
   const [talkBusy, setTalkBusy] = useState(false);
@@ -141,6 +194,7 @@ export function GomokuGame({ contacts, userName, onShare, onTalk }: Props) {
   const [lastAutoStep, setLastAutoStep] = useState(0);
   const [lastManualStep, setLastManualStep] = useState(-10);
   const [lastMove, setLastMove] = useState(-1);
+  const [pendingMove, setPendingMove] = useState(-1);
   const [pendingCharacterUndo, setPendingCharacterUndo] = useState(false);
   const [background, setBackground] = useState(() => readStoredValue(BACKGROUND_KEY, '', (value): value is string => typeof value === 'string'));
   const [backgroundDialogOpen, setBackgroundDialogOpen] = useState(false);
@@ -157,10 +211,12 @@ export function GomokuGame({ contacts, userName, onShare, onTalk }: Props) {
     setBoard(Array(225).fill(0)); setHistory([]); setMoveIndices([]); setTurn(1); setWinner(0);
     setWinningLine([]); setResult(null); setSelected(id ? [id] : []); setShared(false);
     setUserColor(color); setOpponentId(id); setTalk([]); setTalkError(''); setMercyMoves(0);
-    setAutoCount(0); setLastAutoStep(0); setLastManualStep(-10); setLastMove(-1); setTalkBusy(false); setPendingCharacterUndo(false);
+    setCharacterRaisedDifficulty(false);
+    setAutoCount(0); setLastAutoStep(0); setLastManualStep(-10); setLastMove(-1); setPendingMove(-1); setTalkBusy(false); setPendingCharacterUndo(false);
   };
   const move = (i: number, color: Stone) => {
     if (winner || board[i] || turn !== color) return;
+    setPendingMove(-1);
     const next = [...board]; next[i] = color;
     const nextHistory = [...history, color];
     const line = lineAt(next, i, color);
@@ -184,6 +240,7 @@ export function GomokuGame({ contacts, userName, onShare, onTalk }: Props) {
     setBoard(next); setMoveIndices(remaining); setHistory(previous => previous.slice(0, -count));
     setTurn(remaining.length % 2 === 0 ? 1 : 2);
     setWinner(0); setResult(null); setWinningLine([]); setLastMove(remaining.at(-1) ?? -1);
+    setPendingMove(-1);
     setPendingCharacterUndo(false); setLastManualStep(remaining.length);
   };
   const requestUndo = async () => {
@@ -235,6 +292,9 @@ export function GomokuGame({ contacts, userName, onShare, onTalk }: Props) {
       .then(response => {
         if (session !== sessionRef.current) return;
         setTalk(previous => [...previous, { from: 'character', text: response.text }]);
+        if (response.raiseDifficulty && difficulty !== 'hard') {
+          setDifficulty('hard'); setMercyMoves(0); setCharacterRaisedDifficulty(true);
+        }
         if (response.requestUndo && history.length >= 2) setPendingCharacterUndo(true);
       })
       .catch(() => { /* 主动闲聊失败不打断棋局，也不重复请求这一轮。 */ })
@@ -253,12 +313,14 @@ export function GomokuGame({ contacts, userName, onShare, onTalk }: Props) {
       const response = await onTalk(opponentId, message, next, `难度${difficulty}；${blackName}执黑${history.filter(x => x === 1).length}步，${whiteName}执白${history.filter(x => x === 2).length}步；${result ? result.summary : `当前轮到${turn === userColor ? userName : opponent?.name}`}`, 'user');
       if (session !== sessionRef.current) return;
       setTalk([...next, { from: 'character', text: response.text }]);
-      if (response.yieldMove) setMercyMoves(2);
+      if (response.raiseDifficulty && difficulty !== 'hard') {
+        setDifficulty('hard'); setMercyMoves(0); setCharacterRaisedDifficulty(true);
+      } else if (response.yieldMove) setMercyMoves(2);
     } catch (error) { if (session === sessionRef.current) setTalkError(error instanceof Error ? error.message : '角色暂时没有回应，请重试。'); }
     finally { if (session === sessionRef.current) setTalkBusy(false); }
   };
   if (!contacts.length) return <div className="p-6 text-center text-sm text-slate-500">请先在通讯录添加角色，再来下五子棋。</div>;
-  return <section className="min-h-full bg-gradient-to-b from-[#e9f4ee] via-[#f7f7ef] to-[#f8efe4] px-4 pb-8 pt-4 text-[#294239]" style={background ? { backgroundImage: `linear-gradient(to bottom, rgba(235,247,239,.82), rgba(250,247,239,.82)), url("${background.replace(/"/g, '%22')}")`, backgroundSize: 'cover', backgroundPosition: 'center' } : undefined}>
+  return <section className="min-h-full bg-gradient-to-b from-[#e9f4ee] via-[#f7f7ef] to-[#f8efe4] px-2 pb-8 pt-4 text-[#294239]" style={background ? { backgroundImage: `linear-gradient(to bottom, rgba(235,247,239,.82), rgba(250,247,239,.82)), url("${background.replace(/"/g, '%22')}")`, backgroundSize: 'cover', backgroundPosition: 'center' } : undefined}>
     <div className="mx-auto max-w-[420px]">
       <div className="grid grid-cols-3 gap-2 rounded-2xl border border-white/90 bg-white/75 p-2.5 shadow-[0_8px_28px_rgba(68,97,78,0.08)]">
         <label className="min-w-0"><span className="mb-1 block pl-1 text-[10px] text-slate-500">对弈角色</span><select aria-label="对手" value={opponentId} onChange={e => reset(userColor, e.target.value)} className="w-full min-w-0 rounded-xl bg-[#f1f6f2] px-2 py-2 text-xs font-semibold outline-none"><option value="" disabled>选择角色</option>{contacts.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
@@ -276,16 +338,19 @@ export function GomokuGame({ contacts, userName, onShare, onTalk }: Props) {
         <div className={`rounded-2xl border bg-white/80 p-2.5 shadow-sm ${turn === opponentColor && !result ? 'border-emerald-500' : 'border-white'}`}><span className="text-[10px] text-slate-400">对手</span><p className="truncate text-sm font-bold">{opponent?.name}</p><p className="mt-1 text-[11px] text-slate-600">{opponentColor === 1 ? '● 黑棋' : '○ 白棋'} · {history.filter(x => x === opponentColor).length} 步</p></div>
       </div>
       <p aria-live="polite" className="my-3 text-center text-xs font-semibold text-emerald-800">{result ? result.winner === '平局' ? '棋逢对手 · 平局' : `${result.winner}获胜 ✨` : turn === userColor ? '轮到你落子' : `${opponent?.name}正在思考…`}</p>
+      {characterRaisedDifficulty && <p role="status" className="-mt-2 mb-3 text-center text-[11px] text-amber-800">{opponent?.name}认真起来了 · 已切换到困难模式</p>}
     </div>
-    <div className="mx-auto aspect-square w-full max-w-[420px] rounded-[22px] border-[7px] border-[#c99b62] bg-[#e7bd78] p-2 shadow-[0_12px_28px_rgba(94,63,34,0.24),inset_0_2px_5px_rgba(116,75,33,0.15)]">
+    <div className="mx-auto aspect-square w-full max-w-[480px] rounded-[22px] border-[5px] border-[#c99b62] bg-[#e7bd78] p-1.5 shadow-[0_12px_28px_rgba(94,63,34,0.24),inset_0_2px_5px_rgba(116,75,33,0.15)]">
       <div className="grid h-full w-full" style={{ gridTemplateColumns: `repeat(${SIZE}, 1fr)`, gridTemplateRows: `repeat(${SIZE}, 1fr)` }}>
-        {board.map((stone, i) => <button key={i} type="button" onClick={() => move(i, userColor)} disabled={!!result || turn !== userColor || !!stone || talkBusy || pendingCharacterUndo} aria-label={`第${Math.floor(i / SIZE) + 1}行第${i % SIZE + 1}列`} className="relative flex items-center justify-center">
+        {board.map((stone, i) => <button key={i} type="button" onClick={() => pendingMove === i ? move(i, userColor) : setPendingMove(i)} disabled={!!result || turn !== userColor || !!stone || talkBusy || pendingCharacterUndo} aria-label={`第${Math.floor(i / SIZE) + 1}行第${i % SIZE + 1}列${pendingMove === i ? '，再次点击确认落子' : '，点击选择位置'}`} className="relative flex items-center justify-center">
           <span className="absolute h-px w-full bg-amber-900/50"/><span className="absolute h-full w-px bg-amber-900/50"/>
           {!stone && [48, 56, 112, 168, 176].includes(i) && <span className="relative z-10 h-1 w-1 rounded-full bg-amber-950/60"/>}
+          {!stone && pendingMove === i && <span className={`relative z-20 h-[80%] w-[80%] rounded-full border-2 border-emerald-600 shadow-md ${userColor === 1 ? 'bg-slate-900/55' : 'bg-white/75'}`}/>}
           {!!stone && <span className={`relative z-10 h-[84%] w-[84%] rounded-full shadow-md ${stone === 1 ? 'bg-gradient-to-br from-[#4a4a4a] to-[#17191b]' : 'border border-[#c9c6bb] bg-gradient-to-br from-white to-[#e8e4da]'} ${winningLine.includes(i) ? 'ring-2 ring-rose-500' : lastMove === i ? 'ring-2 ring-emerald-500' : ''}`}/>}
         </button>)}
       </div>
     </div>
+    <p aria-live="polite" className="mt-2 text-center text-[11px] text-emerald-800">{pendingMove >= 0 ? `已选第${Math.floor(pendingMove / SIZE) + 1}行第${pendingMove % SIZE + 1}列，再点一次确认落子` : '先点一格选位置，再点同一格落子'}</p>
     <div className="mx-auto mt-4 max-w-[420px] overflow-hidden rounded-[22px] border border-white/90 bg-white/85 shadow-[0_8px_28px_rgba(68,97,78,0.08)]">
       <div className="flex items-center justify-between border-b border-emerald-50 px-4 py-3"><div className="flex items-center gap-2"><span className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700"><MessageCircle size={17}/></span><div><p className="text-sm font-bold">棋局小聊</p><p className="text-[10px] text-slate-400">和{opponent?.name}边下边聊</p></div></div><label className="flex items-center gap-1.5 text-[10px] text-slate-500"><input type="checkbox" checked={autoChatEnabled} onChange={e => setAutoChatEnabled(e.target.checked)} className="accent-emerald-600"/>主动发言</label></div>
       <div ref={chatScrollRef} className="max-h-44 min-h-16 space-y-2 overflow-y-auto px-4 py-3">{talk.length ? talk.map((item, i) => <div key={i} className={`flex ${item.from === 'user' ? 'justify-end' : 'justify-start'}`}><p className={`max-w-[86%] rounded-2xl px-3 py-2 text-xs leading-5 ${item.from === 'user' ? 'rounded-br-sm bg-emerald-600 text-white' : 'rounded-bl-sm bg-[#f1f5f0] text-slate-700'}`}>{item.text}</p></div>) : <p className="py-2 text-center text-xs text-slate-400">落子之间，和 TA 聊两句吧</p>}{talkBusy && <p className="text-[11px] text-slate-400">{opponent?.name}正在想怎么说…</p>}</div>

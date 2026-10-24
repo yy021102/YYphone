@@ -368,6 +368,7 @@ const toBaseMessageContent = (message: PromptChatMessage) => {
       message.aiContext || message.text,
     ].join('\n');
   }
+  if (message.kind === 'group-rename') return `[群聊系统提示：${message.text}]`;
   if (message.senderId === 'narrator') return `（旁白：${message.text}）`;
   if (message.kind === 'pat') return `[拍一拍：${message.text}]`;
   if (message.kind === 'couple-invite') {

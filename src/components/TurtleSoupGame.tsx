@@ -12,7 +12,7 @@ type Session = {
   solverPrompt?: { kind: Turn['kind']; text: string } | null;
   outcome: 'solved' | 'revealed' | null; selectedShare: string[]; shared: boolean;
 };
-type Stored = { selectedPuzzleId: string; hostId: string; generated: TurtlePuzzle[]; custom?: TurtlePuzzle[]; customDraft?: TurtlePuzzle | null; session: Session | null };
+type Stored = { selectedPuzzleId: string; hostId: string; generated: TurtlePuzzle[]; custom?: TurtlePuzzle[]; builtinEdits?: TurtlePuzzle[]; deletedBuiltinIds?: string[]; customDraft?: TurtlePuzzle | null; session: Session | null };
 type HostInput = { host: TurtlePerson; puzzle: TurtlePuzzle; history: Turn[]; mode: 'question' | 'guess'; question: string };
 type HostOutput = { verdict: 'yes' | 'no' | 'irrelevant'; answer: string; solved?: boolean };
 type SolverInput = { actor: TurtlePerson; title: string; surface: string; history: Turn[] };
@@ -50,6 +50,8 @@ const isSession = (value: unknown): value is Session => isRecord(value) && typeo
 const isStored = (value: unknown): value is Stored => isRecord(value) && typeof value.selectedPuzzleId === 'string' &&
   typeof value.hostId === 'string' && Array.isArray(value.generated) && value.generated.every(isPuzzle) &&
   (value.custom === undefined || Array.isArray(value.custom) && value.custom.every(isPuzzle)) &&
+  (value.builtinEdits === undefined || Array.isArray(value.builtinEdits) && value.builtinEdits.every(isPuzzle)) &&
+  (value.deletedBuiltinIds === undefined || Array.isArray(value.deletedBuiltinIds) && value.deletedBuiltinIds.every((id: unknown) => typeof id === 'string')) &&
   (value.customDraft === undefined || value.customDraft === null || isPuzzle(value.customDraft)) &&
   (value.session === null || isSession(value.session));
 const DEFAULT: Stored = { selectedPuzzleId: BUILTIN[0].id, hostId: '', generated: [], custom: [], customDraft: null, session: null };
@@ -85,6 +87,8 @@ export function TurtleSoupGame({ people, userName, onHost, onSolver, onGenerate,
   const [hostId, setHostId] = useState(saved.hostId);
   const [generated, setGenerated] = useState(saved.generated);
   const [custom, setCustom] = useState(saved.custom ?? []);
+  const [builtinEdits, setBuiltinEdits] = useState(saved.builtinEdits ?? []);
+  const [deletedBuiltinIds, setDeletedBuiltinIds] = useState(saved.deletedBuiltinIds ?? []);
   const [customDraft, setCustomDraft] = useState<TurtlePuzzle | null>(saved.customDraft ?? null);
   const [session, setSession] = useState<Session | null>(saved.session);
   const [mode, setMode] = useState<'question' | 'guess'>('question');
@@ -100,16 +104,16 @@ export function TurtleSoupGame({ people, userName, onHost, onSolver, onGenerate,
   const requestId = useRef(0);
   const inFlight = useRef(false);
   const generationInFlight = useRef(false);
-  const puzzles = [...BUILTIN, ...generated, ...custom];
-  const selectedPuzzle = puzzles.find(puzzle => puzzle.id === selectedPuzzleId) ?? BUILTIN[0];
+  const puzzles = [...BUILTIN.filter(puzzle => !deletedBuiltinIds.includes(puzzle.id)).map(puzzle => builtinEdits.find(edited => edited.id === puzzle.id) ?? puzzle), ...generated, ...custom];
+  const selectedPuzzle = puzzles.find(puzzle => puzzle.id === selectedPuzzleId) ?? puzzles[0];
   const availableRecipients = session?.selectedShare.filter(id => people.some(person => person.id === id)) ?? [];
 
-  useEffect(() => { writeStoredValue(KEY, { selectedPuzzleId, hostId, generated, custom, customDraft, session } satisfies Stored); }, [selectedPuzzleId, hostId, generated, custom, customDraft, session]);
+  useEffect(() => { writeStoredValue(KEY, { selectedPuzzleId, hostId, generated, custom, builtinEdits, deletedBuiltinIds, customDraft, session } satisfies Stored); }, [selectedPuzzleId, hostId, generated, custom, builtinEdits, deletedBuiltinIds, customDraft, session]);
   useEffect(() => () => { requestId.current++; }, []);
 
   const start = () => {
     const host = people.find(person => person.id === hostId);
-    if (!host) return;
+    if (!host || !selectedPuzzle) return;
     requestId.current++; inFlight.current = false; setBusy(false); setError(''); setDraft(''); setMode('question');
     setSession({ id: `turtle-${crypto.randomUUID()}`, puzzle: selectedPuzzle, host, phase: 'asking',
       mode: selectedPuzzle.source === 'custom' ? 'host' : 'guess',
@@ -137,14 +141,23 @@ export function TurtleSoupGame({ people, userName, onHost, onSolver, onGenerate,
     const surface = customDraft.surface.trim();
     const truth = customDraft.truth.trim();
     if (!title || !surface || !truth) { setEditorMessage('请填写题名、汤面和汤底。'); return; }
-    if (!custom.some(puzzle => puzzle.id === customDraft.id) && custom.length >= 20) { setEditorMessage('最多保存 20 碗自创汤。'); return; }
-    const savedPuzzle = { ...customDraft, title, surface, truth, source: 'custom' as const };
-    setCustom(previous => [...previous.filter(puzzle => puzzle.id !== savedPuzzle.id), savedPuzzle]);
+    const isBuiltin = BUILTIN.some(puzzle => puzzle.id === customDraft.id);
+    const isGenerated = generated.some(puzzle => puzzle.id === customDraft.id);
+    if (!isBuiltin && !isGenerated && !custom.some(puzzle => puzzle.id === customDraft.id) && custom.length >= 20) { setEditorMessage('最多保存 20 碗自创汤。'); return; }
+    const savedPuzzle = { ...customDraft, title, surface, truth };
+    if (isBuiltin) setBuiltinEdits(previous => [...previous.filter(puzzle => puzzle.id !== savedPuzzle.id), savedPuzzle]);
+    else if (isGenerated) setGenerated(previous => previous.map(puzzle => puzzle.id === savedPuzzle.id ? savedPuzzle : puzzle));
+    else setCustom(previous => [...previous.filter(puzzle => puzzle.id !== savedPuzzle.id), { ...savedPuzzle, source: 'custom' }]);
     setSelectedPuzzleId(savedPuzzle.id); setCustomDraft(null); setEditorMessage('');
   };
-  const deleteCustom = (id: string) => {
-    setCustom(previous => previous.filter(puzzle => puzzle.id !== id));
-    if (selectedPuzzleId === id) setSelectedPuzzleId(BUILTIN[0].id);
+  const deletePuzzle = (id: string) => {
+    if (BUILTIN.some(puzzle => puzzle.id === id)) {
+      setDeletedBuiltinIds(previous => [...previous, id]);
+      setBuiltinEdits(previous => previous.filter(puzzle => puzzle.id !== id));
+    } else if (generated.some(puzzle => puzzle.id === id)) setGenerated(previous => previous.filter(puzzle => puzzle.id !== id));
+    else setCustom(previous => previous.filter(puzzle => puzzle.id !== id));
+    if (selectedPuzzleId === id) setSelectedPuzzleId(puzzles.find(puzzle => puzzle.id !== id)?.id ?? '');
+    if (customDraft?.id === id) setCustomDraft(null);
     setDeletePendingId('');
   };
   const generate = async () => {
@@ -155,7 +168,7 @@ export function TurtleSoupGame({ people, userName, onHost, onSolver, onGenerate,
       const puzzle = await onGenerate(style);
       if (!puzzle.title.trim() || !puzzle.surface.trim() || !puzzle.truth.trim()) throw new Error('生成的汤面或汤底不完整，请重试。');
       const next = { ...puzzle, id: `turtle-ai-${crypto.randomUUID()}`, difficulty: puzzle.difficulty || style };
-      setGenerated(previous => [...previous.slice(-7), next]); setSelectedPuzzleId(next.id);
+      setGenerated(previous => [...previous, next]); setSelectedPuzzleId(next.id);
     } catch (cause) { setError(cause instanceof Error ? cause.message : '生成失败，请重试。'); }
     finally { generationInFlight.current = false; setGenerating(false); }
   };
@@ -231,20 +244,20 @@ export function TurtleSoupGame({ people, userName, onHost, onSolver, onGenerate,
       {!session && <>
         <div className="rounded-3xl border border-white/80 bg-white/80 p-4 shadow-sm">
           <h3 className="text-sm font-bold">挑一碗汤</h3><p className="mt-1 text-[11px] text-slate-500">内置与 AI 汤由角色主持；你上传的汤由你主持。</p>
-          <div className="mt-3 space-y-2">{puzzles.map(puzzle => <div key={puzzle.id} className={`rounded-2xl border p-3 ${selectedPuzzleId === puzzle.id ? 'border-[#b6cece] bg-[#eaf3f1]' : 'border-white bg-[#f6f7f7]'}`}><button type="button" onClick={() => setSelectedPuzzleId(puzzle.id)} className="w-full text-left"><span className="flex items-center justify-between text-xs font-bold"><span>{puzzle.title}</span><span className="text-[10px] font-normal text-slate-500">{puzzle.source === 'custom' ? '我主持' : puzzle.difficulty}</span></span><span className="mt-1 block text-[11px] leading-5 text-slate-500">{puzzle.surface}</span></button>{puzzle.source === 'custom' && <div className="mt-2 flex gap-3 text-[11px] font-semibold text-[#6a8a90]"><button type="button" onClick={() => { setCustomDraft({ ...puzzle }); setEditorMessage(''); }}>编辑</button><button type="button" onClick={() => deletePendingId === puzzle.id ? deleteCustom(puzzle.id) : setDeletePendingId(puzzle.id)} className="text-rose-600">{deletePendingId === puzzle.id ? '再次点击删除' : '删除'}</button></div>}</div>)}</div>
+          <div className="mt-3 space-y-2">{puzzles.length ? puzzles.map(puzzle => <div key={puzzle.id} className={`rounded-2xl border p-3 ${selectedPuzzleId === puzzle.id ? 'border-[#b6cece] bg-[#eaf3f1]' : 'border-white bg-[#f6f7f7]'}`}><button type="button" onClick={() => setSelectedPuzzleId(puzzle.id)} className="w-full text-left"><span className="flex items-center justify-between text-xs font-bold"><span>{puzzle.title}</span><span className="text-[10px] font-normal text-slate-500">{puzzle.source === 'custom' ? '我主持' : puzzle.difficulty}</span></span><span className="mt-1 block text-[11px] leading-5 text-slate-500">{puzzle.surface}</span></button><div className="mt-2 flex gap-3 text-[11px] font-semibold text-[#6a8a90]"><button type="button" onClick={() => { setCustomDraft({ ...puzzle }); setEditorMessage(''); setDeletePendingId(''); }}>编辑</button><button type="button" onClick={() => deletePendingId === puzzle.id ? deletePuzzle(puzzle.id) : setDeletePendingId(puzzle.id)} className="text-rose-600">{deletePendingId === puzzle.id ? '再次点击删除' : '删除'}</button></div></div>) : <p className="py-3 text-center text-xs text-slate-500">汤单是空的，可以自己新增或让 AI 生成一碗。</p>}</div>
         </div>
         <div className="rounded-3xl border border-white/80 bg-white/80 p-4 shadow-sm">
-          <h3 className="text-sm font-bold">我来主持 · 上传海龟汤</h3>
+          <h3 className="text-sm font-bold">新增或编辑海龟汤</h3>
           <p className="mt-1 text-[11px] leading-5 text-slate-500">支持 .txt、.md、.json。一个文件可用“汤面：”“汤底：”分段，也可以分别上传两份文稿。</p>
           <div className="mt-3 grid grid-cols-2 gap-2"><button type="button" onClick={() => { setCustomDraft(newCustomDraft()); setEditorMessage(''); }} className="flex items-center justify-center gap-1.5 rounded-xl bg-[#e5efec] py-2.5 text-xs font-bold"><Plus size={14} />自己填写</button><label className="flex cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-[#e8edf3] py-2.5 text-xs font-bold"><FileUp size={14} />上传整份<input type="file" accept=".txt,.md,.markdown,.json,text/plain,application/json" className="sr-only" onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; void uploadCustom(file); }} /></label></div>
           {customDraft && <div className="mt-4 space-y-3 rounded-2xl bg-[#f4f7f6] p-3">
             <label className="block text-xs font-semibold">题名<input value={customDraft.title} onChange={event => setCustomDraft({ ...customDraft, title: event.target.value.slice(0, 80) })} maxLength={80} placeholder="这碗汤的名字" className="mt-1 w-full rounded-xl bg-white p-2.5 font-normal outline-none" /></label>
             <label className="block text-xs font-semibold">汤面<textarea value={customDraft.surface} onChange={event => setCustomDraft({ ...customDraft, surface: event.target.value.slice(0, 10000) })} rows={4} maxLength={10000} placeholder="给猜汤角色看的故事" className="mt-1 w-full resize-y rounded-xl bg-white p-2.5 font-normal leading-5 outline-none" /></label>
             <label className="flex cursor-pointer items-center gap-1 text-[11px] font-semibold text-[#65858b]"><FileUp size={13} />单独导入汤面<input type="file" accept=".txt,.md,.markdown,text/plain" className="sr-only" onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; void uploadDraftField('surface', file); }} /></label>
-            <label className="block text-xs font-semibold">汤底<textarea value={customDraft.truth} onChange={event => setCustomDraft({ ...customDraft, truth: event.target.value.slice(0, 20000) })} rows={5} maxLength={20000} placeholder="完整真相，只由你查看；不会发送给猜汤角色" className="mt-1 w-full resize-y rounded-xl bg-white p-2.5 font-normal leading-5 outline-none" /></label>
+            <label className="block text-xs font-semibold">汤底<textarea value={customDraft.truth} onChange={event => setCustomDraft({ ...customDraft, truth: event.target.value.slice(0, 20000) })} rows={5} maxLength={20000} placeholder={customDraft.source === 'custom' ? '完整真相，不会发送给猜汤角色' : '完整真相，供角色主持时使用'} className="mt-1 w-full resize-y rounded-xl bg-white p-2.5 font-normal leading-5 outline-none" /></label>
             <label className="flex cursor-pointer items-center gap-1 text-[11px] font-semibold text-[#65858b]"><FileUp size={13} />单独导入汤底<input type="file" accept=".txt,.md,.markdown,text/plain" className="sr-only" onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; void uploadDraftField('truth', file); }} /></label>
             {editorMessage && <p role="status" className="text-xs text-amber-700">{editorMessage}</p>}
-            <button type="button" onClick={saveCustom} className="w-full rounded-xl bg-[#78999e] py-2.5 text-xs font-bold text-white">保存到我的汤单</button>
+            <button type="button" onClick={saveCustom} className="w-full rounded-xl bg-[#78999e] py-2.5 text-xs font-bold text-white">保存到汤单</button>
             <button type="button" onClick={() => { setCustomDraft(null); setEditorMessage(''); }} className="w-full text-center text-xs text-slate-500">收起编辑</button>
           </div>}
           {!customDraft && editorMessage && <p role="status" className="mt-2 text-xs text-amber-700">{editorMessage}</p>}
@@ -254,14 +267,14 @@ export function TurtleSoupGame({ people, userName, onHost, onSolver, onGenerate,
           <div className="mt-3 flex gap-2"><select value={style} onChange={event => setStyle(event.target.value)} aria-label="故事风格" className="min-w-0 flex-1 rounded-xl bg-[#f1f5f4] px-3 py-2.5 text-xs">{['悬疑', '日常反转', '温情', '惊悚', '奇幻', '校园'].map(item => <option key={item}>{item}</option>)}</select><button type="button" disabled={generating} onClick={() => void generate()} className="rounded-xl bg-[#83a7a9] px-4 text-xs font-bold text-white disabled:opacity-50">{generating ? '生成中…' : '生成'}</button></div>
           <p className="mt-2 text-[11px] text-slate-500">生成后会加入本机汤单，仍由你选择何时开局。</p>
         </div>
-        <div className="rounded-3xl border border-white/80 bg-white/80 p-4 shadow-sm">
+        {selectedPuzzle && <div className="rounded-3xl border border-white/80 bg-white/80 p-4 shadow-sm">
           <h3 className="text-sm font-bold">{selectedPuzzle.source === 'custom' ? '选择猜汤角色' : '选择主持人'}</h3>
           <select value={hostId} onChange={event => setHostId(event.target.value)} className="mt-3 w-full rounded-xl bg-[#f1f5f4] px-3 py-3 text-xs"><option value="">请选择角色或 NPC</option>{people.map(person => <option key={person.id} value={person.id}>{person.name} · {person.kind}</option>)}</select>
           {selectedPuzzle.source === 'custom' && <p className="mt-2 text-[11px] leading-5 text-slate-500">你负责回答“是／不是／无关”，角色会自己提问并尝试猜出汤底。</p>}
           {!people.length && <p className="mt-2 text-xs text-rose-600">请先在通讯录添加角色或 NPC。</p>}
           {error && <p role="alert" className="mt-3 rounded-xl bg-rose-50 p-2.5 text-xs text-rose-700">{error}</p>}
           <button type="button" disabled={!people.some(person => person.id === hostId) || generating} onClick={start} className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-[#78999e] py-3 text-sm font-bold text-white disabled:opacity-40">{selectedPuzzle.source === 'custom' ? '开始主持' : '开始猜汤'}<ChevronRight size={15} /></button>
-        </div>
+        </div>}
       </>}
       {session && <>
         <div className="rounded-3xl border border-white/80 bg-white/85 p-4 shadow-sm">
