@@ -4845,7 +4845,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
               })}
             </div>
             {selectMode ? (
-              <div className="flex items-center justify-between gap-2 border-t border-white/70 bg-white/80 p-3">
+              <div className="yy-chat-bottom-bar flex items-center justify-between gap-2 border-t border-white/70 bg-white/80 p-3">
                 <button type="button" onClick={exitSelectMode} className="rounded-xl bg-slate-100 px-3 py-2 text-xs text-slate-600">取消</button>
                 <span className="text-[11px] text-slate-500">已选 {selectedIds.length} 条</span>
                 <div className="flex gap-2">
@@ -4868,7 +4868,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                 </div>
               </div>
             ) : activeChat.blocked ? (
-              <div className="flex items-center justify-between gap-3 border-t border-slate-200 bg-white/70 p-3">
+              <div className="yy-chat-bottom-bar flex items-center justify-between gap-3 border-t border-slate-200 bg-white/70 p-3">
                 <p className="text-xs text-rose-600">此对话已拉黑，无法发送消息。</p>
                 <button type="button" onClick={() => openChatSettings(activeChat)}
                   className="shrink-0 rounded-lg bg-slate-100 px-2.5 py-1.5 text-[10px] font-semibold text-slate-700">
@@ -8269,9 +8269,6 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
           );
         })}
       </div>}
-      {activeChat && (
-        <div aria-hidden="true" className="wechat-bottom-safe shrink-0 bg-white" style={{ height: 'calc(env(safe-area-inset-bottom, 0px) + 2px)' }} />
-      )}
     </div>
   );
 };

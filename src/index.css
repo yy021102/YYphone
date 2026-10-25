@@ -239,6 +239,10 @@ body {
   color: #191919;
 }
 .yy-chat-composer .yy-chat-attachments { order: 0; }
+/* 聊天底部留白属于操作栏本身，随其背景、渐变和透明度一起美化。 */
+.wechat-app.wechat-chat-open :is(.yy-chat-composer, .yy-chat-bottom-bar) {
+  padding-bottom: calc(var(--wechat-composer-bottom-padding, 8px) + var(--wechat-chat-safe-bottom, min(env(safe-area-inset-bottom, 0px), 12px)));
+}
 .yy-chat-composer textarea { order: 1; }
 .yy-chat-composer .yy-chat-emoji { order: 2; }
 .yy-chat-composer :is(.yy-chat-generate, .yy-chat-send) { order: 3; color: inherit; background: transparent; }

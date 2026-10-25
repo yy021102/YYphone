@@ -100,6 +100,9 @@ export const DEFAULT_WECHAT_THEME_CSS = `/* 微信完整聊天主题 · 默认�
 
 /* 09 底部输入栏：固定三个按钮 + 一个输入框；可移动位置或替换外观 */
 .yy-chat-composer { background: #f7f7f7; color: #191919; border-top: 1px solid #dcdcdc; padding: 8px; gap: 8px; }
+/* 底部安全区与输入栏共用背景；不再单独铺白条。
+   --wechat-composer-bottom-padding：基础底边距；--wechat-chat-safe-bottom：额外安全区高度。 */
+.yy-chat-composer { padding-bottom: calc(var(--wechat-composer-bottom-padding, 8px) + var(--wechat-chat-safe-bottom, min(env(safe-area-inset-bottom, 0px), 12px))); }
 .yy-chat-attachments { order: 0; } /* 加号：展开原有功能菜单 */
 .yy-chat-input { order: 1; background: #fff; color: #111; border-radius: 5px; border: none; padding: 8px 12px; font-size: calc(16px * var(--font-scale, 1)); }
 .yy-chat-emoji { order: 2; } /* 表情按钮 */
