@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { JournalRange } from '../utils/journalRange';
 
-export const JournalRegenerator = ({ total, busy, batchSize, onGenerate }: {
+export const JournalRegenerator = ({ total, busy, onGenerate }: {
   total: number; busy: boolean; batchSize: number; onGenerate: (range: JournalRange) => Promise<void>;
 }) => {
   const [open, setOpen] = useState(false);
@@ -23,9 +23,9 @@ export const JournalRegenerator = ({ total, busy, batchSize, onGenerate }: {
         <span>至</span><input aria-label="重新生成结束条数" type="number" min={1} max={total} value={end}
           placeholder={String(total)} disabled={busy} onChange={(event) => setEnd(event.target.value)} className="w-20 rounded-lg border p-1.5" /><span>条</span>
       </div>
-      <p>包含首尾；沿用当前设置，每篇最多 {batchSize} 条，超长聊天会提前分段。重做会替换与所选范围重叠的旧篇及上层压缩摘要，未被覆盖的下层原篇恢复。聊天原文不变；全部成功后才保存。</p>
+      <p>所选范围合并为一篇，沿用总结提示词和字数上限。重做会替换重叠的旧篇及上层摘要，聊天原文不变；全部成功后才保存。</p>
       <button type="button" disabled={busy || !valid} onClick={() => {
-        if (window.confirm(`重新整理第 ${first} 至 ${last} 条？按当前每篇最多 ${batchSize} 条，至少需要 ${Math.ceil((last - first + 1) / batchSize)} 次生成请求（超长分段或摘要超字数精简时会增加请求），将替换重叠的旧流水账。`)) {
+        if (window.confirm(`将第 ${first} 至 ${last} 条聊天整理为一篇流水账，并替换重叠的旧记录？`)) {
           void onGenerate({ start: first, end: last });
         }
       }} className="rounded-full bg-sky-100 px-3 py-1.5 text-sky-700 disabled:opacity-50">

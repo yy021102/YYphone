@@ -42,3 +42,14 @@ export async function summarizeJournal(system: string, input: string, level: Jou
   if (!content || content.length > max) throw new Error(`流水账未满足 ${max} 字上限，未保存或推进进度。可重试或调整每篇字数。`);
   return content;
 }
+
+/** 分段只用于控制请求长度，中间摘要不保存为独立流水账。 */
+export async function summarizeJournalParts(system: string, inputs: string[]): Promise<string> {
+  if (!inputs.length) throw new Error('没有可整理的聊天记录。');
+  let summary = await summarizeJournal(system, inputs[0]);
+  for (const input of inputs.slice(1)) {
+    summary = await summarizeJournal(system,
+      `【此前记录的临时摘要】\n${summary}\n【后续聊天记录】\n${input}\n请按时间顺序合并为同一篇完整流水账，合并重复，保留关键事实与有效约定。只输出合并后的正文。`);
+  }
+  return summary;
+}

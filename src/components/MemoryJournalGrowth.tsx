@@ -182,7 +182,7 @@ export const JournalPanel: React.FC<PanelProps> = ({ charId, charName, flash }) 
           <span>每篇流水账最多 {settings.journalMaxChars} 字（个人与群聊共用）</span>
           <input aria-label="流水账字数上限" type="range" min={200} max={1200} step={100} disabled={busy} className="w-full" value={settings.journalMaxChars} onChange={e => patchSettings({ journalMaxChars: Number(e.target.value) })} />
         </label>
-        <p className="text-[10px] leading-relaxed text-slate-400">手动整理、自动整理和指定范围重做均按每篇最多 {settings.journalEvery} 条处理。摘要只保留关键事件、关系变化及有效约定；阶段/长篇回顾分别最多 {Math.round(settings.journalMaxChars * 1.5)} / {settings.journalMaxChars * 2} 字。字数设置仅影响新生成内容，旧篇不会自动改写。</p>
+        <p className="text-[10px] leading-relaxed text-slate-400">自动整理每 {settings.journalEvery} 条生成一篇；手动整理将待整理聊天合为一篇，指定范围重做也只生成一篇。阶段/长篇回顾分别最多 {Math.round(settings.journalMaxChars * 1.5)} / {settings.journalMaxChars * 2} 字。字数设置仅影响新生成内容。</p>
         {settings.lastError && <p className="rounded-xl bg-rose-50 px-2.5 py-1.5 text-[10px] text-rose-400">上次自动整理失败：{settings.lastError}</p>}
       </div>
 

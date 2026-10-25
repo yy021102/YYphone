@@ -74,7 +74,7 @@ export const GroupJournalPanel = ({ chatId }: { chatId: string }) => {
       <button type="button" disabled={busy} onClick={() => void run(true)}
         className="rounded-full bg-white px-3 py-1.5 text-[11px] text-slate-600 disabled:opacity-50">压缩合并</button>
     </div>
-    <p className="text-[10px] text-slate-500">每篇最多 {journal.every} 条、{readJournalSettings().journalMaxChars} 字；字数上限可在记忆 App → 流水账调整。超长消息会提前分段。</p>
+    <p className="text-[10px] text-slate-500">自动整理每 {journal.every} 条生成一篇；手动整理和指定范围重做合为一篇，最多 {readJournalSettings().journalMaxChars} 字。</p>
     <JournalRegenerator key={chatId} total={journal.messageCount} busy={busy} batchSize={journal.every} onGenerate={async (range) => {
       if (busy) return;
       setBusy(true); setMessage('');

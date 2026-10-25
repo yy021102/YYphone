@@ -396,7 +396,7 @@ test('journal splitting follows configured count and retains the full long selec
   assert.equal(long.length, 2);
 });
 
-test('personal journal automatic-size chunks and regeneration both follow journalEvery', async () => {
+test('personal automatic journals follow journalEvery while regeneration saves one entry', async () => {
   archiveFixture(); testApi();
   const chats = JSON.parse(readStorageString(WECHAT_CHATS_STORAGE_KEY)!);
   chats[0].messages = Array.from({ length: 95 }, (_, index) => ({ id: `cfg-${index}`, senderId: index % 2 ? 'archive-char' : 'user', text: `事件${index}`,
@@ -406,15 +406,15 @@ test('personal journal automatic-size chunks and regeneration both follow journa
   mock.method(globalThis, 'fetch', async () => aiResponse('关键事件提要'));
   const entry = await createJournalEntry('archive-char', { minMessages: 40 });
   assert.equal(entry?.messageCount, 40);
-  assert.equal(await regenerateJournal('archive-char'), 3);
-  assert.deepEqual(readJournalEntries().map(item => item.messageCount), [40, 40, 15]);
+  assert.equal(await regenerateJournal('archive-char'), 1);
+  assert.deepEqual(readJournalEntries().map(item => item.messageCount), [95]);
 });
 
 test('group regeneration covers messages after 250 and follows its independent batch setting', async () => {
   const chat = groupJournalFixture(305, 'group', 'full-range');
   setGroupJournalSettings(chat.id, { every: 40 });
   mock.method(globalThis, 'fetch', async () => aiResponse('群内关键结论'));
-  assert.equal(await regenerateGroupJournal(chat.id), 8);
+  assert.equal(await regenerateGroupJournal(chat.id), 1);
   const entries = readGroupJournal(chat.id).entries;
   assert.equal(entries.reduce((sum, entry) => sum + entry.messageCount, 0), 305);
   assert.equal(entries.at(-1)?.toMessageId, chat.messages.at(-1)?.id);
@@ -581,6 +581,37 @@ test('range regeneration preserves distinct message ranges sharing identical tim
   assert.equal(readJournalEntries().length, 1);
   assert.equal(readJournalEntries()[0].messageCount, 25);
   assert.throws(() => updateJournalEntryContent(readJournalEntries()[0].id, ' '), /不能为空/);
+});
+
+test('manual and range journals save one entry across internal batches', async () => {
+  archiveFixture(); testApi();
+  const chats = JSON.parse(readStorageString(WECHAT_CHATS_STORAGE_KEY)!);
+  chats[0].messages = Array.from({ length: 501 }, (_, index) => ({
+    id: `single-${index}`, senderId: 'user', text: `消息${index}`,
+    createdAt: new Date(Date.UTC(2026, 0, 1, 0, index)).toISOString(),
+  }));
+  saveSetting(WECHAT_CHATS_STORAGE_KEY, chats);
+  const inputs: string[] = [];
+  mock.method(globalThis, 'fetch', async (_url: unknown, init?: RequestInit) => {
+    inputs.push(String(init?.body));
+    return aiResponse(`合并后的摘要${inputs.length}`);
+  });
+  assert.equal((await runJournal('archive-char')).created, 1);
+  assert.equal(readJournalEntries().length, 1);
+  assert.equal(readJournalEntries()[0].messageCount, 501);
+  assert.match(inputs[1], /合并后的摘要1/);
+  assert.match(inputs.at(-1)!, /消息500/);
+  assert.equal(await regenerateJournal('archive-char'), 1);
+  assert.equal(readJournalEntries().length, 1);
+  assert.equal(readJournalEntries()[0].messageCount, 501);
+
+  const chat = groupJournalFixture(501, 'group', 'single-group');
+  assert.equal((await runGroupJournal(chat.id)).created, 1);
+  assert.equal(readGroupJournal(chat.id).entries.length, 1);
+  assert.equal(readGroupJournal(chat.id).entries[0].messageCount, 501);
+  assert.equal(await regenerateGroupJournal(chat.id), 1);
+  assert.equal(readGroupJournal(chat.id).entries.length, 1);
+  assert.equal(readGroupJournal(chat.id).entries[0].messageCount, 501);
 });
 
 test('personal regeneration is atomic across chunks and serializes normal manual and auto work', async () => {

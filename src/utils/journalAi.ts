@@ -22,7 +22,7 @@ import { readMemories } from './memoryData';
 import { readOfflineContacts } from './offlineData';
 import { guardMemoryArchive } from './memoryArchives';
 import { replaceJournalRange, selectJournalRange, type JournalRange } from './journalRange';
-import { splitJournalMessages, summarizeJournal } from './journalPolicy';
+import { splitJournalMessages, summarizeJournal, summarizeJournalParts } from './journalPolicy';
 import { readStorageString } from './localStorage';
 import { getUserRealName } from './userPersona';
 import type { UserPersona } from '../types';
@@ -82,7 +82,7 @@ const setError = (message: string) => {
 /** 把还没整理的聊天（最多一段）写成一篇流水账。返回新条目，没有可写的返回 null。 */
 export const createJournalEntry = async (
   charId: string,
-  options: { minMessages: number } = { minMessages: MIN_MANUAL_CHUNK }
+  options: { minMessages: number; allPending?: boolean } = { minMessages: MIN_MANUAL_CHUNK }
 ): Promise<JournalEntry | null> => {
   const assertArchive = guardMemoryArchive(charId);
   const settings = readJournalSettings();
@@ -90,7 +90,7 @@ export const createJournalEntry = async (
   const messages = readDirectMessages(charId, { fullText: true });
   const pending = messages.filter((m) => !cursor || m.createdAt > cursor);
   if (pending.length < options.minMessages) return null;
-  const chunk = splitMessages(pending.slice(0, settings.journalEvery), settings.journalEvery)[0] ?? [];
+  const chunk = options.allPending ? pending : pending.slice(0, settings.journalEvery);
   if (chunk.length === 0) return null;
   const original = entriesOf(charId);
   const { name, persona } = charInfo(charId);
@@ -102,12 +102,7 @@ export const createJournalEntry = async (
     '【记录】也可能是群聊转私信背景。涉及这类经历时保留来源群名及相关成员，区分群内发言与后续私信，不把其他成员说的话或约定记到玩家或我身上，也不推断其他成员知道私信内容。',
     `用第三人称和真实姓名叙述${name}与${userName}的关键经历，不用“我”“对方”等代称混淆归属。保留线下剧情、手机内容、群聊转私信等必要来源与发言归属。优先记录新事实、关系变化、承诺和未完事项，不逐条复述聊天。`,
   ].join('\n');
-  const source = `【聊天记录（${stamp(chunk[0].createdAt)} 至 ${stamp(chunk[chunk.length - 1].createdAt)}，共 ${chunk.length} 条）】\n${transcript(chunk, name, userName)}`;
-  const text = await summarizeJournal(
-    system,
-    source,
-    1
-  );
+  const text = await summarizeJournalParts(system, splitMessages(chunk).map(part => transcript(part, name, userName)));
   assertArchive();
   if (JSON.stringify(readDirectMessages(charId, { fullText: true }).slice(0, messages.length)) !== JSON.stringify(messages) ||
     JSON.stringify(entriesOf(charId)) !== JSON.stringify(original) ||
@@ -222,11 +217,11 @@ export const regenerateJournal = async (charId: string, range?: JournalRange) =>
   const generated: JournalEntry[] = [];
   journalRunning.add(charId);
   try {
-    for (const chunk of splitMessages(selected)) {
-      const source = transcript(chunk, name, readUserName());
-      const content = (await summarizeJournal(
+    for (const chunk of [selected]) {
+      const sources = splitMessages(chunk).map(part => transcript(part, name, readUserName()));
+      const content = (await summarizeJournalParts(
         `你是${name}的记忆整理助手。人设仅供理解，不用于改写事实。用第三人称和真实姓名概括${name}与${readUserName()}的重要经历，保留群聊转私信的来源群名及相关成员、发言归属，不让角色知道未参与的私聊。`,
-        source, 1
+        sources
       )).trim();
       if (!content || content.length > 20000) throw new Error('流水账正文为空或过长，未保存本次重做。');
       assertArchive();
@@ -260,21 +255,16 @@ export const regenerateJournal = async (charId: string, range?: JournalRange) =>
   }
 };
 
-/** 手动整理：连续整理最多 maxChunks 段待整理的聊天，再压缩。 */
-export const runJournal = async (charId: string, maxChunks = 6): Promise<{ created: number; merged: number }> => {
+/** 手动整理：全部待整理聊天合并为一篇。 */
+export const runJournal = async (charId: string): Promise<{ created: number; merged: number }> => {
   if (journalRunning.has(charId)) throw new Error('这个角色的流水账正在整理，请稍后再试。');
   const assertArchive = guardMemoryArchive(charId);
   journalRunning.add(charId);
   try {
-    let created = 0;
-    for (let i = 0; i < maxChunks; i += 1) {
-      const entry = await createJournalEntry(charId);
-      assertArchive();
-      if (!entry) break;
-      created += 1;
-    }
-    const merged = await compressJournal(charId);
+    const entry = await createJournalEntry(charId, { minMessages: MIN_MANUAL_CHUNK, allPending: true });
     assertArchive();
+    const created = entry ? 1 : 0;
+    const merged = 0;
     return { created, merged };
   } finally {
     journalRunning.delete(charId);

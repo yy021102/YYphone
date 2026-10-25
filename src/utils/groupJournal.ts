@@ -3,7 +3,7 @@ import { getNpcByParticipantId, readCharacterNpcs } from './characterNpcs';
 import { COMPRESSION, describeForSummary, type JournalLevel } from './journalData';
 import { readStorageString, writeStoredValue } from './localStorage';
 import { replaceJournalRange, selectJournalRange, type JournalRange } from './journalRange';
-import { splitJournalMessages, summarizeJournal } from './journalPolicy';
+import { splitJournalMessages, summarizeJournal, summarizeJournalParts } from './journalPolicy';
 
 export const GROUP_JOURNAL_KEY = 'yyphone:group-journal';
 
@@ -229,7 +229,7 @@ const summaryText = (text: string) => {
 };
 const newId = () => `group-jr-${crypto.randomUUID()}`;
 
-const createEntry = async (chatId: string, minimum: number) => {
+const createEntry = async (chatId: string, minimum: number, allPending = false) => {
   const chat = readChat(chatId);
   const assertCurrent = guard(chat);
   const originalArchive = archiveOf(readState(), chat);
@@ -237,14 +237,12 @@ const createEntry = async (chatId: string, minimum: number) => {
   if (pending.length < minimum) return false;
   const source = sourceOf(chat);
   const every = groupOf(readState(), chatId).every;
-  const batch = splitGroupMessages(pending.slice(0, every), source.speaker, every)[0] ?? [];
+  const batch = allPending ? pending : pending.slice(0, every);
   if (batch.length === 0) return false;
   const snapshot = JSON.stringify(batch);
-  const content = summaryText(await summarizeJournal(
+  const content = summaryText(await summarizeJournalParts(
     `你是群聊流水账整理助手，请提炼这段多人对话的重要经历。\n${summaryRules}`,
-    `${source.text}\n【待整理记录】\n${batch.map((message) =>
-      describeGroupMessage(message, source.speaker(message.senderId))).join('\n')}`,
-    1
+    splitGroupMessages(batch, source.speaker, every).map(part => `${source.text}\n【待整理记录】\n${part.map(message => describeGroupMessage(message, source.speaker(message.senderId))).join('\n')}`)
   ));
   const latest = assertCurrent();
   if (JSON.stringify(archiveOf(readState(), latest).cursor) !== JSON.stringify(originalArchive.cursor)) {
@@ -320,13 +318,11 @@ export const regenerateGroupJournal = async (chatId: string, range?: JournalRang
   running.add(chatId);
   try {
     const every = groupOf(readState(), chatId).every;
-    for (const batch of splitGroupMessages(selected, source.speaker, every)) {
-      const input = `${source.text}\n【指定范围聊天记录】\n${batch.map((message) =>
-        describeGroupMessage(message, source.speaker(message.senderId))).join('\n')}`;
-      const content = summaryText(await summarizeJournal(
+    for (const batch of [selected]) {
+      const inputs = splitGroupMessages(batch, source.speaker, every).map(part => `${source.text}\n${part.map(message => describeGroupMessage(message, source.speaker(message.senderId))).join("\n")}`);
+      const content = summaryText(await summarizeJournalParts(
         `把以下群聊提炼为简洁事件提要。\n${summaryRules}`,
-        input,
-        1
+        inputs
       ));
       assertCurrent();
       generated.push({ id: newId(), level: 1, from: batch[0].createdAt,
@@ -362,13 +358,13 @@ export const runGroupJournal = async (chatId: string, options: { compressOnly?: 
     let created = 0;
     if (!options.compressOnly) {
       const minimum = options.auto ? readGroupJournal(chatId).every : 10;
-      for (let index = 0; index < (options.auto ? 1 : 6); index += 1) {
-        if (!await createEntry(chatId, minimum)) break;
+      for (let index = 0; index < 1; index += 1) {
+        if (!await createEntry(chatId, minimum, !options.auto)) break;
         assertCurrent();
         created += 1;
       }
     }
-    const merged = await compress(chatId);
+    const merged = options.auto || options.compressOnly ? await compress(chatId) : 0;
     assertCurrent();
     updateArchive(chat, (archive) => ({ ...archive, lastError: '' }));
     return { created, merged };
