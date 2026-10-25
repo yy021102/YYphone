@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import {
   Check,
+  ChevronDown,
   Database,
   Download,
   Eye,
@@ -10,15 +11,17 @@ import {
   Key,
   Lock,
   Plus,
+  Bell,
   RotateCcw,
   Save,
   Sliders,
+  Sparkles,
   Trash2,
   Upload,
   Volume2,
 } from 'lucide-react';
 import { AppHeader } from '../components/AppHeader';
-import { DEFAULT_FONT_SETTINGS, FONT_FAMILIES, FontSettings, normalizeFontUrl } from '../utils/fontSettings';
+import { VoiceConnectionTest, ImageConnectionTest } from '../components/MediaConnectionTests';
 import { ChatRuntimeSettings } from '../utils/chatRuntime';
 import { useErrorDialog } from '../components/ErrorDialog';
 import {
@@ -46,6 +49,9 @@ import {
   ImageGenerationSettings,
   isImageGenerationProvider,
   readImageGenerationSettings,
+  defaultImageSize,
+  imageSizeOptions,
+  isImageSizePreset,
 } from '../utils/imageGeneration';
 
 interface ApiPreset {
@@ -80,8 +86,6 @@ interface SettingsAppProps {
   runtimeSettings: ChatRuntimeSettings;
   onSaveRuntimeSettings: (settings: ChatRuntimeSettings, resumeKeepAlive?: boolean) => Promise<boolean>;
   keepAliveStatus: string;
-  fontSettings: FontSettings;
-  onSaveFontSettings: (settings: FontSettings) => boolean;
   onBack: () => void;
   showStatusBar: boolean;
   onToggleStatusBar: () => boolean;
@@ -101,8 +105,6 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
   runtimeSettings,
   onSaveRuntimeSettings,
   keepAliveStatus,
-  fontSettings,
-  onSaveFontSettings,
   onBack,
   showStatusBar,
   onToggleStatusBar,
@@ -112,9 +114,14 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
   lockSettings,
   onSaveLockSettings,
 }) => {
-  const [fontUrlDraft, setFontUrlDraft] = useState(fontSettings.url ?? '');
   const [apiConfigExpanded, setApiConfigExpanded] = useState(() =>
     readSetting(SETTINGS_KEYS.apiConfigExpanded, true, (value): value is boolean => typeof value === 'boolean')
+  );
+  const [voiceConfigExpanded, setVoiceConfigExpanded] = useState(() =>
+    readSetting(SETTINGS_KEYS.voiceConfigExpanded, true, (value): value is boolean => typeof value === 'boolean')
+  );
+  const [imageConfigExpanded, setImageConfigExpanded] = useState(() =>
+    readSetting(SETTINGS_KEYS.imageConfigExpanded, true, (value): value is boolean => typeof value === 'boolean')
   );
   const [runtimeBusy, setRuntimeBusy] = useState(false);
   const [lockMode, setLockMode] = useState(lockSettings.mode);
@@ -511,10 +518,11 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
   };
 
   return (
-    <div className="flex-1 w-full flex flex-col bg-[#F3F6F8] overflow-hidden">
-      <AppHeader title="设置 · 系统配置" onBack={onBack} />
+    <div className="settings-app flex-1 w-full flex flex-col overflow-hidden">
+      <AppHeader title="设置" subtitle="把小手机调成你喜欢的样子" onBack={onBack} />
 
-      <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar p-4 space-y-3 flex flex-col">
+      <div className="settings-content flex-1 min-h-0 overflow-y-auto no-scrollbar p-4 space-y-3 flex flex-col">
+        <h2 className="settings-section-label">连接与模型<span>让每一次互动都有回应</span></h2>
         <details open={apiConfigExpanded} onToggle={(event) => {
           const expanded = event.currentTarget.open;
           if (expanded === apiConfigExpanded) return;
@@ -526,12 +534,13 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
             console.error('Could not save API panel state.', error);
             setApiError('API 配置折叠状态保存失败，请重试。');
           }
-        }} className="space-y-2">
-          <summary className="cursor-pointer px-1 text-xs font-bold text-[#2C4A5C]">
-            <Key className="mr-1.5 inline-block h-3.5 w-3.5 align-middle text-sky-600" />
-            <span>API 配置预设</span>
+        }} className="settings-card settings-model-panel" data-tone="blue">
+          <summary className="settings-panel-heading">
+            <span className="settings-icon"><Key size={18} strokeWidth={1.7} /></span>
+            <span className="settings-heading-copy"><strong>API 配置预设</strong><small>聊天与内容生成</small></span>
+            <ChevronDown size={16} className="settings-chevron" />
           </summary>
-          <div className="glass-card rounded-2xl p-4 space-y-3">
+          <div className="settings-panel-body space-y-3">
             <div className="flex gap-2">
               <select
                 value={selectedApiPresetId}
@@ -643,7 +652,7 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
               <button
                 type="button"
                 onClick={handleSaveApiPreset}
-                className="flex-1 rounded-xl bg-sky-600 text-white py-2 text-xs font-bold"
+                className="flex-1 rounded-xl settings-primary bg-sky-600 text-white py-2 text-xs font-bold"
               >
                 <Save className="inline w-3.5 h-3.5 mr-1" />保存预设
               </button>
@@ -664,256 +673,158 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
             </p>
           </div>
         </details>
-        <section className="glass-card rounded-2xl p-4 space-y-3">
-          <h2 className="text-xs font-bold text-[#2C4A5C]">后台、来电与消息提醒</h2>
-          {([
-            ['keepAlive', '后台保活（循环播放静默音频）'],
-            ['allowIncomingCalls', '允许角色主动打电话'],
-            ['banners', '新消息顶部弹窗'],
-            ['systemNotifications', '浏览器系统通知'],
-          ] as const).map(([key, label]) => (
-            <label key={key} className="flex items-center justify-between gap-3 text-xs text-slate-600">
-              <span>{label}</span>
-              <input type="checkbox" checked={runtimeSettings[key]} disabled={runtimeBusy} onChange={(event) => void updateRuntime({ [key]: event.target.checked })} />
+        <details open={voiceConfigExpanded} onToggle={(event) => {
+          const expanded = event.currentTarget.open;
+          if (expanded === voiceConfigExpanded) return;
+          try {
+            saveSetting(SETTINGS_KEYS.voiceConfigExpanded, expanded);
+            setVoiceConfigExpanded(expanded);
+          } catch (error) {
+            event.currentTarget.open = voiceConfigExpanded;
+            console.error('Could not save voice panel state.', error);
+            setApiError('语音模型折叠状态保存失败，请重试。');
+          }
+        }} className="settings-card settings-model-panel" data-tone="pink">
+          <summary className="settings-panel-heading">
+            <span className="settings-icon"><Volume2 size={18} strokeWidth={1.7} /></span>
+            <span className="settings-heading-copy"><strong>语音模型</strong><small>朗读消息与语音通话</small></span>
+            <ChevronDown size={16} className="settings-chevron" />
+          </summary>
+          <div className="settings-panel-body space-y-3">
+            <label className="block text-[11px] font-semibold text-[#2C4A5C]">
+              服务商
+              <select value={voiceProvider}
+                onChange={(event) => setVoiceModelDraft({
+                  ...voiceModelDraft,
+                  provider: VOICE_PROVIDER_OPTIONS.find((option) => option.value === event.target.value)?.value ?? 'openai',
+                })}
+                className="mt-1 w-full rounded-xl border border-white bg-white/70 px-3 py-2 text-xs">
+                {VOICE_PROVIDER_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
             </label>
-          ))}
-          <p className="text-[11px] leading-relaxed text-slate-500">
-            在每个私聊右上角的对话设置中，单独允许主动消息并填写间隔；会额外消耗 API。角色来电为文字模拟，需点击接通。保活只尝试降低网页暂停概率，不能保证锁屏、系统冻结或关闭网页后仍运行，也可能增加耗电。系统通知需授权，是否展示取决于浏览器与系统。
-          </p>
-          <p className="text-[11px] text-sky-700" role="status">保活状态：{keepAliveStatus || '未开启'}</p>
-          {runtimeSettings.keepAlive && <button type="button" disabled={runtimeBusy} onClick={() => void updateRuntime({ keepAlive: true })} className="text-xs font-semibold text-sky-600">恢复保活</button>}
-        </section>
-        <section className="glass-card rounded-2xl p-4 space-y-3">
-          <h2 className="flex items-center gap-1.5 text-xs font-bold text-[#2C4A5C]">
-            <Volume2 className="h-3.5 w-3.5 text-sky-600" />语音模型
-          </h2>
-          <label className="block text-[11px] font-semibold text-[#2C4A5C]">
-            服务商
-            <select value={voiceProvider}
-              onChange={(event) => setVoiceModelDraft({
-                ...voiceModelDraft,
-                provider: VOICE_PROVIDER_OPTIONS.find((option) => option.value === event.target.value)?.value ?? 'openai',
-              })}
-              className="mt-1 w-full rounded-xl border border-white bg-white/70 px-3 py-2 text-xs">
-              {VOICE_PROVIDER_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-            </select>
-          </label>
-          <label className="block text-[11px] font-semibold text-[#2C4A5C]">
-            {voiceProvider === 'minimax' ? 'Group ID（选填，旧版账号需要）' : 'API ID（选填）'}
-            <input value={voiceModelDraft.id} onChange={(event) => setVoiceModelDraft({ ...voiceModelDraft, id: event.target.value })}
-              className="mt-1 w-full rounded-xl border border-white bg-white/70 px-3 py-2 text-xs font-mono outline-none" />
-          </label>
-          <label className="block text-[11px] font-semibold text-[#2C4A5C]">
-            API Key{voiceProvider === 'moss' ? '（自部署可留空）' : ''}
-            <input type="password" autoComplete="off" value={voiceModelDraft.key}
-              onChange={(event) => setVoiceModelDraft({ ...voiceModelDraft, key: event.target.value })}
-              className="mt-1 w-full rounded-xl border border-white bg-white/70 px-3 py-2 text-xs font-mono outline-none" />
-          </label>
-          <label className="block text-[11px] font-semibold text-[#2C4A5C]">
-            模型
-            <input value={voiceModelDraft.model} onChange={(event) => setVoiceModelDraft({ ...voiceModelDraft, model: event.target.value })}
-              placeholder={voiceDefaults.model ? `留空默认：${voiceDefaults.model}` : '选填'}
-              className="mt-1 w-full rounded-xl border border-white bg-white/70 px-3 py-2 text-xs font-mono outline-none" />
-          </label>
-          {([
-            ['domesticEndpoint', '国内接口地址'],
-            ['overseasEndpoint', '海外接口地址'],
-          ] as const).map(([field, label]) => (
-            <label key={field} className="block text-[11px] font-semibold text-[#2C4A5C]">
-              {label}
-              <input type="url" value={voiceModelDraft[field]}
-                onChange={(event) => setVoiceModelDraft({ ...voiceModelDraft, [field]: event.target.value })}
-                placeholder={(field === 'domesticEndpoint' ? voiceDefaults.domestic : voiceDefaults.overseas)
-                  ? `留空默认：${field === 'domesticEndpoint' ? voiceDefaults.domestic : voiceDefaults.overseas}`
-                  : '接口 Base URL'}
+            <label className="block text-[11px] font-semibold text-[#2C4A5C]">
+              {voiceProvider === 'minimax' ? 'Group ID（选填，旧版账号需要）' : 'API ID（选填）'}
+              <input value={voiceModelDraft.id} onChange={(event) => setVoiceModelDraft({ ...voiceModelDraft, id: event.target.value })}
                 className="mt-1 w-full rounded-xl border border-white bg-white/70 px-3 py-2 text-xs font-mono outline-none" />
             </label>
-          ))}
-          <label className="block text-[11px] font-semibold text-[#2C4A5C]">
-            使用区域
-            <select value={voiceModelDraft.region}
-              onChange={(event) => setVoiceModelDraft({ ...voiceModelDraft, region: event.target.value === 'overseas' ? 'overseas' : 'domestic' })}
-              className="mt-1 w-full rounded-xl border border-white bg-white/70 px-3 py-2 text-xs">
-              <option value="domestic">国内</option>
-              <option value="overseas">海外</option>
-            </select>
-          </label>
-          <p className="text-[10px] leading-relaxed text-slate-400">OpenAI 兼容与 MOSS-TTS 请求 /audio/speech；MiniMax 请求 /v1/t2a_v2（国内 api.minimaxi.com，海外 api.minimax.io）。音色 ID 在角色设定中填写。密钥保存在本地，请勿分享备份文件。</p>
-          <button type="button" onClick={handleSaveVoiceModel} className="w-full rounded-xl bg-sky-600 py-2 text-xs font-bold text-white">保存语音模型</button>
-          {voiceModelMessage && <p role="status" className="text-[11px] text-emerald-700">{voiceModelMessage}</p>}
-        </section>
-        <section className="glass-card rounded-2xl p-4 space-y-3">
-          <h2 className="flex items-center gap-1.5 text-xs font-bold text-[#2C4A5C]">
-            <ImageIcon className="h-3.5 w-3.5 text-sky-600" />生图模型
-          </h2>
-          <label className="block text-[11px] font-semibold text-[#2C4A5C]">
-            服务商
-            <select value={imageGenerationDraft.provider}
-              onChange={(event) => setImageGenerationDraft({
-                ...imageGenerationDraft,
-                provider: isImageGenerationProvider(event.target.value) ? event.target.value : 'openai',
-              })}
-              className="mt-1 w-full rounded-xl border border-white bg-white/70 px-3 py-2 text-xs">
-              {IMAGE_PROVIDER_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-            </select>
-          </label>
-          <label className="block text-[11px] font-semibold text-[#2C4A5C]">
-            接口地址（选填）
-            <input type="url" value={imageGenerationDraft.endpoint}
-              onChange={(event) => setImageGenerationDraft({ ...imageGenerationDraft, endpoint: event.target.value })}
-              placeholder={imageDefaults.endpoint ? `留空默认：${imageDefaults.endpoint}` : '留空使用当前 API 地址'}
-              className="mt-1 w-full rounded-xl border border-white bg-white/70 px-3 py-2 text-xs font-mono outline-none" />
-          </label>
-          <label className="block text-[11px] font-semibold text-[#2C4A5C]">
-            API Key{imageGenerationDraft.provider === 'novelai' ? '' : '（选填）'}
-            <input type="password" autoComplete="off" value={imageGenerationDraft.apiKey}
-              onChange={(event) => setImageGenerationDraft({ ...imageGenerationDraft, apiKey: event.target.value })}
-              placeholder={imageGenerationDraft.provider === 'novelai' ? 'NovelAI 必填（pst-...）' : '留空则在格式匹配时使用当前 API 的 Key'}
-              className="mt-1 w-full rounded-xl border border-white bg-white/70 px-3 py-2 text-xs font-mono outline-none" />
-          </label>
-          <label className="block text-[11px] font-semibold text-[#2C4A5C]">
-            模型（选填）
-            <input value={imageGenerationDraft.model}
-              onChange={(event) => setImageGenerationDraft({ ...imageGenerationDraft, model: event.target.value })}
-              placeholder={`留空默认：${imageDefaults.model}`}
-              className="mt-1 w-full rounded-xl border border-white bg-white/70 px-3 py-2 text-xs font-mono outline-none" />
-          </label>
-          <p className="text-[10px] leading-relaxed text-slate-400">在各聊天的对话设置中开启“生图”后生效。OpenAI 兼容留空地址/Key 时使用当前 API；Imagen / Gemini 留空 Key 时，若当前 API 是 Google 也会复用。密钥保存在本地，请勿分享备份文件。</p>
-          <button type="button" onClick={handleSaveImageGeneration} className="w-full rounded-xl bg-sky-600 py-2 text-xs font-bold text-white">保存生图模型</button>
-          {imageGenerationMessage && <p role="status" className={`text-[11px] ${imageGenerationMessage.includes('无效') ? 'text-red-600' : 'text-emerald-700'}`}>{imageGenerationMessage}</p>}
-        </section>
-        <section className="glass-card rounded-2xl p-4 space-y-3">
-          <h2 className="flex items-center gap-1.5 text-xs font-bold text-[#2C4A5C]">
-            <ImageDown className="h-3.5 w-3.5 text-sky-600" />图片空间整理
-          </h2>
-          <p className="text-[10px] leading-relaxed text-slate-500">压缩聊天消息、朋友圈和论坛帖子中的已发送图片；不会处理 App 图标、壁纸、锁屏、聊天背景或头像。</p>
-          <button type="button" disabled={imageCompressionBusy} onClick={() => void handleCompressUploadedImages()}
-            className="w-full rounded-xl bg-white/80 py-2 text-xs font-bold text-[#2C4A5C] disabled:opacity-50">
-            {imageCompressionBusy ? '正在压缩图片…' : '一键压缩已发送图片'}
-          </button>
-          {imageCompressionMessage && <p role="status" className="text-[11px] text-sky-700">{imageCompressionMessage}</p>}
-        </section>
-        <section className="glass-card rounded-2xl p-4 space-y-3">
-          <h2 className="text-xs font-bold text-[#2C4A5C]">小P · YYphone 小精灵</h2>
-          <label className="flex items-center justify-between gap-3 text-xs text-slate-600">
-            在主页显示小精灵入口
-            <input type="checkbox" checked={littlePVisible} onChange={(event) => onSaveLittlePVisible(event.target.checked)} aria-label="显示小P主页入口" />
-          </label>
-          <p className="text-[11px] leading-relaxed text-slate-500">可答疑、指路、日常聊天和发表情包，不代操作。功能指南离线可看；AI 回复使用当前主 API，默认携带最近 100 条小P消息，没有长期记忆配置，不读取角色聊天或全局世界书。隐藏入口不删除聊天。</p>
-        </section>
-        <section className="glass-card rounded-2xl p-4 space-y-3">
-          <h2 className="text-xs font-bold text-[#2C4A5C]">全局字体</h2>
-          <p className="text-[11px] text-slate-500">应用于主页与所有 App。字体样式取决于设备已安装字体，聊天单独字号在此基础上缩放。</p>
-          <label className="block text-xs text-[#2C4A5C]">
-            字体大小 · {Math.round(fontSettings.scale * 100)}%
-            <input
-              aria-label="全局字体大小"
-              type="range"
-              min={85}
-              max={130}
-              step={5}
-              value={Math.round(fontSettings.scale * 100)}
-              onChange={(event) => {
-                if (!onSaveFontSettings({ ...fontSettings, scale: Number(event.target.value) / 100 })) {
-                  setStatusBarError('全局字体保存失败，请重试。');
-                }
-              }}
-              className="mt-2 w-full"
-            />
-          </label>
-          <label className="block text-xs text-[#2C4A5C]">
-            自定义字体 URL
-            <input
-              type="url"
-              value={fontUrlDraft}
-              onChange={(event) => setFontUrlDraft(event.target.value)}
-              placeholder="https://example.com/font.woff2"
-              className="mt-1 w-full rounded-xl border border-white bg-white/70 px-3 py-2"
-            />
-          </label>
-          <p className="text-[11px] text-slate-500">填写支持跨域的字体文件直链（WOFF2 / WOFF / TTF / OTF），不是字体介绍网页。留空并应用即可恢复所选内置字体。</p>
-          <button type="button" className="text-xs font-semibold text-sky-600" onClick={() => {
-            try {
-              const url = normalizeFontUrl(fontUrlDraft);
-              if (!onSaveFontSettings({ ...fontSettings, url })) throw new Error('字体链接保存失败。');
-              setFontUrlDraft(url);
-            } catch (error) {
-              setStatusBarError(error instanceof Error ? error.message : '无效的字体链接。');
-            }
-          }}>应用字体链接</button>
-          <label className="block text-xs text-[#2C4A5C]">
-            字体样式
-            <select
-              aria-label="全局字体样式"
-              value={fontSettings.family}
-              onChange={(event) => {
-                const family = event.target.value;
-                if (family !== 'system' && family !== 'serif' && family !== 'rounded') {
-                  setStatusBarError('无效的字体样式，请重新选择。');
-                  return;
-                }
-                if (!onSaveFontSettings({ ...fontSettings, family })) setStatusBarError('全局字体保存失败，请重试。');
-              }}
-              className="mt-1 w-full rounded-xl border border-white bg-white/70 px-3 py-2"
-            >
-              {Object.entries(FONT_FAMILIES).map(([id, font]) => <option key={id} value={id}>{font.label}</option>)}
-            </select>
-          </label>
-          <p className="text-sm">预览：今天也要好好生活 Aa 123</p>
-          <button type="button" className="text-xs font-semibold text-sky-600" onClick={() => {
-            if (!onSaveFontSettings(DEFAULT_FONT_SETTINGS)) setStatusBarError('全局字体恢复失败，请重试。');
-            else setFontUrlDraft('');
-          }}>恢复默认字体</button>
-        </section>
-
-        <section style={{ order: 100 }} className="space-y-2">
-          <div className="flex items-center gap-1.5 px-1 text-xs font-bold text-[#2C4A5C]">
-            <Database className="w-3.5 h-3.5 text-sky-600" />
-            <span>小手机备份</span>
-          </div>
-          <div className="glass-card rounded-2xl p-4 space-y-2.5">
-            <p className="text-[10px] text-slate-500 leading-relaxed">
-              导出整机本地数据为 JSON 文件，或从备份文件恢复。导入会替换当前浏览器中的全部本地数据。
-            </p>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={handleExportBackup}
-                className="flex-1 rounded-xl bg-white/80 border border-white py-2 text-xs font-bold text-[#2C4A5C]"
-              >
-                <Download className="inline w-3.5 h-3.5 mr-1" />导出数据
-              </button>
-              <label className="flex-1 cursor-pointer rounded-xl bg-sky-600 py-2 text-center text-xs font-bold text-white">
-                <Upload className="inline w-3.5 h-3.5 mr-1" />导入数据
-                <input
-                  type="file"
-                  accept="application/json,.json"
-                  className="hidden"
-                  onChange={(event) => {
-                    void handleImportBackup(event.target.files?.[0]);
-                    event.currentTarget.value = '';
-                  }}
-                />
+            <label className="block text-[11px] font-semibold text-[#2C4A5C]">
+              API Key{voiceProvider === 'moss' ? '（自部署可留空）' : ''}
+              <input type="password" autoComplete="off" value={voiceModelDraft.key}
+                onChange={(event) => setVoiceModelDraft({ ...voiceModelDraft, key: event.target.value })}
+                className="mt-1 w-full rounded-xl border border-white bg-white/70 px-3 py-2 text-xs font-mono outline-none" />
+            </label>
+            <label className="block text-[11px] font-semibold text-[#2C4A5C]">
+              模型
+              <input value={voiceModelDraft.model} onChange={(event) => setVoiceModelDraft({ ...voiceModelDraft, model: event.target.value })}
+                placeholder={voiceDefaults.model ? `留空默认：${voiceDefaults.model}` : '选填'}
+                className="mt-1 w-full rounded-xl border border-white bg-white/70 px-3 py-2 text-xs font-mono outline-none" />
+            </label>
+            {([
+              ['domesticEndpoint', '国内接口地址'],
+              ['overseasEndpoint', '海外接口地址'],
+            ] as const).map(([field, label]) => (
+              <label key={field} className="block text-[11px] font-semibold text-[#2C4A5C]">
+                {label}
+                <input type="url" value={voiceModelDraft[field]}
+                  onChange={(event) => setVoiceModelDraft({ ...voiceModelDraft, [field]: event.target.value })}
+                  placeholder={(field === 'domesticEndpoint' ? voiceDefaults.domestic : voiceDefaults.overseas)
+                    ? `留空默认：${field === 'domesticEndpoint' ? voiceDefaults.domestic : voiceDefaults.overseas}`
+                    : '接口 Base URL'}
+                  className="mt-1 w-full rounded-xl border border-white bg-white/70 px-3 py-2 text-xs font-mono outline-none" />
               </label>
-            </div>
-            {backupMessage && <p className="text-[11px] text-emerald-700">{backupMessage}</p>}
-            {backupError && <p role="alert" className="text-[11px] text-rose-600">{backupError}</p>}
-            <button
-              type="button"
-              onClick={handleFactoryReset}
-              className="w-full rounded-xl border border-rose-200 bg-rose-50 py-2 text-xs font-bold text-rose-700"
-            >
-              <RotateCcw className="inline w-3.5 h-3.5 mr-1" />恢复出厂设置
-            </button>
+            ))}
+            <label className="block text-[11px] font-semibold text-[#2C4A5C]">
+              使用区域
+              <select value={voiceModelDraft.region}
+                onChange={(event) => setVoiceModelDraft({ ...voiceModelDraft, region: event.target.value === 'overseas' ? 'overseas' : 'domestic' })}
+                className="mt-1 w-full rounded-xl border border-white bg-white/70 px-3 py-2 text-xs">
+                <option value="domestic">国内</option>
+                <option value="overseas">海外</option>
+              </select>
+            </label>
+            <label className="block text-[11px] font-semibold text-[#2C4A5C]">
+              <span className="flex justify-between">语速<span>{(voiceModelDraft.speed ?? 1).toFixed(2)} 倍</span></span>
+              <input type="range" aria-label="语速" min="0.5" max="2" step="0.05" value={voiceModelDraft.speed ?? 1}
+                onChange={(event) => setVoiceModelDraft({ ...voiceModelDraft, speed: Number(event.target.value) })} className="mt-2 w-full" />
+              <span className="mt-1 flex justify-between text-[10px] font-normal text-slate-400"><span>慢速 · 0.5×</span><span>正常 · 1×</span><span>快速 · 2×</span></span>
+            </label>
+            <p className="text-[10px] leading-relaxed text-slate-400">音色 ID 在角色设定中填写。语速保存后用于新生成的语音；MOSS 自部署接口需支持 speed 参数。密钥保存在本地。</p>
+            <VoiceConnectionTest settings={voiceModelDraft} />
+            <button type="button" onClick={handleSaveVoiceModel} className="w-full rounded-xl settings-primary bg-sky-600 py-2 text-xs font-bold text-white">保存语音模型</button>
+            {voiceModelMessage && <p role="status" className="text-[11px] text-emerald-700">{voiceModelMessage}</p>}
           </div>
-        </section>
-
-        <section className="space-y-2">
-          <div className="flex items-center gap-1.5 px-1 text-xs font-bold text-[#2C4A5C]">
-            <Sliders className="w-3.5 h-3.5 text-sky-600" />
+        </details>
+        <details open={imageConfigExpanded} onToggle={(event) => {
+          const expanded = event.currentTarget.open;
+          if (expanded === imageConfigExpanded) return;
+          try {
+            saveSetting(SETTINGS_KEYS.imageConfigExpanded, expanded);
+            setImageConfigExpanded(expanded);
+          } catch (error) {
+            event.currentTarget.open = imageConfigExpanded;
+            console.error('Could not save image panel state.', error);
+            setApiError('生图模型折叠状态保存失败，请重试。');
+          }
+        }} className="settings-card settings-model-panel" data-tone="lavender">
+          <summary className="settings-panel-heading">
+            <span className="settings-icon"><ImageIcon size={18} strokeWidth={1.7} /></span>
+            <span className="settings-heading-copy"><strong>生图模型</strong><small>把聊天里的想象变成画面</small></span>
+            <ChevronDown size={16} className="settings-chevron" />
+          </summary>
+          <div className="settings-panel-body space-y-3">
+            <label className="block text-[11px] font-semibold text-[#2C4A5C]">
+              服务商
+              <select value={imageGenerationDraft.provider}
+                onChange={(event) => setImageGenerationDraft({
+                  ...imageGenerationDraft,
+                  provider: isImageGenerationProvider(event.target.value) ? event.target.value : 'openai',
+                })}
+                className="mt-1 w-full rounded-xl border border-white bg-white/70 px-3 py-2 text-xs">
+                {IMAGE_PROVIDER_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+            </label>
+            <label className="block text-[11px] font-semibold text-[#2C4A5C]">
+              接口地址（选填）
+              <input type="url" value={imageGenerationDraft.endpoint}
+                onChange={(event) => setImageGenerationDraft({ ...imageGenerationDraft, endpoint: event.target.value })}
+                placeholder={imageDefaults.endpoint ? `留空默认：${imageDefaults.endpoint}` : '留空使用当前 API 地址'}
+                className="mt-1 w-full rounded-xl border border-white bg-white/70 px-3 py-2 text-xs font-mono outline-none" />
+            </label>
+            <label className="block text-[11px] font-semibold text-[#2C4A5C]">
+              API Key{imageGenerationDraft.provider === 'novelai' ? '' : '（选填）'}
+              <input type="password" autoComplete="off" value={imageGenerationDraft.apiKey}
+                onChange={(event) => setImageGenerationDraft({ ...imageGenerationDraft, apiKey: event.target.value })}
+                placeholder={imageGenerationDraft.provider === 'novelai' ? 'NovelAI 必填（pst-...）' : '留空则在格式匹配时使用当前 API 的 Key'}
+                className="mt-1 w-full rounded-xl border border-white bg-white/70 px-3 py-2 text-xs font-mono outline-none" />
+            </label>
+            <label className="block text-[11px] font-semibold text-[#2C4A5C]">
+              模型（选填）
+              <input value={imageGenerationDraft.model}
+                onChange={(event) => setImageGenerationDraft({ ...imageGenerationDraft, model: event.target.value })}
+                placeholder={`留空默认：${imageDefaults.model}`}
+                className="mt-1 w-full rounded-xl border border-white bg-white/70 px-3 py-2 text-xs font-mono outline-none" />
+            </label>
+            <label className="block text-[11px] font-semibold text-[#2C4A5C]">图片尺寸
+              <select aria-label="图片尺寸" value={imageGenerationDraft.size ?? defaultImageSize(imageGenerationDraft.provider)}
+                onChange={(event) => { if (isImageSizePreset(event.target.value)) setImageGenerationDraft({ ...imageGenerationDraft, size: event.target.value }); }}
+                className="mt-1 w-full rounded-xl border border-white bg-white/70 px-3 py-2 text-xs">
+                {imageSizeOptions(imageGenerationDraft.provider).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+            </label>
+            {(imageGenerationDraft.provider === 'gemini' || imageGenerationDraft.provider === 'imagen') && <p className="text-[10px] text-slate-400">Google 接口按画面比例控制尺寸，实际像素由所选模型决定。</p>}
+            <p className="text-[10px] leading-relaxed text-slate-400">在聊天的对话设置中开启“生图”后生效。留空地址或 Key 时，按服务商匹配规则复用已保存的主 API 配置。密钥保存在本地。</p>
+            <ImageConnectionTest settings={imageGenerationDraft} />
+            <button type="button" onClick={handleSaveImageGeneration} className="w-full rounded-xl settings-primary bg-sky-600 py-2 text-xs font-bold text-white">保存生图模型</button>
+            {imageGenerationMessage && <p role="status" className={`text-[11px] ${imageGenerationMessage.includes('无效') ? 'text-red-600' : 'text-emerald-700'}`}>{imageGenerationMessage}</p>}
+          </div>
+        </details>
+        <h2 className="settings-section-label">日常与体验<span>照顾你的使用习惯</span></h2>
+        <section className="settings-card settings-preferences space-y-3">
+          <h3 className="settings-card-heading">
+            <span className="settings-icon" data-tone="lavender"><Sliders size={17} strokeWidth={1.7} /></span>
             <span>系统交互偏好</span>
-          </div>
-          <div className="glass-card rounded-2xl divide-y divide-slate-100/60 overflow-hidden">
+          </h3>
+          <div className="divide-y divide-slate-100/60">
             <div className="p-3.5 space-y-2.5">
               <div className="flex items-center gap-2">
                 <Lock className="w-3.5 h-3.5 text-sky-600" />
@@ -957,7 +868,7 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
               )}
               <button
                 onClick={handleSaveLockSettings}
-                className="w-full rounded-xl bg-sky-600 text-white py-2 text-xs font-bold active:scale-[0.98]"
+                className="w-full rounded-xl settings-primary bg-sky-600 text-white py-2 text-xs font-bold active:scale-[0.98]"
               >
                 保存锁屏设置
               </button>
@@ -970,21 +881,15 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
                 <p className="text-xs font-bold text-[#2C4A5C]">顶部状态栏显示</p>
                 <span className="text-[10px] text-slate-400">时间、电量、灵动岛指示器</span>
               </div>
-              <button
-                onClick={() => {
+              <input
+                type="checkbox"
+                aria-label="顶部状态栏显示"
+                checked={showStatusBar}
+                onChange={() => {
                   const saved = onToggleStatusBar();
                   setStatusBarError(saved ? '' : '状态栏设置保存失败，请检查浏览器本地存储空间。');
                 }}
-                className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer ${
-                  showStatusBar ? 'bg-sky-500' : 'bg-slate-300'
-                }`}
-              >
-                <div
-                  className={`w-5 h-5 rounded-full bg-white absolute top-0.5 transition-transform ${
-                    showStatusBar ? 'left-5.5' : 'left-0.5'
-                  }`}
-                />
-              </button>
+              />
             </div>
             <div className="flex items-center justify-between p-3.5">
               <div>
@@ -1014,7 +919,84 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
             )}
           </div>
         </section>
-        <footer className="pt-2 pb-1 text-center text-[10px] text-slate-400">YYphone</footer>
+        <section className="settings-card space-y-3">
+          <h3 className="settings-card-heading"><span className="settings-icon" data-tone="blue"><Bell size={17} strokeWidth={1.7} /></span>后台与消息提醒</h3>
+          {([
+            ['keepAlive', '后台保活（循环播放静默音频）'],
+            ['banners', '新消息顶部弹窗'],
+            ['systemNotifications', '浏览器系统通知'],
+          ] as const).map(([key, label]) => (
+            <label key={key} className="settings-toggle-row flex items-center justify-between gap-3 text-xs text-slate-600">
+              <span>{label}</span>
+              <input type="checkbox" checked={runtimeSettings[key]} disabled={runtimeBusy} onChange={(event) => void updateRuntime({ [key]: event.target.checked })} />
+            </label>
+          ))}
+          <p className="text-[11px] leading-relaxed text-slate-500">
+            主动消息及角色来电请在微信私聊右上角的对话设置中单独调整。保活只尝试降低网页暂停概率，不能保证锁屏、系统冻结或关闭网页后仍运行，也可能增加耗电。系统通知需授权，是否展示取决于浏览器与系统。
+          </p>
+          <p className="text-[11px] text-sky-700" role="status">保活状态：{keepAliveStatus || '未开启'}</p>
+          {runtimeSettings.keepAlive && <button type="button" disabled={runtimeBusy} onClick={() => void updateRuntime({ keepAlive: true })} className="text-xs font-semibold text-sky-600">恢复保活</button>}
+        </section>
+        <section className="settings-card space-y-3">
+          <h3 className="settings-card-heading"><span className="settings-icon" data-tone="pink"><Sparkles size={17} strokeWidth={1.7} /></span>小P · YYphone 小精灵</h3>
+          <label className="flex items-center justify-between gap-3 text-xs text-slate-600">
+            在主页显示小精灵入口
+            <input type="checkbox" checked={littlePVisible} onChange={(event) => onSaveLittlePVisible(event.target.checked)} aria-label="显示小P主页入口" />
+          </label>
+          <p className="text-[11px] leading-relaxed text-slate-500">可答疑、指路、日常聊天和发表情包，不代操作。功能指南离线可看；AI 回复使用当前主 API，默认携带最近 100 条小P消息，没有长期记忆配置，不读取角色聊天或全局世界书。隐藏入口不删除聊天。</p>
+        </section>
+        <h2 className="settings-section-label">数据与维护<span>给小世界留一份存档</span></h2>
+        <section className="settings-card space-y-3">
+          <h3 className="settings-card-heading"><span className="settings-icon" data-tone="blue"><ImageDown size={17} strokeWidth={1.7} /></span>图片空间整理</h3>
+          <p className="text-[10px] leading-relaxed text-slate-500">压缩聊天消息、朋友圈和论坛帖子中的已发送图片；不会处理 App 图标、壁纸、锁屏、聊天背景或头像。</p>
+          <button type="button" disabled={imageCompressionBusy} onClick={() => void handleCompressUploadedImages()}
+            className="w-full rounded-xl bg-white/80 py-2 text-xs font-bold text-[#2C4A5C] disabled:opacity-50">
+            {imageCompressionBusy ? '正在压缩图片…' : '一键压缩已发送图片'}
+          </button>
+          {imageCompressionMessage && <p role="status" className="text-[11px] text-sky-700">{imageCompressionMessage}</p>}
+        </section>
+        <section className="settings-card space-y-3">
+          <h3 className="settings-card-heading">
+            <span className="settings-icon" data-tone="lavender"><Database size={17} strokeWidth={1.7} /></span>
+            <span>小手机备份</span>
+          </h3>
+          <div className="space-y-2.5">
+            <p className="text-[10px] text-slate-500 leading-relaxed">
+              导出整机本地数据为 JSON 文件，或从备份文件恢复。导入会替换当前浏览器中的全部本地数据。
+            </p>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={handleExportBackup}
+                className="flex-1 rounded-xl bg-white/80 border border-white py-2 text-xs font-bold text-[#2C4A5C]"
+              >
+                <Download className="inline w-3.5 h-3.5 mr-1" />导出数据
+              </button>
+              <label className="flex-1 cursor-pointer rounded-xl settings-primary bg-sky-600 py-2 text-center text-xs font-bold text-white">
+                <Upload className="inline w-3.5 h-3.5 mr-1" />导入数据
+                <input
+                  type="file"
+                  accept="application/json,.json"
+                  className="hidden"
+                  onChange={(event) => {
+                    void handleImportBackup(event.target.files?.[0]);
+                    event.currentTarget.value = '';
+                  }}
+                />
+              </label>
+            </div>
+            {backupMessage && <p className="text-[11px] text-emerald-700">{backupMessage}</p>}
+            {backupError && <p role="alert" className="text-[11px] text-rose-600">{backupError}</p>}
+            <button
+              type="button"
+              onClick={handleFactoryReset}
+              className="w-full rounded-xl border border-rose-200 bg-rose-50 py-2 text-xs font-bold text-rose-700"
+            >
+              <RotateCcw className="inline w-3.5 h-3.5 mr-1" />恢复出厂设置
+            </button>
+          </div>
+        </section>
+        <footer className="settings-footer">YYphone · 你的随身小世界</footer>
       </div>
     </div>
   );

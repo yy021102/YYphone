@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Pencil, Trash2 } from 'lucide-react';
 import { showYyError } from './ErrorDialog';
 import { JournalRegenerator } from './JournalRegenerator';
+import { JournalSummaryText } from './JournalSummaryText';
 import {
   activateGrowthNote,
   archiveGrowthNote,
@@ -29,7 +30,7 @@ import {
   writeJournalSettings,
 } from '../utils/journalData';
 
-const cardClass = 'rounded-[22px] border border-white/90 bg-white/75 backdrop-blur-xl shadow-[0_6px_20px_-10px_rgba(148,163,184,0.3)]';
+const cardClass = 'memory-card rounded-[22px] border border-white/90 bg-white/75 backdrop-blur-xl shadow-[0_6px_20px_-10px_rgba(148,163,184,0.3)]';
 const pillBtn = 'rounded-full border border-white bg-white/80 px-3 py-1.5 text-[11px] font-semibold text-[#6F7F8E] active:scale-95 disabled:opacity-50';
 const gradBtn = 'rounded-full bg-gradient-to-r from-[#F5C6D6] to-[#BFD9F0] px-4 py-2 text-xs font-bold text-[#5F6F7E] active:scale-95 disabled:opacity-50';
 const inputClass = 'w-full rounded-xl border border-slate-200/80 bg-white/80 px-3 py-2 text-xs text-slate-700 outline-none focus:border-pink-200';
@@ -56,6 +57,8 @@ export const JournalPanel: React.FC<PanelProps> = ({ charId, charName, flash }) 
   void version;
 
   const settings = readJournalSettings();
+  const [promptDraft, setPromptDraft] = useState(settings.journalPrompt);
+  useEffect(() => setPromptDraft(settings.journalPrompt), [settings.journalPrompt]);
   const patchSettings = (patch: Partial<JournalSettings>) => {
     writeJournalSettings({ ...readJournalSettings(), ...patch });
     refresh();
@@ -116,7 +119,7 @@ export const JournalPanel: React.FC<PanelProps> = ({ charId, charName, flash }) 
       </div>
       {editing?.id === entry.id ? (
         <div className="space-y-2">
-          <textarea aria-label="个人流水账正文" maxLength={4000} className={`${inputClass} h-32 resize-none leading-relaxed`} value={editing.text} onChange={(e) => setEditing({ id: entry.id, text: e.target.value })} />
+          <textarea aria-label="个人流水账正文" maxLength={20000} className={`${inputClass} h-32 resize-none leading-relaxed`} value={editing.text} onChange={(e) => setEditing({ id: entry.id, text: e.target.value })} />
           <div className="flex gap-2">
             <button
               type="button"
@@ -137,7 +140,7 @@ export const JournalPanel: React.FC<PanelProps> = ({ charId, charName, flash }) 
           </div>
         </div>
       ) : (
-        <p className="whitespace-pre-wrap break-words text-[13px] leading-relaxed text-slate-700">{entry.content}</p>
+        <JournalSummaryText content={entry.content} />
       )}
     </div>
   );
@@ -157,7 +160,7 @@ export const JournalPanel: React.FC<PanelProps> = ({ charId, charName, flash }) 
           <button type="button" className={gradBtn} disabled={busy} onClick={() => void run()}>{busy ? '整理中…' : '整理流水账'}</button>
           <button type="button" className={pillBtn} disabled={busy} onClick={() => void compressOnly()}>压缩合并</button>
         </div>
-        <JournalRegenerator key={charId} total={readDirectMessages(charId).length} busy={busy} onGenerate={async (range) => {
+        <JournalRegenerator key={charId} total={readDirectMessages(charId).length} busy={busy} batchSize={settings.journalEvery} onGenerate={async (range) => {
           if (busy) return;
           setBusy(true);
           try {
@@ -173,14 +176,31 @@ export const JournalPanel: React.FC<PanelProps> = ({ charId, charName, flash }) 
         </label>
         <label className="block space-y-1 text-xs text-slate-600">
           <span>每累计 {settings.journalEvery} 条新消息写一篇</span>
-          <input type="range" min={30} max={400} step={10} className="w-full" value={settings.journalEvery} onChange={(e) => patchSettings({ journalEvery: Number(e.target.value) })} />
+          <input type="range" min={30} max={400} step={10} disabled={busy} className="w-full" value={settings.journalEvery} onChange={(e) => patchSettings({ journalEvery: Number(e.target.value) })} />
         </label>
+        <label className="block space-y-1 text-xs text-slate-600">
+          <span>每篇流水账最多 {settings.journalMaxChars} 字（个人与群聊共用）</span>
+          <input aria-label="流水账字数上限" type="range" min={200} max={1200} step={100} disabled={busy} className="w-full" value={settings.journalMaxChars} onChange={e => patchSettings({ journalMaxChars: Number(e.target.value) })} />
+        </label>
+        <p className="text-[10px] leading-relaxed text-slate-400">手动整理、自动整理和指定范围重做均按每篇最多 {settings.journalEvery} 条处理。摘要只保留关键事件、关系变化及有效约定；阶段/长篇回顾分别最多 {Math.round(settings.journalMaxChars * 1.5)} / {settings.journalMaxChars * 2} 字。字数设置仅影响新生成内容，旧篇不会自动改写。</p>
         {settings.lastError && <p className="rounded-xl bg-rose-50 px-2.5 py-1.5 text-[10px] text-rose-400">上次自动整理失败：{settings.lastError}</p>}
       </div>
 
       {entries.length === 0 && (
         <div className={`${cardClass} p-6 text-center text-[11px] leading-relaxed text-slate-400`}>还没有流水账，点「整理流水账」，或者等聊天累计到设定条数后自动生成。</div>
       )}
+
+      <details className={`${cardClass} memory-prompt-editor p-4`}>
+        <summary className="cursor-pointer text-xs font-bold text-[#6F7F8E]">总结提示词 <span className="ml-1 font-normal text-slate-400">{settings.journalPrompt ? '自定义已启用' : '使用默认写法'}</span></summary>
+        <p className="my-3 text-[11px] leading-relaxed text-slate-500">可指定人称、语气、格式、重点和详略。个人与群聊的自动、手动、重做及压缩合并都会采用；字数仍遵循上方设置，旧篇不会自动改写。</p>
+        <textarea aria-label="流水账总结提示词" value={promptDraft} onChange={event => setPromptDraft(event.target.value)} maxLength={6000} rows={6} disabled={busy}
+          placeholder="例如：用第一人称写成简短日记，按日期分段。重点保留关系变化、重要对话和未完成的约定，语气自然，不重复琐碎寒暄。留空则使用默认总结规则。"
+          className={`${inputClass} resize-y leading-relaxed`} />
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button type="button" disabled={busy} className={gradBtn} onClick={() => { patchSettings({ journalPrompt: promptDraft.trim() }); flash('总结提示词已保存，新生成的流水账会按此整理'); }}>保存总结提示词</button>
+          <button type="button" disabled={busy} className={pillBtn} onClick={() => { setPromptDraft(''); patchSettings({ journalPrompt: '' }); flash('已恢复默认总结提示词'); }}>恢复默认提示词</button>
+        </div>
+      </details>
 
       {levels.map((level) => {
         const list = entries.filter((e) => e.level === level && !e.mergedInto);

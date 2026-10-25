@@ -2,7 +2,7 @@ import type { LockScreenAppearance } from '../types';
 
 export const DEFAULT_LOCK_APPEARANCE: LockScreenAppearance = {
   textColor: '#2C4A5C',
-  subtitle: '丙午年 菊月 · 微风渐起',
+  subtitle: '天天开心',
 };
 
 export const isLockScreenAppearance = (value: unknown): value is LockScreenAppearance => {

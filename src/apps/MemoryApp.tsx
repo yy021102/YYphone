@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Download, Pencil, Pin, PinOff, Plus, Search, Settings, Sparkles, Trash2, Upload, X } from 'lucide-react';
+import { Archive, BookOpen, BrainCircuit, ChevronDown, Download, Heart, Package, Pencil, Pin, PinOff, Plus, Search, Settings, Sparkles, Trash2, Upload, X } from 'lucide-react';
 import { AppHeader } from '../components/AppHeader';
 import { showYyError } from '../components/ErrorDialog';
 import { readOfflineContacts, OfflineContact } from '../utils/offlineData';
@@ -37,7 +37,7 @@ interface MemoryAppProps {
   onBack: () => void;
 }
 
-const cardClass = 'rounded-[22px] border border-white/90 bg-white/75 backdrop-blur-xl shadow-[0_6px_20px_-10px_rgba(148,163,184,0.3)]';
+const cardClass = 'memory-card rounded-[22px] border border-white/90 bg-white/75 backdrop-blur-xl shadow-[0_6px_20px_-10px_rgba(148,163,184,0.3)]';
 const pillBtn = 'rounded-full border border-white bg-white/80 px-3 py-1.5 text-[11px] font-semibold text-[#6F7F8E] active:scale-95 disabled:opacity-50';
 const gradBtn = 'rounded-full bg-gradient-to-r from-[#F5C6D6] to-[#BFD9F0] px-4 py-2 text-xs font-bold text-[#5F6F7E] active:scale-95 disabled:opacity-50';
 const inputClass = 'w-full rounded-xl border border-slate-200/80 bg-white/80 px-3 py-2 text-xs text-slate-700 outline-none focus:border-pink-200';
@@ -121,27 +121,29 @@ export const MemoryApp: React.FC<MemoryAppProps> = ({ onBack }) => {
   };
 
   const ownerName = (id: string) => (id === SHARED_MEMORY_ID ? '玩家通用' : contacts.find((c) => c.id === id)?.name ?? '未知角色');
+  const ownerAvatar = contacts.find((contact) => contact.id === ownerId)?.avatarUrl;
   const owners = [...contacts.map((c) => ({ id: c.id, name: c.name })), { id: SHARED_MEMORY_ID, name: '玩家通用' }];
 
   const mine = memories.filter((item) => item.charId === ownerId);
+  const library = mine.filter((item) => item.category !== 'item');
   const gifts = mine.filter((item) => item.category === 'item')
     .sort((a, b) => (b.gift?.date ?? b.createdAt).localeCompare(a.gift?.date ?? a.createdAt));
   const visible = useMemo(() => {
     const keyword = search.trim().toLowerCase();
-    return mine
+    return library
       .filter((item) => category === 'all' || item.category === category)
       .filter((item) => !keyword || item.content.toLowerCase().includes(keyword))
       .sort(
         (a, b) =>
           Number(b.pinned) - Number(a.pinned) || b.importance - a.importance || b.updatedAt.localeCompare(a.updatedAt)
       );
-  }, [mine, category, search]);
+  }, [library, category, search]);
 
   const pendingCount = useMemo(
     () => (ownerId === SHARED_MEMORY_ID ? 0 : countNewMessages(ownerId, settings)),
     [ownerId, settings, memories]
   );
-  const embeddedCount = mine.filter((item) => embeddedIds.has(item.id)).length;
+  const embeddedCount = library.filter((item) => embeddedIds.has(item.id)).length;
   const configured = embeddingConfigured(settings.embedding);
   const selectedMemoryWorldBookIds = ownerId === SHARED_MEMORY_ID
     ? []
@@ -426,10 +428,10 @@ export const MemoryApp: React.FC<MemoryAppProps> = ({ onBack }) => {
   const embedProgress = busy.startsWith('embed') ? busy.replace('embed', '').trim() : '';
 
   return (
-    <div className="relative flex flex-1 w-full flex-col overflow-hidden bg-gradient-to-b from-[#FBF3F7] via-[#F3F6FB] to-[#EAF2F8] text-slate-700">
+    <div className="memory-app relative flex flex-1 w-full flex-col overflow-hidden bg-gradient-to-b from-[#FBF3F7] via-[#F3F6FB] to-[#EAF2F8] text-slate-700">
       <AppHeader
         title="记忆"
-        subtitle="长期记忆 · 陪伴"
+        subtitle="把重要的相处，慢慢记住"
         onBack={onBack}
         rightAction={
           <button type="button" aria-label="记忆设置" onClick={() => setSettingsOpen(true)} className="flex h-8 w-8 items-center justify-center rounded-full hover:bg-black/5">
@@ -442,35 +444,53 @@ export const MemoryApp: React.FC<MemoryAppProps> = ({ onBack }) => {
         <div className="pointer-events-none absolute left-1/2 top-16 z-[60] -translate-x-1/2 rounded-full bg-slate-700/85 px-4 py-2 text-[11px] text-white">{notice}</div>
       )}
 
-      <div className="flex-1 min-h-0 space-y-3 overflow-y-auto p-4">
-        <div className="flex gap-1.5 overflow-x-auto pb-1">
+      <div className="memory-content flex-1 min-h-0 space-y-3 overflow-y-auto p-4">
+        <div className="memory-owner-tabs flex gap-2 overflow-x-auto pb-1">
           {owners.map((owner) => (
             <button
               key={owner.id}
               type="button"
               onClick={() => setOwnerId(owner.id)}
-              className={`shrink-0 rounded-full border px-3.5 py-1.5 text-xs ${ownerId === owner.id ? 'border-pink-200 bg-gradient-to-r from-pink-50 to-sky-50 font-bold text-[#6F7F8E]' : 'border-slate-200 bg-white/70 text-slate-400'}`}
+              className={`memory-owner flex shrink-0 items-center gap-2 rounded-full border px-3 py-2 text-xs ${ownerId === owner.id ? 'is-active border-pink-200 bg-gradient-to-r from-pink-50 to-sky-50 font-bold text-[#6F7F8E]' : 'border-slate-200 bg-white/70 text-slate-400'}`}
             >
-              {owner.id === SHARED_MEMORY_ID ? '🌐 ' : ''}{owner.name}
+              <span aria-hidden="true" className="memory-owner-initial flex h-6 w-6 items-center justify-center rounded-full bg-white/80 text-[10px]">{owner.id === SHARED_MEMORY_ID ? '✧' : owner.name.slice(0, 1)}</span>{owner.name}
             </button>
           ))}
         </div>
 
-        <p className="rounded-xl bg-sky-50/80 px-3 py-2 text-[11px] leading-relaxed text-slate-500">
+        <section className="memory-hero">
+          <div className="memory-hero-orbit">
+            {ownerAvatar ? <img key={ownerAvatar} src={ownerAvatar} alt={`${ownerName(ownerId)}的头像`} className="memory-hero-avatar" /> : <span aria-hidden="true" className="text-2xl font-semibold">{ownerId === SHARED_MEMORY_ID ? '✧' : ownerName(ownerId).slice(0, 1)}</span>}
+            <Heart aria-hidden="true" size={13} className="memory-hero-heart" fill="currentColor" />
+          </div>
+          <p className="memory-eyebrow"><Sparkles size={11} /> 相处档案 · MEMORY</p>
+          <h2 className="memory-hero-title">{ownerName(ownerId)}的记忆花园</h2>
+          <p className="memory-hero-subtitle">那些小事，也值得被认真收藏。</p>
+          <div className="memory-stats">
+            <div><span>长期记忆</span><strong>{library.length}<small> 条</small></strong></div>
+            <div><span>互赠物品</span><strong>{gifts.length}<small> 件</small></strong></div>
+            <div><span>待整理消息</span><strong>{pendingCount}<small> 条</small></strong></div>
+          </div>
+        </section>
+
+        <details className="memory-archive-note rounded-2xl border border-white/90 bg-white/60 px-3 py-2.5 text-[11px] leading-relaxed text-slate-500">
+          <summary className="flex cursor-pointer list-none items-center gap-2"><Archive size={13} className="text-[#98acc3]" /><span className="flex-1">{ownerId === SHARED_MEMORY_ID ? '玩家通用 · 跨角色共享' : `当前存档 · ${memoryArchiveLabel(ownerId)}`}</span><span className="text-[9px] text-[#a6b1c0]">存档说明</span><ChevronDown size={12} /></summary>
+          <p className="mt-2 border-t border-white pt-2">
           {ownerId === SHARED_MEMORY_ID
             ? '玩家通用记忆跨角色、跨存档共用。身份或关系相关的信息请存入对应角色的当前档，避免影响新身份。'
             : `当前关联微信私聊「${memoryArchiveLabel(ownerId)}」：记忆、流水账和成长笔记仅属于此档。请到聊天 → 更多 → 聊天存档切换；新档为空，删除存档会一并删除这些内容。`}
-        </p>
+          </p>
+        </details>
         {ownerId !== SHARED_MEMORY_ID && (
-          <div className="grid grid-cols-4 rounded-2xl bg-white/70 p-1 text-[11px]">
-            {([['memories', '记忆库'], ['items', '物品'], ['journal', '流水账'], ['growth', '成长笔记']] as const).map(([key, label]) => (
+          <div className="memory-tabs grid grid-cols-4 rounded-2xl bg-white/70 p-1 text-[11px]">
+            {([['memories', '记忆库', BrainCircuit], ['items', '物品', Package], ['journal', '流水账', BookOpen], ['growth', '成长笔记', Heart]] as const).map(([key, label, Icon]) => (
               <button
                 key={key}
                 type="button"
                 onClick={() => setTab(key)}
-                className={`rounded-xl py-1.5 font-semibold ${activeTab === key ? 'bg-white text-[#6F7F8E] shadow-sm' : 'text-slate-400'}`}
+                className={`memory-tab flex flex-col items-center justify-center gap-1 rounded-xl py-2.5 font-semibold ${activeTab === key ? 'is-active bg-white text-[#6F7F8E] shadow-sm' : 'text-slate-400'}`}
               >
-                {label}
+                <Icon size={16} strokeWidth={1.6} />{label}
               </button>
             ))}
           </div>
@@ -522,7 +542,7 @@ export const MemoryApp: React.FC<MemoryAppProps> = ({ onBack }) => {
             <div>
               <p className="text-sm font-bold text-[#4A5A6A]">{ownerName(ownerId)}的记忆</p>
               <p className="mt-0.5 text-[10px] text-slate-400">
-                共 {mine.length} 条 · {configured ? `已向量化 ${embeddedCount}/${mine.length}` : '未配置向量化（使用关键词检索）'}
+                共 {library.length} 条 · {configured ? `已向量化 ${embeddedCount}/${library.length}` : '未配置向量化（使用关键词检索）'}
                 {ownerId !== SHARED_MEMORY_ID && ` · 待整理新消息 ${pendingCount} 条`}
               </p>
             </div>
@@ -563,7 +583,7 @@ export const MemoryApp: React.FC<MemoryAppProps> = ({ onBack }) => {
         </div>
 
         <div className="flex gap-1.5 overflow-x-auto pb-1">
-          {[{ id: 'all' as const, label: '全部', emoji: '' }, ...MEMORY_CATEGORIES].map((c) => (
+          {[{ id: 'all' as const, label: '全部', emoji: '' }, ...MEMORY_CATEGORIES.filter(c => c.id !== 'item')].map((c) => (
             <button
               key={c.id}
               type="button"
@@ -577,9 +597,9 @@ export const MemoryApp: React.FC<MemoryAppProps> = ({ onBack }) => {
 
         {visible.length === 0 && (
           <div className={`${cardClass} p-6 text-center`}>
-            <p className="text-xs font-bold text-[#6F7F8E]">{mine.length === 0 ? '这里还是空的' : '没有符合条件的记忆'}</p>
+            <p className="text-xs font-bold text-[#6F7F8E]">{library.length === 0 ? '这里还是空的' : '没有符合条件的记忆'}</p>
             <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
-              {mine.length === 0 ? '点「整理记忆」让 AI 从微信聊天里提炼，或者手动添加。' : '换个分类或关键词试试。'}
+              {library.length === 0 ? '点「整理记忆」让 AI 从微信聊天里提炼，或者手动添加。物品记录请查看上方“物品”。' : '换个分类或关键词试试。'}
             </p>
           </div>
         )}

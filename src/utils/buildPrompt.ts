@@ -14,6 +14,7 @@ import { buildGrowthInjection, buildJournalInjection } from './journalData';
 import { describeChatSource, resolveChatHistoryCount } from './chatHistory';
 import { buildPaperMemoryInjection } from './paperNotes';
 import { buildGroupJournalInjection } from './groupJournal';
+import { buildChannelMemory } from './channelMemory';
 
 export interface PromptChatMessage {
   id: string;
@@ -633,6 +634,10 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
   if (plantInjection.text) messages.push({ role: 'system', content: plantInjection.text });
 
   if (options.memoryInjection?.text) messages.push({ role: 'system', content: options.memoryInjection.text });
+  if (chat.type === 'direct' && chat.participantIds.length === 1) {
+    const channelMemory = buildChannelMemory(chat.participantIds[0]);
+    if (channelMemory) messages.push({ role: 'system', content: channelMemory });
+  }
   const paperMemory = buildPaperMemoryInjection(chat.participantIds, chat.type);
   if (paperMemory) messages.push({ role: 'system', content: paperMemory });
 

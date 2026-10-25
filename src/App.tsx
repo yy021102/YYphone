@@ -688,8 +688,6 @@ export default function App() {
                   runtimeSettings={runtimeSettings}
                   onSaveRuntimeSettings={handleRuntimeSettings}
                   keepAliveStatus={keepAliveStatus}
-                  fontSettings={fontSettings}
-                  onSaveFontSettings={handleSaveFontSettings}
                   onBack={handleBackToHome}
                   showStatusBar={showStatusBar}
                   onToggleStatusBar={handleToggleStatusBar}
@@ -702,6 +700,8 @@ export default function App() {
               )}
               {activeApp === 'customizer' && (
                 <ThemeCustomizerApp
+                  fontSettings={fontSettings}
+                  onSaveFontSettings={handleSaveFontSettings}
                   onBack={handleBackToHome}
                   activeThemeId={beautySettings.themeId}
                   onSelectTheme={handleSelectTheme}

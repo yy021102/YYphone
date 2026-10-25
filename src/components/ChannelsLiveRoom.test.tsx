@@ -17,7 +17,7 @@ test('live room shows scene, audience and interactive controls; replay keeps his
   assert.match(active, /42/);
   assert.match(active, /送礼物/);
   assert.match(active, /背景/);
-  assert.match(active, /推进直播现场/);
+  assert.match(active, /刷新直播/);
 
   const replay = renderToStaticMarkup(<ChannelsLiveRoom {...props} room={{ ...room, ended: true }} />);
   assert.match(replay, /直播已结束/);

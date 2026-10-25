@@ -229,7 +229,8 @@ export const EMPTY_COUPLE_INJECTION: CoupleInjection = { text: '', marks: [] };
 
 const moodFingerprint = (record: { userMoodId?: string; userNote?: string }) =>
   `${record.userMoodId ?? ''}|${record.userNote ?? ''}`;
-const diaryFingerprint = (entry: { title: string; content: string }) => `${entry.title}|${entry.content}`;
+const diaryFingerprint = (entry: { title: string; content: string; annotations?: Array<{ id: string; author: string; content: string }> }) =>
+  `${entry.title}|${entry.content}${entry.annotations?.some(note => note.author === 'user') ? `|${JSON.stringify(entry.annotations.filter(note => note.author === 'user').map(note => [note.id, note.content]))}` : ''}`;
 const qaFingerprint = (entry: { question: string; userAnswer?: string }) => `${entry.question}|${entry.userAnswer ?? ''}`;
 
 const clip = (value: string, length: number) => (value.length > length ? `${value.slice(0, length)}…` : value);
@@ -268,11 +269,12 @@ export const buildCoupleSpaceInjection = (
         return `· ${record.dateStr} 玩家的心情：${moodLabel(record.userMoodId) || '未选'}${record.userNote ? `，心情小记：${clip(record.userNote, 80)}` : ''}`;
       });
     const diaryLines = space.diaries
-      .filter((entry) => entry.author === 'user' && entry.seenByChar === false)
+      .filter((entry) => entry.seenByChar === false && (entry.author === 'user' || entry.annotations?.some(note => note.author === 'user')))
       .slice(0, 3)
       .map((entry) => {
         items.push({ kind: 'diary', id: entry.id, fingerprint: diaryFingerprint(entry) });
-        return `· 玩家写了交换日记《${entry.title}》（${entry.dateStr}）：${clip(entry.content, 300)}`;
+        const annotations = entry.annotations?.filter(note => note.author === 'user').slice(-4).map(note => clip(note.content, 180)).join('；');
+        return `· ${entry.author === 'user' ? '玩家写了交换日记' : '玩家批注了你的日记'}《${entry.title}》（${entry.dateStr}）：${clip(entry.content, 300)}${annotations ? `；玩家批注：${annotations}` : ''}`;
       });
     const qaLines = space.qaList
       .filter((entry) => entry.seenByChar === false && (entry.userAnswer || entry.askedBy === 'user'))

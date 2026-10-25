@@ -22,7 +22,8 @@ import {
 } from 'lucide-react';
 import { AppHeader } from '../components/AppHeader';
 import { CoupleRecordEditor } from '../components/CoupleRecordEditor';
-import { coupleRecordDate, editCoupleRecord, type CoupleRecordEdit } from '../utils/coupleRecords';
+import { CoupleSpacePages } from '../components/CoupleSpacePages';
+import { deleteCoupleMood, editCoupleRecord, type CoupleRecordEdit } from '../utils/coupleRecords';
 import { showYyError } from '../components/ErrorDialog';
 import { readAlipayContacts, AlipayContact } from '../utils/alipayData';
 import { appendCharacterContextEvent } from '../utils/characterContext';
@@ -38,13 +39,8 @@ import {
   writeCoupleSpaces,
 } from '../utils/coupleSpaceData';
 import {
-  generateCharDiary,
   generateCharMood,
   generateCoupleBatch,
-  generateDiaryReply,
-  generateQaAnswer,
-  generateQaQuestion,
-  generateStickyNote,
 } from '../utils/coupleSpaceAi';
 
 interface CoupleSpaceAppProps {
@@ -190,7 +186,10 @@ export interface DiaryEntry {
   content: string;
   replyComment?: string;
   seenByChar?: boolean;
+  annotations?: DiaryAnnotation[];
 }
+
+export interface DiaryAnnotation { id: string; author: 'user' | 'char'; authorName: string; content: string; createdAt: string }
 
 export interface QAEntry {
   id: string;
@@ -278,7 +277,7 @@ export const CoupleSpaceApp: React.FC<CoupleSpaceAppProps> = ({ onBack }) => {
   const updateCurrentSpace = (updater: (prev: CharacterCoupleSpace) => CharacterCoupleSpace) =>
     updateSpaceFor(selectedCharId, updater);
 
-  const [activeSubModal, setActiveSubModal] = useState<
+  const [activePage, setActivePage] = useState<
     'none' | 'anniversary' | 'diary' | 'qa' | 'sticky'
   >('none');
   const [showTopMenu, setShowTopMenu] = useState(false);
@@ -313,16 +312,6 @@ export const CoupleSpaceApp: React.FC<CoupleSpaceAppProps> = ({ onBack }) => {
       setAiBusy('');
     }
   };
-
-  const [newAnniTitle, setNewAnniTitle] = useState('');
-  const [newAnniDate, setNewAnniDate] = useState('');
-  const [newDiaryTitle, setNewDiaryTitle] = useState('');
-  const [newDiaryContent, setNewDiaryContent] = useState('');
-  const [newQuestionText, setNewQuestionText] = useState('');
-  const [answeringQaId, setAnsweringQaId] = useState<string | null>(null);
-  const [userAnswerInput, setUserAnswerInput] = useState('');
-  const [newStickyText, setNewStickyText] = useState('');
-  const [newStickyColor, setNewStickyColor] = useState('#FEF6C9');
 
   const calcLoveDays = (startDateStr: string) => {
     const start = new Date(startDateStr).getTime();
@@ -450,7 +439,7 @@ export const CoupleSpaceApp: React.FC<CoupleSpaceAppProps> = ({ onBack }) => {
         throw new Error('生成期间情侣空间内容已变化，未覆盖现有内容，请重试。');
       }
       updateSpaceFor(charId, () => result);
-      return '已用一次请求补齐心情、日记、问答和便签，保留已有内容。';
+      return '已更新';
     });
   };
 
@@ -503,6 +492,7 @@ export const CoupleSpaceApp: React.FC<CoupleSpaceAppProps> = ({ onBack }) => {
 
   // 清除空间数据：静默执行，不写入 characterContext，不通知角色。
   const handleClearSpaceSilently = () => {
+    if (aiWorking.current) { setBannerTip('请等待当前操作完成。'); return; }
     if (
       !window.confirm(
         `确定清除与「${currentChar.name}」情侣空间内的所有数据吗？（此操作静默执行，不通知角色）`
@@ -523,6 +513,7 @@ export const CoupleSpaceApp: React.FC<CoupleSpaceAppProps> = ({ onBack }) => {
 
   // 解除关系：重置为未开通，并向角色记忆写入高优先级事件。
   const handleUnbindAndNotifyChar = () => {
+    if (aiWorking.current) { setBannerTip('请等待当前操作完成。'); return; }
     if (
       !window.confirm(
         `确定要与「${currentChar.name}」解除情侣空间绑定关系吗？（解绑后将通知角色）`
@@ -595,7 +586,7 @@ export const CoupleSpaceApp: React.FC<CoupleSpaceAppProps> = ({ onBack }) => {
 
   return (
     <div
-      className="relative flex-1 w-full flex flex-col overflow-hidden select-none text-[#56515C]"
+      className="couple-space-app relative flex-1 w-full flex flex-col overflow-hidden select-none text-[#56515C]"
       style={{
         background: currentSpace.pageBgUrl
           ? `linear-gradient(rgba(255,255,255,0.35), rgba(255,255,255,0.35)), url("${currentSpace.pageBgUrl}") center / cover no-repeat`
@@ -607,7 +598,7 @@ export const CoupleSpaceApp: React.FC<CoupleSpaceAppProps> = ({ onBack }) => {
       <div className="absolute top-1/3 -right-20 w-64 h-64 rounded-full bg-sky-100/30 blur-3xl pointer-events-none" />
 
       {/* 顶栏 */}
-      <AppHeader
+      {activePage === 'none' && <AppHeader
         title="情侣空间"
         onBack={onBack}
         rightAction={
@@ -653,10 +644,10 @@ export const CoupleSpaceApp: React.FC<CoupleSpaceAppProps> = ({ onBack }) => {
             </button>
           </div>
         }
-      />
+      />}
 
       {/* 主体滚动容器 */}
-      <div className="relative z-10 flex-1 min-h-0 overflow-y-auto no-scrollbar px-4 pt-1 space-y-3 pb-[max(env(safe-area-inset-bottom,0px),24px)]">
+      {activePage === 'none' && <div className="relative z-10 flex-1 min-h-0 overflow-y-auto no-scrollbar px-4 pt-1 space-y-3 pb-[max(env(safe-area-inset-bottom,0px),24px)]">
         {bannerTip && (
           <div className="flex items-center justify-between rounded-2xl bg-white/90 backdrop-blur-md border border-slate-200 px-3.5 py-2 text-[11px] font-medium text-slate-600 shadow-2xs">
             <span>{bannerTip}</span>
@@ -991,7 +982,7 @@ export const CoupleSpaceApp: React.FC<CoupleSpaceAppProps> = ({ onBack }) => {
             <div className="grid grid-cols-2 gap-2.5">
               {/* 入口 1：纪念日（浅灰粉） */}
               <button
-                onClick={() => setActiveSubModal('anniversary')}
+                onClick={() => setActivePage('anniversary')}
                 className="rounded-[22px] bg-white/75 backdrop-blur-xl border border-white p-3.5 text-left space-y-2 shadow-2xs hover:bg-white transition-all cursor-pointer active:scale-98"
               >
                 <div className="w-8 h-8 rounded-xl bg-[#F8EDF0] text-[#B88998] flex items-center justify-center">
@@ -1009,7 +1000,7 @@ export const CoupleSpaceApp: React.FC<CoupleSpaceAppProps> = ({ onBack }) => {
 
               {/* 入口 2：交换日记（薄雾蓝） */}
               <button
-                onClick={() => setActiveSubModal('diary')}
+                onClick={() => setActivePage('diary')}
                 className="rounded-[22px] bg-white/75 backdrop-blur-xl border border-white p-3.5 text-left space-y-2 shadow-2xs hover:bg-white transition-all cursor-pointer active:scale-98"
               >
                 <div className="w-8 h-8 rounded-xl bg-[#ECF3F9] text-[#7899B8] flex items-center justify-center">
@@ -1027,7 +1018,7 @@ export const CoupleSpaceApp: React.FC<CoupleSpaceAppProps> = ({ onBack }) => {
 
               {/* 入口 3：每日 Q&A（淡紫灰） */}
               <button
-                onClick={() => setActiveSubModal('qa')}
+                onClick={() => setActivePage('qa')}
                 className="rounded-[22px] bg-white/75 backdrop-blur-xl border border-white p-3.5 text-left space-y-2 shadow-2xs hover:bg-white transition-all cursor-pointer active:scale-98"
               >
                 <div className="w-8 h-8 rounded-xl bg-[#F2EFF7] text-[#9387A8] flex items-center justify-center">
@@ -1045,7 +1036,7 @@ export const CoupleSpaceApp: React.FC<CoupleSpaceAppProps> = ({ onBack }) => {
 
               {/* 入口 4：碎碎念（奶麦黄） */}
               <button
-                onClick={() => setActiveSubModal('sticky')}
+                onClick={() => setActivePage('sticky')}
                 className="rounded-[22px] bg-white/75 backdrop-blur-xl border border-white p-3.5 text-left space-y-2 shadow-2xs hover:bg-white transition-all cursor-pointer active:scale-98"
               >
                 <div className="w-8 h-8 rounded-xl bg-[#FAF4E6] text-[#B09968] flex items-center justify-center">
@@ -1063,7 +1054,7 @@ export const CoupleSpaceApp: React.FC<CoupleSpaceAppProps> = ({ onBack }) => {
             </div>
           </>
         )}
-      </div>
+      </div>}
 
       {/* ==================== 弹窗：页面 / 日历背景 ==================== */}
       {bgEditor && (
@@ -1120,7 +1111,7 @@ export const CoupleSpaceApp: React.FC<CoupleSpaceAppProps> = ({ onBack }) => {
       {/* ==================== 弹窗 A：点击日期编辑当天心情 ==================== */}
       {editingMoodDate && (
         <div className="absolute inset-0 z-50 bg-slate-900/25 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="w-full max-w-sm bg-white/95 backdrop-blur-2xl border border-white rounded-[26px] p-5 shadow-lg space-y-4 max-h-[90%] overflow-y-auto">
+          <div role="dialog" aria-modal="true" aria-label="心情" className="w-full max-w-sm bg-white/95 backdrop-blur-2xl border border-white rounded-[26px] p-5 shadow-lg space-y-4 max-h-[90%] overflow-y-auto">
             <div className="flex items-center justify-between">
               <h3 className="text-xs font-bold text-slate-700 font-mono">
                 {editingMoodDate}
@@ -1135,9 +1126,7 @@ export const CoupleSpaceApp: React.FC<CoupleSpaceAppProps> = ({ onBack }) => {
 
             {/* 玩家今日心情选择 */}
             <div className="space-y-2">
-              <span className="text-xs font-medium text-slate-600 block">
-                我的心情（圆形）：
-              </span>
+              <div className="flex items-center justify-between"><span className="text-xs font-medium text-slate-600">我的心情</span>{(currentSpace.moods[editingMoodDate]?.userMoodId || currentSpace.moods[editingMoodDate]?.userNote) && <button type="button" aria-label="删除我的心情" disabled={!!aiBusy} onClick={() => { if (window.confirm('删除我的这条心情？')) { updateCurrentSpace(prev => deleteCoupleMood(prev, editingMoodDate, 'user')); setEditingMoodDate(null); } }} className="p-1 text-slate-400"><Trash2 size={14} /></button>}</div>
               <div className="grid grid-cols-5 gap-2">
                 {MOOD_OPTIONS.map((opt) => {
                   const isSel = selectedUserMoodId === opt.id;
@@ -1170,7 +1159,7 @@ export const CoupleSpaceApp: React.FC<CoupleSpaceAppProps> = ({ onBack }) => {
 
               <input
                 type="text"
-                placeholder="写一句今日心情备注（选填）..."
+                aria-label="心情备注" placeholder="备注"
                 value={userMoodNoteInput}
                 onChange={(e) => setUserMoodNoteInput(e.target.value)}
                 className="w-full px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-xs outline-none"
@@ -1195,8 +1184,9 @@ export const CoupleSpaceApp: React.FC<CoupleSpaceAppProps> = ({ onBack }) => {
             <div className="p-3 rounded-2xl bg-slate-50/70 border border-slate-200/60 space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-medium text-slate-600">
-                  {currentChar.name} 的心情（方形）：
+                  {currentChar.name}的心情
                 </span>
+                {(currentSpace.moods[editingMoodDate]?.charMoodId || currentSpace.moods[editingMoodDate]?.charNote) && <button type="button" aria-label="删除角色的心情" disabled={!!aiBusy} onClick={() => { if (window.confirm('删除角色的这条心情？')) { updateCurrentSpace(prev => deleteCoupleMood(prev, editingMoodDate, 'char')); setEditingMoodDate(null); } }} className="p-1 text-slate-400"><Trash2 size={14} /></button>}
                 <button
                   type="button"
                   onClick={() => handleGenerateCharMoodForDay(editingMoodDate)}
@@ -1254,598 +1244,10 @@ export const CoupleSpaceApp: React.FC<CoupleSpaceAppProps> = ({ onBack }) => {
       )}
 
       {/* ==================== 弹窗 B：四大子板块详情 ==================== */}
-      {activeSubModal !== 'none' && (
-        <div className="absolute inset-0 z-50 bg-slate-900/25 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="w-full max-w-sm bg-white/95 backdrop-blur-2xl border border-white rounded-[26px] p-5 shadow-lg space-y-3.5 max-h-[90%] overflow-y-auto">
-            {/* 1. 纪念日 */}
-            {activeSubModal === 'anniversary' && (
-              <>
-                <div className="flex items-center justify-between">
-                  <h3 className="text-xs font-bold text-slate-700">纪念日</h3>
-                  <button
-                    onClick={() => setActiveSubModal('none')}
-                    className="w-6 h-6 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-600 cursor-pointer"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-
-                <div className="bg-slate-50/70 p-3 rounded-2xl border border-slate-200/60 space-y-2">
-                  <input
-                    type="text"
-                    placeholder="纪念日名称..."
-                    value={newAnniTitle}
-                    onChange={(e) => setNewAnniTitle(e.target.value)}
-                    className="w-full px-3 py-1.5 rounded-xl bg-white border border-slate-200 text-xs"
-                  />
-                  <div className="flex gap-2">
-                    <input
-                      type="date"
-                      value={newAnniDate}
-                      onChange={(e) => setNewAnniDate(e.target.value)}
-                      className="flex-1 px-3 py-1.5 rounded-xl bg-white border border-slate-200 text-xs font-mono"
-                    />
-                    <button
-                      onClick={() => {
-                        if (!newAnniTitle.trim() || !newAnniDate) return;
-                        updateCurrentSpace((prev) => ({
-                          ...prev,
-                          anniversaries: [
-                            {
-                              id: `anni-${Date.now()}`,
-                              title: newAnniTitle.trim(),
-                              targetDate: newAnniDate,
-                              type: 'countdown',
-                            },
-                            ...prev.anniversaries,
-                          ],
-                        }));
-                        setNewAnniTitle('');
-                        setNewAnniDate('');
-                      }}
-                      className="px-3.5 py-1.5 rounded-xl bg-slate-700 text-white text-xs font-medium cursor-pointer"
-                    >
-                      添加
-                    </button>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  {currentSpace.anniversaries.map((item) => {
-                    const dLeft = calcDaysUntil(item.targetDate);
-                    return (
-                      <div
-                        key={item.id}
-                        className="p-3 rounded-2xl bg-white border border-slate-100 flex items-center justify-between shadow-2xs"
-                      >
-                        <div>
-                          <p className="text-xs font-bold text-slate-700">{item.title}</p>
-                          <p className="text-[10px] text-slate-400 font-mono">{item.targetDate}</p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-medium text-slate-600 font-mono">
-                            {dLeft >= 0 ? `还有 ${dLeft} 天` : `已过 ${Math.abs(dLeft)} 天`}
-                          </span>
-                          <button type="button" aria-label={`编辑纪念日：${item.title}`}
-                            onClick={() => setRecordEdit({ kind: 'anniversary', id: item.id, date: item.targetDate, title: item.title, type: item.type })}
-                            className="text-slate-400"><Pencil className="h-3.5 w-3.5" /></button>
-                          <button
-                            onClick={() =>
-                              updateCurrentSpace((prev) => ({
-                                ...prev,
-                                anniversaries: prev.anniversaries.filter((a) => a.id !== item.id),
-                              }))
-                            }
-                            className="text-slate-300 hover:text-rose-400 cursor-pointer"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </>
-            )}
-
-            {/* 2. 交换日记 */}
-            {activeSubModal === 'diary' && (
-              <>
-                <div className="flex items-center justify-between">
-                  <h3 className="text-xs font-bold text-slate-700">交换日记</h3>
-                  <button
-                    onClick={() => setActiveSubModal('none')}
-                    className="w-6 h-6 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-600 cursor-pointer"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-
-                <div className="bg-slate-50/70 p-3 rounded-2xl border border-slate-200/60 space-y-2">
-                  <input
-                    type="text"
-                    placeholder="标题..."
-                    value={newDiaryTitle}
-                    onChange={(e) => setNewDiaryTitle(e.target.value)}
-                    className="w-full px-3 py-1.5 rounded-xl bg-white border border-slate-200 text-xs font-medium"
-                  />
-                  <textarea
-                    rows={3}
-                    placeholder="写下今天的想法..."
-                    value={newDiaryContent}
-                    onChange={(e) => setNewDiaryContent(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs outline-none"
-                  />
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => {
-                        if (!newDiaryContent.trim()) return;
-                          const entry: DiaryEntry = {
-                            id: `diary-${Date.now()}`,
-                            author: 'user',
-                            authorName: userProfile.name,
-                            dateStr: todayStr(),
-                            title: newDiaryTitle.trim() || '今日小记',
-                            content: newDiaryContent.trim(),
-                            seenByChar: false,
-                          };
-                          updateCurrentSpace((prev) => ({
-                            ...prev,
-                            diaries: [entry, ...prev.diaries],
-                          }));
-                        setNewDiaryTitle('');
-                        setNewDiaryContent('');
-                      }}
-                      className="flex-1 py-2 rounded-xl bg-gradient-to-r from-[#D7A8B7] to-[#A8C6DF] text-white text-xs font-medium cursor-pointer"
-                    >
-                      写日记
-                    </button>
-
-                    <button
-                      disabled={!!aiBusy}
-                      onClick={() => {
-                        const charId = selectedCharId;
-                        if (currentSpace.diaries.some((x) => x.author === 'char' && x.dateStr === todayStr())) {
-                          setBannerTip(`${currentChar.name}今天已经写过一篇日记啦，明天再来吧。`);
-                          return;
-                        }
-                        void runAi('diary', async () => {
-                          const result = await generateCharDiary(
-                            charId,
-                            userProfile.name,
-                            currentSpace
-                          );
-                          const charEntry: DiaryEntry = {
-                            id: `diary-${Date.now()}`,
-                            author: 'char',
-                            authorName: currentChar.name,
-                            dateStr: todayStr(),
-                            title: result.title,
-                            content: result.content,
-                            seenByChar: true,
-                          };
-                          updateSpaceFor(charId, (prev) => ({
-                            ...prev,
-                            diaries: [charEntry, ...prev.diaries],
-                          }));
-                        });
-                      }}
-                      className="px-3 py-2 rounded-xl bg-white border border-slate-200 text-slate-600 text-xs flex items-center gap-1 cursor-pointer disabled:opacity-60"
-                    >
-                      <Sparkles
-                        className={`w-3.5 h-3.5 text-amber-400 ${aiBusy === 'diary' ? 'animate-spin' : ''}`}
-                      />
-                      <span>{aiBusy === 'diary' ? '写作中' : '让TA写'}</span>
-                    </button>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  {currentSpace.diaries.map((d) => (
-                    <div
-                      key={d.id}
-                      className="p-3.5 rounded-2xl bg-white border border-slate-100 space-y-1.5 shadow-2xs"
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold text-slate-700">
-                          {d.title}
-                        </span>
-                        <div className="flex items-center gap-2">
-                          <span className="text-[10px] text-slate-400">
-                            {d.authorName} · {d.dateStr}
-                          </span>
-                          <button
-                            onClick={() =>
-                              updateCurrentSpace((prev) => ({
-                                ...prev,
-                                diaries: prev.diaries.filter((x) => x.id !== d.id),
-                              }))
-                            }
-                            className="text-slate-300 hover:text-rose-400 cursor-pointer"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-                      <p className="text-xs text-slate-500 leading-relaxed whitespace-pre-wrap">
-                        {d.content}
-                      </p>
-                      {d.replyComment && (
-                        <p className="text-[11px] text-slate-500 leading-relaxed p-2 rounded-xl bg-rose-50/60">
-                          {currentChar.name}：{d.replyComment}
-                        </p>
-                      )}
-                      <button type="button" onClick={() => setRecordEdit({
-                        kind: 'diary', id: d.id, date: d.dateStr, title: d.title, content: d.content,
-                        replyComment: d.replyComment || '', authorName: d.authorName,
-                      })} className="flex items-center gap-1 text-[10px] text-sky-600">
-                        <Pencil className="h-3 w-3" />编辑日记与日期
-                      </button>
-                      {d.author === 'user' && (
-                        <div className="flex items-center gap-3 pt-0.5">
-                          {!d.replyComment && (
-                            <button
-                              disabled={!!aiBusy}
-                              onClick={() => {
-                                const charId = selectedCharId;
-                                void runAi(`reply-${d.id}`, async () => {
-                                  const reply = await generateDiaryReply(
-                                    charId,
-                                    userProfile.name,
-                                    d.title,
-                                    d.content
-                                  );
-                                  updateSpaceFor(charId, (prev) => ({
-                                    ...prev,
-                                    diaries: prev.diaries.map((x) =>
-                                      x.id === d.id ? { ...x, replyComment: reply } : x
-                                    ),
-                                  }));
-                                });
-                              }}
-                              className="text-[10px] text-slate-400 flex items-center gap-0.5 cursor-pointer disabled:opacity-60"
-                            >
-                              <Sparkles className="w-3 h-3 text-amber-400" />
-                              {aiBusy === `reply-${d.id}` ? '回复中...' : '让TA回复'}
-                            </button>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-
-            {/* 3. 每日 Q&A */}
-            {activeSubModal === 'qa' && (
-              <>
-                <div className="flex items-center justify-between">
-                  <h3 className="text-xs font-bold text-slate-700">每日 Q&A</h3>
-                  <button
-                    onClick={() => setActiveSubModal('none')}
-                    className="w-6 h-6 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-600 cursor-pointer"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-
-                <div className="bg-slate-50/70 p-3 rounded-2xl border border-slate-200/60 space-y-2">
-                  <div className="flex gap-1.5">
-                    <input
-                      type="text"
-                      placeholder="问一个问题..."
-                      value={newQuestionText}
-                      onChange={(e) => setNewQuestionText(e.target.value)}
-                      className="flex-1 px-3 py-1.5 rounded-xl bg-white border border-slate-200 text-xs"
-                    />
-                    <button
-                      onClick={() => {
-                        const q =
-                          newQuestionText.trim() ||
-                          BUILTIN_QUESTIONS[Math.floor(Math.random() * BUILTIN_QUESTIONS.length)];
-                        const newQa: QAEntry = {
-                          id: `qa-${Date.now()}`,
-                          dateStr: todayStr(),
-                          question: q,
-                          askedBy: newQuestionText.trim() ? 'user' : 'system',
-                          seenByChar: false,
-                        };
-                        updateCurrentSpace((prev) => ({
-                          ...prev,
-                          qaList: [newQa, ...prev.qaList],
-                        }));
-                        setNewQuestionText('');
-                      }}
-                      className="px-3 py-1.5 rounded-xl bg-slate-700 text-white text-xs font-medium cursor-pointer shrink-0"
-                    >
-                      {newQuestionText.trim() ? '提问' : '抽题'}
-                    </button>
-                  </div>
-                  <button
-                    disabled={!!aiBusy}
-                    onClick={() => {
-                      const charId = selectedCharId;
-                      void runAi('qa-ask', async () => {
-                        const question = await generateQaQuestion(
-                          charId,
-                          userProfile.name,
-                          currentSpace
-                        );
-                        const newQa: QAEntry = {
-                          id: `qa-${Date.now()}`,
-                          dateStr: todayStr(),
-                          question,
-                          askedBy: 'char',
-                          seenByChar: true,
-                        };
-                        updateSpaceFor(charId, (prev) => ({
-                          ...prev,
-                          qaList: [newQa, ...prev.qaList],
-                        }));
-                      });
-                    }}
-                    className="px-3 py-1 rounded-xl bg-white border border-slate-200 text-slate-600 text-xs flex items-center gap-1 cursor-pointer disabled:opacity-60"
-                  >
-                    <Sparkles
-                      className={`w-3 h-3 text-amber-400 ${aiBusy === 'qa-ask' ? 'animate-spin' : ''}`}
-                    />
-                    <span>{aiBusy === 'qa-ask' ? '思考中' : '让TA提问'}</span>
-                  </button>
-                </div>
-
-                <div className="space-y-2">
-                  {currentSpace.qaList.map((qa) => (
-                    <div
-                      key={qa.id}
-                      className="p-3 rounded-2xl bg-white border border-slate-100 space-y-2 shadow-2xs"
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0 flex-1">
-                          <p className="text-xs font-medium text-slate-700">Q：{qa.question}</p>
-                          <p className="mt-1 text-[10px] text-slate-400">{qa.dateStr}</p>
-                        </div>
-                        <button type="button" aria-label={`编辑问答：${qa.question}`} onClick={() => setRecordEdit({
-                          kind: 'qa', id: qa.id, date: qa.dateStr, question: qa.question,
-                          userAnswer: qa.userAnswer || '', charAnswer: qa.charAnswer || '',
-                        })} className="shrink-0 text-slate-400"><Pencil className="h-3.5 w-3.5" /></button>
-                        <button
-                          onClick={() =>
-                            updateCurrentSpace((prev) => ({
-                              ...prev,
-                              qaList: prev.qaList.filter((x) => x.id !== qa.id),
-                            }))
-                          }
-                          className="text-slate-300 hover:text-rose-400 cursor-pointer shrink-0"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-
-                      <div className="space-y-1 text-xs">
-                        <div className="p-2 rounded-xl bg-slate-50 text-slate-600">
-                          <span className="font-medium text-slate-800">{userProfile.name}：</span>
-                          {qa.userAnswer || (
-                            <button
-                              onClick={() => {
-                                setAnsweringQaId(qa.id);
-                                setUserAnswerInput('');
-                              }}
-                              className="text-slate-500 underline ml-1 cursor-pointer"
-                            >
-                              填写回答
-                            </button>
-                          )}
-                          {qa.userAnswer && (
-                            <button
-                              onClick={() => {
-                                setAnsweringQaId(qa.id);
-                                setUserAnswerInput(qa.userAnswer || '');
-                              }}
-                              className="text-slate-400 ml-1.5 cursor-pointer"
-                            >
-                              <Pencil className="w-3 h-3 inline" />
-                            </button>
-                          )}
-                        </div>
-                        <div className="p-2 rounded-xl bg-slate-50 text-slate-600">
-                          <span className="font-medium text-slate-800">{currentChar.name}：</span>
-                          {qa.charAnswer || (
-                            <button
-                              disabled={!!aiBusy}
-                              onClick={() => {
-                                const charId = selectedCharId;
-                                void runAi(`qa-${qa.id}`, async () => {
-                                  const answer = await generateQaAnswer(
-                                    charId,
-                                    userProfile.name,
-                                    qa.question,
-                                    qa.userAnswer
-                                  );
-                                  updateSpaceFor(charId, (prev) => ({
-                                    ...prev,
-                                    qaList: prev.qaList.map((item) =>
-                                      item.id === qa.id ? { ...item, charAnswer: answer } : item
-                                    ),
-                                  }));
-                                });
-                              }}
-                              className="text-slate-500 underline ml-1 cursor-pointer disabled:opacity-60"
-                            >
-                              {aiBusy === `qa-${qa.id}` ? '回答中...' : '让TA回答'}
-                            </button>
-                          )}
-                        </div>
-                      </div>
-
-                      {answeringQaId === qa.id && (
-                        <div className="flex gap-1.5 pt-1">
-                          <input
-                            type="text"
-                            placeholder="写下回答..."
-                            value={userAnswerInput}
-                            onChange={(e) => setUserAnswerInput(e.target.value)}
-                            className="flex-1 px-2.5 py-1 rounded-xl bg-slate-50 border border-slate-200 text-xs"
-                          />
-                          <button
-                            onClick={() => {
-                              updateCurrentSpace((prev) => ({
-                                ...prev,
-                                qaList: prev.qaList.map((item) =>
-                                  item.id === qa.id
-                                    ? { ...item, userAnswer: userAnswerInput.trim(), seenByChar: false }
-                                    : item
-                                ),
-                              }));
-                              setAnsweringQaId(null);
-                            }}
-                            className="px-3 py-1 rounded-xl bg-slate-700 text-white text-xs font-medium cursor-pointer"
-                          >
-                            保存
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-
-            {/* 4. 碎碎念 */}
-            {activeSubModal === 'sticky' && (
-              <>
-                <div className="flex items-center justify-between">
-                  <h3 className="text-xs font-bold text-slate-700">碎碎念</h3>
-                  <button
-                    onClick={() => setActiveSubModal('none')}
-                    className="w-6 h-6 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-600 cursor-pointer"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-
-                <div className="bg-slate-50/70 p-3 rounded-2xl border border-slate-200/60 space-y-2">
-                  <textarea
-                    rows={2}
-                    placeholder="随手写一条小碎碎念..."
-                    value={newStickyText}
-                    onChange={(e) => setNewStickyText(e.target.value)}
-                    className="w-full px-3 py-1.5 rounded-xl bg-white border border-slate-200 text-xs outline-none"
-                  />
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5">
-                      {['#FEF6C9', '#FFE0E9', '#DCEEFF', '#DCF5E3', '#EDE2FF'].map((c) => (
-                        <button
-                          key={c}
-                          type="button"
-                          onClick={() => setNewStickyColor(c)}
-                          style={{ backgroundColor: c }}
-                          className={`w-4.5 h-4.5 rounded-full border cursor-pointer ${
-                            newStickyColor === c ? 'ring-2 ring-slate-400 border-white' : 'border-slate-200'
-                          }`}
-                        />
-                      ))}
-                    </div>
-
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        disabled={!!aiBusy}
-                        onClick={() => {
-                          const charId = selectedCharId;
-                          void runAi('sticky', async () => {
-                            const content = await generateStickyNote(
-                              charId,
-                              userProfile.name,
-                              currentSpace
-                            );
-                            const note: StickyNoteItem = {
-                              id: `note-${Date.now()}`,
-                              author: 'char',
-                              authorName: currentChar.name,
-                              content,
-                              colorBg: ['#FEF6C9', '#FFE0E9', '#DCEEFF', '#DCF5E3', '#EDE2FF'][
-                                Math.floor(Math.random() * 5)
-                              ],
-                              createdAt: todayStr(),
-                              seenByChar: true,
-                            };
-                            updateSpaceFor(charId, (prev) => ({
-                              ...prev,
-                              stickyNotes: [note, ...prev.stickyNotes],
-                            }));
-                          });
-                        }}
-                        className="px-2.5 py-1 rounded-xl bg-white border border-slate-200 text-slate-600 text-xs flex items-center gap-1 cursor-pointer disabled:opacity-60"
-                      >
-                        <Sparkles
-                          className={`w-3 h-3 text-amber-400 ${aiBusy === 'sticky' ? 'animate-spin' : ''}`}
-                        />
-                        <span>{aiBusy === 'sticky' ? '书写中' : '让TA贴'}</span>
-                      </button>
-                      <button
-                        onClick={() => {
-                          if (!newStickyText.trim()) return;
-                            const note: StickyNoteItem = {
-                              id: `note-${Date.now()}`,
-                              author: 'user',
-                              authorName: userProfile.name,
-                              content: newStickyText.trim(),
-                              colorBg: newStickyColor,
-                              createdAt: todayStr(),
-                              seenByChar: false,
-                            };
-                            updateCurrentSpace((prev) => ({
-                              ...prev,
-                              stickyNotes: [note, ...prev.stickyNotes],
-                            }));
-                          setNewStickyText('');
-                        }}
-                        className="px-3.5 py-1 rounded-xl bg-slate-700 text-white text-xs font-medium cursor-pointer"
-                      >
-                        贴上
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2">
-                  {currentSpace.stickyNotes.map((n) => (
-                    <div
-                      key={n.id}
-                      style={{ backgroundColor: n.colorBg }}
-                      className="p-3 rounded-2xl border border-white/90 shadow-2xs flex flex-col justify-between space-y-2"
-                    >
-                      <p className="text-xs text-slate-700 leading-relaxed">
-                        {n.content}
-                      </p>
-                      <div className="flex items-center justify-between text-[10px] text-slate-500 pt-1 border-t border-black/5">
-                        <span>{n.authorName} · {coupleRecordDate(n.createdAt) ?? n.createdAt}</span>
-                        <div className="flex items-center gap-1.5">
-                          <button type="button" aria-label={`编辑便签：${n.content}`} onClick={() => setRecordEdit({
-                            kind: 'note', id: n.id, date: coupleRecordDate(n.createdAt) ?? todayStr(),
-                            content: n.content, authorName: n.authorName, colorBg: n.colorBg,
-                          })} className="text-sky-600"><Pencil className="h-3 w-3" /></button>
-                          <button
-                            onClick={() =>
-                              updateCurrentSpace((prev) => ({
-                                ...prev,
-                                stickyNotes: prev.stickyNotes.filter((x) => x.id !== n.id),
-                              }))
-                            }
-                            className="text-slate-400 hover:text-rose-500 cursor-pointer"
-                          >
-                            <Trash2 className="w-3 h-3" />
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      )}
+      {activePage !== 'none' && <CoupleSpacePages key={selectedCharId + activePage} page={activePage} space={currentSpace}
+        user={userProfile} character={{ name: currentChar.name, avatarUrl: currentChar.avatar }} busy={!!aiBusy} message={bannerTip}
+        onDismiss={() => setBannerTip('')} onBack={() => setActivePage('none')} onEdit={setRecordEdit} runAi={runAi}
+        onUpdate={updater => updateSpaceFor(selectedCharId, prev => prev.bindStatus === 'bound' ? updater(prev) : prev)} />}
 
       {recordEdit && (
         <CoupleRecordEditor

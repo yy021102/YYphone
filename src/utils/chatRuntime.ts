@@ -22,6 +22,12 @@ export const readChatRuntimeSettings = (): ChatRuntimeSettings =>
     )
   );
 
+/** Explicit per-chat settings take priority; old chats retain their previous global preference. */
+export const incomingCallsAllowed = (
+  chat: { type: string; blocked?: boolean; allowIncomingCalls?: boolean },
+  legacy: Pick<ChatRuntimeSettings, 'allowIncomingCalls'>,
+): boolean => chat.type === 'direct' && !chat.blocked && (chat.allowIncomingCalls ?? legacy.allowIncomingCalls);
+
 export interface ChatNotification {
   chatId: string;
   name: string;

@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { showYyError } from './ErrorDialog';
 import { JournalRegenerator } from './JournalRegenerator';
-import { JOURNAL_LEVEL_LABEL } from '../utils/journalData';
+import { JournalSummaryText } from './JournalSummaryText';
+import { JOURNAL_LEVEL_LABEL, readJournalSettings } from '../utils/journalData';
 import {
   deleteGroupJournalEntry, editGroupJournalEntry, readGroupJournal,
   runGroupJournal, setGroupJournalSettings, regenerateGroupJournal,
@@ -73,7 +74,8 @@ export const GroupJournalPanel = ({ chatId }: { chatId: string }) => {
       <button type="button" disabled={busy} onClick={() => void run(true)}
         className="rounded-full bg-white px-3 py-1.5 text-[11px] text-slate-600 disabled:opacity-50">压缩合并</button>
     </div>
-    <JournalRegenerator key={chatId} total={journal.messageCount} busy={busy} onGenerate={async (range) => {
+    <p className="text-[10px] text-slate-500">每篇最多 {journal.every} 条、{readJournalSettings().journalMaxChars} 字；字数上限可在记忆 App → 流水账调整。超长消息会提前分段。</p>
+    <JournalRegenerator key={chatId} total={journal.messageCount} busy={busy} batchSize={journal.every} onGenerate={async (range) => {
       if (busy) return;
       setBusy(true); setMessage('');
       try {
@@ -109,14 +111,14 @@ export const GroupJournalPanel = ({ chatId }: { chatId: string }) => {
             <p className="whitespace-pre-wrap break-words">{entry.source}</p>
           </details>
           {editing?.id === entry.id ? <div className="space-y-2">
-            <textarea aria-label="群聊流水账正文" maxLength={4000} className="h-28 w-full rounded-lg border p-2 text-xs"
+            <textarea aria-label="群聊流水账正文" maxLength={20000} className="h-28 w-full rounded-lg border p-2 text-xs"
               value={editing.text} onChange={(event) => setEditing({ id: entry.id, text: event.target.value })} />
             <button type="button" className="mr-3 text-xs text-sky-600" onClick={() => act(() => {
               editGroupJournalEntry(chatId, entry.id, editing.text);
               setEditing(null);
             })}>保存</button>
             <button type="button" className="text-xs text-slate-500" onClick={() => setEditing(null)}>取消</button>
-          </div> : <p className="whitespace-pre-wrap break-words text-xs leading-relaxed text-slate-700">{entry.content}</p>}
+          </div> : <JournalSummaryText content={entry.content} />}
         </article>)}
     </div>
   </section>;

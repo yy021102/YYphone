@@ -22,13 +22,25 @@ import { readMemories } from './memoryData';
 import { readOfflineContacts } from './offlineData';
 import { guardMemoryArchive } from './memoryArchives';
 import { replaceJournalRange, selectJournalRange, type JournalRange } from './journalRange';
+import { splitJournalMessages, summarizeJournal } from './journalPolicy';
+import { readStorageString } from './localStorage';
+import { getUserRealName } from './userPersona';
+import type { UserPersona } from '../types';
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === 'object' && !Array.isArray(value);
 
 const readUserName = () => {
   try {
-    const parsed: unknown = JSON.parse(localStorage.getItem('yyphone:wechat-profile') ?? 'null');
+    const personas: unknown = JSON.parse(readStorageString('pocketos:personas') ?? 'null');
+    if (isRecord(personas) && Array.isArray(personas.profiles)) {
+      const active = personas.profiles.find(profile => isRecord(profile) && profile.id === personas.activeProfileId);
+      if (isRecord(active) && typeof active.name === 'string') {
+        const name = getUserRealName(active as unknown as UserPersona) || (typeof active.nickname === 'string' ? active.nickname.trim() : '');
+        if (name) return name;
+      }
+    }
+    const parsed: unknown = JSON.parse(readStorageString('yyphone:wechat-profile') ?? 'null');
     if (isRecord(parsed) && typeof parsed.name === 'string' && parsed.name) return parsed.name;
   } catch {
     // ignore
@@ -41,8 +53,6 @@ const charInfo = (charId: string) => {
   return { name: contact?.name ?? '角色', persona: contact?.persona ?? '' };
 };
 
-const MAX_CHUNK = 250;
-const MAX_CHUNK_CHARS = 12000;
 const MIN_MANUAL_CHUNK = 10;
 
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -53,23 +63,8 @@ const stamp = (iso: string) => {
     : `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 };
 
-const splitMessages = (messages: DirectMessage[]) => {
-  const chunks: DirectMessage[][] = [];
-  let chunk: DirectMessage[] = [];
-  let length = 0;
-  for (const message of messages) {
-    if (chunk.length > 0 &&
-      (chunk.length >= MAX_CHUNK || length + message.text.length > MAX_CHUNK_CHARS)) {
-      chunks.push(chunk);
-      chunk = [];
-      length = 0;
-    }
-    chunk.push(message);
-    length += message.text.length;
-  }
-  if (chunk.length > 0) chunks.push(chunk);
-  return chunks;
-};
+const splitMessages = (messages: DirectMessage[], every = readJournalSettings().journalEvery) =>
+  splitJournalMessages(messages, every, message => message.text.length + 50);
 
 const transcript = (messages: DirectMessage[], charName: string, userName: string) =>
   messages
@@ -95,7 +90,7 @@ export const createJournalEntry = async (
   const messages = readDirectMessages(charId, { fullText: true });
   const pending = messages.filter((m) => !cursor || m.createdAt > cursor);
   if (pending.length < options.minMessages) return null;
-  const chunk = splitMessages(pending.slice(0, MAX_CHUNK))[0] ?? [];
+  const chunk = splitMessages(pending.slice(0, settings.journalEvery), settings.journalEvery)[0] ?? [];
   if (chunk.length === 0) return null;
   const original = entriesOf(charId);
   const { name, persona } = charInfo(charId);
@@ -105,13 +100,13 @@ export const createJournalEntry = async (
     `你是角色「${name}」的记忆整理助手。请把${name}与玩家「${userName}」的下面这段微信聊天，整理成一篇给${name}自己回忆用的“流水账”。`,
     `角色设定（仅用于理解语气和立场）：${persona || '（无）'}`,
     '【记录】也可能是群聊转私信背景。涉及这类经历时保留来源群名及相关成员，区分群内发言与后续私信，不把其他成员说的话或约定记到玩家或我身上，也不推断其他成员知道私信内容。',
-    `写法：按时间顺序，用第三人称和真实姓名叙述，必须明确写出${name}和${userName}的名字，不用“我”“玩家”“对方”“他们”等代称代替姓名。每件事都标明记录中对应的具体年月日（YYYY年M月D日）；不得只写“当天”“后来”“之后”等模糊时间。逐项记录这段聊天里发生的事件、双方具体言行、重要信息、情绪变化、承诺、约定和未完事项；保留所有人物、地点、数字、日期、专有名词和事件结果。禁止省略事件、把多件事笼统合并、模糊化细节、杜撰记录里没有的信息或为了缩短篇幅删掉内容；可以精简重复措辞，但不能删减事实。客观陈述，不评价、不升华、不写成文学作品。聊天里标为【记录】的内容按各自来源理解，保留线下剧情、手机内容、群聊转私信等来源与发言归属；分享卡片也作为具体事件记录。只输出正文，不要标题和说明。`,
+    `用第三人称和真实姓名叙述${name}与${userName}的关键经历，不用“我”“对方”等代称混淆归属。保留线下剧情、手机内容、群聊转私信等必要来源与发言归属。优先记录新事实、关系变化、承诺和未完事项，不逐条复述聊天。`,
   ].join('\n');
   const source = `【聊天记录（${stamp(chunk[0].createdAt)} 至 ${stamp(chunk[chunk.length - 1].createdAt)}，共 ${chunk.length} 条）】\n${transcript(chunk, name, userName)}`;
-  const text = await requestMemoryAiText(
+  const text = await summarizeJournal(
     system,
     source,
-    { temperature: 0.2, maxTokens: Math.max(1600, Math.min(8000, Math.ceil(source.length / 2))) }
+    1
   );
   assertArchive();
   if (JSON.stringify(readDirectMessages(charId, { fullText: true }).slice(0, messages.length)) !== JSON.stringify(messages) ||
@@ -154,13 +149,13 @@ const mergeEntries = async (charId: string, entries: JournalEntry[], target: Jou
   const system = [
     `你是角色「${name}」的记忆整理助手。下面是${name}按时间顺序对与玩家「${userName}」相处经历写下的多篇记录，请把它们压缩合并成一篇更概括的“${target === 2 ? '阶段回顾' : '长篇回顾'}”。`,
     `角色设定（仅用于理解立场）：${persona || '（无）'}`,
-    `要求：按时间顺序，用第三人称和真实姓名明确写出${name}与${userName}，不用“我”“玩家”“对方”等代称。每件事写明具体年月日（YYYY年M月D日），不得用“后来”“之后”等模糊时间代替。完整保留输入各篇中发生的每一件事、具体言行、事件结果、人物、地点、数字、情绪变化、承诺、约定和未完事项；禁止省略、模糊化、笼统合并不同事件或杜撰事实。只可精简重复措辞，不能删减事实；客观陈述，不评价、不升华。只输出正文。`,
+    `用第三人称和真实姓名明确写出${name}与${userName}。合并重复和连续讨论，只保留能影响后续相处的关键事件、关系进展、稳定偏好和仍有效的约定；已解决事项只保留结论。比原篇明显精炼，不拼接原文，不逐项重述琐碎言行。`,
     '涉及群聊转私信的事件，仍须保留来源群名、相关成员和发言归属，不能把群内发言改写为私聊，也不能合并不同人的发言、关系或承诺。',
   ].join('\n');
-  const text = await requestMemoryAiText(
+  const text = await summarizeJournal(
     system,
     source,
-    { temperature: 0.2, maxTokens: Math.max(1600, Math.min(8000, Math.ceil(source.length / 2))) }
+    target
   );
   return {
     id: newJournalId(),
@@ -192,6 +187,10 @@ export const compressJournal = async (charId: string): Promise<number> => {
       const merged = await mergeEntries(charId, group, target);
       assertArchive();
       const ids = new Set(group.map((e) => e.id));
+      const latest = entriesOf(charId);
+      if (group.some(entry => JSON.stringify(latest.find(item => item.id === entry.id)) !== JSON.stringify(entry))) {
+        throw new Error('待合并的流水账已修改或删除，未保存旧摘要。');
+      }
       writeJournalEntries([
         ...readJournalEntries().map((e) => (ids.has(e.id) ? { ...e, mergedInto: merged.id } : e)),
         merged,
@@ -225,9 +224,9 @@ export const regenerateJournal = async (charId: string, range?: JournalRange) =>
   try {
     for (const chunk of splitMessages(selected)) {
       const source = transcript(chunk, name, readUserName());
-      const content = (await requestMemoryAiText(
-        `你是${name}的记忆整理助手。人设仅供理解，不用于改写事实。按时间顺序用第三人称和真实姓名明确写出${name}与${readUserName()}，不用“我”“玩家”“对方”等代称。每件事标明具体年月日（YYYY年M月D日），逐项记录所有具体事件、言行、结果、情绪变化、承诺和未完事项，保留所有人名、地点、数字、专有名词及来源。禁止省略、模糊化、笼统合并事件或杜撰；只精简重复措辞，不删减事实。群聊转私信须保留群名、成员、发言归属和来源。只输出客观正文，不加标题。`,
-        source, { temperature: 0.2, maxTokens: Math.max(1600, Math.min(8000, Math.ceil(source.length / 2))) }
+      const content = (await summarizeJournal(
+        `你是${name}的记忆整理助手。人设仅供理解，不用于改写事实。用第三人称和真实姓名概括${name}与${readUserName()}的重要经历，保留群聊转私信的来源群名及相关成员、发言归属，不让角色知道未参与的私聊。`,
+        source, 1
       )).trim();
       if (!content || content.length > 20000) throw new Error('流水账正文为空或过长，未保存本次重做。');
       assertArchive();

@@ -59,6 +59,10 @@ import { generateFocusRank } from './pomodoroAi';
 import { buildCalendarContext, emptyCalendarData, toDateKey, writeCalendarData } from './calendarData';
 import { replaceJournalRange, selectJournalRange } from './journalRange';
 import { processBlockedContactSchedules } from './blockedContact';
+import { addInventoryItem, INVENTORY_KEY, readInventory } from './inventoryData';
+import { splitJournalMessages } from './journalPolicy';
+import { incomingCallsAllowed } from './chatRuntime';
+import { compressJournal } from './journalAi';
 
 const stored = new Map<string, string>();
 const localStorage = {
@@ -363,6 +367,110 @@ test('journal range selection is inclusive and replacement invalidates ancestors
   assert.deepEqual(next.map((entry) => entry.id), ['a', 'c', 'outside', 'new']);
   assert.equal(next[0].mergedInto, undefined);
   assert.equal(next[1].mergedInto, undefined);
+});
+
+test('inventory excludes sent purchases, foreign recipients and food in backfill and existing linked records', () => {
+  const order = (id: string, senderId: string, orderMode: string, extra = {}) => ({
+    id, senderId, kind: 'order', orderCategory: 'shopping', orderMode,
+    title: id, text: id, createdAt: '2026-10-25T10:00:00Z', ...extra,
+  });
+  const messages = [order('self', 'user', 'self'), order('received', 'char', 'gift'),
+    order('sent', 'user', 'gift'), order('foreign', 'char', 'gift', { recipientId: 'other' }),
+    order('food', 'char', 'gift', { orderCategory: 'eleme' })];
+  saveSetting(WECHAT_CHATS_STORAGE_KEY, [{ id: 'box', type: 'direct', participantIds: ['char'], messages }]);
+  assert.deepEqual(readInventory().map(item => item.title).sort(), ['received', 'self']);
+  assert.equal(addInventoryItem({ kind: 'purchase', title: '送给角色', desc: '', emoji: '', recipientId: 'char' }), false);
+  assert.equal(readInventory().length, 2);
+  const legacy = { id: 'inv-msg-sent', kind: 'purchase', title: '旧版送出', desc: '', emoji: '', acquiredAt: '2026-10-25' };
+  saveSetting(INVENTORY_KEY, { backfilled: true, items: [legacy, { ...legacy, id: 'unlinked', title: '来源已删除的自购物品' }] });
+  assert.deepEqual(readInventory().map(item => item.title), ['来源已删除的自购物品']);
+  assert.equal(JSON.parse(readStorageString(WECHAT_CHATS_STORAGE_KEY)!)[0].messages.length, 5);
+});
+
+test('journal splitting follows configured count and retains the full long selected range', () => {
+  const messages = Array.from({ length: 305 }, (_, id) => ({ id, text: '一条消息' }));
+  const chunks = splitJournalMessages(messages, 30, item => item.text.length);
+  assert.equal(chunks.length, 11);
+  assert.deepEqual(chunks.flat(), messages);
+  const long = splitJournalMessages([{ text: '甲'.repeat(7000) }, { text: '乙'.repeat(7000) }], 100, item => item.text.length);
+  assert.equal(long.length, 2);
+});
+
+test('personal journal automatic-size chunks and regeneration both follow journalEvery', async () => {
+  archiveFixture(); testApi();
+  const chats = JSON.parse(readStorageString(WECHAT_CHATS_STORAGE_KEY)!);
+  chats[0].messages = Array.from({ length: 95 }, (_, index) => ({ id: `cfg-${index}`, senderId: index % 2 ? 'archive-char' : 'user', text: `事件${index}`,
+    createdAt: new Date(Date.UTC(2026, 9, 25, 10, 0, index)).toISOString() }));
+  saveSetting(WECHAT_CHATS_STORAGE_KEY, chats);
+  writeJournalSettings({ ...readJournalSettings(), journalEvery: 40 });
+  mock.method(globalThis, 'fetch', async () => aiResponse('关键事件提要'));
+  const entry = await createJournalEntry('archive-char', { minMessages: 40 });
+  assert.equal(entry?.messageCount, 40);
+  assert.equal(await regenerateJournal('archive-char'), 3);
+  assert.deepEqual(readJournalEntries().map(item => item.messageCount), [40, 40, 15]);
+});
+
+test('group regeneration covers messages after 250 and follows its independent batch setting', async () => {
+  const chat = groupJournalFixture(305, 'group', 'full-range');
+  setGroupJournalSettings(chat.id, { every: 40 });
+  mock.method(globalThis, 'fetch', async () => aiResponse('群内关键结论'));
+  assert.equal(await regenerateGroupJournal(chat.id), 8);
+  const entries = readGroupJournal(chat.id).entries;
+  assert.equal(entries.reduce((sum, entry) => sum + entry.messageCount, 0), 305);
+  assert.equal(entries.at(-1)?.toMessageId, chat.messages.at(-1)?.id);
+});
+
+test('custom journal prompts apply to creation, regeneration, merging and group summaries and can restore defaults', async () => {
+  archiveFixture(); testApi();
+  const prompt = '用第一人称，按日期列出事件和待办，保留彼此的承诺。';
+  writeJournalSettings({ ...readJournalSettings(), journalPrompt: prompt });
+  const requests: string[] = [];
+  mock.method(globalThis, 'fetch', async (_input: unknown, init?: RequestInit) => { requests.push(String(init?.body)); return aiResponse('一篇简短日记'); });
+  await createJournalEntry('archive-char');
+  await regenerateJournal('archive-char');
+  writeJournalEntries(Array.from({ length: 9 }, (_, index) => ({ id: `merge-custom-${index}`, charId: 'archive-char', level: 1 as const,
+    from: new Date(Date.UTC(2026, 9, 1, 0, index)).toISOString(), to: new Date(Date.UTC(2026, 9, 1, 0, index, 30)).toISOString(),
+    content: '重要事件', messageCount: 30, source: 'manual' as const, createdAt: '2026-10-25T10:00:00Z' })));
+  await compressJournal('archive-char');
+  const group = groupJournalFixture(20, 'group', 'custom-prompt-group');
+  await regenerateGroupJournal(group.id);
+  assert.equal(requests.length, 4);
+  for (const request of requests) {
+    assert.match(request, new RegExp(prompt));
+    assert.match(request, /覆盖前文关于人称/);
+    assert.doesNotMatch(request, /按时间顺序用第三人称和记录中的姓名写事件提要/);
+  }
+  writeJournalSettings({ ...readJournalSettings(), journalPrompt: '' });
+  archiveFixture();
+  await regenerateJournal('archive-char');
+  assert.match(requests.at(-1)!, /按时间顺序用第三人称和记录中的姓名写事件提要/);
+});
+
+test('incoming calls obey each private chat, retain legacy preferences and remain blocked in groups or blocked chats', () => {
+  const legacyOn = { allowIncomingCalls: true }, legacyOff = { allowIncomingCalls: false };
+  assert.equal(incomingCallsAllowed({ type: 'direct', allowIncomingCalls: true }, legacyOff), true);
+  assert.equal(incomingCallsAllowed({ type: 'direct', allowIncomingCalls: false }, legacyOn), false);
+  assert.equal(incomingCallsAllowed({ type: 'direct' }, legacyOn), true);
+  assert.equal(incomingCallsAllowed({ type: 'direct' }, legacyOff), false);
+  assert.equal(incomingCallsAllowed({ type: 'group', allowIncomingCalls: true }, legacyOn), false);
+  assert.equal(incomingCallsAllowed({ type: 'direct', blocked: true, allowIncomingCalls: true }, legacyOn), false);
+});
+
+test('journal length repair is bounded and cannot advance cursor on repeated overlength', async () => {
+  archiveFixture(); testApi();
+  writeJournalSettings({ ...readJournalSettings(), journalMaxChars: 200 });
+  let calls = 0;
+  mock.method(globalThis, 'fetch', async () => { calls++; return aiResponse(calls === 1 ? '长'.repeat(201) : '保留关键人物、事件和约定。'); });
+  assert.ok(await createJournalEntry('archive-char'));
+  assert.equal(calls, 2);
+  const previous = readJournalEntries();
+  const cursor = readJournalSettings().journalCursors['archive-char'];
+  calls = 0;
+  mock.method(globalThis, 'fetch', async () => { calls++; return aiResponse('仍然过长'.repeat(100)); });
+  await assert.rejects(regenerateJournal('archive-char'), /200 字上限/);
+  assert.equal(calls, 2);
+  assert.deepEqual(readJournalEntries(), previous);
+  assert.equal(readJournalSettings().journalCursors['archive-char'], cursor);
 });
 
 test('personal journal can regenerate after deletion and exact ranges ignore prior cursor and remain editable', async () => {
@@ -1146,10 +1254,10 @@ test('lock appearance persists with beauty settings and renders custom colors, m
   assert.match(html, /color:#ffcc88/);
   assert.match(html, /晚风与你\n明天见 &lt;3/);
   assert.doesNotMatch(html, /丙午年/);
-  const oldDefault = renderToStaticMarkup(createElement(LockScreen, props));
-  assert.match(oldDefault, /丙午年 菊月/);
+  const defaultMarkup = renderToStaticMarkup(createElement(LockScreen, props));
+  assert.match(defaultMarkup, /天天开心/);
   const blank = renderToStaticMarkup(createElement(LockScreen, { ...props, appearance: { ...appearance, subtitle: '' } }));
-  assert.doesNotMatch(blank, /晚风与你|丙午年/);
+  assert.doesNotMatch(blank, /晚风与你|丙午年|天天开心/);
 });
 
 test('character export includes only selected books and remaps books and entries without global side effects', () => {
@@ -2002,7 +2110,7 @@ test('group private provenance is durable in prompts and summaries, including le
     assert.match(request, /旧群名/);
   }
   assert.match(requests[1], /第三人称和真实姓名/);
-  assert.match(requests[1], /禁止省略事件/);
+  assert.match(requests[1], /关键事件、关系变化/);
   assert.match(requests[1], /2026年10月/);
 });
 

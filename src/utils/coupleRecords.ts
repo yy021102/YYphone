@@ -1,4 +1,4 @@
-import type { CharacterCoupleSpace } from '../apps/CoupleSpaceApp';
+import type { CharacterCoupleSpace, DiaryAnnotation, DiaryEntry } from '../apps/CoupleSpaceApp';
 import { localDateString } from './coupleSpaceData';
 
 export type CoupleRecordEdit =
@@ -23,6 +23,40 @@ export const coupleRecordDate = (value: string): string | undefined => {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? undefined : localDateString(date);
 };
+
+export function diaryAnnotations(entry: DiaryEntry, charName: string): DiaryAnnotation[] {
+  const annotations = entry.annotations ?? [];
+  return entry.replyComment && !annotations.some(note => note.author === 'char' && note.content === entry.replyComment)
+    ? [{ id: `legacy:${entry.id}`, author: 'char', authorName: charName, content: entry.replyComment, createdAt: entry.dateStr }, ...annotations] : annotations;
+}
+export function appendDiaryAnnotation(space: CharacterCoupleSpace, diaryId: string, annotation: DiaryAnnotation): CharacterCoupleSpace {
+  if (!annotation.content.trim()) throw new Error('批注不能为空。');
+  return { ...space, diaries: space.diaries.map(entry => entry.id !== diaryId ? entry : { ...entry,
+    annotations: [...(entry.annotations ?? []), { ...annotation, content: annotation.content.trim().slice(0, 2000) }],
+    ...(annotation.author === 'user' ? { seenByChar: false } : { replyComment: entry.replyComment || annotation.content.trim() }),
+  }) };
+}
+export function removeDiaryAnnotation(space: CharacterCoupleSpace, diaryId: string, annotationId: string): CharacterCoupleSpace {
+  return { ...space, diaries: space.diaries.map(entry => {
+    if (entry.id !== diaryId) return entry;
+    if (annotationId === `legacy:${entry.id}`) return { ...entry, replyComment: undefined };
+    const removed = entry.annotations?.find(note => note.id === annotationId);
+    const annotations = entry.annotations?.filter(note => note.id !== annotationId);
+    return { ...entry, annotations, ...(removed?.author === 'char' && removed.content === entry.replyComment
+      ? { replyComment: annotations?.find(note => note.author === 'char')?.content } : {}), ...(removed?.author === 'user' ? { seenByChar: false } : {}) };
+  }) };
+}
+export function deleteCoupleMood(space: CharacterCoupleSpace, date: string, author: 'user' | 'char'): CharacterCoupleSpace {
+  const record = space.moods[date];
+  if (!record) return space;
+  const remaining = { ...record };
+  if (author === 'user') { delete remaining.userMoodId; delete remaining.userNote; delete remaining.seenByChar; }
+  else { delete remaining.charMoodId; delete remaining.charNote; }
+  const moods = { ...space.moods };
+  if (remaining.userMoodId || remaining.userNote || remaining.charMoodId || remaining.charNote) moods[date] = remaining;
+  else delete moods[date];
+  return { ...space, moods };
+}
 
 export const editCoupleRecord = (space: CharacterCoupleSpace, edit: CoupleRecordEdit): CharacterCoupleSpace => {
   if (!isRecordDate(edit.date)) throw new Error('请选择有效的记录日期。');
@@ -63,6 +97,8 @@ export const editCoupleRecord = (space: CharacterCoupleSpace, edit: CoupleRecord
       diaries: space.diaries.map((entry) => entry.id === edit.id ? {
         ...entry, dateStr: edit.date, title: edit.title.trim() || '今日小记', content: edit.content.trim(),
         authorName: edit.authorName.trim(), replyComment: edit.replyComment.trim(),
+        ...(entry.annotations ? { annotations: entry.annotations.map(note => note.author === 'char' && note.content === entry.replyComment
+          ? { ...note, content: edit.replyComment.trim() } : note).filter(note => note.content) } : {}),
         ...(entry.author === 'user' ? { seenByChar: false } : {}),
       } : entry),
     };

@@ -74,11 +74,12 @@ export const generateCharDiary = async (charId: string, userName: string, space:
   return { title: str(data.title, 30) || '今日小记', content };
 };
 
-export const generateDiaryReply = async (charId: string, userName: string, title: string, content: string) => {
+export const generateDiaryReply = async (charId: string, userName: string, title: string, content: string,
+  context?: { author: 'user' | 'char'; annotations: Array<{ authorName: string; content: string }> }) => {
   const data = await request(
     charId,
     userName,
-    `玩家写了一篇交换日记《${title}》：${content.slice(0, 400)}\n请写一段 20~80 字的回复批注。`,
+    `${context?.author === 'char' ? '这是你自己写的' : '玩家写了一篇'}交换日记《${title}》：${content.slice(0, 1000)}\n已有批注：${JSON.stringify(context?.annotations.slice(-10) ?? [])}。请以角色本人身份写一段20~80字的批注，回应日记或玩家的最新批注。不替玩家说话，不重复已有内容。`,
     '{"reply":"回复"}'
   );
   const reply = str(data.reply, 200);

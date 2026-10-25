@@ -1,5 +1,6 @@
 import { readSetting, SETTINGS_KEYS } from './settings';
 import { withGlobalWorldBooks } from './worldBookPrompt';
+import { parseImageReference } from './imageReference';
 
 export interface ApiConnection {
   endpoint: string;
@@ -142,7 +143,7 @@ export const requestConfiguredAiText = async (
 
 export const requestConfiguredImage = async (
   prompt: string,
-  options: { model: string; api: ApiConnection }
+  options: { model: string; api: ApiConnection; size?: string; referenceImage?: string; similarity?: number; signal?: AbortSignal }
 ): Promise<string> => {
   const endpoint = options.api.endpoint.trim().replace(/\/+$/, '');
   if (!endpoint || !options.api.apiKey.trim() || !options.model.trim()) {
@@ -164,21 +165,31 @@ export const requestConfiguredImage = async (
     .replace(/\/chat\/completions$/i, '')
     .replace(/\/completions$/i, '')
     .replace(/\/images\/generations$/i, '');
-  baseUrl.pathname = `${baseUrl.pathname.replace(/\/+$/, '')}/images/generations`;
+  baseUrl.pathname = baseUrl.pathname.replace(/\/images\/edits$/i, '');
+  baseUrl.pathname = `${baseUrl.pathname.replace(/\/+$/, '')}/images/${options.referenceImage ? 'edits' : 'generations'}`;
   baseUrl.search = '';
   baseUrl.hash = '';
 
+  let body: BodyInit;
+  if (options.referenceImage) {
+    const reference = parseImageReference(options.referenceImage);
+    const form = new FormData();
+    form.set('model', options.model.trim());
+    form.set('prompt', prompt);
+    form.set('n', '1');
+    if (options.size) form.set('size', options.size);
+    form.set('image', reference.blob, `reference.${reference.mimeType === 'image/jpeg' ? 'jpg' : reference.mimeType.split('/')[1]}`);
+    if (/^gpt-image-1(?:\.5)?$/.test(options.model.trim())) form.set('input_fidelity', (options.similarity ?? 0.7) >= 0.65 ? 'high' : 'low');
+    body = form;
+  } else body = JSON.stringify({ model: options.model.trim(), prompt, n: 1, ...(options.size ? { size: options.size } : {}) });
   const response = await fetch(baseUrl, {
+    signal: options.signal,
     method: 'POST',
     headers: {
       Authorization: `Bearer ${options.api.apiKey}`,
-      'Content-Type': 'application/json',
+      ...(!options.referenceImage ? { 'Content-Type': 'application/json' } : {}),
     },
-    body: JSON.stringify({
-      model: options.model.trim(),
-      prompt,
-      n: 1,
-    }),
+    body,
   });
   if (!response.ok) {
     const detail = await response.text();

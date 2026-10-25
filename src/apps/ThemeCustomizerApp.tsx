@@ -2,12 +2,16 @@ import React, { useEffect, useState } from 'react';
 import {
   BookmarkPlus,
   Check,
+  ChevronDown,
   Download,
   Image as ImageIcon,
+  LayoutGrid,
   Palette,
   Upload,
 } from 'lucide-react';
 import { AppHeader } from '../components/AppHeader';
+import { GlobalFontSettings } from '../components/GlobalFontSettings';
+import type { FontSettings } from '../utils/fontSettings';
 import { useErrorDialog } from '../components/ErrorDialog';
 import { ALL_APPS, THEMES, WALLPAPERS } from '../data/mockData';
 import {
@@ -22,6 +26,8 @@ import { isHomeAppearance } from '../utils/homeAppearance';
 import { DEFAULT_LOCK_APPEARANCE, isLockScreenAppearance } from '../utils/lockAppearance';
 
 interface ThemeCustomizerAppProps {
+  fontSettings: FontSettings;
+  onSaveFontSettings: (settings: FontSettings) => boolean;
   onBack: () => void;
   activeThemeId: string;
   onSelectTheme: (themeId: string) => boolean;
@@ -44,7 +50,7 @@ const isBeautySettings = (value: unknown): value is BeautySettings => {
     typeof settings.themeId === 'string' &&
     THEMES.some((theme) => theme.id === settings.themeId) &&
     typeof settings.wallpaperId === 'string' &&
-    WALLPAPERS.some((wallpaper) => wallpaper.id === settings.wallpaperId) &&
+    (WALLPAPERS.some((wallpaper) => wallpaper.id === settings.wallpaperId) || settings.wallpaperId === 'deep-sea-frost') &&
     !!settings.wallpapers &&
     typeof settings.wallpapers.lockScreen === 'string' &&
     typeof settings.wallpapers.homeScreen === 'string' &&
@@ -68,7 +74,13 @@ const isBeautyPresetList = (value: unknown): value is BeautyPreset[] =>
       isBeautySettings(preset.settings)
   );
 
+// Retired wallpapers fall back without invalidating the rest of an old preset.
+const normalizeWallpaper = (settings: BeautySettings): BeautySettings =>
+  settings.wallpaperId === 'deep-sea-frost' ? { ...settings, wallpaperId: WALLPAPERS[0].id } : settings;
+
 export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
+  fontSettings,
+  onSaveFontSettings,
   onBack,
   activeThemeId,
   onSelectTheme,
@@ -86,6 +98,7 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
   const [lockAppearanceDraft, setLockAppearanceDraft] = useState(currentSettings.lockScreenAppearance ?? DEFAULT_LOCK_APPEARANCE);
   const [presets, setPresets] = useState(() =>
     readSetting(SETTINGS_KEYS.beautyPresets, DEFAULT_PRESETS, isBeautyPresetList)
+      .map((preset) => ({ ...preset, settings: normalizeWallpaper(preset.settings) }))
   );
   const [presetName, setPresetName] = useState('');
   const [selectedPresetId, setSelectedPresetId] = useState('');
@@ -94,7 +107,7 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
   useErrorDialog(error);
   const [processing, setProcessing] = useState<string | null>(null);
   const draftSettings: BeautySettings = {
-    ...currentSettings,
+    ...normalizeWallpaper(currentSettings),
     wallpapers: wallpaperDraft,
     appIcons: iconDraft,
     lockScreenAppearance: lockAppearanceDraft,
@@ -126,7 +139,7 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
     setProcessing(field);
     setError('');
     try {
-      const image = await       compressWallpaper(file);
+      const image = await compressWallpaper(file);
       setWallpaperDraft((current) => ({ ...current, [field]: image }));
       setStatus('');
     } catch (uploadError) {
@@ -152,7 +165,7 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
   };
 
   const wallpaperInput = (field: keyof CustomWallpapers, label: string) => (
-    <div className="glass-card rounded-2xl p-3 space-y-2">
+    <div className="rounded-2xl border border-white/80 bg-white/55 p-3 space-y-2">
       <label className="block text-[11px] font-semibold text-[#2C4A5C]">
         {label}壁纸链接
         <input
@@ -164,16 +177,17 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
         />
       </label>
       <label className="flex items-center justify-between gap-2 text-[11px] text-[#2C4A5C]">
-        <span>{label}本地上传</span>
+        <span className="shrink-0">{label}本地上传</span>
         <input
           type="file"
+          aria-label={`${label}本地上传`}
           accept="image/*"
           disabled={processing !== null}
           onChange={(event) => {
             void handleUpload(field, event.target.files?.[0]);
             event.currentTarget.value = '';
           }}
-          className="max-w-[190px] text-[10px]"
+          className="min-w-0 max-w-[190px] flex-1 text-[10px]"
         />
       </label>
       {wallpaperDraft[field] && (
@@ -252,7 +266,7 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
       {
         id: 'current-design',
         name: '当前搭配',
-        settings: currentSettings,
+        settings: normalizeWallpaper(currentSettings),
       },
     ];
     const content = JSON.stringify(
@@ -292,6 +306,7 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
 
       const additions = importedPresets.map((preset, index) => ({
         ...preset,
+        settings: normalizeWallpaper(preset.settings),
         id: `import-${Date.now()}-${index}`,
       }));
       if (!persistPresets([...presets, ...additions])) return;
@@ -317,15 +332,16 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
       />
 
       <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar p-4 space-y-4">
-        <section className="space-y-2.5">
-          <div className="flex items-center justify-between px-1 text-xs font-bold text-[#2C4A5C]">
-            <span className="flex items-center gap-1.5">
-              <Palette className="w-3.5 h-3.5 text-pink-500" />
-              <span>系统主题配色</span>
-            </span>
-            <span className="text-[10px] text-slate-400">实时生效</span>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
+        <details className="glass-card group rounded-2xl p-3">
+          <summary className="flex cursor-pointer list-none items-center gap-2 text-xs font-bold text-[#2C4A5C]">
+            <Palette className="h-3.5 w-3.5 shrink-0 text-pink-500" />
+            <span className="flex-1">内置主题与锁屏</span>
+            <span className={`h-4 w-4 rounded-full bg-gradient-to-r ${THEMES.find((theme) => theme.id === activeThemeId)?.gradient}`} />
+            <span className="text-[10px] font-normal text-slate-400">一键切换</span>
+            <ChevronDown size={13} className="shrink-0 text-slate-400 transition-transform group-open:rotate-180" />
+          </summary>
+          <h3 className="mt-4 px-0.5 text-[11px] font-semibold text-[#2C4A5C]">系统主题配色</h3>
+          <div className="mt-3 grid grid-cols-3 gap-2">
             {THEMES.map((theme) => {
               const isSelected = activeThemeId === theme.id;
               return (
@@ -340,28 +356,26 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
                       setError('主题保存失败。');
                     }
                   }}
-                  className={`glass-card rounded-2xl p-3 text-left transition-all border ${
+                  aria-pressed={isSelected}
+                  className={`glass-card rounded-xl p-1.5 text-left transition-all border ${
                     isSelected
-                      ? 'border-sky-500 ring-2 ring-sky-300 shadow-md scale-[1.02]'
+                      ? 'border-sky-500 ring-2 ring-sky-300 shadow-sm'
                       : 'border-white/60 hover:border-sky-300'
                   }`}
                 >
                   <div
-                    className={`h-14 rounded-xl bg-gradient-to-r ${theme.gradient} border border-white/80 p-2 flex items-start justify-between shadow-inner`}
+                    className={`h-7 rounded-lg bg-gradient-to-r ${theme.gradient} border border-white/80 p-1 flex items-center justify-end shadow-inner`}
                   >
-                    <span className="text-[10px] font-bold text-slate-700 bg-white/70 px-1.5 py-0.5 rounded shadow-2xs">
-                      {theme.name}
-                    </span>
                     {isSelected && (
                       <span className="w-5 h-5 rounded-full bg-sky-600 text-white flex items-center justify-center shadow-xs">
                         <Check className="w-3 h-3 stroke-[3]" />
                       </span>
                     )}
                   </div>
-                  <div className="flex items-center justify-between mt-2 px-1">
-                    <span className="text-xs font-bold text-[#2C4A5C]">{theme.name}</span>
+                  <div className="flex items-center justify-between gap-1 mt-1.5 px-0.5">
+                    <span className="text-[10px] font-bold text-[#2C4A5C]">{theme.name}</span>
                     <span
-                      className="w-3.5 h-3.5 rounded-full border border-white shadow-xs"
+                      className="w-2.5 h-2.5 shrink-0 rounded-full border border-white shadow-xs"
                       style={{ backgroundColor: theme.accentColor }}
                     />
                   </div>
@@ -369,53 +383,60 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
               );
             })}
           </div>
-        </section>
-
-        <section className="space-y-2.5">
-          <div className="flex items-center gap-1.5 px-1 text-xs font-bold text-[#2C4A5C]">
-            <ImageIcon className="w-3.5 h-3.5 text-sky-500" />
-            <span>锁屏</span>
-          </div>
-          <div className="grid grid-cols-3 gap-2">
-            {WALLPAPERS.map((wallpaper) => {
-              const isSelected = activeWallpaperId === wallpaper.id;
-              return (
-                <button
-                  type="button"
-                  key={wallpaper.id}
-                  onClick={() => {
-                    if (onSelectWallpaper(wallpaper.id)) {
-                      setStatus(`已应用壁纸「${wallpaper.name}」。`);
-                      setError('');
-                    } else {
-                      setError('壁纸保存失败。');
-                    }
-                  }}
-                  className={`glass-card rounded-xl overflow-hidden text-left transition-all border ${
-                    isSelected
-                      ? 'border-sky-500 ring-2 ring-sky-300 shadow-md'
-                      : 'border-white/60 hover:border-sky-300'
-                  }`}
-                >
-                  <div
-                    className="h-14 relative p-1.5 flex flex-col justify-between"
-                    style={{ background: wallpaper.style }}
+          <h3 className="mt-4 flex items-center gap-1.5 border-t border-white/80 px-0.5 pt-3 text-[11px] font-semibold text-[#2C4A5C]">
+            <ImageIcon className="w-3.5 h-3.5 shrink-0 text-sky-500" />
+            <span className="flex-1">锁屏样式</span>
+            <span className="text-[10px] font-normal text-slate-400">{customWallpapers.lockScreen ? '自定义壁纸' : (WALLPAPERS.find((wallpaper) => wallpaper.id === activeWallpaperId) ?? WALLPAPERS[0]).name}</span>
+          </h3>
+          <div className="mt-3 space-y-3">
+            <div className="grid grid-cols-3 gap-2">
+              {WALLPAPERS.map((wallpaper) => {
+                const isSelected = normalizeWallpaper(currentSettings).wallpaperId === wallpaper.id;
+                return (
+                  <button
+                    type="button"
+                    key={wallpaper.id}
+                    aria-pressed={isSelected}
+                    onClick={() => {
+                      if (onSelectWallpaper(wallpaper.id)) {
+                        setStatus(`已应用壁纸「${wallpaper.name}」。`);
+                        setError('');
+                      } else {
+                        setError('壁纸保存失败。');
+                      }
+                    }}
+                    className={`glass-card rounded-xl overflow-hidden text-left transition-all border ${
+                      isSelected
+                        ? 'border-sky-500 ring-2 ring-sky-300 shadow-md'
+                        : 'border-white/60 hover:border-sky-300'
+                    }`}
                   >
-                    <div className="flex justify-end">
-                      {isSelected && (
-                        <span className="w-4 h-4 rounded-full bg-sky-600 text-white flex items-center justify-center shadow-xs">
-                          <Check className="w-2.5 h-2.5 stroke-[3]" />
-                        </span>
-                      )}
+                    <div
+                      className="h-9 relative p-1.5 flex flex-col justify-between"
+                      style={{ background: wallpaper.style }}
+                    >
+                      <div className="flex justify-end">
+                        {isSelected && (
+                          <span className="w-4 h-4 rounded-full bg-sky-600 text-white flex items-center justify-center shadow-xs">
+                            <Check className="w-2.5 h-2.5 stroke-[3]" />
+                          </span>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                  <div className="px-1.5 py-1 bg-white/60">
-                    <p className="text-[10px] font-bold text-[#2C4A5C] truncate">{wallpaper.name}</p>
-                  </div>
-                </button>
-              );
-            })}
+                    <div className="px-1.5 py-1 bg-white/60">
+                      <p className="text-[10px] font-bold text-[#2C4A5C] truncate">{wallpaper.name}</p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-[10px] leading-relaxed text-slate-400">点击即用。内置壁纸同步用于锁屏与桌面，会替换当前的自定义壁纸。</p>
           </div>
+        </details>
+
+        <section className="glass-card rounded-2xl p-3 space-y-3">
+          <h3 className="flex items-center gap-1.5 text-xs font-bold text-[#2C4A5C]"><ImageIcon className="h-3.5 w-3.5 text-sky-500" />自定义壁纸</h3>
+          <p className="text-[10px] leading-relaxed text-slate-500">上传图片或填写链接，分别设置你的锁屏与桌面。</p>
           {wallpaperInput('lockScreen', '锁屏')}
           {wallpaperInput('homeScreen', '桌面')}
           <button
@@ -435,7 +456,6 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
             保存壁纸
           </button>
         </section>
-
         <section className="glass-card rounded-2xl p-4 space-y-3">
           <h3 className="text-xs font-bold text-[#2C4A5C]">锁屏文字</h3>
           <label className="flex items-center justify-between text-xs text-slate-600">
@@ -469,78 +489,85 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
               className="rounded-xl bg-white/70 px-3 py-2 text-xs text-slate-600">恢复默认文字</button>
           </div>
         </section>
-        <section className="space-y-2.5">
-          <h3 className="px-1 text-xs font-bold text-[#2C4A5C]">App 图标</h3>
-          <p className="px-1 text-[10px] text-slate-500">
-            支持图片链接和本地图片；自定义图片会铺满整个 App 图标，替换默认背景与图案，保留图标圆角；非正方形图片会居中裁切。上传会压缩图片，清除后恢复系统图标。
-          </p>
-          <div className="space-y-2">
-            {ALL_APPS.map((app) => (
-              <div key={app.id} className="glass-card rounded-2xl p-3 space-y-2">
-                <label className="block text-[11px] font-semibold text-[#2C4A5C]">
-                  {app.name}图标链接
-                  <input
-                    type="url"
-                    value={iconDraft[app.id] ?? ''}
-                    onChange={(event) => {
-                      setIconDraft((current) => ({
-                        ...current,
-                        [app.id]: event.target.value,
-                      }));
-                      clearFeedback();
-                    }}
-                    placeholder="留空使用系统默认图标"
-                    className="mt-1 w-full bg-white/75 border border-white rounded-xl px-3 py-2 text-xs outline-none"
-                  />
-                </label>
-                <label className="flex items-center justify-between gap-2 text-[11px] text-[#2C4A5C]">
-                  <span>本地上传</span>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    disabled={processing !== null}
-                    onChange={(event) => {
-                      void handleIconUpload(app.id, event.target.files?.[0]);
-                      event.currentTarget.value = '';
-                    }}
-                    className="max-w-[190px] text-[10px]"
-                  />
-                </label>
-                {iconDraft[app.id] && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIconDraft((current) => {
-                        const updated = { ...current };
-                        delete updated[app.id];
-                        return updated;
-                      });
-                      clearFeedback();
-                    }}
-                    className="text-[10px] font-semibold text-rose-600"
-                  >
-                    清除自定义图标
-                  </button>
-                )}
-              </div>
-            ))}
+        <GlobalFontSettings fontSettings={fontSettings} onSaveFontSettings={onSaveFontSettings} />
+        <details className="glass-card group rounded-2xl p-3">
+          <summary className="flex cursor-pointer list-none items-center gap-2 text-xs font-bold text-[#2C4A5C]">
+            <LayoutGrid className="h-3.5 w-3.5 shrink-0 text-pink-500" />
+            <span className="flex-1">App 图标</span>
+            <ChevronDown size={13} className="shrink-0 text-slate-400 transition-transform group-open:rotate-180" />
+          </summary>
+          <div className="mt-3 space-y-2.5">
+            <p className="px-1 text-[10px] text-slate-500">
+              支持图片链接和本地图片；自定义图片会铺满整个 App 图标，替换默认背景与图案，保留图标圆角；非正方形图片会居中裁切。上传会压缩图片，清除后恢复系统图标。
+            </p>
+            <div className="space-y-2">
+              {ALL_APPS.map((app) => (
+                <div key={app.id} className="glass-card rounded-2xl p-3 space-y-2">
+                  <label className="block text-[11px] font-semibold text-[#2C4A5C]">
+                    {app.name}图标链接
+                    <input
+                      type="url"
+                      value={iconDraft[app.id] ?? ''}
+                      onChange={(event) => {
+                        setIconDraft((current) => ({
+                          ...current,
+                          [app.id]: event.target.value,
+                        }));
+                        clearFeedback();
+                      }}
+                      placeholder="留空使用系统默认图标"
+                      className="mt-1 w-full bg-white/75 border border-white rounded-xl px-3 py-2 text-xs outline-none"
+                    />
+                  </label>
+                  <label className="flex items-center justify-between gap-2 text-[11px] text-[#2C4A5C]">
+                    <span>本地上传</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      disabled={processing !== null}
+                      onChange={(event) => {
+                        void handleIconUpload(app.id, event.target.files?.[0]);
+                        event.currentTarget.value = '';
+                      }}
+                      className="max-w-[190px] text-[10px]"
+                    />
+                  </label>
+                  {iconDraft[app.id] && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIconDraft((current) => {
+                          const updated = { ...current };
+                          delete updated[app.id];
+                          return updated;
+                        });
+                        clearFeedback();
+                      }}
+                      className="text-[10px] font-semibold text-rose-600"
+                    >
+                      清除自定义图标
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                if (!onSaveAppIcons(iconDraft)) {
+                  setError('图标保存失败，本地存储空间可能不足。');
+                  return;
+                }
+                setStatus('App 图标已保存。');
+                setError('');
+              }}
+              disabled={processing !== null}
+              className="w-full rounded-xl bg-sky-600 text-white py-2 text-xs font-bold disabled:opacity-50"
+            >
+              保存 App 图标
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={() => {
-              if (!onSaveAppIcons(iconDraft)) {
-                setError('图标保存失败，本地存储空间可能不足。');
-                return;
-              }
-              setStatus('App 图标已保存。');
-              setError('');
-            }}
-            disabled={processing !== null}
-            className="w-full rounded-xl bg-sky-600 text-white py-2 text-xs font-bold disabled:opacity-50"
-          >
-            保存 App 图标
-          </button>
-        </section>
+        </details>
 
         <section className="space-y-2.5">
           <h3 className="px-1 text-xs font-bold text-[#2C4A5C]">预设</h3>

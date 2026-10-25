@@ -316,10 +316,4 @@ export const WALLPAPERS = [
     style: 'linear-gradient(135deg, #FAD4E0 0%, #F5E8FF 50%, #FFFFFF 100%)',
     description: '如春日花瓣般的暖意',
   },
-  {
-    id: 'deep-sea-frost',
-    name: '琉璃深滩',
-    style: 'linear-gradient(180deg, #D7EEF8 0%, #DCECF5 40%, #F4F8FA 100%)',
-    description: '水波柔影与微风拂面',
-  },
 ];

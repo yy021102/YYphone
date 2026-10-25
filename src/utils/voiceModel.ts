@@ -16,6 +16,7 @@ export interface VoiceModelSettings {
   domesticEndpoint: string;
   overseasEndpoint: string;
   region: 'domestic' | 'overseas';
+  speed?: number;
 }
 
 export const DEFAULT_VOICE_MODEL_SETTINGS: VoiceModelSettings = {
@@ -26,6 +27,7 @@ export const DEFAULT_VOICE_MODEL_SETTINGS: VoiceModelSettings = {
   domesticEndpoint: '',
   overseasEndpoint: '',
   region: 'domestic',
+  speed: 1,
 };
 
 const PROVIDER_DEFAULTS: Record<VoiceProvider, { domestic: string; overseas: string; model: string }> = {
@@ -48,6 +50,8 @@ export const isVoiceModelSettings = (value: unknown): value is VoiceModelSetting
   typeof (value as VoiceModelSettings).model === 'string' &&
   typeof (value as VoiceModelSettings).domesticEndpoint === 'string' &&
   typeof (value as VoiceModelSettings).overseasEndpoint === 'string' &&
+  ((value as VoiceModelSettings).speed === undefined || (typeof (value as VoiceModelSettings).speed === 'number' &&
+    Number.isFinite((value as VoiceModelSettings).speed) && (value as VoiceModelSettings).speed! >= 0.5 && (value as VoiceModelSettings).speed! <= 2)) &&
   ((value as VoiceModelSettings).region === 'domestic' ||
     (value as VoiceModelSettings).region === 'overseas');
 
@@ -121,14 +125,14 @@ const readErrorDetail = async (response: Response) => {
 };
 
 // Some self-hosted TTS servers return JSON with base64/hex audio or a URL instead of raw audio bytes.
-const readAudioFromJson = async (payload: unknown): Promise<Blob> => {
+const readAudioFromJson = async (payload: unknown, signal?: AbortSignal): Promise<Blob> => {
   const record = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
   const nested = record.data && typeof record.data === 'object' ? record.data as Record<string, unknown> : {};
   const candidates = [record.audio, record.audio_data, record.audio_base64, nested.audio, nested.audio_data, record.data];
   for (const candidate of candidates) {
     if (typeof candidate !== 'string' || !candidate.trim()) continue;
     if (/^https?:\/\//i.test(candidate)) {
-      const audioResponse = await fetch(candidate);
+      const audioResponse = await fetch(candidate, { signal });
       if (!audioResponse.ok) throw new Error(`下载语音失败（HTTP ${audioResponse.status}）。`);
       return audioResponse.blob();
     }
@@ -142,19 +146,21 @@ const readAudioFromJson = async (payload: unknown): Promise<Blob> => {
   throw new Error(message ? `语音合成失败：${message}` : '语音模型没有返回音频。');
 };
 
-const readAudioResponse = async (response: Response) => {
+const readAudioResponse = async (response: Response, signal?: AbortSignal) => {
   if (!response.ok) throw new Error(await readErrorDetail(response));
   const contentType = response.headers.get('content-type') ?? '';
-  if (contentType.includes('json')) return readAudioFromJson(await response.json());
+  if (contentType.includes('json')) return readAudioFromJson(await response.json(), signal);
+  if (contentType && !contentType.startsWith('audio/') && !contentType.includes('octet-stream')) throw new Error('语音接口未返回音频，请检查接口地址和模型。');
   return response.blob();
 };
 
 export async function synthesizeVoice(
   text: string,
   voiceId: string,
-  language: string
+  language: string,
+  options: { settings?: VoiceModelSettings; signal?: AbortSignal } = {},
 ): Promise<Blob> {
-  const settings = readVoiceModelSettings();
+  const settings = options.settings ?? readVoiceModelSettings();
   const provider = settings.provider ?? 'openai';
   const defaults = PROVIDER_DEFAULTS[provider];
   const endpoint = (settings.region === 'domestic' ? settings.domesticEndpoint : settings.overseasEndpoint).trim() ||
@@ -162,6 +168,8 @@ export async function synthesizeVoice(
   const model = settings.model.trim() || defaults.model;
   const key = settings.key.trim();
   const codes = getVoiceLanguageCodes(language);
+  const speed = settings.speed ?? 1;
+  if (!Number.isFinite(speed) || speed < 0.5 || speed > 2) throw new Error('语速需在 0.5 到 2 倍之间。');
   if (!endpoint) throw new Error('请先在系统设置中填写语音模型的接口地址。');
   if (!key && provider !== 'moss') throw new Error('请先在系统设置中填写语音模型的 API Key。');
   if (!voiceId.trim()) throw new Error('请先在角色设定中填写语音 ID（音色）。');
@@ -169,6 +177,7 @@ export async function synthesizeVoice(
   let audio: Blob;
   if (provider === 'minimax') {
     const response = await fetch(buildMinimaxUrl(endpoint, settings.id), {
+      signal: options.signal,
       method: 'POST',
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -177,7 +186,7 @@ export async function synthesizeVoice(
         stream: false,
         language_boost: codes.minimax,
         output_format: 'hex',
-        voice_setting: { voice_id: voiceId.trim(), speed: 1, vol: 1, pitch: 0 },
+        voice_setting: { voice_id: voiceId.trim(), speed, vol: 1, pitch: 0 },
         audio_setting: { sample_rate: 32000, bitrate: 128000, format: 'mp3', channel: 1 },
       }),
     });
@@ -193,6 +202,7 @@ export async function synthesizeVoice(
     audio = new Blob([hexToBytes(payload.data.audio)], { type: 'audio/mpeg' });
   } else {
     const response = await fetch(buildSpeechUrl(endpoint), {
+      signal: options.signal,
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -208,6 +218,7 @@ export async function synthesizeVoice(
             voice: voiceId.trim(),
             language: codes.iso,
             response_format: 'mp3',
+            speed,
           }
         : {
             model,
@@ -215,9 +226,10 @@ export async function synthesizeVoice(
             voice: voiceId.trim(),
             language: codes.iso,
             response_format: 'mp3',
+            speed,
           }),
     });
-    audio = await readAudioResponse(response);
+    audio = await readAudioResponse(response, options.signal);
   }
   if (!audio.size) throw new Error('语音模型返回了空音频。');
   return audio;

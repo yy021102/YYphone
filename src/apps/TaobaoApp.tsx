@@ -737,6 +737,7 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
           : undefined;
         addInventoryItem({
           kind: 'purchase',
+          recipientId: 'user',
           title: checkoutProduct.title,
           desc: (boughtMarket?.desc ?? boughtXianyu?.desc ?? '').slice(0, 200),
           emoji: boughtMarket?.emoji ?? boughtXianyu?.emoji ?? '🛍️',

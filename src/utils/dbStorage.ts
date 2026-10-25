@@ -214,6 +214,27 @@ export function getCachedStorageItem(key: string): { found: boolean; value?: unk
     : { found: false };
 }
 
+/** Update related settings and content in one transaction, without replacing other apps' data. */
+export async function setStorageItemsAtomically(values: Record<string, unknown>): Promise<void> {
+  await initializeDbStorage();
+  const entries = Object.entries(values);
+  const database = await openDatabase();
+  if (database) {
+    const transaction = database.transaction(STORE_NAME, 'readwrite');
+    const completion = transactionComplete(transaction);
+    for (const [key, value] of entries) transaction.objectStore(STORE_NAME).put({ key, value } satisfies StorageRecord);
+    await completion;
+  } else {
+    const previous = entries.map(([key]) => [key, window.localStorage.getItem(key)] as const);
+    try { for (const [key, value] of entries) window.localStorage.setItem(key, JSON.stringify(value)); }
+    catch (error) {
+      for (const [key, value] of previous) { if (value === null) window.localStorage.removeItem(key); else window.localStorage.setItem(key, value); }
+      throw error;
+    }
+  }
+  for (const [key, value] of entries) memoryCache.set(key, value);
+}
+
 export function setCachedStorageItem(key: string, value: unknown): void {
   memoryCache.set(key, value);
   void setStorageItem(key, value).catch((error: unknown) => {

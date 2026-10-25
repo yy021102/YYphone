@@ -51,6 +51,9 @@ export interface JournalSettings {
   journalAuto: boolean;
   /** 累计多少条新消息写一篇流水账 */
   journalEvery: number;
+  /** First-level summary character limit; higher levels receive modestly larger budgets. */
+  journalMaxChars: number;
+  journalPrompt: string;
   journalCursors: Record<string, string>;
   growthAuto: boolean;
   /** 隔多少天才提醒/生成一次成长笔记 */
@@ -63,6 +66,8 @@ export interface JournalSettings {
 export const DEFAULT_JOURNAL_SETTINGS: JournalSettings = {
   journalAuto: true,
   journalEvery: 100,
+  journalMaxChars: 400,
+  journalPrompt: '',
   journalCursors: {},
   growthAuto: true,
   growthIntervalDays: 14,
@@ -103,6 +108,8 @@ export const readJournalSettings = (): JournalSettings => {
   return {
     journalAuto: stored.journalAuto !== false,
     journalEvery: num(stored.journalEvery, 100, 30, 400),
+    journalMaxChars: num(stored.journalMaxChars, 400, 200, 1200),
+    journalPrompt: typeof stored.journalPrompt === 'string' ? stored.journalPrompt.slice(0, 6000) : '',
     journalCursors: readArchiveCursors(JOURNAL_SETTINGS_KEY, 'journalCursors'),
     growthAuto: stored.growthAuto !== false,
     growthIntervalDays: num(stored.growthIntervalDays, 14, 3, 90),

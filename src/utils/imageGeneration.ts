@@ -1,7 +1,24 @@
 import { ApiConnection, requestConfiguredImage } from './aiApi';
 import { readSetting, SETTINGS_KEYS } from './settings';
+import { parseImageReference, referenceGuidance, referenceSimilarity } from './imageReference';
 
 export type ImageGenerationProvider = 'openai' | 'novelai' | 'imagen' | 'gemini';
+export type ImageSizePreset = 'square' | 'portrait' | 'landscape';
+export const isImageSizePreset = (value: unknown): value is ImageSizePreset => value === 'square' || value === 'portrait' || value === 'landscape';
+export const defaultImageSize = (provider: ImageGenerationProvider): ImageSizePreset => provider === 'novelai' ? 'portrait' : 'square';
+export function imageDimensions(provider: ImageGenerationProvider, size = defaultImageSize(provider)) {
+  if (!isImageSizePreset(size)) throw new Error('图片尺寸选项无效，请重新选择。');
+  const dimensions = provider === 'novelai'
+    ? { square: [1024, 1024], portrait: [832, 1216], landscape: [1216, 832] }
+    : { square: [1024, 1024], portrait: [1024, 1536], landscape: [1536, 1024] };
+  const [width, height] = dimensions[size];
+  const aspectRatio = { square: '1:1', portrait: '3:4', landscape: '4:3' }[size];
+  return { width, height, size: `${width}x${height}`, aspectRatio };
+}
+export const imageSizeOptions = (provider: ImageGenerationProvider) => (['square', 'portrait', 'landscape'] as const).map((value) => {
+  const dimensions = imageDimensions(provider, value);
+  return { value, label: `${{ square: '正方形', portrait: '竖图', landscape: '横图' }[value]} · ${provider === 'gemini' || provider === 'imagen' ? dimensions.aspectRatio : `${dimensions.width} × ${dimensions.height}`}` };
+});
 
 export const IMAGE_PROVIDER_OPTIONS: Array<{ value: ImageGenerationProvider; label: string }> = [
   { value: 'openai', label: 'OpenAI 兼容（/images/generations）' },
@@ -28,6 +45,9 @@ export interface ImageGenerationConfig {
   apiKey?: string;
   model?: string;
   prompt?: string;
+  size?: ImageSizePreset;
+  referenceImage?: string;
+  referenceSimilarity?: number;
 }
 
 export interface ImageGenerationSettings {
@@ -35,6 +55,7 @@ export interface ImageGenerationSettings {
   endpoint: string;
   apiKey: string;
   model: string;
+  size?: ImageSizePreset;
 }
 
 export const DEFAULT_IMAGE_GENERATION_SETTINGS: ImageGenerationSettings = {
@@ -50,7 +71,8 @@ export const isImageGenerationSettings = (value: unknown): value is ImageGenerat
   isImageGenerationProvider((value as ImageGenerationSettings).provider) &&
   typeof (value as ImageGenerationSettings).endpoint === 'string' &&
   typeof (value as ImageGenerationSettings).apiKey === 'string' &&
-  typeof (value as ImageGenerationSettings).model === 'string';
+  typeof (value as ImageGenerationSettings).model === 'string' &&
+  ((value as ImageGenerationSettings).size === undefined || isImageSizePreset((value as ImageGenerationSettings).size));
 
 export const readImageGenerationSettings = () =>
   readSetting(SETTINGS_KEYS.imageGeneration, DEFAULT_IMAGE_GENERATION_SETTINGS, isImageGenerationSettings);
@@ -110,21 +132,25 @@ export const extractFirstZipEntry = async (zip: Uint8Array) => {
 const readError = async (response: Response) =>
   `生图失败（HTTP ${response.status}）：${(await response.text().catch(() => '')).slice(0, 300) || response.statusText}`;
 
-const requestNovelAiImage = async (prompt: string, endpoint: string, apiKey: string, model: string) => {
+const requestNovelAiImage = async (prompt: string, endpoint: string, apiKey: string, model: string, config: ImageGenerationConfig, signal?: AbortSignal) => {
   const base = endpoint.replace(/\/+$/, '');
   const url = parseHttpUrl(/\/ai\/generate-image$/i.test(base) ? base : `${base}/ai/generate-image`);
   const negative = 'lowres, bad anatomy, bad hands, text, error, worst quality, low quality, jpeg artifacts, watermark';
   const isV4 = /nai-diffusion-4/i.test(model);
+  const dimensions = imageDimensions('novelai', config.size);
+  const reference = config.referenceImage ? parseImageReference(config.referenceImage) : undefined;
   const response = await fetch(url, {
+    signal,
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       input: prompt,
       model,
-      action: 'generate',
+      action: reference ? 'img2img' : 'generate',
       parameters: {
-        width: 832,
-        height: 1216,
+        width: dimensions.width,
+        height: dimensions.height,
+        ...(reference ? { image: reference.data, strength: Math.min(0.99, Math.max(0.01, 1 - referenceSimilarity(config.referenceSimilarity))), noise: 0 } : {}),
         scale: 5,
         sampler: 'k_euler_ancestral',
         steps: 28,
@@ -160,11 +186,12 @@ const googleUrl = (endpoint: string, model: string, action: 'predict' | 'generat
     : `${base.replace(/\/v1beta$/i, '')}/v1beta/models/${encodeURIComponent(model)}:${action}`);
 };
 
-const requestImagenImage = async (prompt: string, endpoint: string, apiKey: string, model: string) => {
+const requestImagenImage = async (prompt: string, endpoint: string, apiKey: string, model: string, config: ImageGenerationConfig, signal?: AbortSignal) => {
   const response = await fetch(googleUrl(endpoint, model, 'predict'), {
+    signal,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-    body: JSON.stringify({ instances: [{ prompt }], parameters: { sampleCount: 1 } }),
+    body: JSON.stringify({ instances: [{ prompt }], parameters: { sampleCount: 1, aspectRatio: imageDimensions('imagen', config.size).aspectRatio } }),
   });
   if (!response.ok) throw new Error(await readError(response));
   const payload = await response.json() as {
@@ -175,13 +202,15 @@ const requestImagenImage = async (prompt: string, endpoint: string, apiKey: stri
   return `data:${prediction.mimeType || 'image/png'};base64,${prediction.bytesBase64Encoded}`;
 };
 
-const requestGeminiImage = async (prompt: string, endpoint: string, apiKey: string, model: string) => {
+const requestGeminiImage = async (prompt: string, endpoint: string, apiKey: string, model: string, config: ImageGenerationConfig, signal?: AbortSignal) => {
+  const reference = config.referenceImage ? parseImageReference(config.referenceImage) : undefined;
   const response = await fetch(googleUrl(endpoint, model, 'generateContent'), {
+    signal,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
     body: JSON.stringify({
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
+      contents: [{ role: 'user', parts: [...(reference ? [{ inlineData: { mimeType: reference.mimeType, data: reference.data } }] : []), { text: prompt }] }],
+      generationConfig: { responseModalities: ['TEXT', 'IMAGE'], imageConfig: { aspectRatio: imageDimensions('gemini', config.size).aspectRatio } },
     }),
   });
   if (!response.ok) throw new Error(await readError(response));
@@ -196,9 +225,12 @@ const requestGeminiImage = async (prompt: string, endpoint: string, apiKey: stri
 export const generateImage = async (
   description: string,
   config: ImageGenerationConfig,
-  fallbackApi?: ApiConnection
+  fallbackApi?: ApiConnection,
+  signal?: AbortSignal,
 ): Promise<string> => {
   const provider = config.provider;
+  if (config.referenceImage && provider === 'imagen') throw new Error('当前 Imagen 文生图接口不支持参考图，请切换到支持参考图的 OpenAI 兼容、Gemini Image 或 NovelAI。');
+  if (config.referenceImage) parseImageReference(config.referenceImage);
   const defaults = IMAGE_PROVIDER_DEFAULTS[provider];
   const fallbackMatches = !!fallbackApi && (provider === 'openai'
     ? !fallbackApi.endpoint.includes('generativelanguage.googleapis.com')
@@ -207,19 +239,20 @@ export const generateImage = async (
     (provider === 'openai' && fallbackMatches ? fallbackApi!.endpoint.trim() : '') || defaults.endpoint;
   const apiKey = config.apiKey?.trim() || (fallbackMatches ? fallbackApi!.apiKey.trim() : '');
   const model = config.model?.trim() || defaults.model;
-  const prompt = [config.prompt?.trim(), description.trim()].filter(Boolean).join(provider === 'novelai' ? ', ' : '\n');
+  const prompt = [config.prompt?.trim(), description.trim(), config.referenceImage && provider !== 'novelai' ? referenceGuidance(referenceSimilarity(config.referenceSimilarity)) : ''].filter(Boolean).join(provider === 'novelai' ? ', ' : '\n');
   if (!endpoint) throw new Error('生图接口地址未填写。');
   if (!apiKey) throw new Error('生图 API Key 未填写。');
   if (!prompt) throw new Error('生图提示词为空。');
 
   switch (provider) {
     case 'novelai':
-      return requestNovelAiImage(prompt, endpoint, apiKey, model);
+      return requestNovelAiImage(prompt, endpoint, apiKey, model, config, signal);
     case 'imagen':
-      return requestImagenImage(prompt, endpoint, apiKey, model);
+      return requestImagenImage(prompt, endpoint, apiKey, model, config, signal);
     case 'gemini':
-      return requestGeminiImage(prompt, endpoint, apiKey, model);
+      return requestGeminiImage(prompt, endpoint, apiKey, model, config, signal);
     default:
-      return requestConfiguredImage(prompt, { model, api: { endpoint, apiKey } });
+      return requestConfiguredImage(prompt, { model, api: { endpoint, apiKey }, size: imageDimensions(provider, config.size).size,
+        referenceImage: config.referenceImage, similarity: config.referenceSimilarity, signal });
   }
 };

@@ -16,6 +16,9 @@ export interface InventoryItem {
   fromCharName?: string;
   shop?: string;
   acquiredAt: string;
+  /** Only the player's possessions belong in this box. */
+  recipientId?: string;
+  sourceMessageId?: string;
 }
 
 interface InventoryStore {
@@ -37,6 +40,13 @@ const writeStore = (store: InventoryStore) => writeStoredValue(INVENTORY_KEY, st
 
 const newId = () => `inv-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
+export const isPlayerInventoryOrder = (message: Record<string, unknown>): boolean => {
+  if (message.kind !== 'order' || !['shopping', 'xianyu'].includes(String(message.orderCategory))) return false;
+  if (message.recipientId !== undefined && message.recipientId !== 'user') return false;
+  return message.senderId === 'user' ? message.orderMode === 'self'
+    : typeof message.senderId === 'string' && message.senderId !== 'narrator' && message.orderMode === 'gift';
+};
+
 /** 第一次使用时，从微信里已有的订单卡片补录历史（角色送的商品 + 自己买并通知了角色的商品），外卖不计入。 */
 const backfillFromChats = (store: InventoryStore): InventoryStore => {
   if (store.backfilled) return store;
@@ -49,8 +59,8 @@ const backfillFromChats = (store: InventoryStore): InventoryStore => {
         if (!isRecord(chat) || !Array.isArray(chat.messages)) continue;
         for (const message of chat.messages) {
           if (!isRecord(message) || message.kind !== 'order' || typeof message.id !== 'string') continue;
+          if (!isPlayerInventoryOrder(message)) continue;
           const category = message.orderCategory;
-          if (category !== 'shopping' && category !== 'xianyu') continue;
           const fromUser = message.senderId === 'user';
           const isGift = !fromUser && message.orderMode === 'gift';
           const isSelfPurchase = fromUser && message.orderMode === 'self';
@@ -68,6 +78,7 @@ const backfillFromChats = (store: InventoryStore): InventoryStore => {
             ...(isGift && sender ? { fromCharId: sender, fromCharName: contacts.find((c) => c.id === sender)?.name } : {}),
             shop: category === 'xianyu' ? '闲鱼' : '淘宝',
             acquiredAt: typeof message.createdAt === 'string' ? message.createdAt : new Date().toISOString(),
+            recipientId: 'user', sourceMessageId: message.id,
           });
         }
       }
@@ -80,15 +91,31 @@ const backfillFromChats = (store: InventoryStore): InventoryStore => {
   return next;
 };
 
-export const readInventory = (): InventoryItem[] =>
-  [...backfillFromChats(readStore()).items].sort((a, b) => b.acquiredAt.localeCompare(a.acquiredAt));
+export const readInventory = (): InventoryItem[] => {
+  const orders = new Map<string, Record<string, unknown>>();
+  try {
+    const chats: unknown = JSON.parse(readStorageString('yyphone:wechat-chats') ?? '[]');
+    if (Array.isArray(chats)) for (const chat of chats) {
+      if (!isRecord(chat) || !Array.isArray(chat.messages)) continue;
+      for (const message of chat.messages) if (isRecord(message) && message.kind === 'order' && typeof message.id === 'string') orders.set(message.id, message);
+    }
+  } catch { /* Existing possessions remain visible if their old chat source is unavailable. */ }
+  return backfillFromChats(readStore()).items.filter(item => {
+    if (item.recipientId !== undefined && item.recipientId !== 'user') return false;
+    const sourceId = item.sourceMessageId ?? (item.id.startsWith('inv-msg-') ? item.id.slice(8) : undefined);
+    const order = sourceId ? orders.get(sourceId) : undefined;
+    return !order || isPlayerInventoryOrder(order);
+  }).sort((a, b) => b.acquiredAt.localeCompare(a.acquiredAt));
+};
 
 export const addInventoryItem = (item: Omit<InventoryItem, 'id' | 'acquiredAt'> & { acquiredAt?: string }) => {
+  if (item.recipientId !== undefined && item.recipientId !== 'user') return false;
   const store = backfillFromChats(readStore());
   writeStore({
     ...store,
     items: [...store.items, { ...item, id: newId(), acquiredAt: item.acquiredAt ?? new Date().toISOString() }],
   });
+  return true;
 };
 
 export const removeInventoryItem = (id: string) => {

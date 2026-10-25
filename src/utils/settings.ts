@@ -14,6 +14,8 @@ export const SETTINGS_KEYS = {
   apiPresets: 'yyphone:api-presets',
   activeApiPreset: 'yyphone:active-api-preset',
   apiConfigExpanded: 'yyphone:api-config-expanded',
+  voiceConfigExpanded: 'yyphone:voice-config-expanded',
+  imageConfigExpanded: 'yyphone:image-config-expanded',
   beautyPresets: 'yyphone:beauty-presets',
   personas: 'pocketos:personas',
   chatAppearance: 'yyphone:chat-appearance',
