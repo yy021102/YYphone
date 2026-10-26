@@ -3,6 +3,7 @@
 @import "./components/phoneInspection.css";
 @import "./components/greenhouse.css";
 @import "./components/minimalHome.css";
+@import "./components/moonlitHome.css";
 
 :root {
   color-scheme: light;

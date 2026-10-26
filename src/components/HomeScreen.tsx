@@ -26,7 +26,7 @@ import { PaperNotes } from './PaperNotes';
 import { MinimalHome } from './MinimalHome';
 
 interface HomeScreenProps {
-  homeStyle?: 'classic' | 'minimal';
+  homeStyle?: 'classic' | 'minimal' | 'moonlit';
   userProfile: UserProfile;
   apps: AppMetadata[];
   dockApps: AppMetadata[];
@@ -135,7 +135,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     </button>
   );
 
-  if (homeStyle === 'minimal') return <><MinimalHome userProfile={userProfile} apps={apps} dockApps={dockApps} appIcons={appIcons} onOpenApp={onOpenApp} renderIcon={renderAppIcon} onEditProfile={() => setIsProfileEditorOpen(true)} onOpenNotes={() => setPaperNotesOpen(true)} />{isProfileEditorOpen && <ProfileEditor profile={userProfile} onSave={onSaveUserProfile} onClose={() => setIsProfileEditorOpen(false)} />}{paperNotesOpen && <PaperNotes onClose={() => setPaperNotesOpen(false)} />}</>;
+  if (homeStyle === 'minimal' || homeStyle === 'moonlit') return <><MinimalHome variant={homeStyle} userProfile={userProfile} apps={apps} dockApps={dockApps} appIcons={appIcons} onOpenApp={onOpenApp} renderIcon={renderAppIcon} onEditProfile={() => setIsProfileEditorOpen(true)} onOpenNotes={() => setPaperNotesOpen(true)} />{isProfileEditorOpen && <ProfileEditor profile={userProfile} onSave={onSaveUserProfile} onClose={() => setIsProfileEditorOpen(false)} />}{paperNotesOpen && <PaperNotes onClose={() => setPaperNotesOpen(false)} />}</>;
   return (
     <div className="relative w-full h-full flex flex-col justify-between overflow-hidden select-none">
       {/* Upper Content Area (Profile Card + 4 Quadrants Grid) */}

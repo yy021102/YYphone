@@ -761,7 +761,7 @@ test('beauty export includes only applied appearance, not saved presets or unsav
   assert.ok(handler);
   const currentSettings = {
     themeId: 'ocean-dawn', wallpaperId: 'dreamy-sky',
-    homeStyle: 'minimal' as const,
+    homeStyle: 'moonlit' as const,
     wallpapers: { lockScreen: 'applied-lock.png', homeScreen: 'applied-home.png' },
     appIcons: { wechat: 'applied-icon.png' },
     homeAppearance: captureHomeAppearance(INITIAL_USER_PROFILE),

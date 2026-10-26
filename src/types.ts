@@ -102,7 +102,7 @@ export interface HomeAppearance {
 }
 
 export interface BeautySettings {
-  homeStyle?: 'classic' | 'minimal';
+  homeStyle?: 'classic' | 'minimal' | 'moonlit';
   themeId: string;
   wallpaperId: string;
   wallpapers: CustomWallpapers;

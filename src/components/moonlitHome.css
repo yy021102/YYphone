@@ -1,0 +1,42 @@
+.moonlit-home { --minimal-paper:#ede9f4; --minimal-ink:#686078; --minimal-muted:#a69ab4; --minimal-line:#ffffff90; position:relative; isolation:isolate; background:radial-gradient(ellipse at 12% 40%,#f8e4ecaa,transparent 55%),radial-gradient(ellipse at 90% 75%,#dfe9f4aa,transparent 60%),linear-gradient(165deg,#e6e2f2,#f4edf2 52%,#e4eaf2); }
+.moonlit-art { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; z-index:0; }
+.moonlit-home .minimal-home-scroll { position:relative; z-index:1; display:flex; flex-direction:column; padding:12px 24px 10px; }
+.moonlit-home .minimal-home-header { order:0; padding-bottom:0; }
+.moonlit-home .minimal-home-header > span { font-size:9px; letter-spacing:4px; color:#a99ab8; }
+.moonlit-home .minimal-home-header button { color:#9c8eab; background:#ffffff35; border:1px solid #ffffff50; border-radius:50%; width:27px; height:27px; }
+.moonlit-home .minimal-day { order:1; display:block; position:relative; text-align:center; padding:29px 0 26px; }
+.moonlit-home .minimal-clock { font-size:67px; font-weight:250; color:#80768f; letter-spacing:-3px; text-shadow:0 2px 16px #ffffffb0; }
+.moonlit-home .minimal-day p { color:#9b8da9; font-size:10px; letter-spacing:2px; margin-top:11px; }
+.moonlit-home .minimal-day > div > span { justify-content:center; font-size:9px; margin-top:9px; }
+.moonlit-home .minimal-date-tile { position:absolute; right:0; top:26px; width:38px; height:63px; border-radius:30px 30px 10px 10px; border:1px solid #ffffffa0; background:#ffffff30; transform:rotate(7deg); }
+.moonlit-home .minimal-date-tile small { font-size:6px; letter-spacing:1px; }
+.moonlit-home .minimal-date-tile strong { font-size:19px; }
+.moonlit-home .minimal-date-tile svg { width:10px; height:10px; right:3px; bottom:4px; color:#b4a4c2; }
+.moonlit-home .minimal-profile { order:2; position:relative; padding:20px 21px 25px; border:1px solid #ffffffd9; background:linear-gradient(130deg,#fffdf7bd,#fff9fd85); border-radius:8px 8px 25px 8px; box-shadow:0 9px 28px #9c8ba314,inset 0 0 0 4px #ffffff38; margin-bottom:20px; }
+.moonlit-home .minimal-profile::after { content:''; pointer-events:none; position:absolute; left:10px; bottom:-7px; width:37px; height:16px; background:#d2c0dd60; transform:rotate(-9deg); border:1px solid #ffffff60; }
+.moonlit-home .minimal-profile small { font-size:9px; color:#ad9ab6; }
+.moonlit-home .minimal-profile h1 { font-size:25px; color:#887692; letter-spacing:0; margin:5px 0; }
+.moonlit-home .minimal-profile p { color:#a390a8; font-size:10px; }
+.moonlit-home .minimal-profile-avatar { width:60px; height:70px; border-radius:40px 40px 4px 4px; background:#eee2ed; border:3px solid #fff9; outline:1px solid #d9c9df; box-shadow:3px 3px 0 #d4c1dc30; transform:rotate(5deg); }
+.moonlit-home .minimal-profile-avatar > span { color:#b59cba; font-size:24px; }
+.moonlit-home .minimal-section-label { order:3; border:0; padding:0 4px 17px; font-size:9px; color:#ae9bb9; }
+.moonlit-home .minimal-section-label small { font-size:8px; }
+.moonlit-home .minimal-app-grid { order:4; gap:22px 14px; padding:0 3px; }
+.moonlit-home .minimal-app { color:#9988a5; font-size:10px; gap:9px; }
+.moonlit-home .minimal-app-tile { width:53px; height:53px; border-radius:18px; border:1px solid #ffffffee; background:linear-gradient(140deg,#fffdf9d9,#e8ddf194); box-shadow:0 7px 15px #a494b323,inset 2px 2px 4px #fff9,inset -2px -2px 5px #cbbbd51a; }
+.moonlit-home .minimal-app:nth-child(3n+2) .minimal-app-tile { background:linear-gradient(140deg,#fffafae0,#e9dce891); }
+.moonlit-home .minimal-app:nth-child(3n) .minimal-app-tile { background:linear-gradient(140deg,#fffefae0,#dce6ef91); }
+.moonlit-home .minimal-app-glyph { color:#a18eb3; width:24px; height:24px; stroke-width:1.4; filter:drop-shadow(0 1px 0 #fff); }
+.moonlit-home .minimal-app:nth-child(3n+2) .minimal-app-glyph { color:#b68caa; }
+.moonlit-home .minimal-app:nth-child(3n) .minimal-app-glyph { color:#8ca0b8; }
+.moonlit-home .minimal-app-tile.has-custom-icon { background:transparent; border:0; box-shadow:none; }
+.moonlit-home .minimal-music { order:5; margin-top:24px; border:1px solid #fff9; border-radius:16px; background:#ffffff40; box-shadow:0 4px 14px #9e8bae0a; padding:0 13px; }
+.moonlit-home .minimal-music summary { color:#aa91b3; padding:13px 0; }
+.moonlit-home .minimal-music-indicator { color:#b1a0bc; }
+.moonlit-home .minimal-home-caption { order:6; font-size:8px; padding:15px 6px 4px; color:#b8a9bf; }
+.moonlit-home .minimal-dock { position:relative; z-index:1; margin:7px 17px calc(env(safe-area-inset-bottom,0px) + 12px); padding:13px 10px 11px; background:linear-gradient(110deg,#fff9,#ffffff50); border:1px solid #fff; border-radius:27px; box-shadow:0 8px 26px #a391b52b,inset 0 2px 0 #fff9; }
+.moonlit-home .minimal-dock .minimal-app-tile { width:43px; height:43px; border-radius:15px; }
+.moonlit-home .minimal-dock .minimal-app { font-size:9px; gap:6px; }
+@media(max-height:740px) { .moonlit-home .minimal-day { padding:21px 0; } .moonlit-home .minimal-clock { font-size:58px; } .moonlit-home .minimal-profile { padding:15px 18px 19px; margin-bottom:17px; } .moonlit-home .minimal-app-grid { row-gap:17px; } .moonlit-home .minimal-music { margin-top:19px; } }
+@media(max-width:350px) { .moonlit-home .minimal-home-scroll { padding-left:19px; padding-right:19px; } .moonlit-home .minimal-app-tile { width:47px; height:47px; } .moonlit-home .minimal-day { padding-right:12px; } .moonlit-home .minimal-clock { font-size:57px; } }
+@media(prefers-color-scheme:dark) { :root[data-follow-system-dark=true] [data-home-style=moonlit] { background:#292637!important; } :root[data-follow-system-dark=true] .moonlit-home { background:linear-gradient(150deg,#292637,#352c3d 55%,#26323f); } :root[data-follow-system-dark=true] .moonlit-home :is(.minimal-profile,.minimal-music,.minimal-dock) { background:#ffffff0b; border-color:#ffffff21; } :root[data-follow-system-dark=true] .moonlit-home :is(.minimal-app-tile,.minimal-app:nth-child(n) .minimal-app-tile) { background:linear-gradient(135deg,#4c425c,#373746); border-color:#ffffff24; } :root[data-follow-system-dark=true] .moonlit-home :is(.minimal-profile h1,.minimal-clock) { color:#d4c8e2; text-shadow:none; } :root[data-follow-system-dark=true] .moonlit-home :is(.minimal-profile p,.minimal-app) { color:#baacc9; } :root[data-follow-system-dark=true] .moonlit-art { opacity:.35; } }

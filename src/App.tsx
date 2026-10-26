@@ -80,7 +80,7 @@ const isBeautySettings = (value: unknown): value is BeautySettings => {
   const settings = value as Partial<BeautySettings>;
   return (
     typeof settings.themeId === 'string' &&
-    (settings.homeStyle === undefined || settings.homeStyle === 'classic' || settings.homeStyle === 'minimal') &&
+    (settings.homeStyle === undefined || settings.homeStyle === 'classic' || settings.homeStyle === 'minimal' || settings.homeStyle === 'moonlit') &&
     typeof settings.wallpaperId === 'string' &&
     !!settings.wallpapers &&
     typeof settings.wallpapers.lockScreen === 'string' &&
@@ -613,7 +613,7 @@ export default function App() {
             : 'pt-[max(env(safe-area-inset-top,0px),0px)] pb-0'
         }`}
         style={
-          !activeApp && !isLocked && beautySettings.homeStyle === 'minimal' ? { background: '#f4f2ee' } : beautySettings.wallpapers.homeScreen
+          !activeApp && !isLocked && beautySettings.homeStyle === 'minimal' ? { background: '#f4f2ee' } : !activeApp && !isLocked && beautySettings.homeStyle === 'moonlit' ? { background: '#ede9f4' } : beautySettings.wallpapers.homeScreen
             ? {
                 backgroundImage: `url("${beautySettings.wallpapers.homeScreen}")`,
                 backgroundSize: 'cover',
@@ -623,14 +623,14 @@ export default function App() {
         }
       >
         {/* Dynamic theme backdrop wash */}
-        {!beautySettings.wallpapers.homeScreen && (activeApp || isLocked || beautySettings.homeStyle !== 'minimal') && (
+        {!beautySettings.wallpapers.homeScreen && (activeApp || isLocked || !['minimal', 'moonlit'].includes(beautySettings.homeStyle ?? 'classic')) && (
           <div
             className={`absolute inset-0 bg-gradient-to-b ${currentTheme.gradient} opacity-90 pointer-events-none transition-all duration-700`}
           />
         )}
 
         {/* Ambient aesthetic glow patches */}
-        {!beautySettings.wallpapers.homeScreen && (activeApp || isLocked || beautySettings.homeStyle !== 'minimal') && (
+        {!beautySettings.wallpapers.homeScreen && (activeApp || isLocked || !['minimal', 'moonlit'].includes(beautySettings.homeStyle ?? 'classic')) && (
           <>
             <div className="absolute -top-32 -right-32 w-80 h-80 rounded-full bg-[#DFF1FA] blur-3xl pointer-events-none opacity-70" />
             <div className="absolute top-1/2 -left-32 w-80 h-80 rounded-full bg-[#FAD4E0] blur-3xl pointer-events-none opacity-50" />
