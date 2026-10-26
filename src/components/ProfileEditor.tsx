@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { X } from 'lucide-react';
 import { UserProfile } from '../types';
-import { compressImageFile } from '../utils/imageFile';
+import { compressImageFile, compressWallpaper } from '../utils/imageFile';
 import { DEFAULT_AVATAR_FRAME } from '../utils/avatarFrame';
 import { AvatarFrameEditor } from './AvatarFrameEditor';
 
@@ -45,7 +45,7 @@ export const ProfileEditor: React.FC<ProfileEditorProps> = ({
     setIsProcessingImage(true);
     setError('');
     try {
-      const dataUrl = await compressImageFile(file);
+      const dataUrl = await (field === 'coverImageUrl' ? compressWallpaper(file) : compressImageFile(file));
       updateField(field, dataUrl);
     } catch (imageError) {
       setError(imageError instanceof Error ? imageError.message : '图片处理失败。');

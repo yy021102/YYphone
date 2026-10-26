@@ -41,7 +41,8 @@ import {
   runGroupJournal, setGroupJournalSettings, regenerateGroupJournal,
 } from './groupJournal';
 import { GroupJournalPanel } from '../components/GroupJournalPanel';
-import { buildOfflineSummarySegments } from './offlineAi';
+import { buildOfflineSummarySegments, generateOfflineText } from './offlineAi';
+import { createDefaultPresets } from './offlineData';
 import { compressChatPhoto, compressImageFile } from './imageFile';
 import { createEmptyCoupleSpace, localDateString, readCharacterBrief, readCoupleSpaces, writeCoupleSpaces } from './coupleSpaceData';
 import { readDirectMessages } from './journalData';
@@ -81,6 +82,42 @@ Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: l
 
 beforeEach(async () => { await clearDbStorage(); });
 afterEach(() => { mock.restoreAll(); });
+
+test('regeneration excludes the whole replaced image batch and its hidden thought before assembling any chat context', () => {
+  saveSetting('pocketos:wechat-contacts', [{ id: 'regen-char', name: '林渡', persona: '', worldBooks: [] }]);
+  const base = { type: 'direct', participantIds: ['regen-char'], noteName: '', context: '', avatars: {}, includeLatestThought: true };
+  const messages = [
+    { id: 'keep', senderId: 'regen-char', text: 'KEEP_OLDER_TURN', thought: 'KEEP_OLDER_THOUGHT', replyBatchId: 'older', createdAt: '2026-10-27T10:00:00Z' },
+    { id: 'user-photo', senderId: 'user', text: '重新拍吧', kind: 'image', imageUrl: 'data:image/jpeg;base64,AQID', createdAt: '2026-10-27T10:01:00Z' },
+    { id: 'discard-photo', senderId: 'regen-char', text: 'DISCARDED_IMAGE_SCENE', kind: 'image', imageUrl: 'https://example.test/discard.png', thought: 'DISCARDED_IMAGE_THOUGHT', replyBatchId: 'last-batch', createdAt: '2026-10-27T10:02:00Z' },
+    { id: 'discard-narration', senderId: 'narrator', text: 'DISCARDED_NARRATION', replyBatchId: 'last-batch', createdAt: '2026-10-27T10:02:01Z' },
+    { id: 'discard-text', senderId: 'regen-char', text: 'DISCARDED_LAST_MESSAGE', thought: 'DISCARDED_LAST_THOUGHT', replyBatchId: 'last-batch', createdAt: '2026-10-27T10:02:02Z' },
+  ];
+  saveSetting(WECHAT_CHATS_STORAGE_KEY, [
+    { ...base, id: 'regen-chat', attachHistory: true, attachedHistoryChatIds: ['mounted-chat'], messages },
+    { ...base, id: 'mounted-chat', messages: [{ id: 'mounted', senderId: 'regen-char', text: 'KEEP_MOUNTED_TURN', replyBatchId: 'last-batch', createdAt: '2026-10-27T09:00:00Z' }] },
+  ]);
+  const before = readStorageString(WECHAT_CHATS_STORAGE_KEY);
+  assert.match(JSON.stringify(buildPrompt({ chatId: 'regen-chat' })), /DISCARDED_IMAGE_SCENE/);
+  const prompt = buildPrompt({ chatId: 'regen-chat', regenerate: true });
+  const body = JSON.stringify(prompt); assert.doesNotMatch(body, /DISCARDED_/);
+  assert.match(body, /KEEP_OLDER_TURN/); assert.match(body, /KEEP_OLDER_THOUGHT/); assert.match(body, /KEEP_MOUNTED_TURN/);
+  assert.deepEqual(prompt.at(-1)?.images, ['data:image/jpeg;base64,AQID']);
+  assert.equal(readStorageString(WECHAT_CHATS_STORAGE_KEY), before, 'failed generations can still restore the untouched original turn');
+});
+
+test('offline prose omits separate thoughts and strips reasoning tags while preserving narrative and choices', async () => {
+  testApi(); let body = '';
+  mock.method(globalThis, 'fetch', async (_url: unknown, init?: RequestInit) => {
+    body = String(init?.body);
+    return Response.json({ choices: [{ message: { content: '<think>不展示的思考</think><thought>不展示的心声</thought>他把伞往你这边偏了一点。\n\n“走吧。”\n【行动建议】\n1. 跟上他的脚步\n2. 问他冷不冷\n3. 把伞接过来' } }] });
+  });
+  const story = { id: 'offline-no-thought', title: '雨', characterIds: [], personaId: '', worldBookIds: [], presetId: '', wechatContextCount: 0, autoChoices: true, contextMessages: 20, ended: false, messages: [], createdAt: '', updatedAt: '' };
+  const result = await generateOfflineText(story, createDefaultPresets()[0], [], 'opening', '', true);
+  assert.match(body, /线下不生成角色心声或独立内心独白/);
+  assert.match(result.text, /把伞往你这边偏/); assert.doesNotMatch(result.text, /不展示|<think|<thought/);
+  assert.deepEqual(result.choices, ['跟上他的脚步', '问他冷不冷', '把伞接过来']);
+});
 
 test('saved player photo adds subject instructions only for enabled image generation and never enters text chat payloads', () => {
   const photo = 'data:image/png;base64,iVBORw0KGgo=';

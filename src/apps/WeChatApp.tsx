@@ -97,6 +97,9 @@ import { buildGroupPrivateContext } from '../utils/chatHistory';
 import { deleteGroupJournal, invalidateGroupJournal, maybeAutoGroupJournal } from '../utils/groupJournal';
 import { GroupJournalPanel } from '../components/GroupJournalPanel';
 import { requestChatReply, withChatResponseFormat } from '../utils/chatReply';
+import { regeneratedReplyIds } from '../utils/chatRegeneration';
+import { deleteWeChatContact, type FormerParticipant } from '../utils/deleteWeChatContact';
+import { ChatImageViewer } from '../components/ChatImageViewer';
 import { createPacketClaims, luckyPacketWinner, type PacketClaim } from '../utils/groupRedPacket';
 import { generateImage, readImageGenerationSettings } from '../utils/imageGeneration';
 import { isImageReference } from '../utils/imageReference';
@@ -475,6 +478,7 @@ interface ChatConversation {
   updatedAt: string;
   groupTitle?: string;
   groupNicknames?: Record<string, string>;
+  formerParticipants?: Record<string, FormerParticipant>;
   allowAgentGroupRename?: boolean;
   attachHistory?: boolean;
   attachedHistoryContactId?: string;
@@ -1067,6 +1071,8 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
   const [mcpStatus, setMcpStatus] = useState<{ chatId: string; text: string } | null>(null);
   const [chatSettingsDraft, setChatSettingsDraft] = useState<ChatConversation | null>(null);
   const [imageReferenceBusy, setImageReferenceBusy] = useState(false);
+  const [previewImageId, setPreviewImageId] = useState('');
+  useEffect(() => { setPreviewImageId(''); }, [activeChatId, isVisible]);
   const [tokenPreview, setTokenPreview] = useState<{ chatId: string; input: number } | null>(null);
   const [tokenPreviewBusy, setTokenPreviewBusy] = useState(false);
   const [tokenPreviewError, setTokenPreviewError] = useState('');
@@ -2035,10 +2041,22 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
     pressTimerRef.current = null;
   };
 
-  const deleteContact = (contactId: string) => {
+  const deleteContact = async (contactId: string) => {
     const contact = contacts.find((item) => item.id === contactId);
-    if (!contact || !window.confirm(`删除角色「${contact.name}」？`)) return;
-    if (persistContacts(contacts.filter((item) => item.id !== contactId))) closeContactEditor();
+    if (!contact || !window.confirm(`删除角色「${contact.name}」及其私聊？群聊会移除该成员，历史消息保留。`)) return;
+    try {
+      await deleteWeChatContact(contactId);
+      invalidateMemoryArchive(contactId);
+      const nextChats = readStoredValue(CHATS_STORAGE_KEY, [], isChatList);
+      setContacts(readStoredValue(CONTACTS_STORAGE_KEY, [], isContactList));
+      setCharacterNpcs(readCharacterNpcs());
+      setChats(nextChats);
+      setChatSettingsDraft(current => current ? nextChats.find(chat => chat.id === current.id) ?? null : null);
+      if (!nextChats.some(chat => chat.id === activeChatId)) setActiveChatId('');
+      closeContactEditor();
+    } catch (error) {
+      setContactError(error instanceof Error ? error.message : '删除失败，请重试。');
+    }
   };
 
   const contactsByGroup = contacts.reduce<Record<string, ContactPersona[]>>((groups, contact) => {
@@ -2092,7 +2110,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
     const npc = getNpcByParticipantId(characterNpcs, participantId);
     return participantId === 'user'
       ? personaNickname
-      : nickname || (npc ? `${npc.name}（NPC）` : contactName(participantId));
+      : nickname || (npc ? `${npc.name}（NPC）` : chat.formerParticipants?.[participantId]?.name || contactName(participantId));
   };
 
   const getAttachedHistoryChatIds = (chat: ChatConversation) => {
@@ -2488,6 +2506,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
   const sendPat = (targetId: string, suffix = '') => {
     const chat = chats.find((item) => item.id === activeChatId);
     if (!chat || chat.type === 'observer' || chat.blocked) return;
+    if (targetId !== 'user' && !chat.participantIds.includes(targetId)) return;
     const targetName = targetId === 'user' ? '自己' : `“${getChatParticipantName(chat, targetId)}”`;
     const message: ChatMessage = {
       id: `message-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -2693,6 +2712,8 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       toggleSelectedMessage(messageId);
       return;
     }
+    const image = activeChat?.messages.find(message => message.id === messageId && message.kind === 'image' && message.imageUrl);
+    if (image) { setPreviewImageId(image.id); setSelectedMessageId(''); setReactionMenuId(''); return; }
     setSelectedMessageId(selectedMessageId === messageId ? '' : messageId);
   };
 
@@ -3272,7 +3293,9 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
 
   const generateAiReply = async (regenerate = false, targetChatId = activeChatId, proactive = false, previewOnly = false) => {
     const latestChats = readStoredValue(CHATS_STORAGE_KEY, chats, isChatList);
-    const chat = latestChats.find((item) => item.id === targetChatId);
+    const storedChat = latestChats.find((item) => item.id === targetChatId);
+    const replacedIds = regenerate && storedChat ? regeneratedReplyIds(storedChat.messages) : new Set<string>();
+    const chat = storedChat && { ...storedChat, messages: storedChat.messages.filter(message => !replacedIds.has(message.id)) };
     if (!chat || (!previewOnly && chat.blocked) || generationRunning.current || tokenPreviewBusy) return;
     const latestContacts = readStoredValue(CONTACTS_STORAGE_KEY, contacts, isContactList);
 
@@ -3315,18 +3338,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       setIsGeneratingReply(true);
       setChatError('');
     }
-    const previousReply = chat.messages.at(-1);
-    const canReplace = !!previousReply && previousReply.senderId !== 'user' &&
-      (previousReply.senderId !== 'narrator' || !!previousReply.replyBatchId);
-    const replacedReplyBatchId = regenerate && canReplace ? previousReply?.replyBatchId : undefined;
-    const replacedMessageId = regenerate && canReplace ? previousReply?.id : undefined;
-    if (regenerate && previousReply && canReplace) {
-      setHiddenMessageIds(
-        replacedReplyBatchId
-          ? chat.messages.filter((item) => item.replyBatchId === replacedReplyBatchId).map((item) => item.id)
-          : [previousReply.id]
-      );
-    }
+    if (replacedIds.size) setHiddenMessageIds([...replacedIds]);
     try {
       const currentInput = proactive ? '' : [...chat.messages].reverse().find((message) => message.senderId === 'user')?.text ?? '';
       if (!previewOnly && chat.type === 'direct' && chat.weatherAwarenessEnabled) {
@@ -3749,6 +3761,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       }
       const liveChat = readStoredValue(CHATS_STORAGE_KEY, chats, isChatList).find((item) => item.id === chat.id);
       if (!liveChat || liveChat.blocked || liveChat.activeArchiveId !== chat.activeArchiveId ||
+        liveChat.participantIds.length !== chat.participantIds.length || !chat.participantIds.every(id => liveChat.participantIds.includes(id)) ||
         liveChat.coupleCouponRevision !== chat.coupleCouponRevision ||
         (proactive && (!liveChat.proactiveEnabled || liveChat.updatedAt !== chat.updatedAt))) {
         console.info('Cancelled stale chat generation after chat activity, archive or permissions changed.');
@@ -3930,11 +3943,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       const replySaved = updateChat(chat.id, (current) => ({
         ...current,
         messages: [
-          ...current.messages.filter((item) =>
-            replacedReplyBatchId
-              ? item.replyBatchId !== replacedReplyBatchId
-              : item.id !== replacedMessageId
-          ).map((item) => {
+          ...current.messages.filter((item) => !replacedIds.has(item.id)).map((item) => {
             if (intimateAction?.requestId === item.id) return {
               ...item,
               intimateStatus: intimateAction.type === 'grant' ? 'granted' as const : 'declined' as const,
@@ -4010,7 +4019,8 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         const length = (message.text ?? '').length;
         await new Promise((resolve) => setTimeout(resolve, 500 + Math.min(1300, length * 40)));
         const live = readStoredValue(CHATS_STORAGE_KEY, chats, isChatList).find(item => item.id === chat.id);
-        if (!live || live.blocked || live.activeArchiveId !== chat.activeArchiveId || live.coupleCouponRevision !== expectedCouponRevision) return;
+        if (!live || live.blocked || live.activeArchiveId !== chat.activeArchiveId || live.coupleCouponRevision !== expectedCouponRevision ||
+          live.participantIds.length !== chat.participantIds.length || !chat.participantIds.every(id => live.participantIds.includes(id))) return;
         updateChat(chat.id, (current) => ({
           ...current,
           messages: [...current.messages, message],
@@ -4605,7 +4615,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                 }
                 const isUserMessage = message.senderId === 'user';
                 const sender = contacts.find((contact) => contact.id === message.senderId) ??
-                  getNpcByParticipantId(characterNpcs, message.senderId);
+                  getNpcByParticipantId(characterNpcs, message.senderId) ?? activeChat.formerParticipants?.[message.senderId];
                 const isShareCard = message.kind === 'forum-forward' || message.kind === 'pomodoro-share';
                 const externalUrl = (message.externalUrl ? publicLink(message.externalUrl) : undefined) || ((!message.kind || message.kind === 'text' || message.kind === 'link' && !message.source?.startsWith('微信')) ? extractSharedLink(message.text) : undefined);
                 const isSpecialBubble = !!externalUrl || isShareCard || ['video-call', 'location', 'red-packet', 'transfer', 'link', 'order', 'couple-invite', 'couple-coupon', 'couple-letter', 'phone-share', 'intimate-pay'].includes(message.kind ?? '');
@@ -4893,7 +4903,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                         })()
                       ) : message.kind === 'image' ? (
                         message.imageUrl ? (
-                          <img src={message.imageUrl} alt="聊天图片" className="max-h-52 max-w-full rounded-xl object-contain" />
+                          <img src={message.imageUrl} alt="聊天图片" role="button" tabIndex={selectMode ? -1 : 0} aria-label="查看聊天图片" onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); handleMessageTap(message.id); } }} className="max-h-52 max-w-full cursor-zoom-in rounded-xl object-contain" />
                         ) : (
                           <div className="flex aspect-square w-40 max-w-full items-center justify-center overflow-hidden rounded-xl bg-gradient-to-br from-slate-100 to-sky-100 p-3 text-center text-xs leading-relaxed text-slate-700">
                             {message.text}
@@ -5174,21 +5184,21 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                         setComposerOpen(false);
                         setCallChoiceOpen(true);
                       } },
-                      { page: 0, title: '位置', icon: MapPin, run: () => openAttachment('location') },
+                      { page: 1, title: '位置', icon: MapPin, run: () => openAttachment('location') },
                       { page: 0, title: '红包', icon: Gift, run: () => openAttachment('red-packet') },
                       { page: 0, title: '重新生成', icon: RefreshCw, run: handleRegenerate },
                       { page: 0, title: '转账', icon: Wallet, run: () => openAttachment('transfer') },
-                      { page: 0, title: '链接', icon: Link, run: () => openAttachment('link') },
+                      { page: 1, title: '链接', icon: Link, run: () => openAttachment('link') },
                       { page: 1, title: '语音', icon: Mic, run: () => {
                         setComposerOpen(false);
                         setVoiceDraft('');
                         setVoiceModalOpen(true);
                       } },
-                      { page: 1, title: '聊天存档', icon: Archive, run: () => {
+                      { page: 0, title: '聊天存档', icon: Archive, run: () => {
                         setComposerOpen(false);
                         setArchiveOpen(true);
                       } },
-                      ...(activeChat.type === 'direct' && activeChat.participantIds.length === 1 ? [{ page: 1, title: '反查手机', icon: Search, run: () => {
+                      ...(activeChat.type === 'direct' && activeChat.participantIds.length === 1 ? [{ page: 0, title: '反查手机', icon: Search, run: () => {
                         if (generationRunning.current) { setChatError('等这轮回复结束后再把手机交给角色。'); return; }
                         const actor = contacts.find(c => c.id === activeChat.participantIds[0]);
                         if (!actor) { setChatError('请先在通讯录中创建这个角色。'); return; }
@@ -7994,7 +8004,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
               </section>
             )}
             {!isNewContactDraft && (
-              <button type="button" onClick={() => deleteContact(contactDraft.id)} className="w-full rounded-xl bg-rose-50 py-2 text-xs font-bold text-rose-600">
+              <button type="button" onClick={() => void deleteContact(contactDraft.id)} className="w-full rounded-xl bg-rose-50 py-2 text-xs font-bold text-rose-600">
                 删除角色
               </button>
             )}
@@ -8393,6 +8403,10 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
           );
         })}
       </div>}
+      {activeChat && previewImageId && (() => {
+        const image = activeChat.messages.find(message => message.id === previewImageId && message.kind === 'image' && message.imageUrl);
+        return image?.imageUrl ? <ChatImageViewer key={image.id} src={image.imageUrl} onClose={() => setPreviewImageId('')} /> : null;
+      })()}
     </div>
   );
 };

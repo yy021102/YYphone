@@ -58,11 +58,11 @@ export function CoupleRewardsShop({ charId, charName, userName }: { charId: stri
       <div className="couple-pocket-heading"><div role="tablist" aria-label="心愿券库存">{(['user', 'char'] as const).map(who => <button type="button" key={who} role="tab" aria-selected={owner === who} onClick={() => setOwner(who)}>{who === 'user' ? '我的口袋' : `${charName}的口袋`}</button>)}</div>
         <button type="button" className="couple-shop-generate" disabled={!!busy} onClick={generate} aria-label="生成角色的兑换或使用决定">{busy === 'generate' ? <LoaderCircle size={13} className="animate-spin" /> : <Sparkles size={13} />}生成</button>
       </div>
+      {choice && <p role="status" className="couple-shop-choice"><span>{charName}</span>{choice}</p>}
       {inventory.length ? <div className="couple-pocket-items">{inventory.map(product => { const Icon = icons[product.icon]; return <div key={product.id}><span className={`couple-pocket-icon ticket-${product.icon}`}><Icon size={17} strokeWidth={1.4} /></span><div><strong>{product.name}</strong><small>× {couponStock(wallet, owner, product.id)}</small></div>{owner === 'user' && <button type="button" disabled={!!busy} aria-label={`使用${product.name}`} onClick={() => void run(`use:${product.id}`, async () => {
         await useCoupleCoupon(charId, 'user', product.id, `user-use:${crypto.randomUUID()}`); return '使用卡片已发到聊天';
       })}>{busy === `use:${product.id}` ? <LoaderCircle size={12} className="animate-spin" /> : '使用'}</button>}</div>; })}</div>
         : <div className="couple-pocket-empty"><Ticket size={22} strokeWidth={1.1} /><span>口袋里还没有券</span></div>}
-      {choice && <p className="couple-shop-choice"><span>{charName}</span>{choice}</p>}
     </div>
     {notice && <p className="couple-shop-notice" role="status">{notice}</p>}
   </section>;

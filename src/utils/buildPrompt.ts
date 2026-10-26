@@ -1,7 +1,9 @@
 import { PersonaCollection, UserPersona } from '../types';
 import { getUserRealName } from './userPersona';
 import { userFaceReferenceInstructions, validUserFaceFields } from './userImageReference';
-import { coupleRewardContext } from './coupleRewards';
+import { regeneratedReplyIds } from './chatRegeneration';
+import type { FormerParticipant } from './deleteWeChatContact';
+import { COUPLE_PRODUCTS, coupleRewardContext, couponUseInstructions } from './coupleRewards';
 import { readAlipayData } from './alipayData';
 import { readSetting, SETTINGS_KEYS } from './settings';
 import { CharacterNpc, getNpcByParticipantId, readCharacterNpcs } from './characterNpcs';
@@ -31,6 +33,7 @@ export interface PromptChatMessage {
   reactions?: Array<{ by: string; emoji: string }>;
   forumForwardTargetId?: string;
   thought?: string;
+  replyBatchId?: string;
   title?: string;
   content?: string;
   source?: string;
@@ -45,6 +48,7 @@ export interface PromptChatMessage {
   orderCategory?: string;
   orderMode?: string;
   aiContext?: string;
+  couponProductId?: string;
   pomodoroDetails?: {
     totalMinutes: number;
     sessionCount: number;
@@ -69,6 +73,7 @@ export interface PromptConversation {
   messages: PromptChatMessage[];
   groupTitle?: string;
   groupNicknames?: Record<string, string>;
+  formerParticipants?: Record<string, FormerParticipant>;
   attachHistory?: boolean;
   attachedHistoryCount?: number;
   attachedHistoryChatIds?: string[];
@@ -216,6 +221,7 @@ const getSpeakerName = (
   return conversation.groupNicknames?.[senderId]?.trim() ||
     getNpcByParticipantId(npcs, senderId)?.name ||
     contacts.find((contact) => contact.id === senderId)?.name ||
+    conversation.formerParticipants?.[senderId]?.name ||
     senderId;
 };
 
@@ -389,7 +395,8 @@ const toBaseMessageContent = (message: PromptChatMessage) => {
     return `[已寄达的情书：${message.title ?? '给你的一封信'}]\n${message.content ?? ''}`;
   }
   if (message.kind === 'couple-coupon') {
-    return `[情侣空间券已使用：${message.title ?? message.text}] ${message.content ?? ''}\n${message.aiContext ?? ''}`;
+    const product = COUPLE_PRODUCTS.find(item => item.id === message.couponProductId || item.name === message.title);
+    return `[情侣空间券已使用：${message.title ?? message.text}] ${message.content ?? ''}\n${message.aiContext ?? ''}${product ? `\n【履约方向，以此为准】${couponUseInstructions(product.id, message.senderId === 'user' ? 'user' : 'char')}` : ''}`;
   }
   if (message.kind === 'couple-invite') {
     const from = message.senderId === 'user' ? '玩家' : '你';
@@ -483,7 +490,11 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
   const personaValue = readSetting<unknown>(SETTINGS_KEYS.personas, null, (_value): _value is unknown => true);
   const alipayData = readAlipayData();
 
-  const chats = Array.isArray(chatsValue) ? chatsValue.filter(isChatConversation) : [];
+  const chats = (Array.isArray(chatsValue) ? chatsValue.filter(isChatConversation) : []).map(conversation => {
+    if (!regenerate || conversation.id !== chatId) return conversation;
+    const excluded = regeneratedReplyIds(conversation.messages);
+    return { ...conversation, messages: conversation.messages.filter(message => !excluded.has(message.id)) };
+  });
   const chat: PromptConversation | undefined = chats.find((item) => item.id === chatId) ??
     (!chatId && options.backgroundCharacterId ? {
       id: `background:${options.backgroundCharacterId}`, type: 'direct',
@@ -608,6 +619,9 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
     content: [
       '【当前聊天来源】',
       currentSource.text,
+      Object.keys(chat.formerParticipants ?? {}).some(id => !chat.participantIds.includes(id))
+        ? `已离开当前群聊的历史成员：${Object.entries(chat.formerParticipants ?? {}).filter(([id]) => !chat.participantIds.includes(id)).map(([id, person]) => `${person.name}（ID：${id}）`).join('、')}。其旧消息只作为过去的记录；本轮不能替他们发言，也不能当作他们仍在群里。`
+        : '',
       '以下历史中的来源标记用于区分当前聊天和挂载记录，不是角色说的话。挂载记录只是背景，不代表切换聊天、玩家刚发言或本轮需要回答其中的问题；谁说的话归谁，不要把其他成员的话、约定或关系算到你或玩家身上。群昵称与成员 ID 指向同一个人，不是新增角色。成员名单反映记录当前保存的配置，不能据此推断成员始终在群里或读过每一条历史消息。',
     ].join('\n'),
   });
@@ -799,11 +813,6 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
         (latestUserMessage.kind === 'forum-forward' || latestUserMessage.kind === 'pomodoro-share' || latestUserMessage.kind === 'phone-share' || latestUserMessage.kind === 'couple-coupon' || latestUserMessage.kind === 'couple-letter' || latestUserMessage.kind === 'link' && !!latestUserMessage.externalUrl || latestUserMessage.source === '反查手机代发')
       ? toMessageContent(latestUserMessage)
       : requestedInput;
-  const previousAssistantMessage = regenerate
-    ? [...chat.messages].reverse().find(
-        (message) => message.senderId !== 'user' && message.senderId !== 'narrator'
-      )
-    : undefined;
   if (
     latestUserMessage?.kind === 'forum-forward' &&
     canReadForumForward(latestUserMessage, chat, chat)
@@ -816,8 +825,7 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
   const localMessages = chat.messages
     .filter((message) =>
       canReadForumForward(message, chat, chat) &&
-      message.id !== latestUserMessage?.id &&
-      message.id !== previousAssistantMessage?.id
+      message.id !== latestUserMessage?.id
     )
     .slice(-recentLimit)
     .map((message) => ({

@@ -10,6 +10,7 @@ import { describeForSummary } from './journalData';
 import { generateCoupleRewardAction, processCouplePeaceBells } from './coupleRewardsAi';
 import { buildPrompt, toMessageContent } from './buildPrompt';
 import type { CharacterCoupleSpace } from '../apps/CoupleSpaceApp';
+import { couponUseInstructions } from './coupleRewards';
 
 const values = new Map<string,string>();
 Object.defineProperty(globalThis,'window',{configurable:true,value:{ setTimeout, clearTimeout, dispatchEvent: () => true, localStorage:{getItem:(k:string)=>values.get(k)??null,setItem:(k:string,v:string)=>values.set(k,v),removeItem:(k:string)=>values.delete(k),clear:()=>values.clear(),key:(i:number)=>[...values.keys()][i]??null,get length(){return values.size;}} }});
@@ -154,6 +155,45 @@ test('cancelling a character decision before its response prevents a purchase or
 const loveLetter='今天又想起你说窗边的小花开了。那时我回得很快，后来却把这句话想了很久。原来等一朵花开，会让平常的一天有了可以期待的事情；而你愿意把这个消息告诉我，也让我觉得，自己被放进了你的生活里。\n\n我不总是很会表达，有时候想关心你，话到了嘴边却只剩下几句笨拙的问候。但你的疲惫、你忽然高兴起来的语气，我都有认真听。想把这些小事好好收着，也想在你需要的时候，比昨天更懂你一点。以后的日子不必每一天都有惊喜，只要你还愿意说，我就想继续听。';
 async function used(product:'letter'|'gift',owner:'char'|'user'='char',id='request') {await fund();await buyCoupleCoupon('a',owner,product,`buy:${id}`);await useCoupleCoupon('a',owner,product,id);}
 async function catalog(balance=100) {await setStorageItemsAtomically({'yyphone:taobao-market-products':[{id:'p1',category:'shopping',title:'窗边的小花灯',desc:'一盏温柔的灯',price:25.5,emoji:'💡'}], 'yyphone:alipay-data':{balance,yuebao:0,intimateCards:[],monthlyBudgets:{},ledgerList:[],allowedViewers:[],lastInterestDate:rewardDay()}});}
+test('a low-balance character may keep affordable points and say why without spending', async () => {
+  await fund(1); const before = readStorageString(COUPLE_REWARDS_KEY); let calls = 0;
+  mock.method(globalThis, 'fetch', async (_url: unknown, init?: RequestInit) => {
+    calls++; assert.match(String(init?.body), /积分少或想攒更贵的券/);
+    return answer({ action: 'save', reason: '先留着，我想攒到能听你哄我睡觉的时候。' });
+  });
+  const result = await generateCoupleRewardAction('a');
+  assert.equal(result.action, 'save'); assert.match(result.reason, /先留着/); assert.equal(calls, 1);
+  assert.equal(readStorageString(COUPLE_REWARDS_KEY), before); assert.equal(coupleBalance(readCoupleWallet('a'), 'char'), 3);
+});
+
+test('even when no coupon is affordable the character generates its own saving explanation', async () => {
+  await fund(0); const before = readStorageString(COUPLE_REWARDS_KEY); let calls = 0;
+  mock.method(globalThis, 'fetch', async (_url: unknown, init?: RequestInit) => {
+    calls++; assert.match(String(init?.body), /本轮只能返回 save/);
+    return answer({ action: 'save', reason: '今天先放进口袋里，慢慢来。' });
+  });
+  const result = await generateCoupleRewardAction('a'); assert.equal(calls, 1); assert.equal(result.reason, '今天先放进口袋里，慢慢来。');
+  assert.equal(readStorageString(COUPLE_REWARDS_KEY), before);
+});
+
+test('every coupon names its receiver and performer, including character sleep requests and day effects', async () => {
+  for (const product of COUPLE_PRODUCTS) {
+    assert.match(couponUseInstructions(product.id, 'char'), /受益者：角色（你）；履约者：玩家/);
+    assert.match(couponUseInstructions(product.id, 'user'), /受益者：玩家；履约者：角色（你）/);
+  }
+  await fund(); await buyCoupleCoupon('a', 'char', 'sleep', 'buy-sleep');
+  assert.match(coupleRewardContext('a', 'one').text, /玩家哄角色（你）睡觉/);
+  mock.method(globalThis, 'fetch', async (_url: unknown, init?: RequestInit) => {
+    assert.match(String(init?.body), /玩家哄角色（你）睡觉/);
+    return answer({ action: 'use', productId: 'sleep', reason: '今晚你哄我睡，好不好？' });
+  });
+  await generateCoupleRewardAction('a'); assert.match(chat().messages.at(-1).aiContext, /玩家哄角色（你）睡觉/);
+  assert.match(toMessageContent(chat().messages.at(-1)), /履约者：玩家/);
+  assert.match(toMessageContent({ id: 'legacy-sleep', senderId: 'a', kind: 'couple-coupon', title: '哄睡券', text: '对方使用了哄睡券', createdAt: '' }), /玩家哄角色（你）睡觉/);
+  await buyCoupleCoupon('a', 'char', 'emperor', 'buy-emperor'); await useCoupleCoupon('a', 'char', 'emperor', 'use-emperor');
+  assert.match(coupleRewardContext('a', 'one').text, /今天由玩家哄着、照顾和迁就角色（你）/);
+});
+
 test('a character letter request accepts a handwritten reply once and preserves both the envelope body and completed request',async()=>{
   await used('letter');await assert.rejects(fulfillCoupleLetter('a','request','char',{title:'错了',body:loveLetter}),/另一方/);
   const ids=await Promise.all([fulfillCoupleLetter('a','request','user',{title:'给你',body:loveLetter}),fulfillCoupleLetter('a','request','user',{title:'重复',body:'不能重复'})]);

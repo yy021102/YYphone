@@ -12,7 +12,7 @@ const CHATS = 'yyphone:wechat-chats';
 export type CouponOwner = 'user' | 'char';
 export const COUPLE_PRODUCTS = [
   { id: 'kiss', name: '亲亲券', price: 3, icon: 'heart', description: '向对方领取一个亲亲', rule: '给使用者一个符合你们关系、温柔自然的亲亲回应。' },
-  { id: 'sleep', name: '哄睡券', price: 5, icon: 'moon', description: '把今晚的晚安交给对方', rule: '回应使用者的哄睡请求，温柔陪伴，接住当下情绪，不要催促入睡。' },
+  { id: 'sleep', name: '哄睡券', price: 5, icon: 'moon', description: '让对方哄自己睡觉', rule: '温柔哄使用者入睡，陪伴并接住当下情绪，不要催促入睡。' },
   { id: 'gift', name: '礼物券', price: 8, icon: 'gift', description: '让对方为自己挑一份礼物', rule: '为使用者认真挑选一份符合喜好的礼物；购买送礼仍须走正常流程，券本身不产生扣款或凭空到账。' },
   { id: 'letter', name: '一封情书券', price: 10, icon: 'mail', description: '收下一封只属于自己的信', rule: '为使用者写一封真诚细腻、贴合你们共同经历的情书，避免套话。' },
   { id: 'emperor', name: '一日小皇帝', price: 15, icon: 'crown', description: '今天，对方要好好哄着自己', rule: '截至今天结束，对方要多哄着使用者，主动关心、迁就和照顾其心情，尊重彼此的界限。' },
@@ -20,6 +20,20 @@ export const COUPLE_PRODUCTS = [
 ] as const;
 export type CoupleProductId = typeof COUPLE_PRODUCTS[number]['id'];
 export const coupleProduct = (id: string) => COUPLE_PRODUCTS.find(p => p.id === id);
+/** The person spending the voucher receives the affection; the other person performs it. */
+export function couponUseInstructions(id: CoupleProductId, owner: CouponOwner): string {
+  const receiver = owner === 'char' ? '角色（你）' : '玩家';
+  const performer = owner === 'char' ? '玩家' : '角色（你）';
+  const effect = {
+    kiss: `${performer}亲吻${receiver}。`,
+    sleep: `${performer}哄${receiver}睡觉，${receiver}是被哄睡的一方。`,
+    gift: `${performer}为${receiver}挑选并送出礼物，实际送达才算完成。`,
+    letter: `${performer}给${receiver}写情书，${receiver}是收信的一方。`,
+    emperor: `今天由${performer}哄着、照顾和迁就${receiver}，${receiver}是今日的小皇帝。`,
+    'peace-bell': '双方立即停止争吵、恢复联系，今天不能再次拉黑。',
+  }[id];
+  return `使用者与受益者：${receiver}；履约者：${performer}。${effect}使用者是在向对方提出请求，不是承诺替对方做这件事。`;
+}
 export interface PointAward { key: string; day: string; kind: 'mood' | 'diary' | 'qa'; at: string }
 export interface CouponPurchase { id: string; owner: CouponOwner; productId: CoupleProductId; cost: number; at: string; reason?: string }
 export interface CouponUse { id: string; owner: CouponOwner; productId: CoupleProductId; at: string; chatId: string; archiveId: string; note: string; noticeSeen?: boolean; respondedAt?: string; fulfilledAt?: string; fulfillmentMessageId?: string }
@@ -136,7 +150,7 @@ export const useCoupleCoupon = (charId: string, owner: CouponOwner, productId: C
   const message = { id: `coupon:${requestId}`, senderId: owner === 'user' ? 'user' : charId, kind: 'couple-coupon',
     couponUseId: requestId, couponProductId: productId,
     text: `${owner === 'user' ? '我' : '对方'}使用了${product.name}`, title: product.name,
-    content: use.note || product.description, aiContext: `【情侣空间券已真实使用，库存已扣除】使用者：${owner === 'user' ? '玩家' : '角色'}。${product.rule}`, createdAt: at };
+    content: use.note || product.description, aiContext: `【情侣空间券已真实使用，库存已扣除】${couponUseInstructions(productId, owner)}${product.rule}`, createdAt: at };
   const restored = productId === 'peace-bell' ? { blocked: false, blockedNextAt: undefined, blockedBacklogGeneratedAt: at, blockedBacklogRetryAt: undefined } : {};
   const values: Record<string, unknown> = {
     [COUPLE_REWARDS_KEY]: { ...all, [charId]: { ...wallet, uses: [...wallet.uses, use] } },
@@ -170,10 +184,12 @@ export function coupleRewardContext(charId: string, archiveId?: string): { text:
   const dayEffects = wallet.uses.filter(u => ['peace-bell', 'emperor'].includes(u.productId) && rewardDay(new Date(u.at)) === today);
   if (!inventory.length && !pending.length && !dayEffects.length) return { text: '', pendingIds: [] };
   return { text: ['【情侣空间积分与心愿券】',
+    '所有心愿券都是让另一方为使用者行动：你用券时，你享受玩家为你做的事；玩家用券时，由你为玩家做。不要把使用者和履约者弄反。',
     `你自己的库存：${inventory.join('；') || '暂无'}。库存属于角色，不能使用玩家的券，也不能凭空制造或重复使用。`,
+    ...COUPLE_PRODUCTS.filter(p => couponStock(wallet, 'char', p.id) > 0).map(p => `${p.name}：${couponUseInstructions(p.id, 'char')}`),
     inventory.length ? '普通私聊时可根据人设、剧情主动使用一张已有券，在JSON顶层返回 "coupleCouponUse":"商品id"；不使用时省略。每轮最多一张，系统会验证库存并发出使用卡片。不要仅在正文声称已经用券。重生成、预览、群聊与通话不能使用。和好铃或皇帝券当天已生效时不可再次使用。' : '',
     ...pending.map(u => `玩家已使用${coupleProduct(u.productId)?.name}，请在本轮自然回应：${u.productId === 'letter' ? '情书会通过独立信封寄出，不要把普通回复当作已经寄信，也不要重复写信。' : u.productId === 'gift' ? '礼物需在淘宝选购并真实送达后才算完成，不要仅凭口头承诺宣称已履约。' : coupleProduct(u.productId)?.rule}${u.note ? ` 附言：${u.note}` : ''}`),
-    ...dayEffects.map(u => `今日生效：使用者为${u.owner === 'user' ? '玩家' : '你'}的${coupleProduct(u.productId)?.name}。${coupleProduct(u.productId)?.rule}`),
+    ...dayEffects.map(u => `今日生效：${coupleProduct(u.productId)?.name}。${couponUseInstructions(u.productId, u.owner)}${coupleProduct(u.productId)?.rule}`),
   ].filter(Boolean).join('\n'), pendingIds: pending.map(u => u.id) };
 }
 

@@ -157,7 +157,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               className="absolute inset-0 h-full w-full object-cover"
             />
           )}
-          <div className="absolute inset-0 opacity-40 bg-[radial-gradient(circle_at_30%_50%,rgba(255,255,255,0.8),transparent_60%)]" />
+          {!userProfile.coverImageUrl && <div className="absolute inset-0 opacity-40 bg-[radial-gradient(circle_at_30%_50%,rgba(255,255,255,0.8),transparent_60%)]" />}
         </div>
 
         {/* Profile Content Body */}
