@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import { runInNewContext } from 'node:vm';
 import { DOCK_APPS, INITIAL_USER_PROFILE, MAIN_GRID_APPS } from '../data/mockData';
 import { HomeScreen } from '../components/HomeScreen';
+import { normalizeWallpaper } from '../apps/ThemeCustomizerApp';
 import { clearDbStorage } from './dbStorage';
 import { DEFAULT_FONT_SETTINGS, normalizeFontUrl, readFontSettings } from './fontSettings';
 import { DEFAULT_CHAT_RUNTIME, getRoundThought, isKeepAlivePlaying, isProactiveDue, permittedSticker, preserveRoundThoughts, proactiveInterval, readChatRuntimeSettings, startKeepAlive, stopKeepAlive } from './chatRuntime';
@@ -29,6 +30,7 @@ import { BUILTIN_STICKERS, CHAT_STICKERS_STORAGE_KEY, readAvailableChatStickers 
 import { LITTLE_P_MESSAGES_KEY, LITTLE_P_VISIBLE_KEY, littlePHistory, littlePSystemPrompt, parseLittlePReply, readLittlePMessages, writeLittlePMessages, type LittlePMessage } from './littleP';
 import { requestConfiguredAiText } from './aiApi';
 import { buildPrompt, type OpenAiMessage } from './buildPrompt';
+import { WEATHER_CACHE_KEY, writeWeatherSettings } from './weatherData';
 import { getUserRealName } from './userPersona';
 import { toGeminiContents, toOpenAiMessages } from './chatVision';
 import { requestChatReply, validateChatSpeakerPrefix, withChatResponseFormat } from './chatReply';
@@ -73,7 +75,7 @@ const localStorage = {
   key: (index: number) => [...stored.keys()][index] ?? null,
   get length() { return stored.size; },
 };
-Object.defineProperty(globalThis, 'window', { configurable: true, value: { localStorage } });
+Object.defineProperty(globalThis, 'window', { configurable: true, value: { localStorage, setTimeout, clearTimeout } });
 Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: localStorage });
 
 beforeEach(async () => { await clearDbStorage(); });
@@ -240,6 +242,7 @@ test('phone generates all eight scopes with one request and includes world, play
     album: { photos: [{ sceneDesc: '车窗', isPrivate: false }] },
     browser: { items: [{ query: '旅行攻略' }] }, notes: { notes: [{ content: '记得带伞' }] },
     icity: { diaries: [{ content: '今天和小雨去看海' }] },
+    shopping: { items: [1, 2, 3].map(i => ({ name: `旅行用品${i}`, category: '旅行', price: 20 + i, variant: '便携款', note: '下次出门可以用' })) },
     agent: { doubaoTurns: [{ role: 'char', content: '明天天气？' }], claudeTurns: [{ role: 'ai', content: '说说你的心事' }] },
     wallet: { balance: 800, records: [{ title: '车票', amount: -20 }] },
     health: { sleepHours: 7, sleepNote: '睡得很好', steps: 1000, screenTimeMinutes: 30 },
@@ -261,7 +264,7 @@ test('phone generates all eight scopes with one request and includes world, play
   assert.equal(calls, 1);
   for (const text of ['角色住在浮空城', '城市没有地铁', '钟表修理师', '玩家背景标记', '两人正在旅行', '今天一起去看了海']) assert.ok(body.includes(text), text);
   assert.doesNotMatch(body, /不应出现的世界书秘密/);
-  for (const key of ['npcThreads', 'photos', 'browserHistory', 'notes', 'icityDiaries', 'agentSession', 'wallet', 'health', 'ratings']) assert.ok(key in result, key);
+  for (const key of ['npcThreads', 'photos', 'browserHistory', 'notes', 'icityDiaries', 'agentSession', 'wallet', 'health', 'ratings', 'shoppingCart']) assert.ok(key in result, key);
   assert.equal(result.ratings?.length, 3);
   assert.match(body, /至少 3 条/);
   assert.match(body, /评分必须与短评的态度和结论严格一致/);
@@ -271,6 +274,40 @@ test('phone generates all eight scopes with one request and includes world, play
   await assert.rejects(generatePhoneScope('all', { charId: 'paper-a', charName: '甲', userName: '玩家', npcs: [] }, prev), /遗漏/);
   assert.equal(calls, 2);
   assert.equal(JSON.stringify(prev), snapshot);
+});
+
+test('phone shopping uses character memories and accepts only three to five distinct pending products without financial writes', async () => {
+  paperFixture(); testApi();
+  writeMemories([{ id: 'cart-memory', charId: 'paper-a', content: 'SHOPPING_MEMORY：旅行时相机包坏了', category: 'core', pinned: true, importance: 5, createdAt: '', updatedAt: '', recallCount: 0, source: 'manual' }]);
+  const prev = { charId: 'paper-a', wallpaperUrl: '', userRemark: '', npcThreads: [], photos: [], browserHistory: [], notes: [], icityDiaries: [], agentSession: { doubaoTopic: '', doubaoTurns: [], claudeTopic: '', claudeTurns: [] } };
+  let body = '', calls = 0;
+  let items = Array.from({ length: 3 }, (_, i) => ({ name: `相机配件${i}`, price: 39.9 + i, category: '摄影', variant: '黑色', note: '下次看海带上' }));
+  mock.method(globalThis, 'fetch', async (_url: unknown, init?: RequestInit) => { body = String(init?.body); calls++; return aiResponse({ items }); });
+  readAlipayData();
+  const chatsBefore = readStorageString(WECHAT_CHATS_STORAGE_KEY), moneyBefore = readStorageString('yyphone:alipay-data');
+  const ctx = { charId: 'paper-a', charName: '纸条角色甲', userName: '玩家', npcs: [] };
+  const result = await generatePhoneScope('shopping', ctx, prev);
+  assert.equal(calls, 1); assert.equal(result.shoppingCart?.length, 3); assert.match(body, /SHOPPING_MEMORY/); assert.match(body, /今天一起去看了海/); assert.match(body, /不能把加购写成已购买/);
+  items = Array.from({ length: 5 }, (_, i) => ({ ...items[0], name: `用品${i}` }));
+  assert.equal((await generatePhoneScope('shopping', ctx, prev)).shoppingCart?.length, 5);
+  items = items.slice(0, 2); await assert.rejects(generatePhoneScope('shopping', ctx, prev), /3～5/);
+  items = Array.from({ length: 3 }, () => ({ ...items[0] })); await assert.rejects(generatePhoneScope('shopping', ctx, prev), /重复/);
+  assert.equal(readStorageString(WECHAT_CHATS_STORAGE_KEY), chatsBefore); assert.equal(readStorageString('yyphone:alipay-data'), moneyBefore);
+});
+
+test('icity generates one complete diary with private memory and rejects multiple entries or truncated oversized content', async () => {
+  paperFixture(); testApi();
+  writeMemories([{ id: 'diary-memory', charId: 'paper-a', content: 'DIARY_PRIVATE_MEMORY：把那张船票收进书里', category: 'core', pinned: true, importance: 5, createdAt: '', updatedAt: '', recallCount: 0, source: 'manual' }]);
+  const prev = { charId: 'paper-a', wallpaperUrl: '', userRemark: '', npcThreads: [], photos: [], browserHistory: [], notes: [], icityDiaries: [], agentSession: { doubaoTopic: '', doubaoTurns: [], claudeTopic: '', claudeTurns: [] } };
+  let body = ''; let diaries = [{ content: '一段完整的自述。'.repeat(200) + '故事自然结束。', dateStr: '10月26日', timeStr: '20:00', weather: '未记录', mood: '平静' }];
+  mock.method(globalThis, 'fetch', async (_url: unknown, init?: RequestInit) => { body = String(init?.body); return aiResponse({ diaries }); });
+  const ctx = { charId: 'paper-a', charName: '纸条角色甲', userName: '玩家', npcs: [] };
+  const result = await generatePhoneScope('icity', ctx, prev);
+  assert.equal(result.icityDiaries?.length, 1); assert.equal(result.icityDiaries?.[0].content, diaries[0].content);
+  for (const text of ['DIARY_PRIVATE_MEMORY', '今天一起去看了海', '不善表达但关心玩家', '本次只生成一篇', '重点剖析内心世界', '不把约定写成已发生']) assert.ok(body.includes(text), text);
+  diaries = [diaries[0], diaries[0]]; await assert.rejects(generatePhoneScope('icity', ctx, prev), /一篇完整日记/);
+  diaries = [{ ...diaries[0], content: '长'.repeat(4001) }]; await assert.rejects(generatePhoneScope('icity', ctx, prev), /一篇完整日记/);
+  assert.equal(prev.icityDiaries.length, 0);
 });
 
 test('couple one-request generation fills every section and validates missing responses without partial writes', async () => {
@@ -329,6 +366,18 @@ test('character focus ranking uses AI independent minutes with persona and calen
   const ranking = source.slice(source.indexOf('const combinedRankings'), source.indexOf('// ==================== 12.'));
   assert.doesNotMatch(ranking, /companionCharName|陪读/);
   assert.match(ranking, /item.dateStr === todayDateStr/);
+});
+
+test('weather prompt injection requires this direct conversation to opt in and never shares coordinates', () => {
+  paperFixture();
+  writeWeatherSettings({ enabled: true, location: { name: '天气测试城市', region: '地区', latitude: 30.27, longitude: 120.15, source: 'city' } });
+  saveSetting(WEATHER_CACHE_KEY, { key: '30.27,120.15', fetchedAt: Date.now(), timezone: 'Asia/Shanghai', current: { temperature: 23, feels: 24, humidity: 65, wind: 7, code: 2, time: '2026-10-26T12:00' }, days: [] });
+  const chats = JSON.parse(readStorageString(WECHAT_CHATS_STORAGE_KEY)!);
+  const prompt = () => JSON.stringify(buildPrompt({ chatId: chats[0].id, currentInput: '天气怎么样' }));
+  assert.doesNotMatch(prompt(), /天气测试城市/);
+  chats[0].weatherAwarenessEnabled = true; saveSetting(WECHAT_CHATS_STORAGE_KEY, chats);
+  assert.match(prompt(), /天气测试城市/); assert.doesNotMatch(prompt(), /30\.27|120\.15/);
+  chats[0].type = 'group'; saveSetting(WECHAT_CHATS_STORAGE_KEY, chats); assert.doesNotMatch(prompt(), /天气测试城市/);
 });
 
 test('calendar changes affect the next injected character schedule without modifying conversation history', () => {
@@ -583,6 +632,27 @@ test('range regeneration preserves distinct message ranges sharing identical tim
   assert.throws(() => updateJournalEntryContent(readJournalEntries()[0].id, ' '), /不能为空/);
 });
 
+test('configured text requests attach actual image bytes only when supplied', async () => {
+  testApi();
+  const image = 'data:image/png;base64,AAAA';
+  let payload: any;
+  mock.method(globalThis, 'fetch', async (_url: unknown, init?: RequestInit) => {
+    payload = JSON.parse(String(init?.body));
+    return aiResponse('看到了图片');
+  });
+  await requestConfiguredAiText('system', '看一下', { imageUrls: [image] });
+  assert.deepEqual(payload.messages.at(-1).content, [{ type: 'text', text: '看一下' }, { type: 'image_url', image_url: { url: image } }]);
+  await requestConfiguredAiText('system', '普通文字');
+  assert.equal(payload.messages.at(-1).content, '普通文字');
+  mock.restoreAll();
+  mock.method(globalThis, 'fetch', async (_url: unknown, init?: RequestInit) => {
+    payload = JSON.parse(String(init?.body));
+    return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: '看到了图片' }] } }] }), { status: 200 });
+  });
+  await requestConfiguredAiText('system', '看一下', { imageUrls: [image], api: { endpoint: 'https://generativelanguage.googleapis.com', apiKey: 'test', model: 'gemini-test' } });
+  assert.deepEqual(payload.contents.at(-1).parts[1], { inlineData: { mimeType: 'image/png', data: 'AAAA' } });
+});
+
 test('manual and range journals save one entry across internal batches', async () => {
   archiveFixture(); testApi();
   const chats = JSON.parse(readStorageString(WECHAT_CHATS_STORAGE_KEY)!);
@@ -691,6 +761,7 @@ test('beauty export includes only applied appearance, not saved presets or unsav
   assert.ok(handler);
   const currentSettings = {
     themeId: 'ocean-dawn', wallpaperId: 'dreamy-sky',
+    homeStyle: 'minimal' as const,
     wallpapers: { lockScreen: 'applied-lock.png', homeScreen: 'applied-home.png' },
     appIcons: { wechat: 'applied-icon.png' },
     homeAppearance: captureHomeAppearance(INITIAL_USER_PROFILE),
@@ -704,7 +775,7 @@ test('beauty export includes only applied appearance, not saved presets or unsav
     let error = 'previous error';
     const anchor = { href: '', download: '', click: () => { clicked = true; } };
     runInNewContext(`(() => {${handler.replace(': BeautyPreset[]', '')}\n})();`, {
-      currentSettings, presets,
+      currentSettings, presets, normalizeWallpaper,
       draftSettings: { ...currentSettings, wallpapers: { homeScreen: 'unsaved.png', lockScreen: '' } },
       Blob, JSON,
       URL: {
@@ -728,6 +799,14 @@ test('beauty export includes only applied appearance, not saved presets or unsav
     assert.match(status, /当前已应用/);
     assert.equal(error, '');
   }
+  const retired = { ...currentSettings, wallpaperId: 'deep-sea-frost' };
+  const migrated = normalizeWallpaper(retired);
+  assert.notEqual(migrated.wallpaperId, 'deep-sea-frost');
+  assert.deepEqual(migrated.wallpapers, currentSettings.wallpapers);
+  assert.deepEqual(migrated.appIcons, currentSettings.appIcons);
+  assert.deepEqual(migrated.homeAppearance, currentSettings.homeAppearance);
+  assert.deepEqual(migrated.lockScreenAppearance, currentSettings.lockScreenAppearance);
+  assert.equal(retired.wallpaperId, 'deep-sea-frost', 'migration must not mutate the applied settings');
 });
 
 test('home profile edit sits beside paper notes and custom grid and dock icons replace the whole tile', () => {
@@ -872,7 +951,7 @@ test('group automatic thresholds include 400 messages, same-time cursors and ind
   const chat = groupJournalFixture(400, 'group', 'journal-auto-400');
   chat.messages = chat.messages.map((message) => ({ ...message, createdAt: '2026-10-18T10:00:00Z' }));
   const other = { ...chat, id: 'journal-auto-off' };
-  saveSetting(WECHAT_CHATS_STORAGE_KEY, [chat, other]);
+  saveSetting(WECHAT_CHATS_STORAGE_KEY, [{ ...chat, messages: chat.messages.slice(0, 399) }, other]);
   let calls = 0;
   mock.method(globalThis, 'fetch', async () => {
     calls += 1;
@@ -882,13 +961,34 @@ test('group automatic thresholds include 400 messages, same-time cursors and ind
   await maybeAutoGroupJournal(other.id);
   assert.equal(calls, 0);
   await maybeAutoGroupJournal(chat.id);
-  const remaining = readGroupJournal(chat.id).pending;
-  const firstBatch = readGroupJournal(chat.id).entries[0].messageCount;
-  assert.ok(remaining > 0 && remaining < 400);
-  assert.equal(firstBatch + remaining, 400);
-  await runGroupJournal(chat.id);
-  assert.equal(readGroupJournal(chat.id).pending, 0);
-  assert.ok(calls >= 2);
+  assert.equal(calls, 0, '399 messages must not trigger a 400-message threshold');
+  assert.equal(readGroupJournal(chat.id).pending, 399);
+  saveSetting(WECHAT_CHATS_STORAGE_KEY, [chat, other]);
+  await maybeAutoGroupJournal(chat.id);
+  const first = readGroupJournal(chat.id);
+  assert.equal(first.pending, 0);
+  assert.equal(first.entries.length, 1, 'internal request batches must produce one saved summary');
+  assert.equal(first.entries[0].messageCount, 400);
+  assert.equal(first.entries[0].fromMessageId, chat.messages[0].id);
+  assert.equal(first.entries[0].toMessageId, chat.messages[399].id);
+  assert.ok(calls >= 1);
+  const callsAfterFirst = calls;
+  assert.deepEqual(await runGroupJournal(chat.id), { created: 0, merged: 0 });
+  await maybeAutoGroupJournal(chat.id);
+  assert.equal(calls, callsAfterFirst, 'already summarized messages must not be sent again');
+  const additional = chat.messages.map((message, index) => ({ ...message, id: `same-time-next-${index}` }));
+  saveSetting(WECHAT_CHATS_STORAGE_KEY, [{ ...chat, messages: [...chat.messages, ...additional.slice(0, 399)] }, other]);
+  await maybeAutoGroupJournal(chat.id);
+  assert.equal(calls, callsAfterFirst);
+  assert.equal(readGroupJournal(chat.id).pending, 399, 'same timestamps must not hide new message IDs');
+  saveSetting(WECHAT_CHATS_STORAGE_KEY, [{ ...chat, messages: [...chat.messages, ...additional] }, other]);
+  await maybeAutoGroupJournal(chat.id);
+  const second = readGroupJournal(chat.id);
+  assert.equal(second.pending, 0);
+  assert.equal(second.entries.length, 2);
+  assert.equal(second.entries.reduce((sum, entry) => sum + entry.messageCount, 0), 800);
+  assert.ok(second.entries.some(entry => entry.fromMessageId === additional[0].id && entry.toMessageId === additional[399].id));
+  assert.equal(readGroupJournal(other.id).entries.length, 0);
   assert.equal(readGroupJournal(other.id).every, 100);
   assert.throws(() => setGroupJournalSettings(chat.id, { every: 0 }), /30 到 400/);
   assert.throws(() => setGroupJournalSettings(chat.id, { every: 401 }), /30 到 400/);
@@ -1420,13 +1520,17 @@ test('call replies combine into one synthesized utterance and keep video narrati
     { text: '你好', kind: 'voice' },
   ];
   assert.deepEqual(normalizeCallReplyParts(parts, 'voice'), [
-    { text: '等一下 我刚把灯打开了 你好', kind: 'text' },
+    { text: '等一下 我刚把灯打开了 你好。', kind: 'text' },
   ]);
   assert.deepEqual(normalizeCallReplyParts(parts, 'video'), [
-    { text: '等一下 我刚把灯打开了 你好', kind: 'text' },
+    { text: '等一下 我刚把灯打开了 你好。', kind: 'text' },
     { text: '她抬手理了理头发', kind: 'narration' },
   ]);
   assert.deepEqual(normalizeCallReplyParts([{ text: '旁白', kind: 'narration' }], 'voice'), []);
+  for (const text of ['你好。', '真的吗？', '太好了！', 'Hello.', 'Really?', 'Great!', '嗯…']) {
+    assert.deepEqual(normalizeCallReplyParts([{ text: ` ${text} ` }], 'voice'), [{ text, kind: 'text' }], 'existing sentence punctuation must not be duplicated');
+  }
+  assert.deepEqual(normalizeCallReplyParts([{ text: ' ' }, { text: '旁白', kind: 'narration' }], 'video'), []);
 });
 
 test('phone context follows configured message counts, defaults to 200 and keeps full message text', async () => {

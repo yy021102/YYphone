@@ -1,12 +1,14 @@
 import type { LiveRoomState } from '../components/ChannelsLiveRoom';
 import type { ChannelEngagement } from './channelEngagement';
+import { isChannelMedia, channelVisibleText, type ChannelMedia } from './channelMessageMedia';
 
 export type ChannelPerson = { id: string; name: string; avatarUrl?: string; persona?: string; accountId?: string; forumNickname?: string; forumHandle?: string };
 export type ChannelKind = 'posts' | 'rooms' | 'messages';
 export type ChannelItem = {
   id: string; author: ChannelPerson; text: string; time: number; liked?: boolean; replies: string[]; ended?: boolean; live?: LiveRoomState;
   topic?: string; imageUrl?: string; readAt?: number; lastIncomingAt?: number; ownReplyIndices?: number[]; sourcePostId?: string;
-  replyAuthorIds?: string[]; endedAt?: number; textImage?: string; engagement?: ChannelEngagement;
+  replyAuthorIds?: string[]; endedAt?: number; textImage?: string; textVideo?: string; engagement?: ChannelEngagement;
+  replyMedia?: Record<string, ChannelMedia>;
 };
 export type ChannelData = { posts: ChannelItem[]; rooms: ChannelItem[]; messages: ChannelItem[]; following: string[]; saved?: string[] };
 export const CHANNEL_DATA_KEY = 'yyphone:channels:life-v1';
@@ -28,6 +30,7 @@ export const CHANNEL_IDEAS = [
 export const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const number = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0;
 const validLive = (value: unknown): value is LiveRoomState => record(value) && number(value.viewers) && number(value.hearts) &&
+  (value.hostActions === undefined || Array.isArray(value.hostActions) && value.hostActions.every(action => typeof action === 'string')) &&
   ['invitedRoleIds', 'participantIds'].every((key) => value[key] === undefined || Array.isArray(value[key]) && value[key].every((id) => typeof id === 'string')) &&
   (value.atmosphere === undefined || typeof value.atmosphere === 'string') &&
   (value.audience === undefined || record(value.audience) && number(value.audience.min) && number(value.audience.max) && value.audience.max >= value.audience.min) &&
@@ -43,7 +46,8 @@ const validItem = (value: unknown): value is ChannelItem => record(value) && typ
   (value.engagement === undefined || record(value.engagement) && ['followers', 'views', 'likes', 'comments', 'saves', 'shares'].every(key =>
     Number.isSafeInteger((value.engagement as Record<string, unknown>)[key]) && number((value.engagement as Record<string, unknown>)[key]))) &&
   (value.live === undefined || validLive(value.live)) &&
-  ['topic', 'imageUrl', 'sourcePostId', 'textImage'].every((key) => value[key] === undefined || typeof value[key] === 'string') &&
+  ['topic', 'imageUrl', 'sourcePostId', 'textImage', 'textVideo'].every((key) => value[key] === undefined || typeof value[key] === 'string') &&
+  (value.replyMedia === undefined || record(value.replyMedia) && Object.entries(value.replyMedia).every(([index, media]) => /^\d+$/.test(index) && Number(index) < (value.replies as string[]).length && isChannelMedia(media))) &&
   ['readAt', 'lastIncomingAt', 'endedAt'].every((key) => value[key] === undefined || number(value[key])) &&
   (value.replyAuthorIds === undefined || Array.isArray(value.replyAuthorIds) && value.replyAuthorIds.length === value.replies.length && value.replyAuthorIds.every((id) => typeof id === 'string')) &&
   (value.ownReplyIndices === undefined || Array.isArray(value.ownReplyIndices) && value.ownReplyIndices.every((index) => Number.isInteger(index) && index >= 0 && index < (value.replies as string[]).length));
@@ -108,7 +112,7 @@ export function parseChannelBatch(result: unknown, people: ChannelPerson[]) {
     const matches = entries.filter((entry) => record(entry) && entry.authorId === author.id);
     const entry = matches[0];
     if (matches.length !== 1 || !record(entry) || typeof entry.text !== 'string' || !entry.text.trim()) throw new Error('本批内容缺少发言者或正文，请重试。');
-    const text = entry.text.trim().slice(0, 2000);
+    const text = channelVisibleText(entry.text).slice(0, 2000);
     const key = text.replace(/[\s\p{P}\p{S}]/gu, '').toLowerCase();
     if (!key || texts.has(key)) throw new Error('本批内容有重复，请重试。');
     texts.add(key);
@@ -117,7 +121,7 @@ export function parseChannelBatch(result: unknown, people: ChannelPerson[]) {
 }
 export function channelPublicContext(data: ChannelData) {
   return {
-    posts: [...data.posts].filter((item) => item.author.id === 'self').sort((a, b) => b.time - a.time).slice(0, 3).map((item) => ({ text: item.text.slice(0, 1600), ...(item.textImage ? { textImage: item.textImage.slice(0, 1000) } : {}), time: item.time })),
+    posts: [...data.posts].filter((item) => item.author.id === 'self').sort((a, b) => b.time - a.time).slice(0, 3).map((item) => ({ text: item.text.slice(0, 1600), ...(item.textImage ? { textImage: item.textImage.slice(0, 1000) } : {}), ...(item.textVideo ? { textVideo: item.textVideo.slice(0, 2000) } : {}), time: item.time })),
     lives: [...data.rooms].filter((item) => item.author.id === 'self').sort((a, b) => b.time - a.time).slice(0, 2).map((item) => ({ title: item.text.slice(0, 500), scene: item.live?.scene?.slice(0, 1000), ended: !!item.ended })),
   };
 }

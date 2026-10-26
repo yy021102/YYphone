@@ -13,9 +13,11 @@ import { readCharacterBrief } from './coupleSpaceData';
 import { PhoneHealth, PhoneWallet, readCharacterWallet, readRecentMoneyEvents } from './phoneData';
 import { buildPrompt } from './buildPrompt';
 import { readStorageString } from './localStorage';
+import { buildMemoryInjection } from './memoryData';
+import { guardMemoryArchive } from './memoryArchives';
 
-export type PhoneGenScope = 'wechat' | 'album' | 'browser' | 'notes' | 'icity' | 'agent' | 'wallet' | 'health' | 'douban';
-export const PHONE_GEN_SCOPES: PhoneGenScope[] = ['wechat', 'album', 'browser', 'notes', 'icity', 'agent', 'wallet', 'health', 'douban'];
+export type PhoneGenScope = 'wechat' | 'album' | 'browser' | 'notes' | 'icity' | 'agent' | 'wallet' | 'health' | 'douban' | 'shopping';
+export const PHONE_GEN_SCOPES: PhoneGenScope[] = ['wechat', 'album', 'browser', 'notes', 'icity', 'agent', 'wallet', 'health', 'douban', 'shopping'];
 
 export interface PhoneGenContext {
   charId: string;
@@ -62,6 +64,7 @@ const SCOPE_LABEL: Record<PhoneGenScope, string> = {
   wallet: '钱包（资产与收支）',
   health: '健康数据（睡眠、步数、屏幕使用时间）',
   douban: '豆瓣（近期读过的书、看过的电影/纪录片、玩过的游戏及评分短评）',
+  shopping: '购物车（角色可能加购的商品）',
 };
 
 const scopeSpec = (scope: PhoneGenScope, ctx: PhoneGenContext, prevWallet: PhoneWallet | null): string => {
@@ -83,8 +86,12 @@ const scopeSpec = (scope: PhoneGenScope, ctx: PhoneGenContext, prevWallet: Phone
       return `生成 2~3 条极私密的备忘录：随手记下的关于玩家「${ctx.userName}」的琐碎喜好清单，或遇到挫折、隐忍克制时的心理独白/计划草案。
 返回 JSON：{"notes":[{"title":"标题","content":"内容，可换行","updatedAt":"如 昨天 23:10"}]}`;
     case 'icity':
-      return `生成 2~3 篇深夜私密长日记（每篇 150~300 字，时间戳在深夜，如 02:40），带天气和心情。这是角色卸下所有防备、不对任何人展现的内心世界，必须第一人称、细腻、贴合人设，可包含连玩家当面都听不到的剖白或不愿示人的一面。
+      return `本次只生成一篇完整的第一人称私密日记，diaries 数组必须恰好一项。建议400~900字，允许自然分段，不能拆成多篇、多个日期或日记合集。时间与当前剧情相符，不强制深夜；天气不明确时写“未记录”，不要把猜测当事实。
+从最近对话或记忆中一件具体的小事切入，写清事情的起因、当时的反应、事后反复想起的细节，以及此刻怎样理解自己的感受，形成完整叙事。重点剖析内心世界：为什么一句话令自己在意、期待与顾虑怎样冲突、表面表现与真实动机有何距离、自己不愿承认什么。情绪要有具体依据与变化，细腻真实，保留人设中的表达习惯、克制程度、价值观和自我辩解，不强行煽情、吃醋或告白，不堆砌抒情形容词和心理学术语。
+结合提供的对话、人设、当前存档记忆和世界书，准确区分谁说过什么、谁与谁经历了什么；不把其他人的经历写成自己亲历，不把约定写成已发生。可以对真实事件作主观理解，但不要虚构重大往事或关系进展；资料少时围绕已知细节与当下心绪展开，不编造共同经历。不要复述聊天流水账、写总结报告或给玩家的信；结尾自然落在一个未解的念头、细微的领悟或打算上，不必强行圆满。
 返回 JSON：{"diaries":[{"dateStr":"10月16日","timeStr":"02:40","weather":"天气","mood":"心情","content":"日记正文"}]}`;
+    case 'shopping':
+      return `生成3~5件角色可能放进购物车、尚未购买的商品。根据人设、职业、收入、生活习惯、兴趣，以及最近对话和记忆中的实际需求挑选，品类自然多样，不要全部都是送玩家的礼物。价格符合角色经济状况；选购理由体现角色个人心思，用一句本人语气的简短备注。不能把加购写成已购买、已送出或已扣款，不制造订单或收支。商品不必是真实品牌，不编造真实商品链接。返回JSON：{"items":[{"name":"商品名称","category":"品类","price":89.9,"emoji":"商品表情","variant":"规格或款式","note":"角色自己的加购备注"}]}`;
     case 'agent':
       return `生成角色与两个 AI 助手的对话记录。豆包：琐碎日常、查天气食谱、吐槽无厘头问题等；Claude：深夜探讨复杂的心思、情感困局、道德拉扯、心理状况。各 4~6 轮，role 为 char 表示角色提问，ai 表示 AI 回复；AI 的回复要像真实的 AI 助手风格。
 返回 JSON：{"doubaoTopic":"主题","doubaoTurns":[{"role":"char或ai","content":"内容"}],"claudeTopic":"主题","claudeTurns":[{"role":"char或ai","content":"内容"}]}`;
@@ -113,14 +120,17 @@ export const generatePhoneScope = async (
   ctx: PhoneGenContext,
   prev: CharacterPhoneData
 ): Promise<Partial<CharacterPhoneData>> => {
+  const assertArchive = guardMemoryArchive(ctx.charId);
   const brief = readCharacterBrief(ctx.charId, { configuredHistory: true });
+  const memory = ['icity', 'shopping', 'all'].includes(scope) ? await buildMemoryInjection([ctx.charId], 'direct', brief.recentChat.slice(-1600), () => ctx.charName, { localOnly: true }) : undefined;
+  assertArchive();
   const prevWallet = scope === 'wallet' ? (prev.wallet ?? readCharacterWallet(ctx.charId)) : null;
   const chats: unknown = JSON.parse(readStorageString('yyphone:wechat-chats') ?? '[]');
   const chat = Array.isArray(chats) ? chats.find((item: unknown) => isRecord(item) &&
     item.type === 'direct' && Array.isArray(item.participantIds) &&
     item.participantIds.length === 1 && item.participantIds[0] === ctx.charId) : undefined;
   const background = buildPrompt({ chatId: chat && typeof chat.id === 'string' ? chat.id : '',
-    backgroundCharacterId: ctx.charId, currentInput: '' });
+    backgroundCharacterId: ctx.charId, currentInput: '', memoryInjection: memory });
   const scopes = scope === 'all' ? PHONE_GEN_SCOPES : [scope];
   const system = [
     ...background.filter((message) => message.role === 'system').map((message) => message.content),
@@ -138,6 +148,7 @@ export const generatePhoneScope = async (
     history: background.flatMap((message) => message.role === 'system' ? [] : [{ role: message.role, content: message.content }]),
     ...(scope === 'all' ? { maxTokens: 16000 } : {}),
   }));
+  assertArchive();
   if (scope !== 'all') return parsePhoneScope(scope, result, ctx, prev, prevWallet);
   return Object.assign({}, ...scopes.map((item) => {
     const section = result[item];
@@ -212,16 +223,23 @@ const parsePhoneScope = (
       return { notes };
     }
     case 'icity': {
-      const diaries: PhoneIcityDiary[] = list(result.diaries).slice(0, 5).map((d) => ({
+      if (!Array.isArray(result.diaries) || result.diaries.length !== 1 || !isRecord(result.diaries[0]) || typeof result.diaries[0].content !== 'string' || result.diaries[0].content.length > 4000) throw new Error('本次需要一篇完整日记，AI 返回的篇数或内容不符合要求，未保存，请重试。');
+      const diaries: PhoneIcityDiary[] = list(result.diaries).map((d) => ({
         id: uid('d'),
         dateStr: str(d.dateStr, 16),
         timeStr: str(d.timeStr, 8),
         weather: str(d.weather, 10),
         mood: str(d.mood, 10),
-        content: str(d.content, 1500),
+        content: str(d.content, 4000),
       })).filter((d) => d.content);
       if (diaries.length === 0) throw new Error('AI 没有生成有效的日记，请重试。');
       return { icityDiaries: diaries };
+    }
+    case 'shopping': {
+      if (!Array.isArray(result.items) || result.items.length < 3 || result.items.length > 5) throw new Error('购物车需要3～5件商品，未保存，请重试。');
+      const items = list(result.items).map(item => ({ id: uid('cart'), name: str(item.name, 80), category: str(item.category, 24), price: typeof item.price === 'number' && Number.isFinite(item.price) && item.price >= 0 ? Math.round(item.price * 100) / 100 : -1, emoji: str(item.emoji, 12) || '🛍️', variant: str(item.variant, 80), note: str(item.note, 240) }));
+      if (items.length !== result.items.length || items.some(item => !item.name || item.price < 0 || !item.note) || new Set(items.map(item => item.name)).size !== items.length) throw new Error('购物车商品信息不完整或重复，未保存，请重试。');
+      return { shoppingCart: items };
     }
     case 'agent': {
       const turns = (value: unknown): PhoneAgentTurn[] =>

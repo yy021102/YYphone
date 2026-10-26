@@ -1,0 +1,50 @@
+.minimal-home { --minimal-paper:#f4f2ee; --minimal-ink:#43433f; --minimal-muted:#96958c; --minimal-line:#dcd9d0; height:100%; width:100%; display:flex; flex-direction:column; background:var(--minimal-paper); color:var(--minimal-ink); font-family:inherit; }
+.minimal-home-scroll { flex:1; min-height:0; overflow-y:auto; scrollbar-width:none; padding:16px 27px 12px; }
+.minimal-home-header { display:flex; align-items:center; justify-content:space-between; padding-bottom:23px; }
+.minimal-home-header > span { font-size:11px; letter-spacing:3px; font-weight:600; }
+.minimal-wordmark-dot { color:#b49c7d; }
+.minimal-home-header > div { display:flex; gap:9px; }
+.minimal-home-header button { display:grid; place-items:center; width:27px; height:29px; color:#78786e; }
+.minimal-profile { display:flex; align-items:center; justify-content:space-between; gap:15px; padding-bottom:24px; border-bottom:1px solid var(--minimal-line); }
+.minimal-profile-copy { min-width:0; }
+.minimal-profile small { display:block; color:var(--minimal-muted); font-size:10px; letter-spacing:1px; }
+.minimal-profile h1 { font-size:32px; line-height:1.3; font-weight:500; margin:7px 0; overflow-wrap:anywhere; letter-spacing:-1px; }
+.minimal-profile p { font-size:11px; color:#818177; line-height:1.7; overflow-wrap:anywhere; }
+.minimal-profile-avatar { width:62px; height:72px; flex-shrink:0; border-radius:50% 50% 8px 8px; background:#e8e5dd; overflow:hidden; display:grid; place-items:center; }
+.minimal-profile-avatar img { width:100%; height:100%; object-fit:cover; border-radius:inherit; }
+.minimal-profile-avatar > span { font-size:25px; color:#9c9b90; }
+.minimal-day { display:flex; align-items:center; justify-content:space-between; padding:25px 0 27px; }
+.minimal-clock { font-size:57px; line-height:1; font-weight:300; letter-spacing:-4px; font-variant-numeric:tabular-nums; }
+.minimal-day p { margin-top:12px; font-size:11px; letter-spacing:1px; }
+.minimal-day > div > span { display:flex; align-items:center; gap:5px; margin-top:10px; font-size:10px; color:var(--minimal-muted); }
+.minimal-day i { display:inline-block; width:2px; height:2px; border-radius:50%; background:var(--minimal-muted); margin:0 3px; }
+.minimal-date-tile { position:relative; width:72px; height:87px; border:1px solid var(--minimal-line); border-radius:3px; display:flex; align-items:center; justify-content:center; flex-direction:column; flex-shrink:0; }
+.minimal-date-tile small { font-size:9px; letter-spacing:3px; color:var(--minimal-muted); }
+.minimal-date-tile strong { font-size:32px; font-weight:300; line-height:1.3; }
+.minimal-date-tile svg { position:absolute; bottom:6px; right:5px; color:#a9a699; }
+.minimal-section-label { display:flex; justify-content:space-between; padding:13px 0 17px; border-top:1px solid var(--minimal-line); color:var(--minimal-muted); font-size:10px; letter-spacing:2px; }
+.minimal-section-label small { font-size:9px; letter-spacing:1px; }
+.minimal-app-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:22px 13px; }
+.minimal-app { display:flex; align-items:center; flex-direction:column; gap:9px; min-width:0; font-size:10px; color:#6d6c64; cursor:pointer; }
+.minimal-app-tile { position:relative; width:51px; height:51px; background:#eeece6; border:1px solid #dedbd3; border-radius:15px; display:grid; place-items:center; transition:background .2s,transform .2s; }
+.minimal-app:active .minimal-app-tile { transform:scale(.93); background:#e3dfd5; }
+.minimal-app-glyph { width:23px; height:23px; color:#606159; stroke-width:1.45; }
+.minimal-app-tile.has-custom-icon { border:0; background:transparent; }
+.minimal-app-tile > img { position:absolute; width:100%; height:100%; border-radius:inherit; object-fit:cover; }
+.minimal-app-badge { position:absolute; right:-4px; top:-4px; min-width:15px; padding:1px 4px; border-radius:10px; background:#8e7962; color:#fff; font-size:9px; text-align:center; }
+.minimal-app > span:last-child { text-align:center; overflow-wrap:anywhere; }
+.minimal-music { margin-top:26px; border-top:1px solid var(--minimal-line); border-bottom:1px solid var(--minimal-line); }
+.minimal-music summary { display:flex; align-items:center; justify-content:space-between; padding:16px 0; cursor:pointer; list-style:none; font-size:11px; }
+.minimal-music summary::-webkit-details-marker { display:none; }
+.minimal-music-indicator { color:var(--minimal-muted); font-size:10px; }
+.minimal-music-indicator > span { margin-left:18px; }
+.minimal-music > div { max-width:240px; margin:0 auto 16px; }
+.minimal-home-caption { display:flex; justify-content:space-between; font-size:9px; color:#a6a397; padding:17px 0 5px; letter-spacing:1px; }
+.minimal-dock { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); padding:16px 22px calc(env(safe-area-inset-bottom,0px) + 18px); flex-shrink:0; border-top:1px solid var(--minimal-line); }
+.minimal-dock .minimal-app-tile { width:44px; height:44px; border-radius:50%; border-color:transparent; background:#e8e5dc; }
+.minimal-dock .minimal-app { gap:7px; }
+@media(max-height:740px) { .minimal-home-scroll { padding-top:10px; } .minimal-home-header { padding-bottom:14px; } .minimal-profile { padding-bottom:16px; } .minimal-day { padding:20px 0; } .minimal-app-grid { gap:17px 10px; } .minimal-music { margin-top:20px; } .minimal-home-caption { padding-top:12px; } }
+@media(max-width:350px) { .minimal-home-scroll { padding-left:20px; padding-right:20px; } .minimal-clock { font-size:49px; } .minimal-app-tile { width:46px; height:46px; } .minimal-app-grid { column-gap:9px; } }
+@media(prefers-color-scheme:dark) { :root[data-follow-system-dark=true] .minimal-home { --minimal-paper:#22231f; --minimal-ink:#e1dfd6; --minimal-muted:#929487; --minimal-line:#414237; } :root[data-follow-system-dark=true] .minimal-home :is(.minimal-app-tile,.minimal-profile-avatar) { background:#32332c; border-color:#45463d; } :root[data-follow-system-dark=true] .minimal-home :is(.minimal-app-glyph,.minimal-app) { color:#bfc0b4; } }
+[data-home-style=minimal] > .relative.z-40 { filter:grayscale(1); }
+@media(prefers-color-scheme:dark) { :root[data-follow-system-dark=true] [data-home-style=minimal] { background:#22231f!important; } }

@@ -4,6 +4,7 @@ import { compressChatPhoto } from '../utils/imageFile';
 import { readStoredValue, writeStoredValue } from '../utils/localStorage';
 import { CHANNEL_PROFILE_KEY, emptyChannelProfile, isChannelProfile, isChannelCount, channelPerson, type ChannelProfileStore, type ChannelSettings } from '../utils/channelProfile';
 import { formatChannelCount } from '../utils/channelEngagement';
+import { getAutomaticWorldBookIdsForContacts } from '../utils/worldBookPrompt';
 import { parseChannelArchive, type ChannelArchive } from '../utils/channelArchive';
 import type { ChannelKind, ChannelPerson } from '../utils/channelLife';
 
@@ -36,6 +37,7 @@ export function ChannelsProfile({ userName, avatarUrl, contacts, stats, onView, 
   useEffect(() => { try { writeStoredValue(STORAGE_KEY, store); } catch { setMessage('设定保存失败，请检查本地存储后重试。'); } }, [store]);
   useEffect(() => { setBooks(readBooks()); }, []);
   const settings = store.settings;
+  const automaticBooks = getAutomaticWorldBookIdsForContacts(settings.roles.length ? settings.roles.map(role => role.contactId) : contacts.map(contact => contact.id));
   const update = (patch: Partial<ChannelSettings>) => setStore(previous => {
     const nextSettings = { ...previous.settings, ...patch };
     return {
@@ -154,7 +156,7 @@ export function ChannelsProfile({ userName, avatarUrl, contacts, stats, onView, 
         })}</div></div>}
       </details>
       <details className="channel-profile-settings rounded-2xl bg-white p-4 shadow-sm"><summary><BookOpen size={15} /><span>关联世界书</span><small>{settings.worldBookIds.length} 本</small><ChevronDown size={14} /></summary><p className="mb-3 mt-4 text-[11px] text-slate-500">选择视频号专用的世界书；下次生成内容时可按此配置读取。</p>
-        {books.length ? <div className="space-y-2">{books.map(book => <label key={book.id} className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-xs"><input type="checkbox" checked={settings.worldBookIds.includes(book.id)} onChange={event => update({ worldBookIds: event.target.checked ? [...settings.worldBookIds, book.id] : settings.worldBookIds.filter(id => id !== book.id) })}/><span>{book.name}</span>{book.isGlobal && <span className="text-slate-400">全局</span>}</label>)}</div> : <p className="text-xs text-slate-400">暂无世界书，可先到世界书应用创建。</p>}
+        {books.length ? <div className="space-y-2">{books.map(book => <label key={book.id} className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-xs"><input type="checkbox" checked={automaticBooks.includes(book.id) || settings.worldBookIds.includes(book.id)} disabled={automaticBooks.includes(book.id)} onChange={event => update({ worldBookIds: event.target.checked ? [...settings.worldBookIds, book.id] : settings.worldBookIds.filter(id => id !== book.id) })}/><span>{book.name}</span>{automaticBooks.includes(book.id) && <span className="text-slate-400">{book.isGlobal ? '全局' : '角色已绑定'}</span>}</label>)}</div> : <p className="text-xs text-slate-400">暂无世界书，可先到世界书应用创建。</p>}
       </details>
       <details className="channel-profile-settings rounded-2xl bg-white p-4 shadow-sm"><summary><Save size={15} /><span>设定预设</span><small>{store.presets.length} 套</small><ChevronDown size={14} /></summary><p className="mb-3 mt-4 text-[11px] text-slate-500">保存本页全部设置，当前预设随编辑更新。</p>
         <select aria-label="切换视频号预设" value={store.activePresetId} onChange={event => {

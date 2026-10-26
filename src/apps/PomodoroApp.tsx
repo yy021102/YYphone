@@ -1,3 +1,4 @@
+import { PottedPlant, FlowerShelves } from '../components/GreenhousePlants';
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Timer,
@@ -1233,7 +1234,7 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
           {[
             { key: 'timer', label: '专注', icon: Timer },
             { key: 'tasks', label: '任务', icon: ListTodo },
-            { key: 'rank', label: '排行/温室', icon: Trophy },
+            { key: 'rank', label: '温室', icon: Sprout },
             { key: 'stats', label: '统计', icon: BarChart3 },
           ].map(({ key, label, icon: TabIcon }) => {
             const isActive = activeTab === key;
@@ -1613,11 +1614,11 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
 
         {/* ==================== 板块 3：升级版陪伴温室（角色专属花盆+手动浇水+标本图鉴） + 角色专注排行榜 ==================== */}
         {activeTab === 'rank' && (
-          <div className="space-y-3">
+          <div className="pomo-dream-garden">
             {/* 升级版陪伴温室卡片 */}
             <div
               style={{ backgroundColor: currentTheme.cardBg, borderRadius: currentTheme.cardRadius }}
-              className="backdrop-blur-xl border border-white/90 p-4 space-y-3 shadow-2xs"
+              className="pomo-greenhouse-card"
             >
               {/* 顶部：标题 + 切换角色专属花盆 + 标本图鉴按钮 */}
               <div className="flex items-center justify-between gap-2">
@@ -1669,58 +1670,11 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
                 </div>
               </div>
 
-              {/* 花盆中央展示区 */}
-              <div className="bg-gradient-to-r from-sky-50/50 via-white/70 to-pink-50/50 p-3.5 rounded-2xl border border-white space-y-2.5">
-                <div className="flex items-center gap-3.5">
-                  <div
-                    className={`w-16 h-16 rounded-2xl bg-white/80 shadow-2xs flex items-center justify-center text-4xl shrink-0 overflow-hidden transition-transform duration-300 ${
-                      isWateringAnim ? 'scale-110' : ''
-                    }`}
-                  >
-                    {currentSpecies.imageUrl ? (
-                      <img
-                        src={currentSpecies.imageUrl}
-                        alt={currentPlantName}
-                        style={{ opacity: 0.45 + currentStageInfo.stage * 0.14 }}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      currentStageInfo.icon
-                    )}
-                  </div>
-                  <div className="space-y-1 flex-1 min-w-0">
-                    <div className="flex items-center justify-between gap-1">
-                      <span className="text-xs font-bold text-slate-600 truncate">
-                        {currentPlantName}
-                        {currentPot.nickname?.trim() && (
-                          <span className="text-slate-400 font-normal"> · {currentSpecies.name}</span>
-                        )}
-                      </span>
-                      <span className="text-[10px] font-bold text-pink-400 bg-pink-50/70 px-2 py-0.5 rounded-full shrink-0">
-                        {currentStageInfo.stageName}
-                      </span>
-                    </div>
-
-                    {/* 成长进度条 */}
-                    <div className="w-full h-2 rounded-full bg-slate-100/80 overflow-hidden">
-                      <div
-                        style={{
-                          width: `${Math.min(100, (currentPot.growthDrops / TOTAL_GROWTH_DROPS) * 100)}%`,
-                          background: currentTheme.primaryGradient,
-                        }}
-                        className="h-full rounded-full transition-all duration-500"
-                      />
-                    </div>
-                    <div className="flex items-center justify-between text-[10px] text-slate-400">
-                      <span className="truncate">{currentSpecies.desc}</span>
-                      <span className="font-mono text-sky-400 shrink-0 ml-1">
-                        {currentPot.growthDrops}/{TOTAL_GROWTH_DROPS} 滴
-                        {!currentStageInfo.isBloomed && ` · 距下一阶段 ${dropsToNextStage(currentPot.growthDrops)} 滴`}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
+              <div className="pomo-garden-stage">
+                <div className="pomo-garden-orbit" aria-hidden="true" />
+                <div className="pomo-garden-hero"><PottedPlant icon={currentStageInfo.icon} image={currentSpecies.imageUrl} name={currentPlantName} stage={currentStageInfo.stage} watering={isWateringAnim} /></div>
+                <div className="pomo-garden-plant-info"><span className="pomo-growth-stage">{currentStageInfo.stageName}</span><h3>{currentPlantName}</h3><p>{currentSpecies.desc}</p><div className="pomo-garden-progress"><span style={{ width: Math.min(100, currentPot.growthDrops / TOTAL_GROWTH_DROPS * 100) + '%', background: currentTheme.primaryGradient }} /></div><small>{currentPot.growthDrops}/{TOTAL_GROWTH_DROPS} 滴{!currentStageInfo.isBloomed && (' · 距下一阶段 ' + dropsToNextStage(currentPot.growthDrops) + ' 滴')}</small></div>
+                <div className="pomo-garden-care">
                 <div className="flex items-center gap-2">
                   <input
                     value={plantNameDraft}
@@ -1775,8 +1729,54 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
                     <span>已盛开，采摘收入标本图鉴</span>
                   </button>
                 )}
+                </div>
               </div>
             </div>
+
+          </div>
+        )}
+
+        {/* ==================== 板块 4：数据统计与历史回看 ==================== */}
+        {activeTab === 'stats' && (
+          <div className="space-y-3">
+            <div className="grid grid-cols-3 gap-2.5">
+              <div
+                style={{ backgroundColor: currentTheme.cardBg }}
+                className="backdrop-blur-xl border border-white rounded-2xl p-3 text-center space-y-0.5 shadow-2xs"
+              >
+                <span className="text-[10px] opacity-60 block">今日专注</span>
+                <span className="text-base font-extrabold text-sky-500 font-mono">
+                  {todayPlayerMinutes}m
+                </span>
+              </div>
+              <div
+                style={{ backgroundColor: currentTheme.cardBg }}
+                className="backdrop-blur-xl border border-white rounded-2xl p-3 text-center space-y-0.5 shadow-2xs"
+              >
+                <span className="text-[10px] opacity-60 block">累计总时长</span>
+                <span className="text-base font-extrabold text-pink-500 font-mono">
+                  {totalFocusMinutes}m
+                </span>
+              </div>
+              <div
+                style={{ backgroundColor: currentTheme.cardBg }}
+                className="backdrop-blur-xl border border-white rounded-2xl p-3 text-center space-y-0.5 shadow-2xs"
+              >
+                <span className="text-[10px] opacity-60 block">累计打卡</span>
+                <span className="text-base font-extrabold text-emerald-500 font-mono">
+                  {uniqueCheckInDays}天
+                </span>
+              </div>
+            </div>
+
+            <button
+              onClick={() => setShowShareModal(true)}
+              style={{ background: currentTheme.primaryGradient }}
+              className="w-full py-2.5 rounded-2xl text-white text-xs font-bold flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer"
+            >
+              <Share2 className="w-3.5 h-3.5" />
+              <span>将今日专注情况分享给角色（支持多选）</span>
+            </button>
 
             {/* 角色今日专注排行榜 */}
             <div
@@ -1853,50 +1853,6 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
                 ))}
               </div>
             </div>
-          </div>
-        )}
-
-        {/* ==================== 板块 4：数据统计与历史回看 ==================== */}
-        {activeTab === 'stats' && (
-          <div className="space-y-3">
-            <div className="grid grid-cols-3 gap-2.5">
-              <div
-                style={{ backgroundColor: currentTheme.cardBg }}
-                className="backdrop-blur-xl border border-white rounded-2xl p-3 text-center space-y-0.5 shadow-2xs"
-              >
-                <span className="text-[10px] opacity-60 block">今日专注</span>
-                <span className="text-base font-extrabold text-sky-500 font-mono">
-                  {todayPlayerMinutes}m
-                </span>
-              </div>
-              <div
-                style={{ backgroundColor: currentTheme.cardBg }}
-                className="backdrop-blur-xl border border-white rounded-2xl p-3 text-center space-y-0.5 shadow-2xs"
-              >
-                <span className="text-[10px] opacity-60 block">累计总时长</span>
-                <span className="text-base font-extrabold text-pink-500 font-mono">
-                  {totalFocusMinutes}m
-                </span>
-              </div>
-              <div
-                style={{ backgroundColor: currentTheme.cardBg }}
-                className="backdrop-blur-xl border border-white rounded-2xl p-3 text-center space-y-0.5 shadow-2xs"
-              >
-                <span className="text-[10px] opacity-60 block">累计打卡</span>
-                <span className="text-base font-extrabold text-emerald-500 font-mono">
-                  {uniqueCheckInDays}天
-                </span>
-              </div>
-            </div>
-
-            <button
-              onClick={() => setShowShareModal(true)}
-              style={{ background: currentTheme.primaryGradient }}
-              className="w-full py-2.5 rounded-2xl text-white text-xs font-bold flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer"
-            >
-              <Share2 className="w-3.5 h-3.5" />
-              <span>将今日专注情况分享给角色（支持多选）</span>
-            </button>
 
             <div
               style={{ backgroundColor: currentTheme.cardBg, borderRadius: currentTheme.cardRadius }}
@@ -2026,67 +1982,7 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
       )}
 
       {/* ==================== 弹窗 0：植物标本图鉴收集册弹窗 ==================== */}
-      {showSpecimenModal && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-900/30 p-4 backdrop-blur-xs">
-          <div className="w-full max-w-sm bg-white/95 backdrop-blur-2xl border border-white rounded-3xl p-5 shadow-xl space-y-3.5 max-h-[88%] overflow-y-auto text-slate-700">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-extrabold flex items-center gap-1.5">
-                <BookOpen className="w-4 h-4 text-pink-400" />
-                <span>植物标本图鉴 ({greenhouse.specimens.length})</span>
-              </h3>
-              <button
-                onClick={() => setShowSpecimenModal(false)}
-                className="w-7 h-7 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {greenhouse.specimens.length === 0 ? (
-              <div className="p-8 text-center space-y-1.5 text-slate-400">
-                <p className="text-2xl">🌸</p>
-                <p className="text-xs font-bold">还没有收集到植物标本哦~</p>
-                <p className="text-[10px]">
-                  在温室里累计浇灌 {TOTAL_GROWTH_DROPS} 滴露水即可盛开采摘，收入图鉴！
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-2.5">
-                {greenhouse.specimens.map((sp) => (
-                  <div
-                    key={sp.id}
-                    className="p-3.5 rounded-2xl bg-gradient-to-r from-sky-50/60 to-pink-50/60 border border-white flex items-center gap-3 shadow-2xs"
-                  >
-                    <div className="w-12 h-12 rounded-2xl bg-white/80 flex items-center justify-center text-2xl shrink-0 shadow-2xs overflow-hidden">
-                      {sp.imageUrl ? (
-                        <img src={sp.imageUrl} alt={sp.speciesName} className="w-full h-full object-cover" />
-                      ) : (
-                        sp.bloomIcon
-                      )}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold text-slate-600">
-                          {sp.nickname?.trim() ? `${sp.nickname.trim()} · ${sp.speciesName}` : sp.speciesName}
-                        </span>
-                        <span className="text-[10px] font-mono text-slate-400">
-                          {sp.harvestDate}
-                        </span>
-                      </div>
-                      <span className="text-[10px] text-pink-400 block mt-0.5">
-                        共同培育人：{sp.charName}
-                      </span>
-                      <p className="text-[10px] text-slate-500 mt-0.5 leading-relaxed">
-                        {sp.commemorativeQuote}
-                      </p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      {showSpecimenModal && <FlowerShelves specimens={greenhouse.specimens} onClose={() => setShowSpecimenModal(false)} />}
 
       {/* ==================== 弹窗 1：自定义专注与休息时长 ==================== */}
       {showDurationModal && (

@@ -65,6 +65,8 @@ export const requestConfiguredAiText = async (
     api?: ApiConnection;
     history?: Array<{ role: 'user' | 'assistant'; content: string }>;
     includeGlobalWorldBooks?: boolean;
+    imageUrls?: string[];
+    signal?: AbortSignal;
   } = {}
 ) => {
   if (options.includeGlobalWorldBooks !== false) systemPrompt = withGlobalWorldBooks(systemPrompt);
@@ -76,6 +78,7 @@ export const requestConfiguredAiText = async (
   const model = preset.model?.trim() || 'gpt-4o-mini';
   let response: Response;
   let responseText = '';
+  const images = (options.imageUrls ?? []).filter(url => /^data:image\/(png|jpeg|webp);base64,/i.test(url)).slice(-4);
 
   if (endpoint.includes('generativelanguage.googleapis.com')) {
     const responseUrl = /:generateContent$/i.test(endpoint)
@@ -83,6 +86,7 @@ export const requestConfiguredAiText = async (
       : `${endpoint}/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(preset.apiKey)}`;
     response = await fetch(responseUrl, {
       method: 'POST',
+      signal: options.signal,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: systemPrompt }] },
@@ -91,7 +95,7 @@ export const requestConfiguredAiText = async (
             role: message.role === 'assistant' ? 'model' : 'user',
             parts: [{ text: message.content }],
           })),
-          { role: 'user', parts: [{ text: userPrompt }] },
+          { role: 'user', parts: [{ text: userPrompt }, ...images.map(url => ({ inlineData: { mimeType: url.slice(5, url.indexOf(';')), data: url.slice(url.indexOf(',') + 1) } }))] },
         ],
         ...(options.json || options.temperature !== undefined || options.maxTokens !== undefined
           ? {
@@ -116,6 +120,7 @@ export const requestConfiguredAiText = async (
       : `${endpoint}/chat/completions`;
     response = await fetch(chatEndpoint, {
       method: 'POST',
+      signal: options.signal,
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${preset.apiKey}`,
@@ -125,7 +130,7 @@ export const requestConfiguredAiText = async (
         messages: [
           { role: 'system', content: systemPrompt },
           ...(options.history ?? []),
-          { role: 'user', content: userPrompt },
+          { role: 'user', content: images.length ? [{ type: 'text', text: userPrompt }, ...images.map(url => ({ type: 'image_url', image_url: { url } }))] : userPrompt },
         ],
         ...(options.json ? { response_format: { type: 'json_object' } } : {}),
         ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),

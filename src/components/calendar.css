@@ -1,0 +1,64 @@
+.calendar-app { color:#526a7e; background:radial-gradient(ellipse at 0 0,#f9e4ee,transparent 55%),radial-gradient(ellipse at 100% 25%,#dfeefb,transparent 58%),#f5f7fb; }
+.calendar-shell { display:flex; width:100%; height:100%; min-height:0; flex-direction:column; }
+.calendar-app-header { display:flex; flex-shrink:0; justify-content:space-between; align-items:center; padding:calc(env(safe-area-inset-top,0px) + 18px) 22px 16px; }
+.calendar-app-header p { color:#a18ea2; font-size:calc(10px * var(--font-scale,1)); letter-spacing:.12em; }
+.calendar-app-header h2 { margin-top:4px; color:#4b6478; font-size:calc(25px * var(--font-scale,1)); font-weight:650; letter-spacing:.06em; }
+.calendar-app-header button { background:#ffffff85; width:34px; height:34px; border:1px solid white; }
+.calendar-app-tabs { flex-shrink:0; margin:0 16px 16px; border:1px solid #ffffffb8; background:#ffffff5c; padding:5px; backdrop-filter:blur(20px); }
+.calendar-app-tabs button { padding:9px 3px; color:#8395a5; font-size:calc(11px * var(--font-scale,1)); }
+.calendar-app-tabs button.bg-white { color:#5f7d92; box-shadow:0 3px 12px #8fa0b01a; }
+.calendar-app-scroll { flex:1; min-height:0; overflow-y:auto; overscroll-behavior:contain; scrollbar-width:none; padding:0 16px calc(env(safe-area-inset-bottom,0px) + 24px); }
+.calendar-month-card { padding:19px 13px 15px; border-radius:25px; border:1px solid #fff; background:#ffffffb3; box-shadow:0 10px 30px -22px #8a9aab70; backdrop-filter:blur(20px); }
+.calendar-month-heading { margin-bottom:19px; }
+.calendar-month-heading > button:nth-child(2) { font-size:calc(15px * var(--font-scale,1)); font-weight:600; }
+.calendar-month-heading > button:not(:nth-child(2)) { background:#edf3f8; }
+.calendar-month-grid > span { padding-bottom:9px; color:#9aa9b8; }
+.calendar-month-grid > button { min-height:44px; }
+.calendar-month-grid > button > span:first-child { width:34px; height:34px; font-size:calc(13px * var(--font-scale,1)); }
+.calendar-month-grid > button[aria-pressed=true] > span:first-child { background:linear-gradient(140deg,#aacfe9,#eabdd3); box-shadow:0 3px 10px #bbcada55; }
+.calendar-agenda-heading { padding:9px 5px 3px; }
+.calendar-agenda-heading > p { font-size:calc(13px * var(--font-scale,1)); }
+.calendar-agenda > div { padding:13px 11px; border:1px solid #ffffffd9; background:#ffffffb0; border-radius:19px; }
+.calendar-agenda > p { background:#ffffff70; padding:24px 12px; border:1px dashed #cfdae5; border-radius:19px; }
+.calendar-app input,.calendar-app textarea { min-width:0; }
+.calendar-app :is(input,textarea,button):focus-visible { outline:2px solid #b7cee7; outline-offset:3px; }
+.calendar-weather { position:relative; overflow:hidden; border:1px solid #ffffffd9; border-radius:26px; padding:16px; background:radial-gradient(ellipse at 100% 0,#f9e1ddba,transparent 65%),linear-gradient(120deg,#dcecf7cf,#f3f3ffc7); box-shadow:0 9px 30px -24px #7d93ac90; backdrop-filter:blur(20px); }
+.calendar-weather > header { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.calendar-weather > header > button,.calendar-weather > header > div { display:flex; align-items:center; gap:5px; min-width:0; font-size:calc(11px * var(--font-scale,1)); }
+.calendar-weather > header > button span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.calendar-weather > header small { font-size:9px; opacity:.6; white-space:nowrap; }
+.calendar-weather > header button:disabled { opacity:.4; }
+.calendar-weather-now { display:flex; align-items:center; justify-content:space-between; padding:14px 10px 12px 3px; }
+.calendar-weather-now strong { font-size:64px; line-height:1.1; font-weight:300; letter-spacing:-4px; color:#536e89; }
+.calendar-weather-now sup { font-size:34px; top:-.5em; }
+.calendar-weather-now p { display:flex; gap:12px; margin-top:7px; font-size:12px; color:#647d93; }
+.calendar-weather-now p span { opacity:.65; }
+.calendar-weather-symbol { font-size:62px; filter:drop-shadow(0 10px 12px #839bb425); }
+.calendar-weather-details { display:flex; gap:8px; flex-wrap:wrap; font-size:9px; color:#8c9cae; padding-bottom:13px; }
+.calendar-forecast { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:3px; padding-top:13px; border-top:1px solid #ffffffa6; }
+.calendar-forecast > div { display:flex; min-width:0; flex-direction:column; align-items:center; gap:7px; text-align:center; }
+.calendar-forecast small { font-size:9px; color:#8a9aad; }
+.calendar-forecast span { font-size:20px; }
+.calendar-forecast strong { font-size:10px; font-weight:500; white-space:nowrap; }
+.calendar-forecast em { font-style:normal; opacity:.5; }
+.calendar-weather-empty { display:flex; align-items:center; justify-content:center; flex-direction:column; gap:10px; padding:20px 4px; color:#8a9eb2; font-size:11px; }
+.calendar-weather-empty > span { font-size:37px; }
+.calendar-weather-settings { display:grid; gap:10px; padding:13px 0 8px; border-top:1px solid #ffffffa0; }
+.calendar-weather-settings > label { display:flex; justify-content:space-between; align-items:center; font-size:11px; }
+.calendar-city-search { display:flex; gap:8px; }
+.calendar-city-search input { width:100%; border:1px solid #fff; border-radius:12px; background:#ffffff8c; padding:10px; font-size:12px; outline:none; }
+.calendar-city-search button { flex-shrink:0; padding:8px; background:#ffffff85; border-radius:11px; }
+.calendar-city-result { display:flex; gap:4px; flex-direction:column; border-radius:12px; background:#ffffff7a; padding:10px 12px; text-align:left; }
+.calendar-city-result strong { font-size:12px; font-weight:500; }
+.calendar-city-result small { color:#8e9aad; font-size:10px; }
+.calendar-locate { display:flex; gap:6px; align-items:center; justify-content:center; padding:10px; background:#ffffff8c; border-radius:12px; font-size:11px; }
+.calendar-weather-settings > p { font-size:10px; color:#99a7b4; line-height:1.7; }
+.calendar-location-clear { font-size:10px; color:#b58fa4; justify-self:end; }
+.calendar-weather-error { padding-top:8px; font-size:11px; color:#b48195; }
+.calendar-weather-credit { display:block; margin-top:12px; text-align:right; color:#9aa9b5; font-size:8px; }
+@media(prefers-color-scheme:dark) {
+  :root[data-follow-system-dark=true] .calendar-app { background:radial-gradient(ellipse at 0 0,#3b3040,transparent 60%),#1d2a34; color:#c5d1dd; }
+  :root[data-follow-system-dark=true] .calendar-app :is(.calendar-month-card,.calendar-app-tabs,.calendar-agenda > div,.calendar-weather) { background:#293c49d9; border-color:#455562; }
+  :root[data-follow-system-dark=true] .calendar-app :is(h2,.calendar-app-header p,button,p,.calendar-weather-now strong,.calendar-agenda-heading > p) { color:inherit; }
+  :root[data-follow-system-dark=true] .calendar-app :is(.bg-white,.bg-white\/70,.bg-slate-50,.bg-slate-100\/80,.calendar-city-result,.calendar-locate,.calendar-city-search input) { background-color:#344753; color:#c5d1dd; border-color:#4a5d6b; }
+}

@@ -31,6 +31,7 @@ import { readStoredValue } from '../utils/localStorage';
 import { useWidgetAppearance } from '../utils/widgetAppearance';
 import { CALENDAR_APPEARANCE_KEY } from '../utils/homeAppearance';
 import { WidgetImagePicker } from './WidgetImagePicker';
+import { CalendarWeather } from './CalendarWeather';
 
 interface CalendarContact {
   id: string;
@@ -103,12 +104,12 @@ const emptyForm = (date: string): EntryForm => ({
   time: '',
 });
 
-export const CalendarWidget: React.FC = () => {
+export const CalendarWidget: React.FC<{ fullScreen?: boolean; onOpen?: () => void; onClose?: () => void }> = ({ fullScreen = false, onOpen, onClose }) => {
   const [data, setData] = useState<CalendarData>(readCalendarData);
   const dataRef = useRef(data);
   const { appearance, patch: patchAppearance } = useWidgetAppearance(CALENDAR_APPEARANCE_KEY);
   const [todayKey, setTodayKey] = useState(() => toDateKey(new Date()));
-  const [panelOpen, setPanelOpen] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(fullScreen);
   const [tab, setTab] = useState<PanelTab>('calendar');
   const [selectedDate, setSelectedDate] = useState(todayKey);
   const [viewMonth, setViewMonth] = useState(() => {
@@ -145,6 +146,7 @@ export const CalendarWidget: React.FC = () => {
   };
 
   const openPanel = () => {
+    if (onOpen) { onOpen(); return; }
     setTab('calendar');
     setSelectedDate(todayKey);
     setViewMonth({ year: today.getFullYear(), month: today.getMonth() });
@@ -312,7 +314,7 @@ export const CalendarWidget: React.FC = () => {
 
   return (
     <>
-      <div
+      {!fullScreen && <div
         role="button"
         tabIndex={0}
         onClick={openPanel}
@@ -340,7 +342,7 @@ export const CalendarWidget: React.FC = () => {
             {appearance.note}
           </p>
         )}
-      </div>
+      </div>}
 
       <input
         ref={importInputRef}
@@ -355,24 +357,24 @@ export const CalendarWidget: React.FC = () => {
 
       {panelOpen && (
         <div
-          className="absolute inset-0 z-50 flex items-center justify-center bg-slate-900/30 backdrop-blur-xs p-4"
+          className="calendar-app absolute inset-0 z-50 flex flex-col"
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) setPanelOpen(false);
           }}
         >
-          <div className="w-full max-w-sm max-h-[90%] overflow-y-auto rounded-3xl bg-white/90 backdrop-blur-2xl border border-white p-4 shadow-2xl space-y-3 text-slate-700">
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-extrabold text-[#2C4A5C]">日历</h2>
+          <div role="dialog" aria-modal="true" aria-label="日历" className="calendar-shell">
+            <div className="calendar-app-header">
+              <div><p>{today.getFullYear()} · 生活手记</p><h2>日历</h2></div>
               <button
-                aria-label="关闭"
-                onClick={() => setPanelOpen(false)}
+                aria-label="关闭日历"
+                onClick={() => { if (onClose) onClose(); else setPanelOpen(false); }}
                 className="w-7 h-7 rounded-full flex items-center justify-center text-slate-500 bg-slate-100 hover:bg-slate-200 cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="grid grid-cols-4 gap-1 rounded-2xl bg-slate-100/80 p-1">
+            <div className="calendar-app-tabs grid grid-cols-4 gap-1 rounded-2xl bg-slate-100/80 p-1">
               {([['calendar', '日程'], ['characters', '角色'], ['appearance', '编辑'], ['data', '数据']] as const).map(([id, label]) => (
                 <button
                   key={id}
@@ -386,10 +388,12 @@ export const CalendarWidget: React.FC = () => {
                 </button>
               ))}
             </div>
-
+            <div className="calendar-app-scroll">
             {tab === 'calendar' && (
               <div className="space-y-3">
-                <div className="flex items-center justify-between">
+                <CalendarWeather />
+                <section className="calendar-month-card">
+                <div className="calendar-month-heading flex items-center justify-between">
                   <button
                     type="button"
                     aria-label="上个月"
@@ -418,7 +422,7 @@ export const CalendarWidget: React.FC = () => {
                   </button>
                 </div>
 
-                <div className="grid grid-cols-7 gap-y-1 text-center">
+                <div className="calendar-month-grid grid grid-cols-7 gap-y-1 text-center">
                   {WEEKDAY_INITIALS.map((label) => (
                     <span key={label} className="text-[10px] font-semibold text-slate-400">{label}</span>
                   ))}
@@ -434,6 +438,7 @@ export const CalendarWidget: React.FC = () => {
                         type="button"
                         onClick={() => selectDate(key)}
                         aria-label={`${viewMonth.month + 1}月${day}日`}
+                        aria-pressed={isSelected}
                         className="flex flex-col items-center gap-0.5 py-0.5 cursor-pointer"
                       >
                         <span
@@ -456,8 +461,8 @@ export const CalendarWidget: React.FC = () => {
                     );
                   })}
                 </div>
-
-                <div className="flex items-center justify-between">
+                </section>
+                <div className="calendar-agenda-heading flex items-center justify-between">
                   <p className="text-xs font-extrabold text-[#2C4A5C]">
                     {selectedDate.slice(5).replace('-', '月')}日 {weekdayLabel(selectedDate)}
                     {selectedDate === todayKey && <span className="ml-1.5 text-[10px] text-pink-400">今天</span>}
@@ -553,7 +558,7 @@ export const CalendarWidget: React.FC = () => {
                   </div>
                 )}
 
-                <div className="space-y-1.5">
+                <div className="calendar-agenda space-y-1.5">
                   {selectedEntries.length === 0 && (
                     <p className="rounded-xl bg-slate-50 px-3 py-3 text-center text-[11px] text-slate-400">这一天还没有安排</p>
                   )}
@@ -771,6 +776,7 @@ export const CalendarWidget: React.FC = () => {
 
             {message && <p className="text-center text-[11px] font-bold text-emerald-600">{message}</p>}
             {error && <p role="alert" className="whitespace-pre-line text-[11px] font-bold text-rose-500">{error}</p>}
+            </div>
           </div>
         </div>
       )}

@@ -16,6 +16,7 @@ import { readSetting, saveSetting, SETTINGS_KEYS } from './utils/settings';
 import { StatusBar } from './components/StatusBar';
 import { LockScreen } from './components/LockScreen';
 import { HomeScreen } from './components/HomeScreen';
+import { CalendarWidget as CalendarApp } from './components/CalendarWidget';
 import { LittlePPanel } from './components/LittlePPanel';
 import { LITTLE_P_VISIBLE_KEY } from './utils/littleP';
 import { processPomodoroDeadline } from './utils/pomodoroRuntime';
@@ -79,6 +80,7 @@ const isBeautySettings = (value: unknown): value is BeautySettings => {
   const settings = value as Partial<BeautySettings>;
   return (
     typeof settings.themeId === 'string' &&
+    (settings.homeStyle === undefined || settings.homeStyle === 'classic' || settings.homeStyle === 'minimal') &&
     typeof settings.wallpaperId === 'string' &&
     !!settings.wallpapers &&
     typeof settings.wallpapers.lockScreen === 'string' &&
@@ -604,13 +606,14 @@ export default function App() {
       */}
       <div
         onPointerDown={handleEmergencyTap}
+        data-home-style={!activeApp && !isLocked ? beautySettings.homeStyle : undefined}
         className={`w-full md:w-[min(412px,calc(93vh*9/19.5))] h-full md:h-[min(850px,93vh)] md:rounded-[44px] overflow-hidden relative flex flex-col shadow-[0_25px_80px_rgba(0,0,0,0.7),0_0_0_1px_rgba(255,255,255,0.14)] transition-all ${
           activeApp || isLocked
             ? 'p-0'
             : 'pt-[max(env(safe-area-inset-top,0px),0px)] pb-0'
         }`}
         style={
-          beautySettings.wallpapers.homeScreen
+          !activeApp && !isLocked && beautySettings.homeStyle === 'minimal' ? { background: '#f4f2ee' } : beautySettings.wallpapers.homeScreen
             ? {
                 backgroundImage: `url("${beautySettings.wallpapers.homeScreen}")`,
                 backgroundSize: 'cover',
@@ -620,14 +623,14 @@ export default function App() {
         }
       >
         {/* Dynamic theme backdrop wash */}
-        {!beautySettings.wallpapers.homeScreen && (
+        {!beautySettings.wallpapers.homeScreen && (activeApp || isLocked || beautySettings.homeStyle !== 'minimal') && (
           <div
             className={`absolute inset-0 bg-gradient-to-b ${currentTheme.gradient} opacity-90 pointer-events-none transition-all duration-700`}
           />
         )}
 
         {/* Ambient aesthetic glow patches */}
-        {!beautySettings.wallpapers.homeScreen && (
+        {!beautySettings.wallpapers.homeScreen && (activeApp || isLocked || beautySettings.homeStyle !== 'minimal') && (
           <>
             <div className="absolute -top-32 -right-32 w-80 h-80 rounded-full bg-[#DFF1FA] blur-3xl pointer-events-none opacity-70" />
             <div className="absolute top-1/2 -left-32 w-80 h-80 rounded-full bg-[#FAD4E0] blur-3xl pointer-events-none opacity-50" />
@@ -721,6 +724,7 @@ export default function App() {
               {activeApp === 'memory' && (
                 <MemoryApp onBack={handleBackToHome} />
               )}
+              {activeApp === 'calendar' && <CalendarApp fullScreen onClose={handleBackToHome} />}
               {activeApp === 'inventory' && (
                 <InventoryApp onBack={handleBackToHome} />
               )}
@@ -729,6 +733,7 @@ export default function App() {
           ) : (
             /* Desktop / Home Screen (Strictly fitted within 1 screen, never scrolls, square blocks) */
             <HomeScreen
+              homeStyle={beautySettings.homeStyle}
               userProfile={userProfile}
               apps={MAIN_GRID_APPS}
               dockApps={DOCK_APPS}

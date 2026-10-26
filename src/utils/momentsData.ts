@@ -157,6 +157,7 @@ export const readMoments = (): MomentPost[] => {
 };
 
 const listeners = new Set<() => void>();
+export const notifyMomentsChanged = () => listeners.forEach((listener) => listener());
 
 export const subscribeMoments = (listener: () => void) => {
   listeners.add(listener);
@@ -169,7 +170,7 @@ export const subscribeMoments = (listener: () => void) => {
 export const updateMoments = (updater: (posts: MomentPost[]) => MomentPost[]) => {
   const next = updater(readMoments());
   writeStoredValue(MOMENTS_STORAGE_KEY, next);
-  listeners.forEach((listener) => listener());
+  notifyMomentsChanged();
   return next;
 };
 

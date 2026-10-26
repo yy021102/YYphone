@@ -6,7 +6,7 @@ import { readAlipayData } from '../utils/alipayData';
 export type LiveGift = { id: string; senderId: string; senderName: string; giftId: string; amount?: number; createdAt: number };
 export type LiveBackground = { presetId: string; imageUrl: string };
 export type LiveRoomState = { viewers: number; hearts: number; scene?: string; gifts: LiveGift[]; background?: LiveBackground;
-  invitedRoleIds?: string[]; participantIds?: string[]; audience?: { min: number; max: number }; atmosphere?: string };
+  invitedRoleIds?: string[]; participantIds?: string[]; audience?: { min: number; max: number }; atmosphere?: string; hostActions?: string[] };
 export const LIVE_GIFTS = [
   { id: 'flower', name: '小花', emoji: '🌷', price: 1 },
   { id: 'tea', name: '热茶', emoji: '🍵', price: 2 },
@@ -35,6 +35,7 @@ type LiveItem = {
   text: string;
   time: number;
   replies: string[];
+  replyAuthorIds?: string[];
   ended?: boolean;
   live?: LiveRoomState;
 };
@@ -51,7 +52,8 @@ type Props = {
   onAdvance: () => void;
   onGift: (giftId: string) => string | null;
   onBackgroundChange: (background: LiveBackground) => void;
-  onLike: () => void;
+  onLike: (amount?: number) => void;
+  onAction?: (text: string) => void;
   onEnd: () => void;
 };
 
@@ -60,8 +62,11 @@ const splitLine = (line: string) => {
   return divider < 0 ? { name: '现场', text: line } : { name: line.slice(0, divider), text: line.slice(divider + 1) };
 };
 
-export function ChannelsLiveRoom({ room, me, busy, error, following, onBack, onFollow, onSend, onAdvance, onGift, onBackgroundChange, onLike, onEnd }: Props) {
+export function ChannelsLiveRoom({ room, me, busy, error, following, onBack, onFollow, onSend, onAdvance, onGift, onBackgroundChange, onLike, onAction, onEnd }: Props) {
   const [draft, setDraft] = useState('');
+  const [action, setAction] = useState('');
+  const likeCallback = useRef(onLike);
+  likeCallback.current = onLike;
   const [giftOpen, setGiftOpen] = useState(false);
   const [backgroundOpen, setBackgroundOpen] = useState(false);
   const [backgroundUrl, setBackgroundUrl] = useState(() => room.live?.background?.imageUrl.startsWith('data:') ? '' : room.live?.background?.imageUrl ?? '');
@@ -76,6 +81,17 @@ export function ChannelsLiveRoom({ room, me, busy, error, following, onBack, onF
   const lastGiftId = useRef(room.live?.gifts.at(-1)?.id);
   const chatRef = useRef<HTMLDivElement>(null);
   const pulseRef = useRef(0);
+  useEffect(() => {
+    if (room.ended) return;
+    const timer = window.setInterval(() => {
+      if (document.hidden || !(room.live?.viewers ?? 0)) return;
+      const count = Math.max(1, Math.min(200, Math.ceil((room.live?.viewers ?? 1) * .008 * Math.random())));
+      likeCallback.current(count);
+      const id = ++pulseRef.current;
+      setHearts(current => [...current.slice(-3), { id, left: 87 + Math.random() * 7 }]);
+    }, 2400);
+    return () => window.clearInterval(timer);
+  }, [room.id, room.ended, room.live?.viewers]);
 
   useEffect(() => {
     if (room.ended) return;
@@ -108,8 +124,11 @@ export function ChannelsLiveRoom({ room, me, busy, error, following, onBack, onF
   const live = room.live;
   const viewers = room.ended ? live?.viewers ?? 0 : Math.max(live?.audience?.min ?? 0,
     Math.min(live?.audience?.max ?? Infinity, (live?.viewers ?? 1) + viewerShift));
-  const recent = room.replies.slice(-60);
-  const moving = room.replies.length ? splitLine(room.replies[(ticker + room.replies.length - 1) % room.replies.length]) : null;
+  const isHost = (line: string, index: number) => room.replyAuthorIds?.[index] ? room.replyAuthorIds[index] === room.author.id : splitLine(line).name === room.author.name;
+  const audienceLines = room.replies.filter((line, index) => !isHost(line, index));
+  const hostLines = room.replies.filter(isHost);
+  const recent = audienceLines.slice(-60);
+  const moving = audienceLines.length ? splitLine(audienceLines[(ticker + audienceLines.length - 1) % audienceLines.length]) : null;
   const gift = giftBurst ? LIVE_GIFTS.find((item) => item.id === giftBurst.giftId) : undefined;
   const background = live?.background;
   const backgroundPreset = LIVE_BACKGROUNDS.find((item) => item.id === background?.presetId) ?? LIVE_BACKGROUNDS[0];
@@ -143,7 +162,7 @@ export function ChannelsLiveRoom({ room, me, busy, error, following, onBack, onF
   const like = () => {
     onLike();
     const id = ++pulseRef.current;
-    setHearts((current) => [...current, { id, left: 12 + Math.random() * 44 }]);
+    setHearts((current) => [...current.slice(-4), { id, left: 87 + Math.random() * 7 }]);
     window.setTimeout(() => setHearts((current) => current.filter((item) => item.id !== id)), 1500);
   };
 
@@ -181,12 +200,17 @@ export function ChannelsLiveRoom({ room, me, busy, error, following, onBack, onF
         {moving && !room.ended && <div key={ticker} className="channel-barrage absolute top-3 inline-flex max-w-max items-center gap-1.5 whitespace-nowrap rounded-full border border-white/15 bg-black/35 px-3 py-1.5 text-[11px] text-white shadow-lg backdrop-blur" style={{ animation: 'channel-barrage 6s linear forwards' }}><span className="font-bold text-[#b0efd1]">{moving.name}</span>{moving.text.slice(0, 60)}</div>}
       </div>
 
-      <div className="pointer-events-none absolute inset-x-5 top-[31%] z-[2] text-center">
+      <div className="pointer-events-none absolute inset-x-5 top-[28%] z-[2] text-center">
         <Radio size={19} className="mx-auto mb-3 text-white/35" />
         <p className="text-[10px] font-bold tracking-[0.3em] text-white/45">LIVE MOMENT</p>
-        <h2 className="mx-auto mt-3 max-w-[290px] whitespace-pre-wrap break-words text-[20px] font-semibold leading-8 text-white drop-shadow-lg">{live?.scene || room.text}</h2>
+        <h2 className="mx-auto mt-3 line-clamp-3 max-w-[290px] whitespace-pre-wrap break-words text-[16px] font-semibold leading-6 text-white drop-shadow-lg">{live?.scene || room.text}</h2>
         {live?.scene && <p className="mt-3 line-clamp-2 text-[11px] text-white/50">{room.text}</p>}
       </div>
+      <section aria-label="主播动态" className="absolute inset-x-4 top-[46%] z-10 max-h-[19%] overflow-y-auto rounded-2xl border border-white/20 bg-black/35 p-3 text-xs backdrop-blur-md">
+        <strong className="text-[#f4d3a4]">主播 · {room.author.name}</strong>
+        {(live?.hostActions ?? []).slice(-2).map((text, i) => <p key={`action-${i}`} className="mt-1 italic text-white/65">{text}</p>)}
+        {hostLines.slice(-3).map((line, i) => <p key={i} className="mt-1 whitespace-pre-wrap text-white">{splitLine(line).text}</p>)}
+      </section>
 
       {giftBurst && gift && <div key={giftBurst.id} className="channel-gift pointer-events-none absolute inset-x-5 top-[42%] z-30 flex flex-col items-center text-center" style={{ animation: 'channel-gift 2.6s ease-out forwards' }}><span className="text-6xl drop-shadow-[0_12px_28px_rgba(255,219,112,.5)]">{gift.emoji}</span><span className="mt-2 rounded-full bg-black/55 px-4 py-2 text-xs font-bold backdrop-blur">{giftBurst.senderName} 送出 {gift.name} · ¥{giftBurst.amount ?? gift.price}{room.author.id === 'self' ? ' 已入账' : ''}</span></div>}
       {hearts.map((heart) => <Heart key={heart.id} size={27} fill="#ff688c" className="channel-heart pointer-events-none absolute bottom-[90px] z-20 text-[#ff688c] drop-shadow-lg" style={{ left: `${heart.left}%`, animation: 'channel-float 1.5s ease-out forwards' }} />)}
@@ -202,6 +226,7 @@ export function ChannelsLiveRoom({ room, me, busy, error, following, onBack, onF
 
     <div className="z-20 shrink-0 border-t border-white/10 bg-[#0a1513] px-3 pb-[calc(env(safe-area-inset-bottom,0px)+10px)] pt-2.5">
       {room.ended ? <div className="flex items-center justify-between px-2 py-2 text-xs text-white/60"><span>直播已结束</span><button type="button" onClick={onBack} className="rounded-full bg-white/10 px-3 py-1.5 text-white">返回</button></div> : <>
+        {room.author.id === 'self' && <div className="mb-2 flex gap-2"><input aria-label="主播行为" value={action} maxLength={1000} onChange={e => setAction(e.target.value)} placeholder="写下动作…" className="h-9 min-w-0 flex-1 rounded-xl bg-white/10 px-3 text-xs" /><button type="button" disabled={!action.trim()} onClick={() => { onAction?.(action.trim()); setAction(''); }} className="rounded-xl bg-white/10 px-3 text-xs disabled:opacity-40">记录动作</button></div>}
         <div className="flex items-center gap-2">
           <input aria-label="发送直播弹幕" value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); send(); } }} maxLength={300} placeholder="说点什么…" className="h-10 min-w-0 flex-1 rounded-full border border-white/10 bg-white/10 px-4 text-xs text-white outline-none placeholder:text-white/45 focus:border-white/35" />
           <button type="button" aria-label="发送弹幕" disabled={!draft.trim()} onClick={send} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white text-[#275544] disabled:opacity-40"><Send size={15} /></button>

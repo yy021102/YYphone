@@ -86,6 +86,9 @@ import { readStorageString, readStoredValue, writeStorageString, writeStoredValu
 import { readSetting, saveSetting, SETTINGS_KEYS } from '../utils/settings';
 import { compressChatPhoto, compressImageFile, compressWallpaper } from '../utils/imageFile';
 import { buildPrompt } from '../utils/buildPrompt';
+import { PhoneInspection } from '../components/PhoneInspection';
+import { runMcpDecision } from '../utils/mcpTools';
+import { refreshWeather } from '../utils/weatherData';
 import { buildGroupPrivateContext } from '../utils/chatHistory';
 import { deleteGroupJournal, invalidateGroupJournal, maybeAutoGroupJournal } from '../utils/groupJournal';
 import { GroupJournalPanel } from '../components/GroupJournalPanel';
@@ -124,7 +127,7 @@ import {
 } from '../utils/coupleSpaceData';
 import { applyPlantSeenAfterChat, buildPlantInjection, PlantInjection } from '../utils/plantData';
 import { buildMemoryInjection, markMemoriesRecalled } from '../utils/memoryData';
-import { deleteCharacterMemoryArchives, deleteMemoryArchive, invalidateMemoryArchive, prepareMemoryArchiveSwitch } from '../utils/memoryArchives';
+import { activeMemoryArchive, deleteCharacterMemoryArchives, deleteMemoryArchive, invalidateMemoryArchive, prepareMemoryArchiveSwitch } from '../utils/memoryArchives';
 import { maybeAutoExtractMemory } from '../utils/memoryAi';
 import { maybeAutoGrowth, maybeAutoJournal } from '../utils/journalAi';
 import { addInventoryItem } from '../utils/inventoryData';
@@ -478,6 +481,8 @@ interface ChatConversation {
   timeAwarenessEnabled?: boolean;
   timeZone?: string;
   imageGenerationEnabled?: boolean;
+  mcpEnabled?: boolean;
+  weatherAwarenessEnabled?: boolean;
   imageGenerationPrompt?: string;
   imageGenerationReferenceImage?: string;
   imageGenerationReferenceSimilarity?: number;
@@ -710,6 +715,8 @@ export const isStrictChatList = (value: unknown): value is ChatConversation[] =>
       (chat.timeAwarenessEnabled === undefined || typeof chat.timeAwarenessEnabled === 'boolean') &&
       (chat.timeZone === undefined || typeof chat.timeZone === 'string') &&
       (chat.imageGenerationEnabled === undefined || typeof chat.imageGenerationEnabled === 'boolean') &&
+      (chat.mcpEnabled === undefined || typeof chat.mcpEnabled === 'boolean') &&
+      (chat.weatherAwarenessEnabled === undefined || typeof chat.weatherAwarenessEnabled === 'boolean') &&
       (chat.imageGenerationPrompt === undefined || typeof chat.imageGenerationPrompt === 'string') &&
       (chat.imageGenerationReferenceImage === undefined || chat.imageGenerationReferenceImage === '' || isImageReference(chat.imageGenerationReferenceImage)) &&
       (chat.imageGenerationReferenceSimilarity === undefined || (typeof chat.imageGenerationReferenceSimilarity === 'number' && Number.isFinite(chat.imageGenerationReferenceSimilarity) && chat.imageGenerationReferenceSimilarity >= 0 && chat.imageGenerationReferenceSimilarity <= 1)) &&
@@ -1034,6 +1041,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
     return () => window.clearInterval(timer);
   }, []);
   const [chatSettingsOpen, setChatSettingsOpen] = useState(false);
+  const [mcpStatus, setMcpStatus] = useState<{ chatId: string; text: string } | null>(null);
   const [chatSettingsDraft, setChatSettingsDraft] = useState<ChatConversation | null>(null);
   const [imageReferenceBusy, setImageReferenceBusy] = useState(false);
   const [tokenPreview, setTokenPreview] = useState<{ chatId: string; input: number } | null>(null);
@@ -1129,6 +1137,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
   const lastAvatarTapRef = useRef<{ id: string; time: number }>({ id: '', time: 0 });
   const avatarTapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [archiveOpen, setArchiveOpen] = useState(false);
+  const [inspection, setInspection] = useState<{ chatId: string; charId: string; actorName: string; avatarUrl?: string } | null>(null);
   const [archiveNameDraft, setArchiveNameDraft] = useState('');
   const [renamingArchive, setRenamingArchive] = useState<{ id: string; name: string } | null>(null);
 
@@ -3289,6 +3298,9 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
     }
     try {
       const currentInput = proactive ? '' : [...chat.messages].reverse().find((message) => message.senderId === 'user')?.text ?? '';
+      if (!previewOnly && chat.type === 'direct' && chat.weatherAwarenessEnabled) {
+        try { await refreshWeather(); } catch { /* Weather failure must not interrupt conversation. */ }
+      }
       const replyRange = getReplyMessageRange(chat);
       const targetReplyCount = activeCallMode
         ? 1
@@ -3425,6 +3437,13 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         role: 'user',
         content: `【定时主动联系】这不是玩家新发来的消息。请根据人设、${chat.timeAwarenessEnabled === false ? '已有聊天' : '当前时间与已有聊天'}主动联系玩家，聊一个自然的新话题或关心近况。不要假装玩家刚说过话，不要机械重复上一轮回复，不要提定时器或后台任务。`,
       });
+      if (!previewOnly && chat.type === 'direct' && apiPreset) {
+        setMcpStatus(null);
+        const mcp = await runMcpDecision({ allowed: chat.mcpEnabled === true, query: currentInput,
+          history: chat.messages.filter(m => m.senderId === 'user' || chat.participantIds.includes(m.senderId)).slice(-8).map(m => ({ from: m.senderId === 'user' ? '玩家' : '角色', text: m.text })), mainApi: apiPreset });
+        if (mcp.context) promptMessages.splice(Math.max(0, promptMessages.length - 1), 0, { role: 'system', content: mcp.context });
+        if (mcp.status && mcp.status !== 'MCP：本轮无需查询。') setMcpStatus({ chatId: chat.id, text: mcp.status });
+      }
       const requestMessages = withChatResponseFormat(promptMessages, responseInstructions);
       const estimatedInput = estimatePromptTokens(requestMessages);
       if (previewOnly) {
@@ -4059,7 +4078,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
 
   useEffect(() => {
     scheduledTick.current = async () => {
-      if (generationRunning.current || activeCallMode ||
+      if (generationRunning.current || activeCallMode || inspection ||
         (document.visibilityState !== 'visible' && !runtimeSettings.keepAlive)) return;
       const run = async () => {
         const latest = readStoredValue(CHATS_STORAGE_KEY, chats, isChatList);
@@ -5109,6 +5128,12 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                         setComposerOpen(false);
                         setArchiveOpen(true);
                       } },
+                      ...(activeChat.type === 'direct' && activeChat.participantIds.length === 1 ? [{ page: 1, title: '反查手机', icon: Search, run: () => {
+                        if (generationRunning.current) { setChatError('等这轮回复结束后再把手机交给角色。'); return; }
+                        const actor = contacts.find(c => c.id === activeChat.participantIds[0]);
+                        if (!actor) { setChatError('请先在通讯录中创建这个角色。'); return; }
+                        setComposerOpen(false); setInspection({ chatId: activeChat.id, charId: actor.id, actorName: actor.name, avatarUrl: actor.avatarUrl });
+                      } }] : []),
                     ]).filter((item) => item.page === composerPage).map(({ title, icon: Icon, run }) => (
                       <button key={title} type="button" onClick={run} className="flex flex-col items-center gap-1.5 text-[10px] text-slate-600">
                         <span className="yy-chat-attachment-icon flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-pink-50 to-sky-50 text-[#6F8CA0] shadow-sm">
@@ -5158,6 +5183,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                 event.currentTarget.value = '';
               }}
             />
+            {mcpStatus?.chatId === activeChat.id && <p role="status" className="px-3 pb-1 text-center text-[10px] text-slate-400">{mcpStatus.text}</p>}
             {chatError && <p role="alert" className="px-3 pb-2 text-center text-[11px] text-rose-600">{chatError}</p>}
           </div>
         )}
@@ -6736,6 +6762,18 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
             {chatSettingsDraft.type === 'direct' && (
               <section style={{ order: 6 }} className="space-y-2 rounded-2xl border border-sky-100 bg-sky-50/60 p-3">
                 <label className="flex items-center justify-between gap-3 text-xs text-slate-600">
+                  感知当地天气
+                  <input type="checkbox" aria-label="感知当地天气" checked={chatSettingsDraft.weatherAwarenessEnabled === true}
+                    onChange={event => setChatSettingsDraft({ ...chatSettingsDraft, weatherAwarenessEnabled: event.target.checked })} />
+                </label>
+                <p className="text-[10px] text-slate-400">参考日历中选择的城市和天气，不共享精确坐标。</p>
+                <label className="flex items-center justify-between gap-3 text-xs text-slate-600">
+                  启用 MCP 功能
+                  <input type="checkbox" aria-label="启用 MCP 功能" checked={chatSettingsDraft.mcpEnabled === true}
+                    onChange={event => setChatSettingsDraft({ ...chatSettingsDraft, mcpEnabled: event.target.checked })} />
+                </label>
+                <p className="text-[10px] text-slate-400">按需联网查询。工具和决策副 API 在系统设置中配置。</p>
+                <label className="flex items-center justify-between gap-3 text-xs text-slate-600">
                   允许角色主动打电话
                   <input type="checkbox" aria-label="允许角色主动打电话" checked={chatSettingsDraft.allowIncomingCalls ?? runtimeSettings.allowIncomingCalls}
                     onChange={event => setChatSettingsDraft({ ...chatSettingsDraft, allowIncomingCalls: event.target.checked })} />
@@ -8238,6 +8276,12 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         </div>
       )}
       {/* WeChat Bottom Sub-Tab Bar */}
+      {inspection && <PhoneInspection {...inspection} userName={personaNickname} userAvatarUrl={personaDraft.avatarUrl} onChanged={() => setChats(readStoredValue(CHATS_STORAGE_KEY, [], isChatList))} onClose={() => { setChats(readStoredValue(CHATS_STORAGE_KEY, [], isChatList)); setInspection(null); }} onFinished={(text, archiveKey, sessionId) => {
+        if (activeMemoryArchive(inspection.charId) !== archiveKey) return;
+        updateChat(inspection.chatId, current => current.messages.some(m => m.id === `inspection-note:${sessionId}`) ? current : ({ ...current, updatedAt: new Date().toISOString(), messages: [...current.messages, {
+          id: `inspection-note:${sessionId}`, senderId: 'narrator', kind: 'context-note', title: '反查手机', text, aiContext: text, createdAt: new Date().toISOString(),
+        }] }));
+      }} />}
       {favoriteNotice && <div role="status" className="pointer-events-none absolute inset-x-6 top-[calc(env(safe-area-inset-top,0px)+60px)] z-[90] mx-auto w-fit max-w-[85%] rounded-lg bg-[#333]/90 px-4 py-2 text-center text-sm text-white shadow-lg">{favoriteNotice}</div>}
       {!activeChat && !isDiscoverSubpage && !isMeSubpage && <div className="wechat-tab-bar border-t border-slate-100 bg-white px-2 pt-1 pb-3 flex items-center justify-around z-20 shrink-0 mt-auto">
         {([

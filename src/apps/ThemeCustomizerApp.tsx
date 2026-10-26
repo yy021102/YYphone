@@ -48,6 +48,7 @@ const isBeautySettings = (value: unknown): value is BeautySettings => {
   const settings = value as Partial<BeautySettings>;
   return (
     typeof settings.themeId === 'string' &&
+    (settings.homeStyle === undefined || settings.homeStyle === 'classic' || settings.homeStyle === 'minimal') &&
     THEMES.some((theme) => theme.id === settings.themeId) &&
     typeof settings.wallpaperId === 'string' &&
     (WALLPAPERS.some((wallpaper) => wallpaper.id === settings.wallpaperId) || settings.wallpaperId === 'deep-sea-frost') &&
@@ -75,7 +76,7 @@ const isBeautyPresetList = (value: unknown): value is BeautyPreset[] =>
   );
 
 // Retired wallpapers fall back without invalidating the rest of an old preset.
-const normalizeWallpaper = (settings: BeautySettings): BeautySettings =>
+export const normalizeWallpaper = (settings: BeautySettings): BeautySettings =>
   settings.wallpaperId === 'deep-sea-frost' ? { ...settings, wallpaperId: WALLPAPERS[0].id } : settings;
 
 export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
@@ -340,6 +341,8 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
             <span className="text-[10px] font-normal text-slate-400">一键切换</span>
             <ChevronDown size={13} className="shrink-0 text-slate-400 transition-transform group-open:rotate-180" />
           </summary>
+          <h3 className="mt-4 px-0.5 text-[11px] font-semibold text-[#2C4A5C]">主页面风格</h3>
+          <div className="mt-3 grid grid-cols-2 gap-2">{([{ id: 'classic', name: '清新 · 轻透', colors: ['#dcecf8', '#f3dce7'], description: '渐变毛玻璃 · 组件桌面' }, { id: 'minimal', name: '素简 · 纸白', colors: ['#f4f2ee', '#55544f'], description: '暖白与石墨 · 简约布局' }] as const).map(style => <button type="button" key={style.id} aria-pressed={(currentSettings.homeStyle ?? 'classic') === style.id} onClick={() => { if (onApplyPreset({ ...currentSettings, homeStyle: style.id })) { setStatus(`已应用主页面风格「${style.name}」。`); setError(''); } else setError('主页面风格保存失败。'); }} className={`rounded-xl border p-3 text-left ${(currentSettings.homeStyle ?? 'classic') === style.id ? 'border-slate-400 ring-1 ring-slate-300' : 'border-white bg-white/50'}`}><div className="mb-3 flex h-16 items-center justify-center gap-1 rounded-lg" style={{ background: style.colors[0] }}>{[0, 1, 2, 3].map(i => <span key={i} className="h-5 w-5 rounded-md border border-white/80" style={{ background: style.colors[1], opacity: .4 + i * .15 }} />)}</div><strong className="block text-[11px] font-semibold text-slate-600">{style.name}</strong><span className="mt-1 block text-[9px] text-slate-400">{style.description}</span></button>)}</div>
           <h3 className="mt-4 px-0.5 text-[11px] font-semibold text-[#2C4A5C]">系统主题配色</h3>
           <div className="mt-3 grid grid-cols-3 gap-2">
             {THEMES.map((theme) => {

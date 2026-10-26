@@ -23,6 +23,7 @@ import {
   X,
   BookOpen,
   Star,
+  ShoppingBag,
 } from 'lucide-react';
 import { readAlipayContacts, AlipayContact } from '../utils/alipayData';
 import { showYyError } from '../components/ErrorDialog';
@@ -51,7 +52,7 @@ const getCharAvatar = (charObj: unknown): string => {
   return '';
 };
 
-type SubAppKey = 'home' | 'wechat' | 'album' | 'browser' | 'notes' | 'icity' | 'agent' | 'wallet' | 'maps' | 'health' | 'douban';
+type SubAppKey = 'home' | 'wechat' | 'album' | 'browser' | 'notes' | 'icity' | 'agent' | 'wallet' | 'maps' | 'health' | 'douban' | 'shopping';
 
 const scopeForApp = (app: SubAppKey): 'all' | PhoneGenScope =>
   app === 'home' ? 'all' : app === 'maps' ? 'album' : app;
@@ -132,6 +133,7 @@ export interface PhoneAgentSession {
   claudeTurns: PhoneAgentTurn[];
 }
 
+export interface PhoneShoppingItem { id: string; name: string; category: string; price: number; emoji: string; variant: string; note: string }
 export interface CharacterPhoneData {
   charId: string;
   wallpaperUrl: string;
@@ -145,6 +147,7 @@ export interface CharacterPhoneData {
   wallet?: PhoneWallet;
   health?: PhoneHealth;
   ratings?: PhoneRatingItem[];
+  shoppingCart?: PhoneShoppingItem[];
 }
 
 const readRealUserMessagesForChar = (
@@ -212,6 +215,7 @@ const createDefaultPhoneData = (charId: string, _charName: string): CharacterPho
   browserHistory: [],
   notes: [],
   icityDiaries: [],
+  shoppingCart: [],
   agentSession: { doubaoTopic: '', doubaoTurns: [], claudeTopic: '', claudeTurns: [] },
 });
 
@@ -418,6 +422,11 @@ export const CheckPhoneApp: React.FC<CheckPhoneAppProps> = ({ onBack }) => {
             .map((d) => `${d.dateStr} ${d.timeStr}｜${d.weather}｜${d.mood}\n${d.content}`)
             .join('\n\n'),
         };
+      case 'shopping': {
+        const items = currentPhone.shoppingCart ?? [];
+        if (!items.length) return null;
+        return { appLabel: '购物车', summary: items.map(item => item.name).join('、'), detail: items.map(item => `${item.name}｜¥${formatMoney(item.price)}｜${item.variant}\n加购备注：${item.note}`).join('\n\n') };
+      }
       case 'agent': {
         const isDoubao = agentTab === 'doubao';
         const session = currentPhone.agentSession;
@@ -469,7 +478,7 @@ export const CheckPhoneApp: React.FC<CheckPhoneAppProps> = ({ onBack }) => {
     }
   };
 
-  const SHAREABLE_APPS: SubAppKey[] = ['wechat', 'album', 'browser', 'notes', 'icity', 'agent', 'wallet', 'health', 'douban'];
+  const SHAREABLE_APPS: SubAppKey[] = ['wechat', 'album', 'browser', 'notes', 'icity', 'agent', 'wallet', 'health', 'douban', 'shopping'];
   const shareButton = SHAREABLE_APPS.includes(activeSubApp) ? (
     <button
       type="button"
@@ -679,6 +688,7 @@ export const CheckPhoneApp: React.FC<CheckPhoneAppProps> = ({ onBack }) => {
                   bg: '#E5EEE5',
                   color: '#4D795A',
                 },
+                { key: 'shopping', label: '购物', icon: ShoppingBag, bg: '#F2E5DC', color: '#A47C66' },
               ].map((app) => {
                 const IconComp = app.icon;
                 return (
@@ -1005,6 +1015,8 @@ export const CheckPhoneApp: React.FC<CheckPhoneAppProps> = ({ onBack }) => {
           ))}
         </div>
       )}
+
+      {activeSubApp === 'shopping' && <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar p-4 pb-20 space-y-3"><div className="px-1 py-2"><h3 className="text-lg font-semibold text-[#826b62]">购物车</h3><p className="text-[11px] text-slate-400 mt-1">{currentChar.name}留在购物车里的心动</p></div>{!(currentPhone.shoppingCart?.length) && <p className="py-10 text-center text-[11px] text-slate-400">购物车还是空的，点右上角 ✦ 生成</p>}{(currentPhone.shoppingCart ?? []).map(item => <article key={item.id} className="rounded-3xl border border-white bg-white/80 p-4 shadow-2xs"><div className="flex gap-3"><div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[#f6e8df] to-[#f0e6ed] text-4xl" aria-hidden="true">{item.emoji}</div><div className="min-w-0 flex-1"><span className="text-[10px] text-[#ad968b]">{item.category}</span><h4 className="text-sm font-semibold text-[#685c58] break-words">{item.name}</h4><p className="text-[10px] text-slate-400 mt-1 break-words">{item.variant}</p><p className="mt-2 text-sm font-semibold text-[#bc8b7f]">¥{formatMoney(item.price)}</p></div></div><p className="mt-3 rounded-xl bg-[#faf5f1] px-3 py-2 text-[11px] leading-relaxed text-[#9b8580] whitespace-pre-wrap break-words">{item.note}</p></article>)}</div>}
 
       {activeSubApp === 'icity' && (
         <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar p-4 space-y-3">

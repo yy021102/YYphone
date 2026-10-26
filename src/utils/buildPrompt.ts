@@ -6,6 +6,7 @@ import { CharacterNpc, getNpcByParticipantId, readCharacterNpcs } from './charac
 import { readStorageString } from './localStorage';
 import { buildListenTogetherContext } from './musicPlayback';
 import { buildCalendarContext } from './calendarData';
+import { buildWeatherContext } from './weatherData';
 import { buildMomentsInjection, MomentsInjection } from './momentsData';
 import { buildCoupleSpaceInjection, CoupleInjection } from './coupleSpaceData';
 import { buildPlantInjection, PlantInjection } from './plantData';
@@ -70,6 +71,7 @@ export interface PromptConversation {
   currentChatHistoryCount?: number;
   attachedHistoryCounts?: Record<string, number>;
   includeLatestThought?: boolean;
+  weatherAwarenessEnabled?: boolean;
   attachedHistoryContactId?: string;
 }
 
@@ -431,6 +433,7 @@ const toBaseMessageContent = (message: PromptChatMessage) => {
   if (message.kind === 'link') {
     return `[分享链接：${message.title || message.text}${message.source ? `；来源：${message.source}` : ''}${message.content ? `；摘要：${message.content}` : ''}]`;
   }
+  if (message.kind === 'text' && message.source === '反查手机代发' && message.aiContext) return `[${message.aiContext}]\n${message.text}`;
   return message.text;
 };
 
@@ -609,6 +612,10 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
     chat.type !== 'observer'
   );
   if (calendarContext) messages.push({ role: 'system', content: calendarContext });
+  if (chat.type === 'direct') {
+    const weatherContext = buildWeatherContext(chat.weatherAwarenessEnabled === true);
+    if (weatherContext) messages.push({ role: 'system', content: weatherContext });
+  }
 
   // 朋友圈：只注入对聊天中角色尚未读过的动态/评论，已读的不再重复。
   const unreadMoments = momentsInjection ?? buildMomentsInjection(
@@ -770,7 +777,7 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
     !canReadForumForward(latestUserMessage, chat, chat)
     ? ''
     : latestUserMessage &&
-        (latestUserMessage.kind === 'forum-forward' || latestUserMessage.kind === 'pomodoro-share' || latestUserMessage.kind === 'phone-share')
+        (latestUserMessage.kind === 'forum-forward' || latestUserMessage.kind === 'pomodoro-share' || latestUserMessage.kind === 'phone-share' || latestUserMessage.source === '反查手机代发')
       ? toMessageContent(latestUserMessage)
       : requestedInput;
   const previousAssistantMessage = regenerate

@@ -11,7 +11,7 @@ const cents = (value: number) => Math.round(value * 100);
 /** Settle a virtual gift once without adding it to the user's real-life ledger. */
 export const settleChannelGiftPayment = (payment: ChannelGiftPayment): { balance: number; duplicate: boolean; previous?: AlipayData } => {
   if (!payment.eventId || !Number.isFinite(payment.amount) || payment.amount <= 0 ||
-    !Number.isSafeInteger(cents(payment.amount)) || cents(payment.amount) !== payment.amount * 100) {
+    !Number.isSafeInteger(cents(payment.amount)) || Math.abs(cents(payment.amount) - payment.amount * 100) > 0.000001) {
     throw new Error('礼物金额无效。');
   }
   const account = readAlipayData();

@@ -1,0 +1,55 @@
+﻿.pomo-dream-garden { position:relative; isolation:isolate; padding:3px 0 12px; overflow:hidden; border-radius:24px; }
+.pomo-dream-garden::before { content:''; position:absolute; z-index:-1; inset:0; background:radial-gradient(ellipse at 15% 35%,#a3c9ad99,transparent 42%),radial-gradient(ellipse at 85% 52%,#e9b5d4aa,transparent 35%),radial-gradient(ellipse at 35% 80%,#a8c5d6aa,transparent 42%),linear-gradient(160deg,#f7edea,#e6eee5 45%,#f4e8ef); filter:blur(10px); }
+.pomo-greenhouse-card { background:transparent!important; border-radius:24px; }
+.pomo-greenhouse-card > div:first-child { padding:7px 6px 14px; }
+.pomo-greenhouse-card > div:nth-child(2) { flex-wrap:wrap; gap:7px; background:#ffffff70; border-color:#ffffffa6; backdrop-filter:blur(16px); }
+.pomo-garden-stage { position:relative; padding-top:13px; }
+.pomo-garden-hero { position:relative; height:270px; display:flex; justify-content:center; align-items:flex-end; }
+.pomo-garden-orbit { position:absolute; width:240px; height:240px; border-radius:50%; left:50%; top:20px; transform:translateX(-50%); background:radial-gradient(circle,#ffffffe6,#ffffff30 66%,transparent 70%); box-shadow:0 0 60px #fff8; }
+.pomo-garden-hero::after { content:''; position:absolute; width:86%; height:25px; border-radius:50%; background:linear-gradient(90deg,#ffffff20,#ffffffc9,#ffffff20); bottom:7px; z-index:-1; box-shadow:0 10px 24px #68897616; }
+.pomo-potted-plant { position:relative; width:218px; height:250px; flex-shrink:0; }
+.pomo-ceramic-pot { position:absolute; width:148px; height:95px; bottom:12px; left:50%; transform:translateX(-50%); filter:drop-shadow(0 12px 13px #6b555721); }
+.pomo-plant-stem { position:absolute; width:98px; height:108px; bottom:90px; left:50%; transform:translateX(-50%); }
+.pomo-plant-flower { position:absolute; left:50%; transform:translateX(-50%); bottom:144px; width:155px; height:100px; display:flex; align-items:center; justify-content:center; font-size:85px; line-height:1; filter:drop-shadow(0 8px 9px #5c7f6826); }
+.pomo-plant-flower img { max-width:100%; max-height:135px; object-fit:contain; border-radius:14px; }
+.stage-0 .pomo-plant-flower { bottom:86px; font-size:40px; height:45px; }
+.pomo-plant-shadow { position:absolute; left:50%; bottom:0; width:148px; height:20px; border-radius:50%; transform:translateX(-50%); background:#647a6725; filter:blur(9px); }
+.pomo-potted-plant.is-watering { animation:pomo-plant-water .8s ease-in-out; }
+.pomo-watering-drops { position:absolute; right:0; top:35px; color:#87bdd3; animation:pomo-plant-water .8s ease-in-out; }
+@keyframes pomo-plant-water { 40% { transform:translateY(-5px) rotate(2deg); } 75% { transform:rotate(-2deg); } }
+.pomo-garden-plant-info { text-align:center; position:relative; padding:4px 20px 19px; }
+.pomo-growth-stage { display:inline-block; border:1px solid #fff; border-radius:20px; padding:3px 11px; background:#ffffff85; color:#829c88; font-size:10px; }
+.pomo-garden-plant-info h3 { font-size:24px; color:#526c61; font-weight:600; margin:9px 0 5px; letter-spacing:2px; }
+.pomo-garden-plant-info p { font-size:11px; color:#82938b; }
+.pomo-garden-progress { height:4px; width:150px; max-width:100%; background:#ffffff90; margin:14px auto 7px; border-radius:6px; overflow:hidden; }
+.pomo-garden-progress > span { display:block; height:100%; border-radius:inherit; transition:width .5s; }
+.pomo-garden-plant-info small { font-size:10px; color:#8a9e94; }
+.pomo-garden-care { padding:15px; border:1px solid #ffffffc9; border-radius:22px; background:#ffffff75; backdrop-filter:blur(18px); display:grid; gap:12px; }
+.pomo-flower-gallery { position:absolute; inset:0; z-index:50; display:flex; flex-direction:column; color:#64756d; background:radial-gradient(ellipse at 0 30%,#dae8df,transparent 65%),radial-gradient(ellipse at 100% 75%,#efd9e4,transparent 65%),#f7f2ed; }
+.pomo-flower-gallery > header { padding:calc(env(safe-area-inset-top,0px) + 22px) 23px 19px; display:flex; align-items:center; justify-content:space-between; background:#ffffff50; border-bottom:1px solid #fff9; }
+.pomo-flower-gallery header small { font-size:10px; opacity:.6; letter-spacing:3px; }
+.pomo-flower-gallery h3 { font-size:21px; font-weight:600; margin-top:5px; letter-spacing:1px; }
+.pomo-flower-gallery h3 span { font-size:12px; font-weight:400; margin-left:6px; opacity:.6; }
+.pomo-flower-gallery header button { font-size:26px; background:#fff8; width:35px; height:35px; border-radius:50%; }
+.pomo-gallery-shelves { flex:1; min-height:0; overflow:auto; padding:20px 16px 45px; }
+.pomo-flower-shelf { position:relative; margin:10px 0 30px; }
+.pomo-shelf-plants { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); align-items:end; min-height:185px; padding:0 3px; }
+.pomo-shelf-board { height:12px; border-radius:3px; background:linear-gradient(#f6e8d9,#dfc8b6); border-top:2px solid #fff9; box-shadow:0 13px 18px #84745b26,0 3px 0 #d4bdab; }
+.pomo-specimen { min-width:0; position:relative; text-align:center; }
+.pomo-specimen summary { cursor:pointer; list-style:none; display:flex; flex-direction:column; align-items:center; padding-bottom:10px; }
+.pomo-specimen summary::-webkit-details-marker { display:none; }
+.pomo-specimen .pomo-potted-plant { width:100%; height:150px; }
+.pomo-specimen .pomo-ceramic-pot { width:78px; height:50px; bottom:8px; }
+.pomo-specimen .pomo-plant-stem { height:63px; width:58px; bottom:49px; }
+.pomo-specimen .pomo-plant-flower { font-size:46px; width:85px; height:58px; bottom:87px; }
+.pomo-specimen .pomo-plant-flower img { max-height:72px; }
+.pomo-specimen .pomo-plant-shadow { width:70px; height:12px; bottom:1px; }
+.pomo-specimen summary > strong { font-size:11px; font-weight:500; max-width:100%; overflow-wrap:anywhere; }
+.pomo-specimen summary > small { font-size:9px; opacity:.6; margin-top:3px; }
+.pomo-specimen-label { padding:10px 7px; background:#ffffffb0; border:1px solid #fff; border-radius:9px; margin:0 3px 8px; font-size:10px; overflow-wrap:anywhere; }
+.pomo-specimen-label time { display:block; font-size:9px; opacity:.6; margin:4px 0; }
+.pomo-specimen-label p { line-height:1.7; }
+.pomo-gallery-empty { text-align:center; font-size:12px; opacity:.65; padding:15px 0 0; }
+@media(prefers-reduced-motion:reduce) { .pomo-potted-plant.is-watering,.pomo-watering-drops { animation:none; } }
+@media(prefers-color-scheme:dark) { :root[data-follow-system-dark=true] .pomo-dream-garden::before { background:radial-gradient(ellipse at 15% 35%,#3b574a,transparent 60%),linear-gradient(145deg,#313a3e,#493d48); } :root[data-follow-system-dark=true] .pomo-flower-gallery { background:linear-gradient(140deg,#2d3d37,#3e333f); color:#cfddd5; } :root[data-follow-system-dark=true] :is(.pomo-garden-care,.pomo-specimen-label) { background:#2e3d3cbf; border-color:#5e7168; } :root[data-follow-system-dark=true] .pomo-garden-plant-info :is(h3,p,small) { color:#c2d1c8; } }
+

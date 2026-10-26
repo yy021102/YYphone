@@ -11,7 +11,8 @@ export type AppId =
   | 'customizer'
   | 'world_book'
   | 'memory'
-  | 'inventory';
+  | 'inventory'
+  | 'calendar';
 
 export interface AppMetadata {
   id: AppId;
@@ -101,6 +102,7 @@ export interface HomeAppearance {
 }
 
 export interface BeautySettings {
+  homeStyle?: 'classic' | 'minimal';
   themeId: string;
   wallpaperId: string;
   wallpapers: CustomWallpapers;

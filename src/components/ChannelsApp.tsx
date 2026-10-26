@@ -23,6 +23,7 @@ import { clearChannelSection, createChannelArchive, trimChannelReplays, type Cha
 import { setStorageItemsAtomically } from '../utils/dbStorage';
 import { buildChannelActorContext, channelWorldContext } from '../utils/channelActorContext';
 import { channelFollowers, createChannelEngagement, ensureChannelEngagement, formatChannelCount } from '../utils/channelEngagement';
+import { channelVisibleText, parseChannelMessages, type ChannelMedia } from '../utils/channelMessageMedia';
 
 type Person = ChannelPerson;
 type Item = ChannelItem;
@@ -67,6 +68,12 @@ export function ChannelsApp({ userName, avatarUrl, contacts: sourceContacts, onB
   const [error, setError] = useState('');
   const [composerImage, setComposerImage] = useState('');
   const [textImage, setTextImage] = useState('');
+  const [textVideo, setTextVideo] = useState('');
+  const [mediaKind, setMediaKind] = useState<ChannelMedia['kind'] | ''>('');
+  const [mediaText, setMediaText] = useState('');
+  const [mediaAmount, setMediaAmount] = useState('');
+  const [mediaUrl, setMediaUrl] = useState('');
+  const [mediaBusy, setMediaBusy] = useState(false);
   const [imageBusy, setImageBusy] = useState(false);
   const [authorSheet, setAuthorSheet] = useState<Person | null>(null);
   const [notice, setNotice] = useState('');
@@ -79,6 +86,7 @@ export function ChannelsApp({ userName, avatarUrl, contacts: sourceContacts, onB
   const [atmosphere, setAtmosphere] = useState('');
   const lock = useRef(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const listPositions = useRef<Record<string, number>>({});
   const imageInput = useRef<HTMLInputElement>(null);
   const replyInput = useRef<HTMLTextAreaElement>(null);
   const nearBottom = useRef(true);
@@ -92,8 +100,9 @@ export function ChannelsApp({ userName, avatarUrl, contacts: sourceContacts, onB
   useEffect(() => { if (error && !panel) scrollRef.current?.scrollTo({ top: 0 }); }, [error, panel]);
   useEffect(() => {
     nearBottom.current = true;
-    scrollRef.current?.scrollTo({ top: focus?.kind === 'messages' ? scrollRef.current.scrollHeight : 0 });
-  }, [tab, focus?.id]);
+    scrollRef.current?.scrollTo({ top: focus?.kind === 'messages' ? scrollRef.current.scrollHeight : focus ? 0 : listPositions.current[`${tab}:${filter}`] ?? 0 });
+    setMediaKind(''); setMediaUrl(''); setMediaText('');
+  }, [tab, focus?.id, filter]);
 
   const profile = readStoredValue(PROFILE_KEY, emptyChannelProfile(), isChannelProfile);
   const settings = profile.settings;
@@ -160,7 +169,7 @@ export function ChannelsApp({ userName, avatarUrl, contacts: sourceContacts, onB
   const closePanel = () => { composerToken.current++; setPanel(null); setImageBusy(false); };
   const showPanel = (next: 'compose' | 'refresh') => {
     if (next === 'compose' && tab === 'live' && ownLive) { open('rooms', ownLive.id); return; }
-    composerToken.current++; setPanel(next); setDraft(''); setComposerImage(''); setTextImage(''); setImageBusy(false); setError('');
+    composerToken.current++; setPanel(next); setDraft(''); setComposerImage(''); setTextImage(''); setTextVideo(''); setImageBusy(false); setError('');
     if (next === 'compose' && tab === 'live') { setInvitedIds([]); setAudienceMode('auto'); setCustomViewers('10'); setAtmosphere(''); }
   };
   const uploadPostImage = async (file?: File) => {
@@ -222,6 +231,7 @@ export function ChannelsApp({ userName, avatarUrl, contacts: sourceContacts, onB
   };
   const promptContext = async (actors: Person[], privateConversation = false, query = '') => [
     '你正在续写一个小手机内的虚构视频号平台。内容真实自然，符合人物设定、已有关系和时间线。不替玩家发言或决定行动。只输出 JSON。',
+    '视频号只呈现公开可见的发言、行为和消息，不生成心声、内心独白、thought、thinking 或 think 标签。',
     `当前设备时间：${new Date().toLocaleString('zh-CN')}。保持当下的季节、作息与已有剧情连贯。`,
     `玩家昵称：${me.name}；视频号身份：${settings?.identity || '普通用户'}；公开简介：${settings?.bio || '未填写'}。`,
     `玩家平台人设：${settings.persona || settings.identity || '未填写'}；路人印象：${settings.audienceAttitude || '根据公开内容自然判断'}；关注数：${settings.followingCount ?? dataRef.current.following.length}；粉丝数：${settings.followerCount ?? 0}。路人对玩家的态度遵循这些公开设定。`,
@@ -251,17 +261,26 @@ export function ChannelsApp({ userName, avatarUrl, contacts: sourceContacts, onB
       const task = target
         ? `请以 ${actor.name} 的身份接续${targetKind === 'rooms' ? '直播间现场与弹幕' : '私信'}。原内容：${JSON.stringify({ text: target.text, replies: target.replies.slice(-24) })}。${source ? `这段对话从你的动态「${source.text.slice(0, 1600)}」开始。` : ''}只回复最新互动，保持自然，不能替玩家说话。返回 {"text":"一段回应"}。`
         : `请以 ${actor.name} 的身份生成${targetKind === 'posts' ? '生活帖子' : targetKind === 'rooms' ? '直播标题和开场场景' : '主动发给玩家的私信'}。玩家最近的公开动态：${JSON.stringify(channelPublicContext(dataRef.current))}。返回 {"text":"内容"}。`;
-      const result: unknown = JSON.parse(await requestConfiguredAiText(await promptContext([actor], targetKind === 'messages', `${target?.text || ''} ${target?.replies.slice(-3).join(' ') || ''}`), task, { json: true, maxTokens: 1400 }));
+      const result: unknown = JSON.parse(await requestConfiguredAiText(await promptContext([actor], targetKind === 'messages', `${target?.text || ''} ${target?.replies.slice(-3).join(' ') || ''}`), task + (targetKind === 'messages' ? '\n私信按微信聊天规范：口语短句，一轮1至6条，长短错落，不写大段，按角色习惯少用句末标点，不强制所有人同一种口吻。只写实际发送的消息，不写心声。覆盖前述返回格式，返回 {"messages":[{"kind":"text|image|voice|video|transfer","text":"文字或媒体内容描述","amount":转账金额}]}。图片、语音、视频用文字描述，转账仅在情境合理时使用，amount为正数。' : ''), { json: true, maxTokens: 1400, imageUrls: targetKind === 'messages' ? Object.values(target?.replyMedia ?? {}).flatMap(media => media.kind === 'image' && media.url ? [media.url] : []).slice(-4) : undefined }));
+      if (targetKind === 'messages') {
+        const messages = parseChannelMessages(result);
+        if (!mounted.current) return;
+        mutate(current => {
+          const existing = current.messages.find(item => target ? item.id === target.id : item.author.id === actor.id);
+          let next = existing ?? make(actor, '');
+          for (const message of messages) {
+            const index = next.replies.length;
+            next = appendChannelReply(next, actor, message.text, { now: Date.now(), thread: true, read: viewRef.current.focus?.id === next.id });
+            if (message.media) next = { ...next, replyMedia: { ...next.replyMedia, [index]: message.media } };
+          }
+          return { ...current, messages: existing ? current.messages.map(item => item.id === next.id ? next : item) : [next, ...current.messages] };
+        });
+        return;
+      }
       if (!isRecord(result) || typeof result.text !== 'string' || !result.text.trim()) throw new Error('返回内容不完整，请重试。');
-      const content = result.text.trim().slice(0, 4000);
+      const content = channelVisibleText(result.text).slice(0, 4000);
       if (!mounted.current) return;
-      if (target) update(targetKind, target.id, (item) => appendChannelReply(item, actor, content, { now: Date.now(), thread: targetKind === 'messages', read: viewRef.current.focus?.kind === 'messages' && viewRef.current.focus.id === target.id }));
-      else if (targetKind === 'messages') mutate((current) => {
-        const existing = current.messages.find((item) => item.author.id === actor.id);
-        return { ...current, messages: existing
-          ? current.messages.map((item) => item.id === existing.id ? appendChannelReply(item, actor, content, { now: Date.now(), thread: true, read: viewRef.current.focus?.kind === 'messages' && viewRef.current.focus.id === existing.id }) : item)
-          : [{ ...make(actor, content), lastIncomingAt: Date.now(), readAt: 0 }, ...current.messages] };
-      });
+      if (target) update(targetKind, target.id, (item) => appendChannelReply(item, actor, content, { now: Date.now(), thread: false }));
       else add(targetKind, targetKind === 'rooms' ? makeRoom(actor, content) : make(actor, content));
     } catch (cause) { setError(cause instanceof Error ? cause.message : '生成失败，请重试。'); }
     finally { lock.current = false; setBusy(false); }
@@ -280,11 +299,11 @@ export function ChannelsApp({ userName, avatarUrl, contacts: sourceContacts, onB
         `玩家最近公开动态：${JSON.stringify(channelPublicContext(dataRef.current))}。可自然呼应，但不必每条围着玩家转，不编造玩家发言。`,
         `避免重复近期内容：${JSON.stringify(dataRef.current[targetKind].slice(0, 8).map((item) => ({ name: item.author.name, text: item.text.slice(0, 350) })))}`,
         '不添加话题标签，不编造图片地址、播放量或点赞数。',
-        '帖子适合配图时，可额外返回 textImage 字符串，用文字描述配图画面，最多1000字；不适合时省略，不生成图片URL。',
+        '帖子适合配图时，可额外返回 textImage 字符串描述画面，最多1000字；适合视频时返回 textVideo 字符串描述视频画面、声音与情节，最多2000字；不适合时省略，不生成图片URL。',
         targetKind === 'posts' ? `每篇帖子自带四条评论，四位不同的人评论，不能自己评论自己。评论者名单：${JSON.stringify(commenters.map(({ id, name }) => ({ id, name })))}。评论紧扣各自帖子的细节，语气有差异，别只夸赞。返回 {"items":[{"authorId":"发帖人名单中的ID","text":"正文","comments":[{"authorId":"评论者名单中的ID","text":"评论"}]}]}。五位发帖人各一次，每篇四条评论。`
           : '根据每位主播的平台身份、人设生成在线人数和氛围：素人通常0～30，小博主80～2500，热门网红8000～200000；黑红主播有黑粉和串子。返回 {"items":[{"authorId":"名单中的ID","text":"直播标题与场景","viewers":20,"atmosphere":"符合该主播身份的观众构成和现场氛围"}]}。每个 ID 恰好一次。',
       ].join('\n');
-      let generated: Array<{ author: Person; text: string; textImage?: string; comments?: ReturnType<typeof parseChannelBatch>; viewers?: number; atmosphere?: string }> | undefined;
+      let generated: Array<{ author: Person; text: string; textImage?: string; textVideo?: string; comments?: ReturnType<typeof parseChannelBatch>; viewers?: number; atmosphere?: string }> | undefined;
       let issue = '';
       for (let attempt = 0; attempt < 2; attempt++) {
         const raw = await requestConfiguredAiText(await promptContext([...people, ...commenters]), task + (issue ? `\n上次格式错误：${issue}。请完整重写五条及全部评论。` : ''), { json: true, maxTokens: targetKind === 'posts' ? 6500 : 3000 });
@@ -300,7 +319,7 @@ export function ChannelsApp({ userName, avatarUrl, contacts: sourceContacts, onB
       if (!mounted.current) return;
       const cards = generated.map((entry) => {
         if (targetKind === 'posts') {
-          const post = { ...make(entry.author, entry.text), ...(entry.textImage ? { textImage: entry.textImage } : {}) };
+          const post = { ...make(entry.author, entry.text), ...(entry.textImage ? { textImage: entry.textImage } : {}), ...(entry.textVideo ? { textVideo: entry.textVideo } : {}) };
           return (entry.comments ?? []).reduce<Item>((item, comment) => appendChannelReply(item, comment.author, comment.text, { now: Date.now() }), { ...post, engagement: createChannelEngagement(post, settings) });
         }
         const role = settings.roles.find(role => role.contactId === entry.author.id);
@@ -342,7 +361,7 @@ export function ChannelsApp({ userName, avatarUrl, contacts: sourceContacts, onB
     lock.current = true; setBusy(true); setError(''); setBusyLabel('刷新评论中…');
     const people = channelCommentPeople(cast(), 7, post.author.id);
     try {
-      const task = `为这条动态生成七条新的评论。作者：${currentPerson(post.author).name}。原文：${post.text.slice(0, 2000)}。文字图：${post.textImage?.slice(0, 1000) || '无'}。最近评论：${JSON.stringify(post.replies.slice(-12))}。名单：${JSON.stringify(people.map(({ id, name }) => ({ id, name })))}。每人各一条，包含关联角色与路人（没有角色时全是路人）。角色根据平台人设、与玩家的关系评论；路人对作者的看法以平台人设和路人印象为准，不能一律夸赞。自然且不重复，不替玩家发言，不编造配图中未描述的细节。返回 {"items":[{"authorId":"名单中的ID","text":"10～90字的评论"}]}。`;
+      const task = `为这条动态生成七条新的评论。作者：${currentPerson(post.author).name}。原文：${post.text.slice(0, 2000)}。文字图：${(post.textVideo || post.textImage)?.slice(0, 2000) || '无'}。最近评论：${JSON.stringify(post.replies.slice(-12))}。名单：${JSON.stringify(people.map(({ id, name }) => ({ id, name })))}。每人各一条，包含关联角色与路人（没有角色时全是路人）。角色根据平台人设、与玩家的关系评论；路人对作者的看法以平台人设和路人印象为准，不能一律夸赞。自然且不重复，不替玩家发言，不编造配图中未描述的细节。返回 {"items":[{"authorId":"名单中的ID","text":"10～90字的评论"}]}。`;
       let generated: ReturnType<typeof parseChannelBatch> | undefined;
       for (let attempt = 0; attempt < 2; attempt++) {
         const raw = await requestConfiguredAiText(await promptContext(people, false, `${post.text} ${post.textImage || ''}`), task + (attempt ? '\n上次格式不完整，请严格按七个ID完整返回七条评论。' : ''), { json: true, maxTokens: 2800 });
@@ -369,20 +388,21 @@ export function ChannelsApp({ userName, avatarUrl, contacts: sourceContacts, onB
         `目前场景：${room.live?.scene || room.text}`,
         `人数设定：${JSON.stringify(room.live?.audience || { min: 0, max: 200000 })}；当前在线 ${room.live?.viewers ?? 1}。${room.replies.length ? '人数随内容合理小幅变化。' : '这是开场，请按主播人设与规模选择合理的初始人数。'}在线人数只统计观众，不含主播。弹幕人数不能大于在线人数。`,
         `本场观众构成与氛围：${room.live?.atmosphere || '根据主播的平台身份合理生成，不要全员夸赞。'}。邀请观看的角色：${JSON.stringify(invited.map((person) => ({ id: person.id, name: person.name })))}。这些角色已受邀来到现场；没有受邀的熟人不要凭空到场。`,
-        `最近弹幕与互动：${JSON.stringify(room.replies.slice(-22))}`,
+        `最近弹幕与互动：${JSON.stringify(room.replies.slice(-22))}；主播动作：${JSON.stringify(room.live?.hostActions?.slice(-6) ?? [])}`,
         `可发言的主播与观众：${JSON.stringify(actors.map(({ id, name }) => ({ id, name })))}`,
-        '推进一点现场变化，体现主播与观众的呼应；弹幕有不同语气，不要刷重复短句。不要编造玩家发言或已经发生的礼物。',
+        '推进一点现场变化，体现主播与观众的呼应；弹幕有不同语气，不要刷重复短句。不要编造玩家发言、玩家动作或已经发生的礼物。不写心声。非玩家主播的可见动作单独放在 hostAction 字段，主播发言放在 messages 中并使用主播ID。',
         `可用礼物和价格：${LIVE_GIFTS.map((gift) => `${gift.id}=¥${gift.price}`).join('、')}。礼物由观众送给主播；若主播是玩家，收到礼物会按标价入账，所以只有剧情自然合适时才送，保持低频。`,
         `返回 JSON：{"scene":"本轮现场画面/声音的简短描写","viewers":20,"messages":[{"authorId":"名单中的 ID","text":"一条自然弹幕或主播发言"}],"gift":{"authorId":"名单中的 ID","giftId":"有效礼物 ID"}}。messages 2 至 5 条，可由同一人连续说话；若人数为0可返回空弹幕并描写安静的现场；gift 可省略。`,
       ].join('\n');
       const result: unknown = JSON.parse(await requestConfiguredAiText(await promptContext(actors, false, `${room.text} ${room.replies.slice(-4).join(' ')}`), task, { json: true, maxTokens: 1700 }));
       if (!mounted.current) return;
       if (!isRecord(result) || typeof result.scene !== 'string' || !result.scene.trim() || !Array.isArray(result.messages)) throw new Error('直播现场内容不完整，请重试。');
-      const scene = result.scene.trim().slice(0, 220);
+      const scene = channelVisibleText(result.scene).slice(0, 220);
       const entries = result.messages.slice(0, 5).flatMap((value: unknown) => {
         if (!isRecord(value) || typeof value.authorId !== 'string' || typeof value.text !== 'string' || !value.text.trim()) return [];
         const speaker = actors.find((actor) => actor.id === value.authorId);
-        return speaker ? [{ speaker, text: value.text.trim().slice(0, 180) }] : [];
+        const text = channelVisibleText(value.text).slice(0, 180);
+        return speaker && text && value.kind !== 'thought' ? [{ speaker, text }] : [];
       });
       if (!entries.length && !(typeof result.viewers === 'number' && result.viewers === 0)) throw new Error('直播弹幕为空，请重试。');
       const lines = entries.map(({ speaker, text }) => `${speaker.name}：${text}`);
@@ -399,6 +419,7 @@ export function ChannelsApp({ userName, avatarUrl, contacts: sourceContacts, onB
         return { ...current, time: Date.now(), replies: [...current.replies, ...lines],
           replyAuthorIds: [...(current.replyAuthorIds ?? current.replies.map(() => '')), ...entries.map(({ speaker }) => speaker.id)],
           live: { ...live, viewers: Math.max(speakerCount, channelViewerCount(result.viewers, live.audience ?? { min: 0, max: 200000 }, Math.max(live.viewers, speakerCount))), scene,
+            ...(room.author.id !== 'self' && typeof result.hostAction === 'string' && channelVisibleText(result.hostAction) ? { hostActions: [...(live.hostActions ?? []), channelVisibleText(result.hostAction).slice(0, 1000)] } : {}),
             participantIds: [...new Set([...(live.participantIds ?? []), ...entries.map(({ speaker }) => speaker.id)])] } };
       }) });
       if (giftSender && giftChoice) {
@@ -420,9 +441,9 @@ export function ChannelsApp({ userName, avatarUrl, contacts: sourceContacts, onB
   const sendLive = (room: Item, text: string) => update('rooms', room.id, (current) => ({
     ...appendChannelReply(current, me, text, { now: Date.now(), own: true }), time: Date.now(),
   }));
-  const likeLive = (room: Item) => update('rooms', room.id, (current) => ({ ...current,
+  const likeLive = (room: Item, amount = 1) => update('rooms', room.id, (current) => current.ended ? current : ({ ...current,
     live: { ...current.live, viewers: current.live?.viewers ?? 1, scene: current.live?.scene,
-      gifts: current.live?.gifts ?? [], hearts: (current.live?.hearts ?? 0) + 1 },
+      gifts: current.live?.gifts ?? [], hearts: (current.live?.hearts ?? 0) + amount },
   }));
   const giveLive = (room: Item, giftId: string): string | null => {
     const giftChoice = LIVE_GIFTS.find((gift) => gift.id === giftId);
@@ -443,8 +464,29 @@ export function ChannelsApp({ userName, avatarUrl, contacts: sourceContacts, onB
     if (update(focus.kind, selected.id, (item) => appendChannelReply(item, me, reply.trim(), { own: true, thread: focus.kind === 'messages', now: Date.now() }))) setReply('');
     else revealOwnReply.current = false;
   };
+  const sendMedia = () => {
+    if (!selected || focus?.kind !== 'messages' || !mediaKind || mediaBusy) return;
+    const amount = Number(mediaAmount);
+    if (mediaKind === 'transfer' && (!/^\d+(\.\d{1,2})?$/.test(mediaAmount) || amount <= 0 || amount > 200000)) { setError('请输入有效金额（最多两位小数，上限20万）。'); return; }
+    if (!mediaText.trim() && !mediaUrl && mediaKind !== 'transfer') return;
+    const media: ChannelMedia = { kind: mediaKind, text: mediaText.trim() || (mediaKind === 'transfer' ? '转账' : '图片'), ...(mediaUrl ? { url: mediaUrl } : {}), ...(mediaKind === 'transfer' ? { amount, id: crypto.randomUUID() } : {}) };
+    let payment: ReturnType<typeof settleChannelGiftPayment> | undefined;
+    try {
+      if (media.kind === 'transfer') payment = settleChannelGiftPayment({ eventId: media.id!, direction: 'sent', amount });
+      if (!update('messages', selected.id, item => ({ ...appendChannelReply(item, me, `[${media.kind}] ${media.text}${media.amount ? ` ¥${media.amount.toFixed(2)}` : ''}`, { own: true, thread: true, now: Date.now() }), replyMedia: { ...item.replyMedia, [item.replies.length]: media } }))) throw new Error('消息未保存，请重试。');
+      revealOwnReply.current = true; setMediaKind(''); setMediaText(''); setMediaUrl(''); setMediaAmount(''); setError('');
+    } catch (e) { if (payment?.previous) writeAlipayData(payment.previous); setError(e instanceof Error ? e.message : '发送失败'); }
+  };
+  const acceptTransfer = (item: Item, index: number, media: ChannelMedia) => {
+    if (!media.id || !media.amount || media.accepted) return;
+    let payment: ReturnType<typeof settleChannelGiftPayment> | undefined;
+    try {
+      payment = settleChannelGiftPayment({ eventId: media.id, direction: 'received', amount: media.amount });
+      if (!update('messages', item.id, current => ({ ...current, replyMedia: { ...current.replyMedia, [index]: { ...media, accepted: true } } }))) throw new Error('收款未保存，请重试。');
+    } catch (e) { if (payment?.previous) writeAlipayData(payment.previous); setError(e instanceof Error ? e.message : '收款失败'); }
+  };
   const create = () => {
-    if ((!draft.trim() && (tab === 'live' || !textImage.trim() && !composerImage)) || imageBusy || lock.current) return;
+    if ((!draft.trim() && (tab === 'live' || !textImage.trim() && !textVideo.trim() && !composerImage)) || imageBusy || lock.current) return;
     const targetKind = tab === 'live' ? 'rooms' : 'posts';
     const currentLive = dataRef.current.rooms.find((item) => item.author.id === 'self' && !item.ended);
     if (targetKind === 'rooms' && currentLive) { closePanel(); open('rooms', currentLive.id); return; }
@@ -456,7 +498,7 @@ export function ChannelsApp({ userName, avatarUrl, contacts: sourceContacts, onB
     const item = targetKind === 'rooms' ? { ...makeRoom(me, draft.trim()), live: { viewers: Math.max(range.min, invites.length), hearts: 0, gifts: [],
       invitedRoleIds: invites, participantIds: invites, audience: { min: Math.max(range.min, invites.length), max: Math.max(range.max, invites.length) },
       atmosphere: `${range.atmosphere}${atmosphere.trim() ? `\n玩家指定：${atmosphere.trim()}` : ''}` } }
-      : { ...make(me, draft.trim()), ...(composerImage ? { imageUrl: composerImage } : {}), ...(textImage.trim() ? { textImage: textImage.trim() } : {}) };
+      : { ...make(me, draft.trim()), ...(composerImage ? { imageUrl: composerImage } : {}), ...(textImage.trim() ? { textImage: textImage.trim() } : {}), ...(textVideo.trim() ? { textVideo: textVideo.trim() } : {}) };
     const prepared = targetKind === 'posts' ? { ...item, engagement: createChannelEngagement(item, settings) } : item;
     if (!add(targetKind, prepared)) return;
     setDraft(''); closePanel(); setFilter('self'); setComposerImage(''); setTextImage('');
@@ -487,7 +529,7 @@ export function ChannelsApp({ userName, avatarUrl, contacts: sourceContacts, onB
   const displayRoom = (room: Item): Item => ({ ...room, author: currentPerson(room.author),
     replies: room.replies.map((line, index) => `${replyPerson(room, index).name}：${channelReply(line).text}`) });
   const cover = (item: Item) => {
-    return <div className={`channel-post-media ${item.imageUrl && item.textImage ? 'has-both' : ''}`}>{item.imageUrl && <img className="channel-post-photo" src={item.imageUrl} alt={`${currentPerson(item.author).name}发布的配图`} loading="lazy" />}{item.textImage && <div className="channel-text-image"><TextImageCard text={item.textImage} large /></div>}</div>;
+    return <div className={`channel-post-media ${item.imageUrl && item.textImage ? 'has-both' : ''}`}>{item.imageUrl && <img className="channel-post-photo" src={item.imageUrl} alt={`${currentPerson(item.author).name}发布的配图`} loading="lazy" />}{item.textImage && <div className="channel-text-image"><TextImageCard text={item.textImage} large /></div>}{item.textVideo && <div className="channel-text-video"><Play size={26} /><strong>视频</strong><p>{item.textVideo}</p></div>}</div>;
   };
   const feedCard = (item: Item, full = false) => {
     const person = currentPerson(item.author); const saved = savedIds.includes(item.id);
@@ -509,7 +551,7 @@ export function ChannelsApp({ userName, avatarUrl, contacts: sourceContacts, onB
       <div className="channel-post-head"><button type="button" className="channel-author" onClick={() => showAuthor(person)}><Avatar person={person} /><span><strong>{person.name}</strong><small>{relativeTime(item.time)}</small></span></button>
         {person.id !== 'self' ? <button type="button" onClick={() => follow(person.id)} className={`channel-follow ${followed(person.id) ? 'is-followed' : ''}`} aria-pressed={followed(person.id)}>{followed(person.id) ? <><Check size={11} />已关注</> : <><Plus size={11} />关注</>}</button> : <span className="channel-self-tag">我发布的</span>}
       </div>
-      {(item.imageUrl || item.textImage) && (full ? cover(item) : <button type="button" className="channel-cover-button" aria-label={`查看${person.name}的动态`} onClick={() => open('posts', item.id)}>{cover(item)}</button>)}
+      {(item.imageUrl || item.textImage || item.textVideo) && (full ? cover(item) : <button type="button" className="channel-cover-button" aria-label={`查看${person.name}的动态`} onClick={() => open('posts', item.id)}>{cover(item)}</button>)}
       <div className="channel-post-body"><p className={full ? '' : 'is-preview'}>{item.text}</p>
         {!full && item.text.length > 140 && <button type="button" className="channel-expand" onClick={() => open('posts', item.id)}>展开 <ChevronRight size={11} /></button>}
       </div>
@@ -528,11 +570,11 @@ export function ChannelsApp({ userName, avatarUrl, contacts: sourceContacts, onB
     const entry = channelReply(line); const person = replyPerson(item, index);
     const own = item.ownReplyIndices?.includes(index) || item.replyAuthorIds?.[index] === 'self' || !item.replyAuthorIds?.[index] && (entry.name === me.name || entry.name === userName);
     return <div key={index} className={thread ? `channel-message ${own ? 'is-own' : ''}` : 'channel-comment'}>
-      <Avatar person={own ? me : person} /><div>{!own || !thread ? <strong>{own ? '我' : person.name}{!thread && person.id === item.author.id && <small>作者</small>}</strong> : null}<p>{entry.text}</p></div>
+      <Avatar person={own ? me : person} /><div>{!own || !thread ? <strong>{own ? '我' : person.name}{!thread && person.id === item.author.id && <small>作者</small>}</strong> : null}{thread && item.replyMedia?.[index] ? (() => { const m = item.replyMedia[index]; return <div className={`channel-dm-media is-${m.kind}`}>{m.url && <a href={m.url} target="_blank" rel="noreferrer"><img alt={m.text} src={m.url} /></a>}<strong>{({ image: '▧ 图片', video: '▷ 视频', voice: '◖ 语音', transfer: '⇄ 转账' })[m.kind]}{m.amount ? ` ¥${m.amount.toFixed(2)}` : ''}</strong><p>{m.text}</p>{m.kind === 'transfer' && (!own ? <button type="button" disabled={m.accepted} onClick={() => acceptTransfer(item, index, m)}>{m.accepted ? '已收款' : '收款'}</button> : <small>已转出</small>)}</div>; })() : <p>{entry.text}</p>}</div>
     </div>;
   });
   const renderComposer = (post: boolean) => <div className="channel-reply-composer">
-    {!post && <div className="channel-quick-replies">{['然后呢？', '听起来很有意思', '我也有类似经历'].map((text) => <button key={text} type="button" onClick={() => { setReply(text); replyInput.current?.focus(); }}>{text}</button>)}</div>}
+    {!post && <><div className="channel-dm-tools">{(['image', 'voice', 'video', 'transfer'] as const).map(kind => <button type="button" key={kind} aria-pressed={mediaKind === kind} onClick={() => { setMediaKind(mediaKind === kind ? '' : kind); setMediaUrl(''); setMediaText(''); }}>{({ image: '图片', voice: '语音', video: '视频', transfer: '转账' })[kind]}</button>)}</div>{mediaKind && <div className="channel-dm-attachment"><textarea aria-label="附件内容" placeholder={mediaKind === 'transfer' ? '转账备注' : '描述内容'} value={mediaText} onChange={e => setMediaText(e.target.value)} maxLength={2000} />{mediaKind === 'transfer' && <input aria-label="转账金额" type="number" min="0.01" step="0.01" value={mediaAmount} onChange={e => setMediaAmount(e.target.value)} />}{mediaKind === 'image' && <><input aria-label="私信上传图片" type="file" accept="image/*" disabled={mediaBusy} onChange={async e => { const file = e.target.files?.[0]; const id = focus?.id; if (!file) return; setMediaBusy(true); try { const url = await compressChatPhoto(file); if (mounted.current && viewRef.current.focus?.id === id) setMediaUrl(url); } catch { setError('图片处理失败'); } finally { setMediaBusy(false); } }} />{mediaUrl && <img src={mediaUrl} alt="待发送图片" />}</>}<button type="button" disabled={mediaBusy} onClick={sendMedia}>{mediaBusy ? '处理中…' : '发送附件'}</button></div>}</>}
     <div className="channel-reply-field"><textarea ref={replyInput} aria-label="互动内容" rows={2} maxLength={2000} placeholder={post ? '评论' : '发送消息'} value={reply} onChange={(event) => setReply(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); sendReply(); } }} />
       <button type="button" className="channel-send" aria-label="发送" disabled={!reply.trim()} onClick={sendReply}><Send size={17} /></button></div>
     <button type="button" disabled={busy} className="channel-ai-reply" aria-label={post ? '刷新评论' : '回复'} onClick={() => selected && void generate(post ? 'posts' : 'messages', selected)}><Sparkles size={14} />{busy ? '加载中…' : post ? '刷新评论' : '回复'}<ChevronRight size={13} /></button>
@@ -550,11 +592,11 @@ export function ChannelsApp({ userName, avatarUrl, contacts: sourceContacts, onB
         <button type="button" className="channel-icon-button is-primary" aria-label={tab === 'messages' ? '刷新私信' : tab === 'live' ? '刷新直播' : '刷新广场'} disabled={busy} onClick={() => tab === 'messages' && filter === 'stranger' ? void refreshStrangerMessages() : showPanel('refresh')}>{busy ? <RefreshCw size={17} className="animate-spin" /> : <Sparkles size={18} />}</button></>
         : selected && <button type="button" className="channel-icon-button" aria-label="查看作者主页" onClick={() => showAuthor(selected.author)}><UserRound size={18} /></button>}
     </header>}
-    <main ref={scrollRef} className={`channel-scroll ${liveFocus ? 'is-room' : ''}`} onScroll={(event) => { const element = event.currentTarget; nearBottom.current = element.scrollHeight - element.scrollTop - element.clientHeight < 130; }}>
+    <main ref={scrollRef} className={`channel-scroll ${liveFocus ? 'is-room' : ''}`} onScroll={(event) => { const element = event.currentTarget; if (!focus) listPositions.current[`${tab}:${filter}`] = element.scrollTop; nearBottom.current = element.scrollHeight - element.scrollTop - element.clientHeight < 130; }}>
       {tab === 'me' ? <><button type="button" className="channel-profile-exit" aria-label="返回发现" onClick={onBack}><X size={19} /></button><ChannelsProfile userName={userName} avatarUrl={avatarUrl} contacts={sourceContacts} stats={profileStats} onView={browseOwn} dataBusy={busy} onExport={exportArchive} onImport={importArchive} onClear={clearSection} /></> : <>
         {!liveFocus && error && <p role="alert" className="channel-error">{error}</p>}
         {!liveFocus && busy && <div role="status" className="channel-loading"><RefreshCw size={14} className="animate-spin" /><span>{busyLabel}</span></div>}
-        {selected && focus ? focus.kind === 'rooms' ? <ChannelsLiveRoom room={displayRoom(selected)} me={me} busy={busy} error={error} following={followed(selected.author.id)} onBack={() => setFocus(null)} onFollow={() => follow(selected.author.id)} onSend={(text) => sendLive(selected, text)} onAdvance={() => void advanceLive(selected)} onGift={(giftId) => giveLive(selected, giftId)} onBackgroundChange={(background) => changeLiveBackground(selected, background)} onLike={() => likeLive(selected)} onEnd={() => update('rooms', selected.id, (item) => ({ ...item, ended: true, endedAt: Date.now(), time: Date.now() }))} />
+        {selected && focus ? focus.kind === 'rooms' ? <ChannelsLiveRoom room={displayRoom(selected)} me={me} busy={busy} error={error} following={followed(selected.author.id)} onBack={() => setFocus(null)} onFollow={() => follow(selected.author.id)} onSend={(text) => sendLive(selected, text)} onAdvance={() => void advanceLive(selected)} onGift={(giftId) => giveLive(selected, giftId)} onBackgroundChange={(background) => changeLiveBackground(selected, background)} onLike={(amount) => likeLive(selected, amount)} onAction={(text) => update('rooms', selected.id, item => item.ended ? item : ({ ...item, live: { ...item.live!, hostActions: [...(item.live?.hostActions ?? []), text] } }))} onEnd={() => update('rooms', selected.id, (item) => ({ ...item, ended: true, endedAt: Date.now(), time: Date.now() }))} />
           : focus.kind === 'messages' ? <div className="channel-thread">
             <div className="channel-thread-note"><small>{formatTime(selected.time)}</small></div>
             {selected.sourcePostId && data.posts.find((item) => item.id === selected.sourcePostId) && <button type="button" className="channel-source-post" onClick={() => { setTab('plaza'); open('posts', selected.sourcePostId!); }}><MessageCircle size={14} /><span>{data.posts.find((item) => item.id === selected.sourcePostId)?.text}</span><ChevronRight size={13} /></button>}
@@ -591,7 +633,8 @@ export function ChannelsApp({ userName, avatarUrl, contacts: sourceContacts, onB
         </div>}
         {panel === 'compose' && tab === 'plaza' && <><input ref={imageInput} type="file" accept="image/*" aria-label="发布动态配图" className="hidden" disabled={imageBusy} onChange={(event) => { void uploadPostImage(event.target.files?.[0]); event.currentTarget.value = ''; }} />{composerImage && <div className="channel-upload-preview"><img alt="待发布的配图" src={composerImage} /><button type="button" aria-label="移除动态配图" onClick={() => setComposerImage('')}><Trash2 size={15} /></button></div>}<button type="button" disabled={imageBusy} className="channel-image-picker" onClick={() => imageInput.current?.click()}><ImagePlus size={17} />{imageBusy ? '处理图片…' : composerImage ? '更换配图' : '添加图片'}</button></>}
         {panel === 'compose' && tab === 'plaza' && <details className="channel-text-image-editor"><summary><Type size={16} />文字图</summary><textarea aria-label="文字图内容" rows={3} maxLength={1000} value={textImage} onChange={event => setTextImage(event.target.value)} />{textImage.trim() && <div className="channel-text-image"><TextImageCard text={textImage.trim()} large /></div>}</details>}
-        <button type="button" disabled={busy || imageBusy || panel === 'compose' && !draft.trim() && (tab === 'live' || !composerImage && !textImage.trim())} className="channel-primary-button" onClick={() => panel === 'refresh' ? void refreshFeed() : create()}>{panel === 'refresh' ? <Sparkles size={16} /> : <Send size={16} />}{panel === 'refresh' ? refreshLabel : tab === 'live' ? '开始直播' : '发布动态'}</button>
+        {panel === 'compose' && tab === 'plaza' && <details className="channel-text-image-editor"><summary><Play size={16} />文字视频</summary><textarea aria-label="文字视频内容" rows={3} maxLength={2000} value={textVideo} onChange={e => setTextVideo(e.target.value)} placeholder="描述视频画面、声音和情节" /></details>}
+        <button type="button" disabled={busy || imageBusy || panel === 'compose' && !draft.trim() && (tab === 'live' || !composerImage && !textImage.trim() && !textVideo.trim())} className="channel-primary-button" onClick={() => panel === 'refresh' ? void refreshFeed() : create()}>{panel === 'refresh' ? <Sparkles size={16} /> : <Send size={16} />}{panel === 'refresh' ? refreshLabel : tab === 'live' ? '开始直播' : '发布动态'}</button>
       </div>}
     </section></div>}
 

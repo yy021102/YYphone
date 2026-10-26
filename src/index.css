@@ -1,4 +1,8 @@
 @import "tailwindcss";
+@import "./components/calendar.css";
+@import "./components/phoneInspection.css";
+@import "./components/greenhouse.css";
+@import "./components/minimalHome.css";
 
 :root {
   color-scheme: light;
@@ -929,3 +933,20 @@ body {
     box-shadow: none !important;
   }
 }
+
+/* Channel message attachments and text videos share the current theme. */
+.channel-dm-tools { display:flex; gap:8px; padding:0 0 8px; flex-wrap:wrap; }
+.channel-dm-tools button,.channel-dm-attachment button { border-radius:12px; padding:6px 10px; background:var(--channel-soft,#edf4ef); color:inherit; font-size:11px; }
+.channel-dm-attachment { display:grid; gap:8px; padding:10px; border:1px solid #92ac9e40; border-radius:16px; margin-bottom:8px; }
+.channel-dm-attachment :is(input,textarea) { min-width:0; width:100%; border-radius:10px; padding:8px; background:transparent; color:inherit; font-size:12px; }
+.channel-dm-attachment img,.channel-dm-media img { max-width:100%; max-height:240px; border-radius:12px; object-fit:contain; }
+.channel-message .channel-dm-media { min-width:120px; max-width:240px; padding:10px; border-radius:12px; background:#aac4b21a; }
+.channel-message .channel-dm-media.is-transfer { background:#f7ac59; color:#fff; }
+.channel-dm-media button { margin-top:8px; border:1px solid currentColor; padding:4px 12px; border-radius:8px; }
+.channel-text-video { display:grid; gap:10px; place-items:center; min-height:180px; padding:24px; background:linear-gradient(140deg,#23443e,#6c857d); color:#fff; border-radius:16px; }
+.channel-text-video p { white-space:pre-wrap; font-size:13px; line-height:1.7; text-align:left; }
+
+.channel-message .channel-dm-media p { width:auto; margin:7px 0 0; padding:0; border:0!important; border-radius:0; background:transparent!important; color:inherit!important; box-shadow:none; }
+.channel-message .channel-dm-media strong { margin:0; font-size:calc(12px * var(--font-scale)); color:inherit; font-weight:600; }
+.channel-message .channel-dm-media.is-transfer { min-width:165px; }
+.channel-message .channel-dm-media small { display:block; margin-top:9px; opacity:.85; font-size:10px; }

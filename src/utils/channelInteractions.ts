@@ -23,7 +23,8 @@ export function parseChannelPosts(result: unknown, authors: ChannelPerson[], com
     const people = entry.comments.map((comment) => record(comment) ? commenters.find((person) => person.id === comment.authorId && person.id !== post.author.id) : undefined);
     if (people.some((person) => !person) || new Set(people.map((person) => person?.id)).size !== 4) throw new Error('帖子的评论者缺失或重复。');
     if (entry.textImage !== undefined && typeof entry.textImage !== 'string') throw new Error('文字图格式无效。');
-    return { ...post, ...(typeof entry.textImage === 'string' && entry.textImage.trim() ? { textImage: entry.textImage.trim().slice(0, 1000) } : {}), comments: parseChannelBatch({ items: entry.comments }, people as ChannelPerson[]) };
+    if (entry.textVideo !== undefined && typeof entry.textVideo !== 'string') throw new Error('文字视频格式无效。');
+    return { ...post, ...(typeof entry.textVideo === 'string' && entry.textVideo.trim() ? { textVideo: entry.textVideo.trim().slice(0, 2000) } : {}), ...(typeof entry.textImage === 'string' && entry.textImage.trim() ? { textImage: entry.textImage.trim().slice(0, 1000) } : {}), comments: parseChannelBatch({ items: entry.comments }, people as ChannelPerson[]) };
   });
 }
 

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { McpSettingsPanel } from '../components/McpSettingsPanel';
 import {
   Check,
   ChevronDown,
@@ -673,6 +674,7 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
             </p>
           </div>
         </details>
+        <McpSettingsPanel />
         <details open={voiceConfigExpanded} onToggle={(event) => {
           const expanded = event.currentTarget.open;
           if (expanded === voiceConfigExpanded) return;
