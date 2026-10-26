@@ -1,5 +1,8 @@
 ﻿.pomo-dream-garden { position:relative; isolation:isolate; padding:3px 0 12px; overflow:hidden; border-radius:24px; }
-.pomo-dream-garden::before { content:''; position:absolute; z-index:-1; inset:0; background:radial-gradient(ellipse at 15% 35%,#a3c9ad99,transparent 42%),radial-gradient(ellipse at 85% 52%,#e9b5d4aa,transparent 35%),radial-gradient(ellipse at 35% 80%,#a8c5d6aa,transparent 42%),linear-gradient(160deg,#f7edea,#e6eee5 45%,#f4e8ef); filter:blur(10px); }
+.pomo-dream-garden::before { content:''; position:absolute; z-index:-2; inset:0; background:radial-gradient(ellipse at 15% 35%,#f7e1ebaa,transparent 60%),radial-gradient(ellipse at 85% 72%,#dbe8f3bb,transparent 60%),linear-gradient(155deg,#e9e4f3,#f4ebf1 55%,#e3eaf3); }
+.pomo-floral-backdrop { position:absolute; z-index:-1; inset:0; width:100%; height:100%; pointer-events:none; opacity:.9; }
+.pomo-dream-garden .pomo-garden-orbit { box-shadow:none; background:radial-gradient(circle,#fff9,transparent 72%); }
+.pomo-dream-garden .pomo-greenhouse-card > div:nth-child(2) { background:#ffffff5e; }
 .pomo-greenhouse-card { background:transparent!important; border-radius:24px; }
 .pomo-greenhouse-card > div:first-child { padding:7px 6px 14px; }
 .pomo-greenhouse-card > div:nth-child(2) { flex-wrap:wrap; gap:7px; background:#ffffff70; border-color:#ffffffa6; backdrop-filter:blur(16px); }
@@ -12,6 +15,10 @@
 .pomo-plant-stem { position:absolute; width:98px; height:108px; bottom:90px; left:50%; transform:translateX(-50%); }
 .pomo-plant-flower { position:absolute; left:50%; transform:translateX(-50%); bottom:144px; width:155px; height:100px; display:flex; align-items:center; justify-content:center; font-size:85px; line-height:1; filter:drop-shadow(0 8px 9px #5c7f6826); }
 .pomo-plant-flower img { max-width:100%; max-height:135px; object-fit:contain; border-radius:14px; }
+.pomo-botanical-flower { width:112px; height:112px; overflow:visible; filter:drop-shadow(0 3px 3px #907b9820); }
+.stage-0 .pomo-botanical-flower { width:46px; height:46px; }
+.pomo-specimen .pomo-botanical-flower { width:67px; height:67px; }
+.pomo-dream-garden .pomo-plant-stem { opacity:.78; }
 .stage-0 .pomo-plant-flower { bottom:86px; font-size:40px; height:45px; }
 .pomo-plant-shadow { position:absolute; left:50%; bottom:0; width:148px; height:20px; border-radius:50%; transform:translateX(-50%); background:#647a6725; filter:blur(9px); }
 .pomo-potted-plant.is-watering { animation:pomo-plant-water .8s ease-in-out; }

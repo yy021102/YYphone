@@ -78,7 +78,20 @@
 .inspection-actor strong { font-weight:600; }
 .inspection-actor small { margin-left:auto; opacity:.6; }
 .inspection-comments { margin:7px 0; }
-.inspection-comments p { width:fit-content; max-width:100%; margin:4px 0; padding:6px 10px; border:1px solid #fff; border-radius:11px; background:#ffffff9e; font-size:12px; line-height:1.6; overflow-wrap:anywhere; }
+.inspection-comments p { width:fit-content; max-width:100%; margin:7px 0; padding:10px 13px; border:1px solid #fff; border-radius:14px; background:#ffffffb8; font-size:16px; line-height:1.75; overflow-wrap:anywhere; animation:inspection-speech-in .3s ease-out; }
+.inspection-preparing { align-items:center; justify-content:center; padding:30px; text-align:center; }
+.inspection-prepare-cancel { position:absolute; top:calc(env(safe-area-inset-top,0px) + 18px); right:20px; font-size:13px; padding:8px 14px; border-radius:20px; background:#ffffff70; }
+.inspection-preparing h2 { font-size:18px; margin-top:35px; font-weight:500; }
+.inspection-preparing > p { font-size:12px; opacity:.65; line-height:1.8; margin-top:14px; max-width:260px; }
+.inspection-preparing-orbit { width:150px; height:150px; position:relative; display:grid; place-items:center; }
+.inspection-preparing-orbit .inspection-avatar { width:75px; height:75px; border-radius:25px; box-shadow:0 10px 45px #a6a8ce30; }
+.inspection-preparing-orbit > span:not(.inspection-avatar) { position:absolute; inset:0; border:1px solid #ffffffd9; border-radius:50%; animation:inspection-orbit 6s linear infinite; }
+.inspection-preparing-orbit > span:not(.inspection-avatar):last-child { inset:-17px; animation-direction:reverse; animation-duration:9s; border-color:#ffffff65; }
+.inspection-preparing-orbit > span:not(.inspection-avatar)::after { content:''; position:absolute; top:15px; left:17px; width:9px; height:9px; border-radius:50%; background:#fff; box-shadow:0 0 17px #b6c2e2; }
+.inspection-prepare-retry { display:flex; gap:7px; align-items:center; padding:10px 15px; background:#fff8; border-radius:20px; margin-top:20px; font-size:12px; }
+@keyframes inspection-orbit { to { transform:rotate(360deg); } }
+@keyframes inspection-speech-in { from { opacity:0; transform:translateY(7px); } to { opacity:1; transform:none; } }
+@media(prefers-reduced-motion:reduce) { .inspection-preparing-orbit > span:not(.inspection-avatar),.inspection-comments p { animation:none; } }
 .inspection-comments small { font-size:10px; opacity:.6; }
 .inspection-comments [role=alert] { color:#b47d93; }
 .inspection-controls { display:flex; align-items:center; justify-content:space-between; gap:8px; }

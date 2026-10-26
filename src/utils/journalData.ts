@@ -139,6 +139,8 @@ export const describeForSummary = (m: Record<string, unknown>, maxLength = 300):
   const detail = clip(m.aiContext, maxLength === Infinity ? Infinity : 320);
   const text = clip(m.text, maxLength);
   switch (m.kind) {
+    case 'couple-letter':
+      return `[情书「${title || '给你的一封信'}」] ${clip(m.content, maxLength)}`;
     case 'context-note':
       return `${title}${m.source === 'offline' ? '（线下剧情摘要）' : m.source === 'phone-memory' ? '（手机内容记忆）' : m.source === 'pomodoro' ? '（番茄钟陪伴）' : m.source === 'group-private' ? '（群聊转私信背景）' : m.source === 'xianyu' ? '（闲鱼对话）' : '（上下文记录）'}：${[
         ...(m.source === 'group-private' && m.aiContext && m.text !== m.aiContext ? [text] : []),

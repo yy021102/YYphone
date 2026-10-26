@@ -1,3 +1,4 @@
+import { PastDiaryHall } from '../components/PastDiaryHall';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Wallet,
@@ -24,6 +25,7 @@ import {
   BookOpen,
   Star,
   ShoppingBag,
+  Archive,
 } from 'lucide-react';
 import { readAlipayContacts, AlipayContact } from '../utils/alipayData';
 import { showYyError } from '../components/ErrorDialog';
@@ -39,6 +41,7 @@ import {
 } from '../utils/phoneData';
 import { readStorageString, writeStorageString } from '../utils/localStorage';
 import { readDirectMessages } from '../utils/journalData';
+import { applyPhoneGeneratedPatch, collectPastDiaries } from '../utils/phoneDiaryArchive';
 
 interface CheckPhoneAppProps {
   onBack: () => void;
@@ -52,10 +55,10 @@ const getCharAvatar = (charObj: unknown): string => {
   return '';
 };
 
-type SubAppKey = 'home' | 'wechat' | 'album' | 'browser' | 'notes' | 'icity' | 'agent' | 'wallet' | 'maps' | 'health' | 'douban' | 'shopping';
+type SubAppKey = 'home' | 'wechat' | 'album' | 'browser' | 'notes' | 'icity' | 'agent' | 'wallet' | 'maps' | 'health' | 'douban' | 'shopping' | 'past';
 
 const scopeForApp = (app: SubAppKey): 'all' | PhoneGenScope =>
-  app === 'home' ? 'all' : app === 'maps' ? 'album' : app;
+  app === 'home' ? 'all' : app === 'maps' ? 'album' : app === 'past' ? 'icity' : app;
 
 export interface PhoneWeChatMsg {
   id: string;
@@ -143,6 +146,8 @@ export interface CharacterPhoneData {
   browserHistory: PhoneBrowserItem[];
   notes: PhoneNoteItem[];
   icityDiaries: PhoneIcityDiary[];
+  diaryArchive?: PhoneIcityDiary[];
+  deletedDiaryIds?: string[];
   agentSession: PhoneAgentSession;
   wallet?: PhoneWallet;
   health?: PhoneHealth;
@@ -215,6 +220,7 @@ const createDefaultPhoneData = (charId: string, _charName: string): CharacterPho
   browserHistory: [],
   notes: [],
   icityDiaries: [],
+  diaryArchive: [],
   shoppingCart: [],
   agentSession: { doubaoTopic: '', doubaoTurns: [], claudeTopic: '', claudeTurns: [] },
 });
@@ -350,7 +356,7 @@ export const CheckPhoneApp: React.FC<CheckPhoneAppProps> = ({ onBack }) => {
     try {
       const patch = await generatePhoneScope(scope, ctx, phonesMapRef.current[charId] ?? currentPhone);
       setPhonesMap((prev) => ({
-        ...prev, [charId]: { ...(prev[charId] ?? createDefaultPhoneData(charId, currentChar.name)), ...patch },
+        ...prev, [charId]: applyPhoneGeneratedPatch(prev[charId] ?? createDefaultPhoneData(charId, currentChar.name), patch),
       }));
     } catch (error) {
       showYyError(error instanceof Error ? error.message : String(error), '生成手机内容时出错了');
@@ -581,14 +587,14 @@ export const CheckPhoneApp: React.FC<CheckPhoneAppProps> = ({ onBack }) => {
         </div>
 
         <div className="flex items-center gap-1.5">
-          <button
+          {activeSubApp !== 'past' && <button
             onClick={() => void handleTriggerGenerate(scopeForApp(activeSubApp))}
             disabled={isGenerating}
             className="w-7 h-7 rounded-full bg-white/80 hover:bg-white border border-white text-[#7C7489] flex items-center justify-center text-sm font-bold shadow-2xs cursor-pointer active:scale-95 transition-all"
             title={activeSubApp === 'home' ? '✦ 一键生成全机内容' : '✦ 重新生成当前 App 内容'}
           >
             <span className={isGenerating ? 'animate-spin inline-block' : ''}>✦</span>
-          </button>
+          </button>}
 
           <button
             onClick={() => setShowTopMenu(true)}
@@ -689,6 +695,7 @@ export const CheckPhoneApp: React.FC<CheckPhoneAppProps> = ({ onBack }) => {
                   color: '#4D795A',
                 },
                 { key: 'shopping', label: '购物', icon: ShoppingBag, bg: '#F2E5DC', color: '#A47C66' },
+                { key: 'past', label: '过往', icon: Archive, bg: '#EAE2E9', color: '#947F99' },
               ].map((app) => {
                 const IconComp = app.icon;
                 return (
@@ -1018,12 +1025,14 @@ export const CheckPhoneApp: React.FC<CheckPhoneAppProps> = ({ onBack }) => {
 
       {activeSubApp === 'shopping' && <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar p-4 pb-20 space-y-3"><div className="px-1 py-2"><h3 className="text-lg font-semibold text-[#826b62]">购物车</h3><p className="text-[11px] text-slate-400 mt-1">{currentChar.name}留在购物车里的心动</p></div>{!(currentPhone.shoppingCart?.length) && <p className="py-10 text-center text-[11px] text-slate-400">购物车还是空的，点右上角 ✦ 生成</p>}{(currentPhone.shoppingCart ?? []).map(item => <article key={item.id} className="rounded-3xl border border-white bg-white/80 p-4 shadow-2xs"><div className="flex gap-3"><div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[#f6e8df] to-[#f0e6ed] text-4xl" aria-hidden="true">{item.emoji}</div><div className="min-w-0 flex-1"><span className="text-[10px] text-[#ad968b]">{item.category}</span><h4 className="text-sm font-semibold text-[#685c58] break-words">{item.name}</h4><p className="text-[10px] text-slate-400 mt-1 break-words">{item.variant}</p><p className="mt-2 text-sm font-semibold text-[#bc8b7f]">¥{formatMoney(item.price)}</p></div></div><p className="mt-3 rounded-xl bg-[#faf5f1] px-3 py-2 text-[11px] leading-relaxed text-[#9b8580] whitespace-pre-wrap break-words">{item.note}</p></article>)}</div>}
 
+      {activeSubApp === 'past' && <PastDiaryHall name={currentChar.name} diaries={currentPhone.diaryArchive ?? []} onDelete={id => { if (window.confirm('删除这篇过往日记？')) updateCurrentPhone(phone => ({ ...phone, diaryArchive: (phone.diaryArchive ?? []).filter(item => item.id !== id), deletedDiaryIds: [...new Set([...(phone.deletedDiaryIds ?? []), id])] })); }} />}
       {activeSubApp === 'icity' && (
         <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar p-4 space-y-3">
           <div className="px-2 pb-1 flex items-center justify-between">
             <span className="text-xs font-bold text-[#6B6082]">
               icity · 仅 {currentChar.name} 自己可见的私密日记
             </span>
+            <button type="button" className="text-[10px] text-[#9c87a5]" onClick={() => setActiveSubApp('past')}>过往</button>
           </div>
 
           {currentPhone.icityDiaries.length === 0 && (
@@ -1045,6 +1054,7 @@ export const CheckPhoneApp: React.FC<CheckPhoneAppProps> = ({ onBack }) => {
               <p className="text-xs text-slate-600 leading-relaxed whitespace-pre-wrap">
                 {d.content}
               </p>
+              <button type="button" className="text-[10px] text-[#a48faf]" disabled={(currentPhone.diaryArchive ?? []).some(item => item.id === d.id || (item.content === d.content && item.dateStr === d.dateStr && item.timeStr === d.timeStr))} onClick={() => updateCurrentPhone(phone => ({ ...phone, diaryArchive: collectPastDiaries(phone.diaryArchive, [d]), deletedDiaryIds: (phone.deletedDiaryIds ?? []).filter(id => id !== d.id) }))}>{(currentPhone.diaryArchive ?? []).some(item => item.id === d.id || (item.content === d.content && item.dateStr === d.dateStr && item.timeStr === d.timeStr)) ? '已存入过往' : '存入过往'}</button>
             </div>
           ))}
         </div>

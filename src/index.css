@@ -4,6 +4,11 @@
 @import "./components/greenhouse.css";
 @import "./components/minimalHome.css";
 @import "./components/moonlitHome.css";
+@import "./components/pastDiaryHall.css";
+@import "./components/externalLink.css";
+@import "./components/memoryTheater.css";
+@import "./components/coupleRewards.css";
+@import "./components/coupleCorrespondence.css";
 
 :root {
   color-scheme: light;

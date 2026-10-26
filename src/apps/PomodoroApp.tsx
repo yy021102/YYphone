@@ -1,4 +1,5 @@
 import { PottedPlant, FlowerShelves } from '../components/GreenhousePlants';
+import { FloralGardenBackdrop } from '../components/FloralGardenBackdrop';
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Timer,
@@ -1615,6 +1616,7 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
         {/* ==================== 板块 3：升级版陪伴温室（角色专属花盆+手动浇水+标本图鉴） + 角色专注排行榜 ==================== */}
         {activeTab === 'rank' && (
           <div className="pomo-dream-garden">
+            <FloralGardenBackdrop />
             {/* 升级版陪伴温室卡片 */}
             <div
               style={{ backgroundColor: currentTheme.cardBg, borderRadius: currentTheme.cardRadius }}

@@ -4,7 +4,7 @@ import { clearDbStorage } from './dbStorage';
 import { readStorageString, writeStoredValue } from './localStorage';
 import { activeMemoryArchive } from './memoryArchives';
 import { readMemories } from './memoryData';
-import { applyInspectionAction, finishPhoneInspection, readPhoneInspections, readInspectionActions, inspectionTargets, readInspectionContacts, readInspectionPage, reactToInspection, type InspectionSession } from './phoneInspection';
+import { applyInspectionAction, finishPhoneInspection, readPhoneInspections, readInspectionActions, inspectionTargets, readInspectionContacts, readInspectionPage, reactToInspection, preparePhoneInspection, type InspectionSession } from './phoneInspection';
 import { readMoments, subscribeMoments } from './momentsData';
 import { buildPrompt } from './buildPrompt';
 const values = new Map<string,string>();
@@ -16,12 +16,28 @@ beforeEach(async()=>{await clearDbStorage();writeStoredValue('pocketos:wechat-co
   writeStoredValue('yyphone:wechat-moments',[{id:'post',authorId:'user',authorName:'玩家',authorType:'user',authorAvatar:'',content:'MOMENT_CONTENT',createdAt:'2026-10-20',comments:[],likes:[],seenByCharIds:[],seenCommentIdsByChar:{}}]);
 });afterEach(()=>mock.restoreAll());
 const session=():InspectionSession=>({id:'session-test',charId:'a',chatId:'chat-a',archiveKey:activeMemoryArchive('a'),createdAt:'2026-10-26T12:00:00Z',steps:[]});
+test('preparation buffers the complete route and speech without changing remarks, sending messages or writing memories',async()=>{
+  const before=readStorageString('yyphone:wechat-chats'); let calls=0;
+  mock.method(globalThis,'fetch',async(_url:unknown,init?:RequestInit)=>{calls++; const body=JSON.parse(String(init?.body));const task=JSON.parse(body.messages.at(-1).content); const result=task.currentPageId==='home'?{comments:['先看看备注'],nextId:'remark',end:false}:task.currentPageId==='remark'?{comments:['换一个名字','就叫这个吧'],nextId:'moments',action:{type:'rename-self',text:'新的名字'},end:false}:{comments:['手机还你'],end:true};return Response.json({choices:[{message:{content:JSON.stringify(result)}}]});});
+  const s=session(); const plan=await preparePhoneInspection(s,'玩家',new AbortController().signal);
+  assert.equal(calls,3);assert.deepEqual(plan.map(step=>step.page.id),['home','remark','moments']);assert.equal(plan[1].comments.length,2);assert.equal(plan[1].action?.type,'rename-self');assert.equal(plan.at(-1)?.end,true);
+  assert.equal(readStorageString('yyphone:wechat-chats'),before);assert.equal(readInspectionActions(s.id).length,0);assert.equal(readPhoneInspections().length,0);assert.equal(readMemories().length,0);assert.equal(s.steps.length,0);
+});
 test('phone pages display actual current chat, personal note and moments without thoughts, hidden archives or configurations',()=>{
   assert(inspectionTargets('a').some(t=>t.id==='chat:chat-b'));
   assert.match(JSON.stringify(readInspectionPage('remark','a','玩家')),/特别备注/);assert.match(JSON.stringify(readInspectionPage('moments','a','玩家')),/MOMENT_CONTENT/);
   const page=readInspectionPage('chat:chat-b','a','玩家');assert.equal(page.lines.length,2);assert.equal(page.lines[0].from,'时予');assert.equal(page.lines[1].from,'玩家');assert.equal(page.lines[0].time,'2024-01-01');
   assert(!JSON.stringify(page).includes('NEVER_INCLUDE'));assert(!JSON.stringify(page).includes('OTHER_PRIVATE_PERSONA'));assert.throws(()=>readInspectionPage('chat:deleted','a','玩家'));
 });
+test('each opened conversation exposes only its latest 15 visible messages',()=>{
+  const chats=JSON.parse(readStorageString('yyphone:wechat-chats')!);
+  chats[1].messages=Array.from({length:35},(_,i)=>({senderId:i%2?'user':'b',text:`visible-${i}`,createdAt:'2026-10-26'}));
+  chats[1].messages.push({senderId:'b',kind:'thought',text:'NEVER_INCLUDE_THOUGHT'},{senderId:'b',hidden:true,text:'NEVER_INCLUDE_HIDDEN'});
+  writeStoredValue('yyphone:wechat-chats',chats);
+  const page=readInspectionPage('chat:chat-b','a','玩家');
+  assert.equal(page.lines.length,15);assert.equal(page.lines[0].text,'visible-20');assert.equal(page.lines.at(-1)?.text,'visible-34');
+});
+
 test('reactions receive actor settings and only opened phone content, and reject invented next targets',async()=>{
   let body='';mock.method(globalThis,'fetch',async(_url:unknown,init?:RequestInit)=>{body=String(init?.body);return Response.json({choices:[{message:{content:JSON.stringify({comments:['你们还一起看了电影啊'],nextId:'invented',end:false})}}]});});
   const s=session();const page=readInspectionPage('remark','a','玩家');s.steps=[{page,comments:[]}];

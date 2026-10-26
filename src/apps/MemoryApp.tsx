@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Archive, BookOpen, BrainCircuit, ChevronDown, Download, Heart, Package, Pencil, Pin, PinOff, Plus, Search, Settings, Sparkles, Trash2, Upload, X } from 'lucide-react';
+import { Archive, ArrowUpRight, BookOpen, BrainCircuit, ChevronDown, Download, Film, Heart, Package, Pencil, Pin, PinOff, Plus, Search, Settings, Sparkles, Trash2, Upload, X } from 'lucide-react';
 import { AppHeader } from '../components/AppHeader';
+import { MemoryTheater } from '../components/MemoryTheater';
 import { showYyError } from '../components/ErrorDialog';
 import { readOfflineContacts, OfflineContact } from '../utils/offlineData';
 import {
@@ -71,6 +72,7 @@ export const MemoryApp: React.FC<MemoryAppProps> = ({ onBack }) => {
   const [editing, setEditing] = useState<MemoryItem | null>(null);
   const [giftEditing, setGiftEditing] = useState<{ id?: string; gift: GiftMemoryDetails } | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [theaterId, setTheaterId] = useState<string | null>(null);
   const [busy, setBusy] = useState('');
   const [secondaryModels, setSecondaryModels] = useState<Array<{ id: string; label: string }>>([]);
   const [isLoadingSecondaryModels, setIsLoadingSecondaryModels] = useState(false);
@@ -429,6 +431,7 @@ export const MemoryApp: React.FC<MemoryAppProps> = ({ onBack }) => {
 
   return (
     <div className="memory-app relative flex flex-1 w-full flex-col overflow-hidden bg-gradient-to-b from-[#FBF3F7] via-[#F3F6FB] to-[#EAF2F8] text-slate-700">
+      {theaterId && <MemoryTheater key={theaterId} charId={theaterId} charName={ownerName(theaterId)} avatar={contacts.find(c => c.id === theaterId)?.avatarUrl} onClose={() => setTheaterId(null)} />}
       <AppHeader
         title="记忆"
         subtitle="把重要的相处，慢慢记住"
@@ -459,6 +462,7 @@ export const MemoryApp: React.FC<MemoryAppProps> = ({ onBack }) => {
         </div>
 
         <section className="memory-hero">
+          {ownerId !== SHARED_MEMORY_ID && <button type="button" aria-label={`进入${ownerName(ownerId)}的记忆放映室`} onClick={() => setTheaterId(ownerId)} className="absolute inset-0 z-10 rounded-[28px] outline-offset-[-4px] focus-visible:outline-2 focus-visible:outline-[#9eacc8]" />}
           <div className="memory-hero-orbit">
             {ownerAvatar ? <img key={ownerAvatar} src={ownerAvatar} alt={`${ownerName(ownerId)}的头像`} className="memory-hero-avatar" /> : <span aria-hidden="true" className="text-2xl font-semibold">{ownerId === SHARED_MEMORY_ID ? '✧' : ownerName(ownerId).slice(0, 1)}</span>}
             <Heart aria-hidden="true" size={13} className="memory-hero-heart" fill="currentColor" />
@@ -466,6 +470,7 @@ export const MemoryApp: React.FC<MemoryAppProps> = ({ onBack }) => {
           <p className="memory-eyebrow"><Sparkles size={11} /> 相处档案 · MEMORY</p>
           <h2 className="memory-hero-title">{ownerName(ownerId)}的记忆花园</h2>
           <p className="memory-hero-subtitle">那些小事，也值得被认真收藏。</p>
+          {ownerId !== SHARED_MEMORY_ID && <div className="memory-theater-entry"><Film size={12} strokeWidth={1.4} /><span>记忆放映室</span><ArrowUpRight size={13} /></div>}
           <div className="memory-stats">
             <div><span>长期记忆</span><strong>{library.length}<small> 条</small></strong></div>
             <div><span>互赠物品</span><strong>{gifts.length}<small> 件</small></strong></div>

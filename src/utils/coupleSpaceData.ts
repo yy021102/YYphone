@@ -1,4 +1,5 @@
 import type { CharacterCoupleSpace } from '../apps/CoupleSpaceApp';
+import { settleCouplePoints } from './coupleRewards';
 import {
   markCharacterContextEventsConsumed,
   readPendingHighPriorityEvents,
@@ -59,6 +60,7 @@ export const readCoupleSpaces = (): Record<string, CharacterCoupleSpace> => {
 
 export const writeCoupleSpaces = (spaces: Record<string, CharacterCoupleSpace>) => {
   writeStoredValue(COUPLE_SPACES_STORAGE_KEY, spaces);
+  void settleCouplePoints().catch(error => console.error('Could not settle couple points.', error));
 };
 
 export const updateCoupleSpace = (

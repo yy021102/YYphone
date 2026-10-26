@@ -1,6 +1,7 @@
 import { ApiConnection, requestConfiguredImage } from './aiApi';
 import { readSetting, SETTINGS_KEYS } from './settings';
 import { parseImageReference, referenceGuidance, referenceSimilarity } from './imageReference';
+import type { GenerationReference } from './userImageReference';
 
 export type ImageGenerationProvider = 'openai' | 'novelai' | 'imagen' | 'gemini';
 export type ImageSizePreset = 'square' | 'portrait' | 'landscape';
@@ -48,6 +49,7 @@ export interface ImageGenerationConfig {
   size?: ImageSizePreset;
   referenceImage?: string;
   referenceSimilarity?: number;
+  references?: GenerationReference[];
 }
 
 export interface ImageGenerationSettings {
@@ -203,13 +205,20 @@ const requestImagenImage = async (prompt: string, endpoint: string, apiKey: stri
 };
 
 const requestGeminiImage = async (prompt: string, endpoint: string, apiKey: string, model: string, config: ImageGenerationConfig, signal?: AbortSignal) => {
-  const reference = config.referenceImage ? parseImageReference(config.referenceImage) : undefined;
+  const references = config.references ?? (config.referenceImage ? [{ image: config.referenceImage }] : []);
+  const parts = references.flatMap((item, index) => {
+    const reference = parseImageReference(item.image);
+    return [
+      ...(item.subject ? [{ text: `参考图 ${index + 1}：${item.subject === 'user' ? '玩家（user）的脸部' : '角色（character）'}，仅用于对应人物，不得混用身份。` }] : []),
+      { inlineData: { mimeType: reference.mimeType, data: reference.data } },
+    ];
+  });
   const response = await fetch(googleUrl(endpoint, model, 'generateContent'), {
     signal,
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
     body: JSON.stringify({
-      contents: [{ role: 'user', parts: [...(reference ? [{ inlineData: { mimeType: reference.mimeType, data: reference.data } }] : []), { text: prompt }] }],
+      contents: [{ role: 'user', parts: [...parts, { text: prompt }] }],
       generationConfig: { responseModalities: ['TEXT', 'IMAGE'], imageConfig: { aspectRatio: imageDimensions('gemini', config.size).aspectRatio } },
     }),
   });
@@ -229,8 +238,14 @@ export const generateImage = async (
   signal?: AbortSignal,
 ): Promise<string> => {
   const provider = config.provider;
-  if (config.referenceImage && provider === 'imagen') throw new Error('当前 Imagen 文生图接口不支持参考图，请切换到支持参考图的 OpenAI 兼容、Gemini Image 或 NovelAI。');
-  if (config.referenceImage) parseImageReference(config.referenceImage);
+  const references: GenerationReference[] = config.references ?? (config.referenceImage ? [{ image: config.referenceImage, similarity: config.referenceSimilarity }] : []);
+  if (references.length && provider === 'imagen') throw new Error('当前 Imagen 文生图接口不支持参考图，请切换到支持参考图的 OpenAI 兼容、Gemini Image 或 NovelAI。');
+  if (references.length > 1 && provider === 'novelai') throw new Error('当前 NovelAI 图生图流程只能使用一张参考图。双人分别参考请切换 OpenAI 兼容或 Gemini Image，或移除当前对话参考图后重试。');
+  if (references.length > 16) throw new Error('参考图数量过多。');
+  for (const reference of references) { parseImageReference(reference.image); referenceSimilarity(reference.similarity); }
+  const referencePrompt = references.map((reference, index) => reference.subject === 'user'
+    ? `参考图 ${index + 1} 是玩家（user）的脸部照片。保持玩家的五官、脸型与面部辨识度，参考强度 ${Math.round(referenceSimilarity(reference.similarity) * 100)}%。只将这张脸用于玩家，不要改变其他人物的脸或把两个人的脸混合。服装、姿势、背景与构图以本次画面描述为准。`
+    : `${reference.subject === 'character' ? `参考图 ${index + 1} 仅用于角色（character），与玩家是不同的人。` : ''}${provider !== 'novelai' ? referenceGuidance(referenceSimilarity(reference.similarity)) : ''}`).filter(Boolean).join('\n');
   const defaults = IMAGE_PROVIDER_DEFAULTS[provider];
   const fallbackMatches = !!fallbackApi && (provider === 'openai'
     ? !fallbackApi.endpoint.includes('generativelanguage.googleapis.com')
@@ -239,20 +254,20 @@ export const generateImage = async (
     (provider === 'openai' && fallbackMatches ? fallbackApi!.endpoint.trim() : '') || defaults.endpoint;
   const apiKey = config.apiKey?.trim() || (fallbackMatches ? fallbackApi!.apiKey.trim() : '');
   const model = config.model?.trim() || defaults.model;
-  const prompt = [config.prompt?.trim(), description.trim(), config.referenceImage && provider !== 'novelai' ? referenceGuidance(referenceSimilarity(config.referenceSimilarity)) : ''].filter(Boolean).join(provider === 'novelai' ? ', ' : '\n');
+  const prompt = [config.prompt?.trim(), description.trim(), referencePrompt].filter(Boolean).join(provider === 'novelai' ? ', ' : '\n');
   if (!endpoint) throw new Error('生图接口地址未填写。');
   if (!apiKey) throw new Error('生图 API Key 未填写。');
   if (!prompt) throw new Error('生图提示词为空。');
 
   switch (provider) {
     case 'novelai':
-      return requestNovelAiImage(prompt, endpoint, apiKey, model, config, signal);
+      return requestNovelAiImage(prompt, endpoint, apiKey, model, { ...config, referenceImage: references[0]?.image, referenceSimilarity: references[0]?.similarity }, signal);
     case 'imagen':
       return requestImagenImage(prompt, endpoint, apiKey, model, config, signal);
     case 'gemini':
-      return requestGeminiImage(prompt, endpoint, apiKey, model, config, signal);
+      return requestGeminiImage(prompt, endpoint, apiKey, model, { ...config, references }, signal);
     default:
       return requestConfiguredImage(prompt, { model, api: { endpoint, apiKey }, size: imageDimensions(provider, config.size).size,
-        referenceImage: config.referenceImage, similarity: config.referenceSimilarity, signal });
+        referenceImages: references.map((reference) => reference.image), similarity: references.length ? Math.max(...references.map((reference) => referenceSimilarity(reference.similarity))) : undefined, signal });
   }
 };

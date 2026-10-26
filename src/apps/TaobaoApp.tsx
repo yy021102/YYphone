@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { findCouponUse, fulfillCoupleGift, type CouponGiftTarget } from '../utils/coupleRewards';
 import {
   ShoppingBag,
   Sparkles,
@@ -41,6 +42,8 @@ import { compressImage } from '../utils/imageFile';
 
 interface TaobaoAppProps {
   onBack: () => void;
+  giftCoupon?: CouponGiftTarget | null;
+  onCouponGiftComplete?: (chatId: string) => void;
 }
 
 // 三大主板块：购物 | 饿了么 | 闲鱼
@@ -224,7 +227,9 @@ const getCharacterPersona = (charId: string) => {
   return isRecord(character) && typeof character.persona === 'string' ? character.persona : '';
 };
 
-export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
+export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack, giftCoupon, onCouponGiftComplete }) => {
+  const couponUse = giftCoupon ? findCouponUse(giftCoupon.charId, giftCoupon.useId) : undefined;
+  const [couponPaying, setCouponPaying] = useState(false);
   // ==================== 1. 导航与子页面状态 ====================
   const [activeTab, setActiveTab] = useState<MainTab>('shopping');
   const [xianyuSubTab, setXianyuSubTab] = useState<XianyuSubTab>('market');
@@ -694,6 +699,19 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
   // ==================== 9. 结算支付与送礼/通知角色 ====================
   const handleConfirmPurchase = async () => {
     if (!checkoutProduct) return;
+    if (giftCoupon) {
+      if (couponPaying) return;
+      setCouponPaying(true);
+      try {
+        const current = findCouponUse(giftCoupon.charId, giftCoupon.useId);
+        if (!current || current.productId !== 'gift') throw new Error('找不到这张礼物券，请返回聊天重试。');
+        await fulfillCoupleGift(giftCoupon, checkoutProduct.id, paymentSelection === 'balance' ? { type: 'balance' } : { type: 'intimate', charId: paymentSelection.slice('intimate:'.length) }, checkoutProduct.price);
+        setCheckoutProduct(null); setFinanceData(readAlipayData()); setPaymentNotice('礼物已送达，礼物券已完成');
+        onCouponGiftComplete?.(current.chatId);
+      } catch(e) { setPaymentError(e instanceof Error ? e.message : '礼物尚未送达，请重试。'); }
+      finally { setCouponPaying(false); }
+      return;
+    }
     if (buyForWho === 'char' && !contacts.some((contact) => contact.id === targetCharId)) {
       setPaymentError('请先选择有效的收礼角色。');
       return;
@@ -1000,6 +1018,7 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
           </button>
         }
       />
+      {giftCoupon && <div className="mx-4 mt-2 rounded-2xl border border-white bg-white/75 px-4 py-3 text-[11px] text-slate-500"><Gift size={14} className="mr-2 inline text-pink-300" />{couponUse?.fulfilledAt ? '这张礼物券已经完成' : couponUse?.owner === 'char' ? `为${contacts.find(c => c.id === giftCoupon.charId)?.name ?? '对方'}挑一份礼物` : `收下${contacts.find(c => c.id === giftCoupon.charId)?.name ?? '对方'}送你的心意`}</div>}
 
       {/* 三大主板块切换胶囊：购物 | 饿了么 | 闲鱼 */}
       <div className="px-4 py-2 z-10 shrink-0">
@@ -1013,6 +1032,7 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
             return (
               <button
                 key={key}
+                disabled={!!giftCoupon && key !== 'shopping'}
                 onClick={() => setActiveTab(key as MainTab)}
                 style={isActive ? { background: currentTheme.primaryGradient } : undefined}
                 className={`py-2 flex items-center justify-center gap-1.5 rounded-xl text-xs font-bold transition-all duration-300 cursor-pointer ${
@@ -1725,7 +1745,8 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
               ¥{Number(checkoutProduct.price).toFixed(2)}
             </p>
 
-            <div className="space-y-2 bg-slate-50/90 p-3 rounded-2xl border border-slate-100">
+            {giftCoupon && <div className="rounded-2xl border border-pink-100 bg-pink-50/70 p-3 text-xs text-slate-500">礼物券 · {couponUse?.owner === 'char' ? `送给${contacts.find(c => c.id === giftCoupon.charId)?.name ?? '对方'}` : `由${contacts.find(c => c.id === giftCoupon.charId)?.name ?? '对方'}送给你`}</div>}
+            <div style={{ display: giftCoupon ? 'none' : undefined }} className="space-y-2 bg-slate-50/90 p-3 rounded-2xl border border-slate-100">
               <span className="text-[11px] font-bold block">收件人与互动方式</span>
               <div className="grid grid-cols-2 gap-2">
                 <button
@@ -1807,7 +1828,7 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
               )}
             </div>
 
-            <label className="block text-[11px] font-bold">
+            <label style={{ display: giftCoupon && couponUse?.owner === 'user' ? 'none' : undefined }} className="block text-[11px] font-bold">
               选择付款方式
               <select
                 value={paymentSelection}
@@ -1851,10 +1872,11 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack }) => {
               <button
                 type="button"
                 onClick={handleConfirmPurchase}
+                disabled={couponPaying}
                 style={{ background: currentTheme.primaryGradient }}
                 className="flex-1 rounded-xl py-2.5 text-xs font-bold text-white shadow-2xs cursor-pointer"
               >
-                确认支付
+                {couponPaying ? '正在送达…' : giftCoupon ? '买下并送出' : '确认支付'}
               </button>
             </div>
           </section>

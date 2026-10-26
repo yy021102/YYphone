@@ -15,6 +15,8 @@ import { buildPrompt } from './buildPrompt';
 import { readStorageString } from './localStorage';
 import { buildMemoryInjection } from './memoryData';
 import { guardMemoryArchive } from './memoryArchives';
+import { readDirectMessages } from './journalData';
+export const PHONE_HISTORY_LIMIT = 150;
 
 export type PhoneGenScope = 'wechat' | 'album' | 'browser' | 'notes' | 'icity' | 'agent' | 'wallet' | 'health' | 'douban' | 'shopping';
 export const PHONE_GEN_SCOPES: PhoneGenScope[] = ['wechat', 'album', 'browser', 'notes', 'icity', 'agent', 'wallet', 'health', 'douban', 'shopping'];
@@ -96,7 +98,7 @@ const scopeSpec = (scope: PhoneGenScope, ctx: PhoneGenContext, prevWallet: Phone
       return `生成角色与两个 AI 助手的对话记录。豆包：琐碎日常、查天气食谱、吐槽无厘头问题等；Claude：深夜探讨复杂的心思、情感困局、道德拉扯、心理状况。各 4~6 轮，role 为 char 表示角色提问，ai 表示 AI 回复；AI 的回复要像真实的 AI 助手风格。
 返回 JSON：{"doubaoTopic":"主题","doubaoTurns":[{"role":"char或ai","content":"内容"}],"claudeTopic":"主题","claudeTurns":[{"role":"char或ai","content":"内容"}]}`;
     case 'wallet': {
-      const money = readRecentMoneyEvents(ctx.charId);
+      const money = readRecentMoneyEvents(ctx.charId, PHONE_HISTORY_LIMIT);
       const prev = prevWallet
         ? `当前钱包：资产 ¥${prevWallet.balance}，最近记录：${prevWallet.records.slice(0, 6).map((r) => `${r.timeStr}${r.title}${r.amount}`).join('；')}。请在此基础上延续，只生成“新增”的收支，并给出更新后的总资产。`
         : '这是第一次生成钱包，请根据角色身份和经济状况设定一个合理的总资产。';
@@ -121,8 +123,9 @@ export const generatePhoneScope = async (
   prev: CharacterPhoneData
 ): Promise<Partial<CharacterPhoneData>> => {
   const assertArchive = guardMemoryArchive(ctx.charId);
-  const brief = readCharacterBrief(ctx.charId, { configuredHistory: true });
-  const memory = ['icity', 'shopping', 'all'].includes(scope) ? await buildMemoryInjection([ctx.charId], 'direct', brief.recentChat.slice(-1600), () => ctx.charName, { localOnly: true }) : undefined;
+  const brief = readCharacterBrief(ctx.charId);
+  const recent = readDirectMessages(ctx.charId, { fullText: true }).slice(-PHONE_HISTORY_LIMIT).filter(message => !message.note);
+  const memory = ['icity', 'shopping', 'all'].includes(scope) ? await buildMemoryInjection([ctx.charId], 'direct', recent.map(message => message.text).join('\n').slice(-1600), () => ctx.charName, { localOnly: true }) : undefined;
   assertArchive();
   const prevWallet = scope === 'wallet' ? (prev.wallet ?? readCharacterWallet(ctx.charId)) : null;
   const chats: unknown = JSON.parse(readStorageString('yyphone:wechat-chats') ?? '[]');
@@ -130,7 +133,7 @@ export const generatePhoneScope = async (
     item.type === 'direct' && Array.isArray(item.participantIds) &&
     item.participantIds.length === 1 && item.participantIds[0] === ctx.charId) : undefined;
   const background = buildPrompt({ chatId: chat && typeof chat.id === 'string' ? chat.id : '',
-    backgroundCharacterId: ctx.charId, currentInput: '', memoryInjection: memory });
+    backgroundCharacterId: ctx.charId, currentInput: '', memoryInjection: memory, historyWindowOverride: PHONE_HISTORY_LIMIT });
   const scopes = scope === 'all' ? PHONE_GEN_SCOPES : [scope];
   const system = [
     ...background.filter((message) => message.role === 'system').map((message) => message.content),
@@ -138,6 +141,7 @@ export const generatePhoneScope = async (
     `你要为角色「${ctx.charName}」生成他/她自己手机里的「${scopes.map((item) => SCOPE_LABEL[item]).join('、')}」内容，供玩家“查手机”时偷看。`,
     `角色人设：${brief.persona || '（无详细人设，请合理发挥）'}`,
     '要求：完全贴合人设与当前剧情，有生活感和细节，不要套话、不要客服腔；内容必须是角色自己的真实痕迹，不要出现“作为AI”之类的字眼；只返回 JSON，不要多余文字。',
+    '近期情境以本次提供的最近150条聊天记录为准。记忆和流水账只作长期背景，不能把早年的事当作最近刚发生；近期没有提及的旧事不反复当成手机内容的中心。',
   ].filter(Boolean).join('\n');
   const task = scope === 'all'
     ? `一次生成以下所有模块，返回一个以 ${scopes.join('、')} 为键的 JSON 对象，每个值按对应模块的格式填写，不能遗漏：\n${scopes.map((item) =>

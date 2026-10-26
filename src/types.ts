@@ -66,6 +66,10 @@ export interface UserPersona {
   realName?: string;
   wechatId?: string;
   avatarUrl?: string;
+  /** A separate local photo used only when generating images containing the player. */
+  faceReferenceImage?: string;
+  faceReferenceEnabled?: boolean;
+  faceReferenceSimilarity?: number;
   identity: string;
   personality: string;
   background: string;

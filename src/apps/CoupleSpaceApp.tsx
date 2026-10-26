@@ -23,6 +23,7 @@ import {
 import { AppHeader } from '../components/AppHeader';
 import { CoupleRecordEditor } from '../components/CoupleRecordEditor';
 import { CoupleSpacePages } from '../components/CoupleSpacePages';
+import { CoupleRewardsShop } from '../components/CoupleRewardsShop';
 import { deleteCoupleMood, editCoupleRecord, type CoupleRecordEdit } from '../utils/coupleRecords';
 import { showYyError } from '../components/ErrorDialog';
 import { readAlipayContacts, AlipayContact } from '../utils/alipayData';
@@ -1052,6 +1053,7 @@ export const CoupleSpaceApp: React.FC<CoupleSpaceAppProps> = ({ onBack }) => {
                 </div>
               </button>
             </div>
+            <CoupleRewardsShop key={selectedCharId} charId={selectedCharId} charName={currentChar.name} userName={userProfile.name} />
           </>
         )}
       </div>}

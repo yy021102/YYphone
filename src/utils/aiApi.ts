@@ -148,7 +148,7 @@ export const requestConfiguredAiText = async (
 
 export const requestConfiguredImage = async (
   prompt: string,
-  options: { model: string; api: ApiConnection; size?: string; referenceImage?: string; similarity?: number; signal?: AbortSignal }
+  options: { model: string; api: ApiConnection; size?: string; referenceImage?: string; referenceImages?: string[]; similarity?: number; signal?: AbortSignal }
 ): Promise<string> => {
   const endpoint = options.api.endpoint.trim().replace(/\/+$/, '');
   if (!endpoint || !options.api.apiKey.trim() || !options.model.trim()) {
@@ -171,19 +171,22 @@ export const requestConfiguredImage = async (
     .replace(/\/completions$/i, '')
     .replace(/\/images\/generations$/i, '');
   baseUrl.pathname = baseUrl.pathname.replace(/\/images\/edits$/i, '');
-  baseUrl.pathname = `${baseUrl.pathname.replace(/\/+$/, '')}/images/${options.referenceImage ? 'edits' : 'generations'}`;
+  const references = options.referenceImages ?? (options.referenceImage ? [options.referenceImage] : []);
+  baseUrl.pathname = `${baseUrl.pathname.replace(/\/+$/, '')}/images/${references.length ? 'edits' : 'generations'}`;
   baseUrl.search = '';
   baseUrl.hash = '';
 
   let body: BodyInit;
-  if (options.referenceImage) {
-    const reference = parseImageReference(options.referenceImage);
+  if (references.length) {
     const form = new FormData();
     form.set('model', options.model.trim());
     form.set('prompt', prompt);
     form.set('n', '1');
     if (options.size) form.set('size', options.size);
-    form.set('image', reference.blob, `reference.${reference.mimeType === 'image/jpeg' ? 'jpg' : reference.mimeType.split('/')[1]}`);
+    references.forEach((image, index) => {
+      const reference = parseImageReference(image);
+      form.append(references.length === 1 ? 'image' : 'image[]', reference.blob, `reference-${index + 1}.${reference.mimeType === 'image/jpeg' ? 'jpg' : reference.mimeType.split('/')[1]}`);
+    });
     if (/^gpt-image-1(?:\.5)?$/.test(options.model.trim())) form.set('input_fidelity', (options.similarity ?? 0.7) >= 0.65 ? 'high' : 'low');
     body = form;
   } else body = JSON.stringify({ model: options.model.trim(), prompt, n: 1, ...(options.size ? { size: options.size } : {}) });
@@ -192,7 +195,7 @@ export const requestConfiguredImage = async (
     method: 'POST',
     headers: {
       Authorization: `Bearer ${options.api.apiKey}`,
-      ...(!options.referenceImage ? { 'Content-Type': 'application/json' } : {}),
+      ...(!references.length ? { 'Content-Type': 'application/json' } : {}),
     },
     body,
   });

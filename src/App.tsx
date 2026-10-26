@@ -14,6 +14,9 @@ import {
 } from './data/mockData';
 import { readSetting, saveSetting, SETTINGS_KEYS } from './utils/settings';
 import { StatusBar } from './components/StatusBar';
+import { CoupleBellNotice } from './components/CoupleBellNotice';
+import { CoupleLetterRuntime } from './components/CoupleLetterRuntime';
+import { findCouponUse, type CouponGiftTarget } from './utils/coupleRewards';
 import { LockScreen } from './components/LockScreen';
 import { HomeScreen } from './components/HomeScreen';
 import { CalendarWidget as CalendarApp } from './components/CalendarWidget';
@@ -271,6 +274,7 @@ export default function App() {
   const [keepAliveStatus, setKeepAliveStatus] = useState('');
   const [notification, setNotification] = useState<ChatNotification | null>(null);
   const [requestedChat, setRequestedChat] = useState<{ id: string; at: number } | null>(null);
+  const [couponGift, setCouponGift] = useState<CouponGiftTarget | null>(null);
 
   useEffect(() => {
     document.documentElement.style.setProperty('--font-scale', String(fontSettings.scale));
@@ -473,10 +477,12 @@ export default function App() {
   }, [beautySettings.wallpapers.homeScreen, currentWallpaper.style]);
 
   const handleOpenApp = (appId: AppId) => {
+    setCouponGift(null);
     setActiveApp(appId);
   };
 
   const handleBackToHome = () => {
+    setCouponGift(null);
     setActiveApp(null);
   };
 
@@ -675,7 +681,10 @@ export default function App() {
                 <PhoneExplorerApp onBack={handleBackToHome} />
               )}
               {activeApp === 'alipay' && <AlipayApp onBack={handleBackToHome} />}
-              {activeApp === 'taobao' && <TaobaoApp onBack={handleBackToHome} />}
+              {activeApp === 'taobao' && <TaobaoApp giftCoupon={couponGift} onBack={() => {
+                const use = couponGift && findCouponUse(couponGift.charId, couponGift.useId);
+                setCouponGift(null); if (use) openNotifiedChat(use.chatId); else handleBackToHome();
+              }} onCouponGiftComplete={chatId => { setCouponGift(null); openNotifiedChat(chatId); }} />}
               {activeApp === 'forum' && <ForumApp onBack={handleBackToHome} />}
               {activeApp === 'pomodoro' && <PomodoroApp onBack={handleBackToHome} />}
               {activeApp === 'offline_mode' && (
@@ -755,6 +764,7 @@ export default function App() {
                 requestedChat={requestedChat}
                 onMessage={handleChatNotification}
                 onIncomingCall={() => setActiveApp('wechat')}
+                onOpenCouponGift={(charId, useId) => { setCouponGift({ charId, useId }); setActiveApp('taobao'); }}
               />
             </Suspense>
           </div>
@@ -768,6 +778,8 @@ export default function App() {
         <LittlePPanel open={littlePOpen && littlePVisible && !isLocked && !activeApp}
           onClose={() => setLittlePOpen(false)} onHide={() => handleLittlePVisible(false)} />
         <BlockedContactRuntime enabled={!isLocked} />
+        <CoupleBellNotice enabled={!isLocked} />
+        <CoupleLetterRuntime />
         {notification && (
           <div className="absolute left-3 right-3 top-[max(env(safe-area-inset-top,0px),12px)] z-[100] flex items-center gap-3 rounded-3xl border border-white bg-white/95 p-3 shadow-xl backdrop-blur-xl" role="status">
             <button type="button" onClick={() => openNotifiedChat(notification.chatId)} className="flex min-w-0 flex-1 items-center gap-3 text-left" aria-label={`查看${notification.name}的新消息`}>

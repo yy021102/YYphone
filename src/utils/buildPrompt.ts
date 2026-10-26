@@ -1,5 +1,7 @@
 import { PersonaCollection, UserPersona } from '../types';
 import { getUserRealName } from './userPersona';
+import { userFaceReferenceInstructions, validUserFaceFields } from './userImageReference';
+import { coupleRewardContext } from './coupleRewards';
 import { readAlipayData } from './alipayData';
 import { readSetting, SETTINGS_KEYS } from './settings';
 import { CharacterNpc, getNpcByParticipantId, readCharacterNpcs } from './characterNpcs';
@@ -18,6 +20,7 @@ import { buildGroupJournalInjection } from './groupJournal';
 import { buildChannelMemory } from './channelMemory';
 
 export interface PromptChatMessage {
+  externalUrl?: string;
   id: string;
   senderId: string;
   text: string;
@@ -57,6 +60,7 @@ export interface PromptChatMessage {
 }
 
 export interface PromptConversation {
+  activeArchiveId?: string;
   id: string;
   type: 'direct' | 'group' | 'observer';
   participantIds: string[];
@@ -102,6 +106,8 @@ export interface BuildPromptOptions {
   backgroundCharacterId?: string;
   currentInput?: string;
   historyLimit?: number;
+  /** Caller-specific cap across current and mounted chats; does not change saved chat settings. */
+  historyWindowOverride?: number;
   callMode?: 'voice' | 'video';
   regenerate?: boolean;
   /** Use the live chat protocol for historical assistant turns, not background writing tasks. */
@@ -261,7 +267,8 @@ const isPersonaCollection = (value: unknown): value is PersonaCollection =>
     typeof profile.personality === 'string' &&
     typeof profile.background === 'string' &&
     typeof profile.speakingStyle === 'string' &&
-    (profile.avatarUrl === undefined || typeof profile.avatarUrl === 'string')
+    (profile.avatarUrl === undefined || typeof profile.avatarUrl === 'string') &&
+    validUserFaceFields(profile)
   );
 
 const isChatConversation = (value: unknown): value is PromptConversation =>
@@ -378,6 +385,12 @@ const toBaseMessageContent = (message: PromptChatMessage) => {
   if (message.kind === 'group-rename') return `[群聊系统提示：${message.text}]`;
   if (message.senderId === 'narrator') return `（旁白：${message.text}）`;
   if (message.kind === 'pat') return `[拍一拍：${message.text}]`;
+  if (message.kind === 'couple-letter') {
+    return `[已寄达的情书：${message.title ?? '给你的一封信'}]\n${message.content ?? ''}`;
+  }
+  if (message.kind === 'couple-coupon') {
+    return `[情侣空间券已使用：${message.title ?? message.text}] ${message.content ?? ''}\n${message.aiContext ?? ''}`;
+  }
   if (message.kind === 'couple-invite') {
     const from = message.senderId === 'user' ? '玩家' : '你';
     return `[情侣空间邀请卡片：${from}发出的情侣空间开通邀请，当前状态：${message.inviteStatus === 'accepted' ? '已同意' : message.inviteStatus === 'declined' ? '已婉拒' : message.inviteStatus === 'withdrawn' ? '已撤回' : '等待回应'}]`;
@@ -431,6 +444,7 @@ const toBaseMessageContent = (message: PromptChatMessage) => {
     ].join('\n');
   }
   if (message.kind === 'link') {
+    if (message.externalUrl) return `[分享网页：${message.externalUrl}；标题：${message.title || message.text}${message.content ? `；网页简介：${message.content}` : ''}。这里只是链接预览，未读取全文，不能据此编造正文细节。]\n${message.text}`;
     return `[分享链接：${message.title || message.text}${message.source ? `；来源：${message.source}` : ''}${message.content ? `；摘要：${message.content}` : ''}]`;
   }
   if (message.kind === 'text' && message.source === '反查手机代发' && message.aiContext) return `[${message.aiContext}]\n${message.text}`;
@@ -520,7 +534,8 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
   const participantNpcs = chat.participantIds
     .map((id) => getNpcByParticipantId(characterNpcs, id))
     .filter((npc): npc is CharacterNpc => !!npc);
-  const requestedHistoryLimit = chat.currentChatHistoryCount ?? historyLimit;
+  const historyOverride = options.historyWindowOverride === undefined ? undefined : resolveChatHistoryCount(options.historyWindowOverride);
+  const requestedHistoryLimit = historyOverride ?? chat.currentChatHistoryCount ?? historyLimit;
   const recentLimit = resolveChatHistoryCount(requestedHistoryLimit);
 
   // 1. System base instruction.
@@ -632,6 +647,10 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
     (id) => contacts.find((contact) => contact.id === id)?.name
   );
   if (coupleInjection.text) messages.push({ role: 'system', content: coupleInjection.text });
+  if (chat.type === 'direct' && chat.participantIds.length === 1) {
+    const rewards = coupleRewardContext(chat.participantIds[0], chat.activeArchiveId ?? '');
+    if (rewards.text) messages.push({ role: 'system', content: rewards.text });
+  }
 
   const plantInjection = options.plantInjection ?? buildPlantInjection(
     chat.participantIds,
@@ -777,7 +796,7 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
     !canReadForumForward(latestUserMessage, chat, chat)
     ? ''
     : latestUserMessage &&
-        (latestUserMessage.kind === 'forum-forward' || latestUserMessage.kind === 'pomodoro-share' || latestUserMessage.kind === 'phone-share' || latestUserMessage.source === '反查手机代发')
+        (latestUserMessage.kind === 'forum-forward' || latestUserMessage.kind === 'pomodoro-share' || latestUserMessage.kind === 'phone-share' || latestUserMessage.kind === 'couple-coupon' || latestUserMessage.kind === 'couple-letter' || latestUserMessage.kind === 'link' && !!latestUserMessage.externalUrl || latestUserMessage.source === '反查手机代发')
       ? toMessageContent(latestUserMessage)
       : requestedInput;
   const previousAssistantMessage = regenerate
@@ -819,10 +838,10 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
           const requestedLimit = chat.attachedHistoryCounts?.[conversation.id] ??
             chat.attachedHistoryCount ??
             200;
-          const attachedLimit = Number.isInteger(requestedLimit) && requestedLimit > 0
+          const attachedLimit = historyOverride ?? (Number.isInteger(requestedLimit) && requestedLimit > 0
             ? requestedLimit
-            : 200;
-          if (conversation.type !== 'direct') {
+            : 200);
+          if (conversation.type !== 'direct' && historyOverride === undefined) {
             const windowStart = conversation.messages.slice(-attachedLimit)[0]?.createdAt;
             const groupJournal = buildGroupJournalInjection(conversation.id, windowStart, true);
             if (groupJournal) messages.push({ role: 'system', content: groupJournal });
@@ -833,8 +852,8 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
             .map((message) => ({ date: Date.parse(message.createdAt) || 0, message, conversation }));
         })
     : [];
-  const orderedHistory = [...localMessages, ...attachedMessages]
-    .sort((left, right) => left.date - right.date);
+  const mergedHistory = [...localMessages, ...attachedMessages].sort((left, right) => left.date - right.date);
+  const orderedHistory = historyOverride === undefined ? mergedHistory : mergedHistory.slice(-historyOverride);
 
   const announcedAttachedChats = new Set<string>();
   let previousHistoryDate = 0;
@@ -911,6 +930,7 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
       role: 'system',
       content: [
         '本对话已开启生图：当你发送图片消息时，图片描述会被交给生图模型生成真实图片。请把图片描述写成具体的画面提示词（主体、外貌、动作、场景、光线、构图），不要只写“一张照片”。',
+        userFaceReferenceInstructions(persona),
         options.imageGenerationPrompt?.trim() ? `生图附加提示词（会自动拼接，无需重复）：${options.imageGenerationPrompt.trim()}` : '',
       ].filter(Boolean).join('\n'),
     });

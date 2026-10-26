@@ -1,4 +1,5 @@
 import { requestConfiguredAiText } from './aiApi';
+import { processCouplePeaceBells } from './coupleRewardsAi';
 import { readChatRuntimeSettings } from './chatRuntime';
 import { readStorageString, writeStoredValue } from './localStorage';
 
@@ -149,6 +150,7 @@ const generateBlockedActivity = async (chat: BlockChat) => {
 };
 
 export const processBlockedContactSchedules = async () => {
+  await processCouplePeaceBells();
   const chats = dueBlockedChats();
   for (const chat of chats) {
     if (running.has(chat.id)) continue;

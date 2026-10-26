@@ -1,11 +1,12 @@
 ﻿import { useId, type ReactNode } from 'react';
 
+import { BotanicalFlower } from './BotanicalFlower';
 export function PottedPlant({ icon, image, name, stage = 4, watering = false }: { icon: ReactNode; image?: string; name: string; stage?: number; watering?: boolean }) {
   const gradientId = useId();
   return <div className={`pomo-potted-plant stage-${stage}${watering ? ' is-watering' : ''}`}>
     <div className="pomo-plant-shadow" />
     {stage > 0 && <svg className="pomo-plant-stem" viewBox="0 0 100 110" fill="none" aria-hidden="true"><path d="M50 108C48 75 58 50 50 15" stroke="#75a38b" strokeWidth="4" strokeLinecap="round" /><path d="M50 80C23 81 19 59 20 56C40 54 51 65 50 80Z" fill="#a4c7ab" /><path d="M52 65C76 66 84 44 81 41C60 42 51 52 52 65Z" fill="#84b69a" /></svg>}
-    <div className="pomo-plant-flower">{image ? <img src={image} alt={name} /> : <span role="img" aria-label={name}>{icon}</span>}</div>
+    <div className="pomo-plant-flower">{image ? <img src={image} alt={name} /> : <BotanicalFlower icon={icon} name={name} stage={stage} />}</div>
     <svg className="pomo-ceramic-pot" viewBox="0 0 160 100" aria-hidden="true"><defs><linearGradient id={gradientId} x1="0" y1="0" x2="1" y2=".5"><stop stopColor="#fff9f4" /><stop offset=".5" stopColor="#efdcd4" /><stop offset="1" stopColor="#cdb5b4" /></linearGradient></defs><path d="M22 19H138L121 83Q80 101 39 83Z" fill={'url(#' + gradientId + ')'} /><ellipse cx="80" cy="19" rx="59" ry="15" fill="#f5e7de" /><ellipse cx="80" cy="18" rx="49" ry="9" fill="#867465" /><path d="M38 39L47 76" stroke="white" strokeOpacity=".65" strokeWidth="5" strokeLinecap="round" /><path d="M55 89Q80 94 105 89" stroke="#bba4a6" strokeOpacity=".4" strokeWidth="2" /></svg>
     {watering && <span className="pomo-watering-drops" aria-hidden="true">✧ ˚ 💧</span>}
   </div>;

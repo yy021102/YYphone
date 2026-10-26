@@ -1,4 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { acknowledgeCouponRequests, assertCouponAvailable, coupleBlockProtection, coupleRewardContext, useCoupleCoupon, type CoupleProductId } from '../utils/coupleRewards';
+import { CoupleCorrespondence } from '../components/CoupleCorrespondence';
 import {
   MessageSquare,
   Users,
@@ -87,6 +89,8 @@ import { readSetting, saveSetting, SETTINGS_KEYS } from '../utils/settings';
 import { compressChatPhoto, compressImageFile, compressWallpaper } from '../utils/imageFile';
 import { buildPrompt } from '../utils/buildPrompt';
 import { PhoneInspection } from '../components/PhoneInspection';
+import { ExternalLinkCard } from '../components/ExternalLinkCard';
+import { extractSharedLink, publicLink } from '../utils/linkPreview';
 import { runMcpDecision } from '../utils/mcpTools';
 import { refreshWeather } from '../utils/weatherData';
 import { buildGroupPrivateContext } from '../utils/chatHistory';
@@ -96,6 +100,7 @@ import { requestChatReply, withChatResponseFormat } from '../utils/chatReply';
 import { createPacketClaims, luckyPacketWinner, type PacketClaim } from '../utils/groupRedPacket';
 import { generateImage, readImageGenerationSettings } from '../utils/imageGeneration';
 import { isImageReference } from '../utils/imageReference';
+import { hasUserFaceReference, parseImageSubject, selectChatImageReferences, validUserFaceFields, type ImageSubject } from '../utils/userImageReference';
 import { ChatImageReference } from '../components/ChatImageReference';
 import { showYyError, useErrorDialog } from '../components/ErrorDialog';
 import { AvatarFrameEditor } from '../components/AvatarFrameEditor';
@@ -150,6 +155,7 @@ import { normalizeCallReplyParts } from '../utils/callReply';
 import { mutateDirectChat } from '../utils/coupleSpaceData';
 
 interface WeChatAppProps {
+  onOpenCouponGift: (charId: string, useId: string) => void;
   onBack: () => void;
   isVisible: boolean;
   followSystemDark: boolean;
@@ -160,11 +166,12 @@ interface WeChatAppProps {
 }
 
 type WeChatTab = 'chats' | 'contacts' | 'discover' | 'me';
-type ChatBanner = { text: string; align: 'left' | 'center' };
+type ChatBanner = { text: string; align: 'left' | 'center'; showIcon?: boolean };
 const CHAT_BANNER_KEY = 'yyphone:wechat:chat-banner';
-const DEFAULT_CHAT_BANNER: ChatBanner = { text: 'Windows 微信已登录', align: 'left' };
+const DEFAULT_CHAT_BANNER: ChatBanner = { text: 'Windows 微信已登录', align: 'left', showIcon: true };
 const isChatBanner = (value: unknown): value is ChatBanner => !!value && typeof value === 'object' &&
-  typeof (value as ChatBanner).text === 'string' && ((value as ChatBanner).align === 'left' || (value as ChatBanner).align === 'center');
+  typeof (value as ChatBanner).text === 'string' && ((value as ChatBanner).align === 'left' || (value as ChatBanner).align === 'center') &&
+  ((value as ChatBanner).showIcon === undefined || typeof (value as ChatBanner).showIcon === 'boolean');
 
 const WECHAT_GAMES = [
   { id: 'sudoku', name: '数独', description: '唯一解挑战', icon: Grid3X3, color: 'bg-emerald-50 text-emerald-700' },
@@ -294,12 +301,18 @@ const formatChatTimestamp = (value: string, timeZone?: string): string => {
 };
 
 interface ChatMessage {
+  couponUseId?: string;
+  couponProductId?: string;
+  letterFromName?: string;
+  letterToName?: string;
+  externalUrl?: string;
+  linkPreviewLoaded?: boolean;
   id: string;
   replyBatchId?: string;
   senderId: string;
   text: string;
   createdAt: string;
-  kind?: 'text' | 'image' | 'voice' | 'sticker' | 'video-call' | 'location' | 'red-packet' | 'transfer' | 'link' | 'forum-forward' |     'pomodoro-share' |   'pat' | 'group-rename' | 'order' | 'couple-invite' | 'phone-share' | 'context-note' | 'intimate-pay';
+  kind?: 'text' | 'image' | 'voice' | 'sticker' | 'video-call' | 'location' | 'red-packet' | 'transfer' | 'link' | 'forum-forward' |     'pomodoro-share' |   'pat' | 'group-rename' | 'order' | 'couple-invite' | 'couple-coupon' | 'couple-letter' | 'phone-share' | 'context-note' | 'intimate-pay';
         shareMode?: 'found' | 'memory';
       inviteFrom?: 'user' | 'char';
       inviteStatus?: 'pending' | 'accepted' | 'declined' | 'withdrawn';
@@ -331,13 +344,14 @@ interface ChatMessage {
 const MESSAGE_REACTIONS = ['🥰', '😋', '🥺', '❤️', '😔', '😡', '🤣', '😥'] as const;
 
 interface GeneratedAiMessage {
+  imageSubject?: ImageSubject;
   speakerId?: string;
   thought?: string;
   packetClaims?: PacketClaim[];
   intimateStatus?: ChatMessage['intimateStatus'];
   text: string;
   quoteText?: string;
-  kind?: Exclude<ChatMessage['kind'], 'forum-forward' | 'pomodoro-share' | 'couple-invite' | 'phone-share' | 'context-note'> | 'narration';
+  kind?: Exclude<ChatMessage['kind'], 'forum-forward' | 'pomodoro-share' | 'couple-invite' | 'couple-coupon' | 'couple-letter' | 'phone-share' | 'context-note'> | 'narration';
   title?: string;
   source?: string;
   content?: string;
@@ -438,6 +452,7 @@ interface ChatArchive {
 
 interface ChatConversation {
   id: string;
+  coupleCouponRevision?: string;
   archives?: ChatArchive[];
   activeArchiveId?: string;
   type: ChatType;
@@ -559,6 +574,7 @@ const isPersonaCollection = (value: unknown): value is PersonaCollection => {
         (profile.realName === undefined || typeof profile.realName === 'string') &&
         (profile.wechatId === undefined || typeof profile.wechatId === 'string') &&
         (profile.avatarUrl === undefined || typeof profile.avatarUrl === 'string') &&
+        validUserFaceFields(profile) &&
         typeof profile.identity === 'string' &&
         typeof profile.personality === 'string' &&
         typeof profile.background === 'string' &&
@@ -652,7 +668,7 @@ export const isStrictChatList = (value: unknown): value is ChatConversation[] =>
           (message.paymentSettledAt === undefined || typeof message.paymentSettledAt === 'string') &&
           (message.intimateStatus === undefined || ['pending', 'granted', 'declined'].includes(message.intimateStatus)) &&
           (message.kind === undefined ||
-            ['text', 'image', 'voice', 'sticker', 'video-call', 'location', 'red-packet', 'transfer', 'link', 'forum-forward', 'pomodoro-share', 'pat', 'group-rename', 'order', 'couple-invite', 'phone-share', 'context-note', 'intimate-pay'].includes(message.kind)) &&
+            ['text', 'image', 'voice', 'sticker', 'video-call', 'location', 'red-packet', 'transfer', 'link', 'forum-forward', 'pomodoro-share', 'pat', 'group-rename', 'order', 'couple-invite', 'couple-coupon', 'couple-letter', 'phone-share', 'context-note', 'intimate-pay'].includes(message.kind)) &&
           (message.forumForwardTargetId === undefined || typeof message.forumForwardTargetId === 'string') &&
           (message.imageUrl === undefined || typeof message.imageUrl === 'string') &&
           (message.title === undefined || typeof message.title === 'string') &&
@@ -884,7 +900,7 @@ const adventureWorldBookContext = (bookIds: string[]): string => {
 };
 
 export const WeChatApp: React.FC<WeChatAppProps> = ({
-  onBack, isVisible, followSystemDark, runtimeSettings, requestedChat, onMessage, onIncomingCall,
+  onBack, isVisible, followSystemDark, runtimeSettings, requestedChat, onMessage, onIncomingCall, onOpenCouponGift,
 }) => {
   const [systemPrefersDark, setSystemPrefersDark] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
   useEffect(() => {
@@ -958,6 +974,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
   const [expandedVoiceIds, setExpandedVoiceIds] = useState<string[]>([]);
   const [callChoiceOpen, setCallChoiceOpen] = useState(false);
   const [isProcessingAvatar, setIsProcessingAvatar] = useState(false);
+  const [personaPhotoBusy, setPersonaPhotoBusy] = useState(false);
   const [contacts, setContacts] = useState(() =>
     readStoredValue(CONTACTS_STORAGE_KEY, [] as ContactPersona[], isContactList)
   );
@@ -1023,7 +1040,13 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
   useEffect(() => {
     const refreshBlockedInteractions = () => {
       setBlockedInteractions(readBlockedInteractions());
-      setChats(readStoredValue(CHATS_STORAGE_KEY, [], isChatList));
+      const latest = readStoredValue(CHATS_STORAGE_KEY, [], isChatList);
+      setChats(latest);
+      setChatSettingsDraft(draft => {
+        if (!draft || draft.type !== 'direct' || !coupleBlockProtection(draft.participantIds[0])) return draft;
+        const live = latest.find(chat => chat.id === draft.id);
+        return live && live.blocked !== draft.blocked ? { ...draft, blocked: live.blocked } : draft;
+      });
     };
     refreshBlockedInteractions();
     window.addEventListener('yyphone:blocked-interactions', refreshBlockedInteractions);
@@ -1292,6 +1315,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
   };
 
   const handleSavePersona = () => {
+    if (personaPhotoBusy) return;
     const updatedPersona = {
       ...personaDraft,
       name: personaDraft.name.trim() || '未命名人设',
@@ -1321,6 +1345,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
   };
 
   const handleSavePersonaAsPreset = () => {
+    if (personaPhotoBusy) return;
     const name = presetNameDraft.trim();
     if (!name) {
       setPersonaError('请填写人设预设名称。');
@@ -1364,7 +1389,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
     }
   };
 
-  const updatePersonaField = (field: keyof UserPersona, value: string) => {
+  const updatePersonaField = <K extends keyof UserPersona,>(field: K, value: UserPersona[K]) => {
     setPersonaDraft((current) => ({ ...current, [field]: value }));
     setPersonaStatus('');
     setPersonaError('');
@@ -2299,6 +2324,9 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
 
   const saveChatSettings = () => {
     if (!chatSettingsDraft || imageReferenceBusy) return;
+    if (chatSettingsDraft.type === 'direct' && chatSettingsDraft.blocked && coupleBlockProtection(chatSettingsDraft.participantIds[0])) {
+      setChatError('和好摇铃今天正在生效，明天才能再次拉黑。'); return;
+    }
     if (chatSettingsDraft.proactiveEnabled &&
       (!Number.isInteger(chatSettingsDraft.proactiveIntervalMinutes) ||
         (chatSettingsDraft.proactiveIntervalMinutes ?? 0) < 1 ||
@@ -2381,6 +2409,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
             }] : current.messages,
         archives: current.archives,
         activeArchiveId: current.activeArchiveId,
+        coupleCouponRevision: current.coupleCouponRevision,
         updatedAt: current.type !== 'direct' && getChatTitle(current) !== getChatTitle(savedDraft)
           ? new Date().toISOString() : current.updatedAt,
         lastProactiveAt: current.proactiveEnabled === savedDraft.proactiveEnabled &&
@@ -2420,6 +2449,8 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       createdAt: new Date().toISOString(),
       ...(replyingTo ? { replyTo: makeReplyRef(chat, replyingTo) } : {}),
     };
+    const sharedUrl = extractSharedLink(text);
+    if (sharedUrl) { message.kind = 'link'; message.externalUrl = sharedUrl; }
     if (
       updateChat(chat.id, (current) => ({
         ...current,
@@ -3328,6 +3359,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         (id) => contacts.find((item) => item.id === id)?.name,
         allowCharInvite
       );
+      const couponContext = coupleCharId ? coupleRewardContext(coupleCharId, chat.activeArchiveId ?? '') : { text: '', pendingIds: [] };
       const plantInjection: PlantInjection = buildPlantInjection(
         chat.participantIds,
         chat.type,
@@ -3351,6 +3383,8 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         readCoupleSpaces()[chat.participantIds[0]]?.bindStatus === 'pending_char'
           ? chat.participantIds[0]
           : '';
+      const imagePersonaCollection = readSetting(SETTINGS_KEYS.personas, DEFAULT_PERSONAS, isPersonaCollection);
+      const imagePersona = imagePersonaCollection.profiles.find((profile) => profile.id === imagePersonaCollection.activeProfileId);
       const promptMessages = buildPrompt({
         chatId: chat.id,
         currentInput,
@@ -3432,6 +3466,9 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         ...(allowCharInvite
           ? ['如果你决定主动邀请玩家开通情侣空间（见上文【情侣空间】说明），请额外返回 "coupleSpaceAction":"invite"；否则不要返回该字段。']
           : []),
+        ...(coupleCharId && !regenerate && !previewOnly && !activeCallMode
+          ? ['如上文有你自己的情侣空间券库存，可选返回顶层字段 "coupleCouponUse":"库存中的商品id" 使用一张；不使用就省略，不能通过reply伪造券卡片或库存。']
+          : ['本轮不能使用情侣空间券，不要返回coupleCouponUse。']),
       ].join('\n');
       if (proactive) promptMessages.push({
         role: 'user',
@@ -3480,8 +3517,13 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       let intimateAction: { type: 'grant' | 'decline'; monthlyLimit?: number; note: string; requestId?: string } | undefined;
       const momentActions: MomentChatAction[] = [];
       let coupleDecision: 'accept' | 'decline' | 'invite' | null = null;
+      let couponUse: CoupleProductId | undefined;
       if (result && typeof result === 'object' && !Array.isArray(result)) {
         const record = result as Record<string, unknown>;
+        if (record.coupleCouponUse !== undefined) {
+          if (!coupleCharId || regenerate || previewOnly || activeCallMode || typeof record.coupleCouponUse !== 'string') throw new Error('本轮不能使用情侣空间券，已取消回复。');
+          couponUse = assertCouponAvailable(coupleCharId, 'char', record.coupleCouponUse).id;
+        }
         if (record.intimatePayAction !== undefined) {
           const action = record.intimatePayAction;
           if (chat.type !== 'direct' || contact.id.startsWith('npc:') || regenerate || activeCallMode ||
@@ -3550,6 +3592,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
               ? stripVoiceMessagePrefix(text) : null;
             if (voiceText) { kind = 'voice'; text = voiceText; }
             const message: GeneratedAiMessage = { text, ...(kind ? { kind } : {}) };
+            if (kind === 'image') message.imageSubject = parseImageSubject(part.imageSubject);
             if (chat.type !== 'direct' && kind !== 'narration') {
               const partSpeakerId = typeof part.speakerId === 'string' ? part.speakerId : '';
               if (partSpeakerId && !chatMembers.some((member) => member.id === partSpeakerId)) {
@@ -3691,24 +3734,27 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         for (const part of replyParts) {
           if (part.kind !== 'image' || !part.text.trim()) continue;
           try {
+            if (hasUserFaceReference(imagePersona) && !part.imageSubject) throw new Error('模型未标注图片中的人物，无法确定是否使用你的照片。请重新生成。');
             part.imageUrl = await generateImage(part.text, {
               ...readImageGenerationSettings(),
               prompt: chat.imageGenerationPrompt,
-              referenceImage: chat.imageGenerationReferenceImage,
-              referenceSimilarity: chat.imageGenerationReferenceSimilarity,
+              references: selectChatImageReferences(part.imageSubject, imagePersona, chat.imageGenerationReferenceImage, chat.imageGenerationReferenceSimilarity),
             }, apiPreset);
           } catch (imageError) {
             console.error('Image generation failed; keeping text image description.', imageError);
-            setChatError(`生图失败，已保留文字图片描述：${imageError instanceof Error ? imageError.message : '未知错误'}`);
+            // Saving the fallback message clears chatError, so report image failures directly.
+            showYyError(`生图失败，已保留文字图片描述：${imageError instanceof Error ? imageError.message : '未知错误'}`);
           }
         }
       }
       const liveChat = readStoredValue(CHATS_STORAGE_KEY, chats, isChatList).find((item) => item.id === chat.id);
       if (!liveChat || liveChat.blocked || liveChat.activeArchiveId !== chat.activeArchiveId ||
+        liveChat.coupleCouponRevision !== chat.coupleCouponRevision ||
         (proactive && (!liveChat.proactiveEnabled || liveChat.updatedAt !== chat.updatedAt))) {
         console.info('Cancelled stale chat generation after chat activity, archive or permissions changed.');
         return;
       }
+      let expectedCouponRevision = liveChat.coupleCouponRevision;
       const executionSocialContext = { ...socialContext, chat: liveChat };
       const socialActions = parseSocialActions(result, executionSocialContext, speakerId);
       if (socialActions.privateMessage) {
@@ -3834,7 +3880,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       const replyMessages: ChatMessage[] = deliverableParts.map((part, index) => {
         const partSpeakerId = part.speakerId ?? speakerId;
         const speakerName = getChatParticipantName(chat, partSpeakerId);
-        const { kind: partKind, quoteText, speakerId: _partSpeakerId, thought: partThought, ...rest } = part;
+        const { kind: partKind, quoteText, speakerId: _partSpeakerId, thought: partThought, imageSubject: _imageSubject, ...rest } = part;
         const quoted = quoteText
           ? [...chat.messages].reverse().slice(0, 40).find(
               (item) => item.senderId !== 'narrator' && item.kind !== 'pat' && item.text &&
@@ -3912,6 +3958,10 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         }
         throw new Error('回复保存失败，亲密付未生效，请重试。');
       }
+      if (couponUse && coupleCharId) {
+        const used = await useCoupleCoupon(coupleCharId, 'char', couponUse, `chat-coupon:${replyBatchId}`, { expectedChatId: chat.id, expectedArchiveId: chat.activeArchiveId ?? '' });
+        expectedCouponRevision = used.id;
+      }
       if (socialActions.privateMessage && socialActor) {
         const currentChats = readStoredValue(CHATS_STORAGE_KEY, chats, isChatList);
         let direct = currentChats.find((item) => item.type === 'direct' &&
@@ -3959,6 +4009,8 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       for (const message of replyMessages.slice(1)) {
         const length = (message.text ?? '').length;
         await new Promise((resolve) => setTimeout(resolve, 500 + Math.min(1300, length * 40)));
+        const live = readStoredValue(CHATS_STORAGE_KEY, chats, isChatList).find(item => item.id === chat.id);
+        if (!live || live.blocked || live.activeArchiveId !== chat.activeArchiveId || live.coupleCouponRevision !== expectedCouponRevision) return;
         updateChat(chat.id, (current) => ({
           ...current,
           messages: [...current.messages, message],
@@ -4009,6 +4061,9 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
           destination.onIncomingCall();
         }
         applyCoupleSeenAfterChat(coupleInjection);
+        if (coupleCharId) {
+          await acknowledgeCouponRequests(coupleCharId, couponContext.pendingIds);
+        }
         applyPlantSeenAfterChat(plantInjection);
         markMemoriesRecalled(memoryInjection.ids);
         void maybeAutoExtractMemory(chat.participantIds, chat.type);
@@ -4552,7 +4607,8 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                 const sender = contacts.find((contact) => contact.id === message.senderId) ??
                   getNpcByParticipantId(characterNpcs, message.senderId);
                 const isShareCard = message.kind === 'forum-forward' || message.kind === 'pomodoro-share';
-                const isSpecialBubble = isShareCard || ['video-call', 'location', 'red-packet', 'transfer', 'link', 'order', 'couple-invite', 'phone-share', 'intimate-pay'].includes(message.kind ?? '');
+                const externalUrl = (message.externalUrl ? publicLink(message.externalUrl) : undefined) || ((!message.kind || message.kind === 'text' || message.kind === 'link' && !message.source?.startsWith('微信')) ? extractSharedLink(message.text) : undefined);
+                const isSpecialBubble = !!externalUrl || isShareCard || ['video-call', 'location', 'red-packet', 'transfer', 'link', 'order', 'couple-invite', 'couple-coupon', 'couple-letter', 'phone-share', 'intimate-pay'].includes(message.kind ?? '');
                 return (
                   <div
                     key={message.id}
@@ -4714,6 +4770,10 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                           <p className="px-3 py-2 text-[11px]">{message.text}</p>
                           <p className="border-t border-pink-100 px-3 py-2 text-[10px] text-slate-400">{message.intimateStatus === 'pending' ? '待角色回应，请生成回复' : message.intimateStatus === 'granted' ? '角色已同意 · 可在支付宝查看' : '角色已婉拒'}</p>
                         </div>
+                      ) : message.kind === 'couple-letter' || message.kind === 'couple-coupon' && (['letter', 'gift'].includes(message.couponProductId ?? '') || ['一封情书券', '礼物券'].includes(message.title ?? '')) ? (
+                        <CoupleCorrespondence charId={activeChat.participantIds[0]} message={message} onGift={onOpenCouponGift} />
+                      ) : message.kind === 'couple-coupon' ? (
+                        <div className="yy-couple-coupon-card"><span><Heart size={19} strokeWidth={1.4} />{message.title}</span><p>{message.content}</p><small>情侣空间 · 已使用</small></div>
                       ) : message.kind === 'couple-invite' ? (
                         <div className="w-52 overflow-hidden rounded-2xl border border-white/80 bg-gradient-to-br from-pink-50/90 to-sky-50/90 shadow-[0_6px_18px_rgba(125,160,200,0.15)]">
                           <div className="px-3 pt-2.5 text-[10px] font-semibold text-[#6F8CA0]">💞 情侣空间邀请</div>
@@ -4779,7 +4839,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                             )}
                           </div>
                         </div>
-                      ) : message.kind === 'link' ? (
+                      ) : externalUrl ? <ExternalLinkCard url={externalUrl} text={message.text} disabled={selectMode} saved={message.linkPreviewLoaded ? { loaded: true, title: message.title, description: message.content, image: message.imageUrl, source: message.source } : undefined} onResolved={preview => updateChat(activeChat.id, current => current.activeArchiveId !== activeChat.activeArchiveId ? current : ({ ...current, messages: current.messages.map(item => item.id === message.id && (!item.externalUrl || item.externalUrl === externalUrl) ? { ...item, kind: 'link', externalUrl, title: preview.title, content: preview.description, imageUrl: preview.image, source: preview.source, linkPreviewLoaded: true } : item) }))} /> : message.kind === 'link' ? (
                         <button type="button" disabled={!['微信游戏 · 猜词', '微信游戏 · 狼人杀', '微信游戏 · 剧本杀', '微信游戏 · 海龟汤', '微信游戏 · 炸金花', '微信读书'].includes(message.source || '') || selectMode}
                           onClick={(event) => { event.stopPropagation(); setGuessRecordPreview(message); }}
                           className="min-w-40 rounded-xl bg-white/80 p-2.5 text-left disabled:cursor-default">
@@ -5205,10 +5265,11 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
             </div>
             <div className="yy-chat-banner border-b border-[#d8d8d8] bg-[#ededed]">
               <button type="button" aria-label="长按编辑消息页文字" title="长按编辑文字" onPointerDown={(event) => { if (event.pointerType === 'mouse' && event.button !== 0) return; stopChatBannerPress(); chatBannerPressTimer.current = setTimeout(openChatBannerEditor, 550); }} onPointerUp={stopChatBannerPress} onPointerCancel={stopChatBannerPress} onPointerLeave={stopChatBannerPress} onContextMenu={(event) => { event.preventDefault(); openChatBannerEditor(); }} onDoubleClick={openChatBannerEditor} className={`flex min-h-10 w-full items-center gap-3 px-4 py-2 text-[12px] text-[#777] active:bg-[#e5e5e5] ${chatBanner.align === 'center' ? 'justify-center text-center' : 'text-left'}`}>
-                <Monitor className="h-4 w-4 shrink-0" /><span className="min-w-0 break-words">{chatBanner.text || '长按编辑文字'}</span>
+                {chatBanner.showIcon !== false && <Monitor className="h-4 w-4 shrink-0" />}<span className="min-w-0 break-words">{chatBanner.text || '长按编辑文字'}</span>
               </button>
               {chatBannerEditing && <div className="space-y-2 border-t border-[#d8d8d8] bg-white px-4 py-3">
                 <label className="block text-xs font-semibold text-[#444]">显示文字<textarea value={chatBannerDraft.text} onChange={(event) => setChatBannerDraft((draft) => ({ ...draft, text: event.target.value.slice(0, 160) }))} maxLength={160} rows={2} className="mt-1 w-full resize-none rounded-lg border border-[#ddd] p-2.5 font-normal outline-none" /></label>
+                <label className="flex items-center gap-2 py-1 text-xs text-[#666]"><input type="checkbox" checked={chatBannerDraft.showIcon !== false} onChange={(event) => setChatBannerDraft((draft) => ({ ...draft, showIcon: event.target.checked }))} className="accent-[#07b75a]" />显示电脑图标</label>
                 <div className="flex gap-2 text-xs"><button type="button" onClick={() => setChatBannerDraft((draft) => ({ ...draft, align: 'left' }))} className={`flex-1 rounded-lg py-2 ${chatBannerDraft.align === 'left' ? 'bg-[#dcebe3] text-[#236545]' : 'bg-[#f1f1f1]'}`}>靠左</button><button type="button" onClick={() => setChatBannerDraft((draft) => ({ ...draft, align: 'center' }))} className={`flex-1 rounded-lg py-2 ${chatBannerDraft.align === 'center' ? 'bg-[#dcebe3] text-[#236545]' : 'bg-[#f1f1f1]'}`}>居中</button></div>
                 <div className="flex justify-end gap-3 text-xs"><button type="button" onClick={() => setChatBannerEditing(false)} className="px-2 py-1.5 text-[#777]">取消</button><button type="button" onClick={saveChatBanner} className="rounded-lg bg-[#07b75a] px-4 py-1.5 font-semibold text-white">保存</button></div>
               </div>}
@@ -6252,6 +6313,22 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                   className="mt-1 block max-w-full text-[10px]"
                 />
               </label>
+              <ChatImageReference
+                key={personaDraft.id}
+                mode="user"
+                value={personaDraft.faceReferenceImage}
+                similarity={personaDraft.faceReferenceSimilarity}
+                enabled={personaDraft.faceReferenceEnabled !== false}
+                provider={readImageGenerationSettings().provider}
+                onChange={(image) => {
+                  const id = personaDraft.id;
+                  setPersonaDraft((current) => current.id === id ? { ...current, faceReferenceImage: image, faceReferenceEnabled: !!image } : current);
+                  setPersonaStatus(''); setPersonaError('');
+                }}
+                onSimilarityChange={(similarity) => updatePersonaField('faceReferenceSimilarity', similarity)}
+                onEnabledChange={(enabled) => updatePersonaField('faceReferenceEnabled', enabled)}
+                onBusyChange={setPersonaPhotoBusy}
+              />
               <label className="block text-[11px] font-semibold text-[#2C4A5C]">
                 人设预设名称
                 <input
@@ -6299,7 +6376,8 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
               {isProcessingAvatar && <p className="text-[11px] text-sky-700">正在压缩图片…</p>}
               <button
                 onClick={handleSavePersona}
-                className="w-full rounded-xl bg-teal-600 text-white py-2 text-xs font-bold active:scale-[0.98]"
+                disabled={personaPhotoBusy}
+                className="w-full rounded-xl bg-teal-600 text-white py-2 text-xs font-bold active:scale-[0.98] disabled:opacity-50"
               >
                 保存人设
               </button>
@@ -6315,7 +6393,8 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                   />
                   <button
                     onClick={handleSavePersonaAsPreset}
-                    className="shrink-0 rounded-xl bg-sky-100 px-3 py-2 text-xs font-bold text-sky-800"
+                    disabled={personaPhotoBusy}
+                    className="shrink-0 rounded-xl bg-sky-100 px-3 py-2 text-xs font-bold text-sky-800 disabled:opacity-50"
                   >
                     新建预设
                   </button>
@@ -7331,10 +7410,11 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
             {chatSettingsDraft.type === 'direct' ? (
               <button
                 style={{ order: 15 }}
-                onClick={() => setChatSettingsDraft({ ...chatSettingsDraft, blocked: !chatSettingsDraft.blocked })}
-                className={`w-full rounded-xl py-2 text-xs font-semibold ${chatSettingsDraft.blocked ? 'bg-slate-100 text-slate-700' : 'bg-rose-50 text-rose-700'}`}
+                disabled={!chatSettingsDraft.blocked && coupleBlockProtection(chatSettingsDraft.participantIds[0])}
+                onClick={() => { if (!chatSettingsDraft.blocked && chatSettingsDraft.type === 'direct' && coupleBlockProtection(chatSettingsDraft.participantIds[0])) { setChatError('和好摇铃今天正在生效，明天才能再次拉黑。'); return; } setChatSettingsDraft({ ...chatSettingsDraft, blocked: !chatSettingsDraft.blocked }); }}
+                className={`w-full rounded-xl py-2 text-xs font-semibold disabled:bg-slate-100 disabled:text-slate-400 ${chatSettingsDraft.blocked ? 'bg-slate-100 text-slate-700' : 'bg-rose-50 text-rose-700'}`}
               >
-                {chatSettingsDraft.blocked ? '解除拉黑' : '拉黑'}
+                {chatSettingsDraft.blocked ? '解除拉黑' : coupleBlockProtection(chatSettingsDraft.participantIds[0]) ? '和好摇铃生效中 · 今日不能拉黑' : '拉黑'}
               </button>
             ) : (
               <button onClick={dissolveChat} className="w-full rounded-xl bg-rose-50 py-2 text-xs font-semibold text-rose-700">

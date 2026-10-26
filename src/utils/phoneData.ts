@@ -51,7 +51,7 @@ export const readCharacterWallet = (charId: string): PhoneWallet | null => {
 };
 
 /** 供钱包生成使用：聊天里与玩家之间的转账、红包、礼物/订单。 */
-export const readRecentMoneyEvents = (charId: string): string => {
+export const readRecentMoneyEvents = (charId: string, historyLimit?: number): string => {
   const chats = readJson(CHATS_STORAGE_KEY);
   if (!Array.isArray(chats)) return '';
   const chat = chats.find(
@@ -64,7 +64,7 @@ export const readRecentMoneyEvents = (charId: string): string => {
   );
   if (!isRecord(chat) || !Array.isArray(chat.messages)) return '';
   const lines: string[] = [];
-  for (const message of chat.messages.slice(-resolveChatHistoryCount(chat.currentChatHistoryCount))) {
+  for (const message of chat.messages.slice(-resolveChatHistoryCount(historyLimit ?? chat.currentChatHistoryCount))) {
     if (!isRecord(message)) continue;
     const kind = message.kind;
     if (kind !== 'red-packet' && kind !== 'transfer' && kind !== 'order') continue;

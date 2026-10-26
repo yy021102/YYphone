@@ -51,6 +51,7 @@ export const isPlayerInventoryOrder = (message: Record<string, unknown>): boolea
 const backfillFromChats = (store: InventoryStore): InventoryStore => {
   if (store.backfilled) return store;
   const items = [...store.items];
+  const knownSources = new Set(items.flatMap(item => item.sourceMessageId ? [item.sourceMessageId] : item.id.startsWith('inv-msg-') ? [item.id.slice(8)] : []));
   try {
     const chats: unknown = JSON.parse(readStorageString('yyphone:wechat-chats') ?? '[]');
     const contacts = readOfflineContacts();
@@ -60,6 +61,8 @@ const backfillFromChats = (store: InventoryStore): InventoryStore => {
         for (const message of chat.messages) {
           if (!isRecord(message) || message.kind !== 'order' || typeof message.id !== 'string') continue;
           if (!isPlayerInventoryOrder(message)) continue;
+          if (knownSources.has(message.id)) continue;
+          knownSources.add(message.id);
           const category = message.orderCategory;
           const fromUser = message.senderId === 'user';
           const isGift = !fromUser && message.orderMode === 'gift';

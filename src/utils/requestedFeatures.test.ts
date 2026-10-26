@@ -46,6 +46,7 @@ import { compressChatPhoto, compressImageFile } from './imageFile';
 import { createEmptyCoupleSpace, localDateString, readCharacterBrief, readCoupleSpaces, writeCoupleSpaces } from './coupleSpaceData';
 import { readDirectMessages } from './journalData';
 import { generatePhoneScope } from './phoneAi';
+import { applyPhoneGeneratedPatch, collectPastDiaries } from './phoneDiaryArchive';
 import { readRecentMoneyEvents } from './phoneData';
 import { buildCharacterExport, parsePortableWorldBooks, remapImportedWorldBooks } from './characterExport';
 import { applySocialWrites, buildSocialInstructions, parseSocialActions, type SocialContext } from './chatSocial';
@@ -80,6 +81,25 @@ Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: l
 
 beforeEach(async () => { await clearDbStorage(); });
 afterEach(() => { mock.restoreAll(); });
+
+test('saved player photo adds subject instructions only for enabled image generation and never enters text chat payloads', () => {
+  const photo = 'data:image/png;base64,iVBORw0KGgo=';
+  const profiles = [{ id: 'photo-persona', name: '照片预设', nickname: '小月', realName: '林月', identity: '', personality: '', background: '', speakingStyle: '', faceReferenceImage: photo, faceReferenceEnabled: true }];
+  saveSetting(SETTINGS_KEYS.personas, { activeProfileId: profiles[0].id, profiles });
+  saveSetting(WECHAT_CHATS_STORAGE_KEY, [{ id: 'photo-chat', type: 'direct', participantIds: ['photo-char'], noteName: '', context: '', messages: [{ id: 'photo-message', senderId: 'user', text: '一起拍张照吧', createdAt: '2026-10-26T10:00:00Z' }] }]);
+  saveSetting('pocketos:wechat-contacts', [{ id: 'photo-char', name: '朋友', persona: '', worldBooks: [] }]);
+  const options = { chatId: 'photo-chat', timeAwarenessEnabled: false };
+  const imagePrompt = JSON.stringify(buildPrompt({ ...options, imageGenerationEnabled: true }));
+  assert.match(imagePrompt, /imageSubject/);
+  assert.match(imagePrompt, /玩家已保存自己的生图脸部参考照片/);
+  assert(!imagePrompt.includes(photo));
+  assert(!imagePrompt.includes('iVBORw0KGgo='));
+  assert(!JSON.stringify(buildPrompt(options)).includes('imageSubject'));
+  saveSetting(SETTINGS_KEYS.personas, { activeProfileId: profiles[0].id, profiles: [{ ...profiles[0], faceReferenceEnabled: false }] });
+  assert(!JSON.stringify(buildPrompt({ ...options, imageGenerationEnabled: true })).includes('imageSubject'));
+  saveSetting(SETTINGS_KEYS.personas, { activeProfileId: 'no-photo', profiles: [...profiles, { ...profiles[0], id: 'no-photo', faceReferenceImage: '' }] });
+  assert(!JSON.stringify(buildPrompt({ ...options, imageGenerationEnabled: true })).includes('imageSubject'));
+});
 
 test('WeChat persona keeps nickname, real name and preset label separate in chat prompts', () => {
   const storageKeys = [SETTINGS_KEYS.personas, WECHAT_CHATS_STORAGE_KEY, 'pocketos:wechat-contacts'];
@@ -308,6 +328,45 @@ test('icity generates one complete diary with private memory and rejects multipl
   diaries = [diaries[0], diaries[0]]; await assert.rejects(generatePhoneScope('icity', ctx, prev), /一篇完整日记/);
   diaries = [{ ...diaries[0], content: '长'.repeat(4001) }]; await assert.rejects(generatePhoneScope('icity', ctx, prev), /一篇完整日记/);
   assert.equal(prev.icityDiaries.length, 0);
+});
+
+test('external link cards retain URL and caption in AI input and distinguish metadata from full text', () => {
+  paperFixture();
+  const chats = JSON.parse(readStorageString(WECHAT_CHATS_STORAGE_KEY)!);
+  chats[0].messages.push({ id: 'external-share', senderId: 'user', kind: 'link', text: '这篇一起看 https://www.zhihu.com/question/123', externalUrl: 'https://www.zhihu.com/question/123', title: '网页真实标题', content: '网页真实简介', source: '知乎', createdAt: '2026-10-26T12:00:00Z' });
+  saveSetting(WECHAT_CHATS_STORAGE_KEY, chats);
+  const latest = buildPrompt({ chatId: chats[0].id }).at(-1)?.content ?? '';
+  for (const value of ['https://www.zhihu.com/question/123', '这篇一起看', '网页真实标题', '网页真实简介', '未读取全文']) assert.ok(latest.includes(value), value);
+});
+
+test('phone diaries archive before replacement, deduplicate manual saves and preserve past diaries on unrelated updates', () => {
+  const old = { id: 'old', dateStr: '10月26日', timeStr: '20:00', weather: '晴', mood: '平静', content: '旧日记完整正文' };
+  const next = { ...old, id: 'new', content: '新日记完整正文' };
+  const current = { charId: 'paper-a', wallpaperUrl: '', userRemark: '', npcThreads: [], photos: [], browserHistory: [], notes: [], icityDiaries: [old], agentSession: { doubaoTopic: '', doubaoTurns: [], claudeTopic: '', claudeTurns: [] } };
+  const updated = applyPhoneGeneratedPatch(current, { icityDiaries: [next] });
+  assert.deepEqual(updated.diaryArchive, [old]); assert.deepEqual(updated.icityDiaries, [next]); assert.deepEqual(current.icityDiaries, [old]);
+  const saved = collectPastDiaries(updated.diaryArchive, [next, { ...next, id: 'different-id-same-diary' }]);
+  assert.equal(saved.length, 2);
+  const manual = { ...updated, diaryArchive: saved };
+  assert.equal(applyPhoneGeneratedPatch(manual, { icityDiaries: [old] }).diaryArchive?.length, 2);
+  assert.deepEqual(applyPhoneGeneratedPatch(manual, { notes: [] }).diaryArchive, saved);
+  assert.deepEqual(collectPastDiaries(saved.filter(d => d.id !== old.id), []), [next]);
+  assert.deepEqual(applyPhoneGeneratedPatch({ ...current, diaryArchive: [], deletedDiaryIds: [old.id] }, { icityDiaries: [next] }).diaryArchive, [], 'deleted entries must not reappear during automatic archiving');
+});
+
+test('check phone caps the merged current and mounted history at the newest 150 regardless of configured counts', async () => {
+  paperFixture(); testApi();
+  const chats = JSON.parse(readStorageString(WECHAT_CHATS_STORAGE_KEY)!);
+  const local = Array.from({ length: 400 }, (_, i) => ({ id: `window-local-${i}`, senderId: i % 2 ? 'paper-a' : 'user', text: `LOCAL_WINDOW_${i}_END`, createdAt: new Date(Date.UTC(2026, 9, 20, 0, i)).toISOString() }));
+  const mounted = Array.from({ length: 400 }, (_, i) => ({ id: `window-mount-${i}`, senderId: 'paper-b', text: `MOUNT_WINDOW_${i}_END`, createdAt: new Date(Date.UTC(2026, 9, 20, 0, i, 1)).toISOString() }));
+  chats[0] = { ...chats[0], currentChatHistoryCount: 400, attachHistory: true, attachedHistoryChatIds: [chats[1].id], attachedHistoryCounts: { [chats[1].id]: 400 }, messages: local };
+  chats[1] = { ...chats[1], messages: mounted }; saveSetting(WECHAT_CHATS_STORAGE_KEY, chats);
+  const before = readStorageString(WECHAT_CHATS_STORAGE_KEY); let body = '';
+  mock.method(globalThis, 'fetch', async (_url: unknown, init?: RequestInit) => { body = String(init?.body); return aiResponse({ notes: [{ content: '最近的事情' }] }); });
+  await generatePhoneScope('notes', { charId: 'paper-a', charName: '甲', userName: '玩家', npcs: [] }, { charId: 'paper-a', wallpaperUrl: '', userRemark: '', npcThreads: [], photos: [], browserHistory: [], notes: [], icityDiaries: [], agentSession: { doubaoTopic: '', doubaoTurns: [], claudeTopic: '', claudeTurns: [] } });
+  assert.equal((body.match(/(?:LOCAL|MOUNT)_WINDOW_\d+_END/g) ?? []).length, 150);
+  assert.match(body, /LOCAL_WINDOW_325_END/); assert.match(body, /MOUNT_WINDOW_399_END/); assert.doesNotMatch(body, /LOCAL_WINDOW_324_END|MOUNT_WINDOW_324_END/);
+  assert.equal(readStorageString(WECHAT_CHATS_STORAGE_KEY), before);
 });
 
 test('couple one-request generation fills every section and validates missing responses without partial writes', async () => {
@@ -1533,7 +1592,7 @@ test('call replies combine into one synthesized utterance and keep video narrati
   assert.deepEqual(normalizeCallReplyParts([{ text: ' ' }, { text: '旁白', kind: 'narration' }], 'video'), []);
 });
 
-test('phone context follows configured message counts, defaults to 200 and keeps full message text', async () => {
+test('shared history readers retain configured counts while check-phone generation uses 150 full messages', async () => {
   const tail = '完整长消息末尾';
   const messages = Array.from({ length: 260 }, (_, i) => ({
     id: `phone-${i}`, senderId: i % 2 ? 'phone-char' : 'user',
@@ -1577,8 +1636,8 @@ test('phone context follows configured message counts, defaults to 200 and keeps
     agentSession: { doubaoTopic: '', doubaoTurns: [], claudeTopic: '', claudeTurns: [] },
   });
   const sent = JSON.parse(body).messages.map((message: { content: string }) => message.content).join('\n');
-  assert.match(sent, /消息60：/);
-  assert.doesNotMatch(sent, /消息59：/);
+  assert.match(sent, /消息110：/);
+  assert.doesNotMatch(sent, /消息109：/);
   assert.match(sent, /完整长消息末尾/);
 });
 

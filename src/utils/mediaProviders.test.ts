@@ -4,6 +4,7 @@ import { deflateRawSync } from 'node:zlib';
 import { extractFirstZipEntry, generateImage, imageDimensions, isImageGenerationSettings } from './imageGeneration';
 import { buildMinimaxUrl, buildSpeechUrl, getVoiceLanguageCodes, hexToBytes, isVoiceModelSettings, synthesizeVoice, DEFAULT_VOICE_MODEL_SETTINGS } from './voiceModel';
 import { isImageReference } from './imageReference';
+import { selectChatImageReferences } from './userImageReference';
 
 const buildZip = (name: string, content: Uint8Array, method: 0 | 8) => {
   const data = method === 8 ? new Uint8Array(deflateRawSync(content)) : content;
@@ -178,4 +179,36 @@ test('Gemini sends reference image parts and aspect ratio; Imagen rejects unsupp
   await assert.rejects(generateImage('a cat', { provider: 'imagen', referenceImage, apiKey: 'k' }), /不支持参考图/);
   await assert.rejects(generateImage('a cat', { provider: 'gemini', referenceImage: 'https://bad.test/private.png', apiKey: 'k' }), /参考图无效/);
   assert.equal(calls, 1);
+});
+
+test('couple images send separate player and character reference bytes to OpenAI and Gemini', async (t) => {
+  const roleImage = 'data:image/jpeg;base64,AQID';
+  const references = selectChatImageReferences('together', { id: 'p', name: '玩家预设', identity: '', personality: '', background: '', speakingStyle: '', faceReferenceImage: referenceImage }, roleImage, 0.7);
+  const calls: Array<{ url: string; init: RequestInit }> = [];
+  t.mock.method(globalThis, 'fetch', async (url: URL, init: RequestInit) => {
+    calls.push({ url: String(url), init });
+    return new Response(JSON.stringify(String(url).includes(':generateContent')
+      ? { candidates: [{ content: { parts: [{ inlineData: { data: 'AAA', mimeType: 'image/png' } }] } }] }
+      : { data: [{ b64_json: 'AAA' }] }), { headers: { 'content-type': 'application/json' } });
+  });
+  await generateImage('玩家在左，角色在右，一起看海', { provider: 'openai', references, ...api });
+  assert.match(calls[0].url, /\/images\/edits$/);
+  const form = calls[0].init.body as FormData;
+  const images = form.getAll('image[]') as Blob[];
+  assert.equal(images.length, 2);
+  assert.equal(form.get('image'), null);
+  assert.deepEqual([...new Uint8Array(await images[0].arrayBuffer())], [137,80,78,71,13,10,26,10]);
+  assert.deepEqual([...new Uint8Array(await images[1].arrayBuffer())], [1,2,3]);
+  assert.match(String(form.get('prompt')), /参考图 1 是玩家/);
+  assert.match(String(form.get('prompt')), /参考图 2 仅用于角色/);
+  assert.match(String(form.get('prompt')), /不要改变其他人物的脸/);
+  await generateImage('两人合照', { provider: 'gemini', references, apiKey: 'k' });
+  const parts = JSON.parse(String(calls[1].init.body)).contents[0].parts;
+  assert.match(parts[0].text, /玩家/);
+  assert.equal(parts[1].inlineData.data, 'iVBORw0KGgo=');
+  assert.match(parts[2].text, /角色/);
+  assert.equal(parts[3].inlineData.data, 'AQID');
+  await assert.rejects(generateImage('两人合照', { provider: 'novelai', references, ...api }), /只能使用一张参考图/);
+  await assert.rejects(generateImage('两人合照', { provider: 'imagen', references, apiKey: 'k' }), /不支持参考图/);
+  assert.equal(calls.length, 2, 'unsupported providers must not silently generate without the reference');
 });

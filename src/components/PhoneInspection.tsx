@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Camera, Check, ChevronRight, Compass, Heart, Image, MessageSquare, MoreHorizontal, Pause, Play, Plus, RefreshCw, Send, Smartphone, Smile, User, Users } from 'lucide-react';
 import { activeMemoryArchive } from '../utils/memoryArchives';
-import { applyInspectionAction, finishPhoneInspection, inspectionActionLabel, inspectionChatChoices, readInspectionActions, readInspectionContacts, readInspectionOptions, readInspectionPage, reactToInspection, saveInspectionOptions, type InspectionAction, type InspectionActionReceipt, type InspectionOptions, type InspectionPage, type InspectionSession, type InspectionStep } from '../utils/phoneInspection';
+import { applyInspectionAction, finishPhoneInspection, inspectionActionLabel, inspectionChatChoices, readInspectionActions, readInspectionContacts, readInspectionOptions, readInspectionPage, preparePhoneInspection, saveInspectionOptions, type PreparedInspectionStep, type InspectionAction, type InspectionActionReceipt, type InspectionOptions, type InspectionPage, type InspectionSession, type InspectionStep } from '../utils/phoneInspection';
 
 type Tab = 'home' | 'contacts' | 'discover' | 'me';
 const tabs = [{ id: 'home', label: '消息', Icon: MessageSquare }, { id: 'contacts', label: '通讯录', Icon: Users }, { id: 'discover', label: '发现', Icon: Compass }, { id: 'me', label: '我', Icon: User }] as const;
@@ -45,6 +45,9 @@ function InspectionViewer({ charId, chatId, actorName, avatarUrl, userName, user
   const [saving, setSaving] = useState(false); const [finished, setFinished] = useState(false);
   const [operation, setOperation] = useState<InspectionAction | null>(null); const [operationText, setOperationText] = useState('');
   const [actions, setActions] = useState<InspectionActionReceipt[]>([]); const mutation = useRef<Promise<unknown> | null>(null);
+  const prepared = useRef<PreparedInspectionStep[]>([]);
+  const [preparing, setPreparing] = useState(true);
+  const reactionPanel = useRef<HTMLElement>(null);
   const request = useRef<AbortController | null>(null); const alive = useRef(true); const started = useRef(false); const ending = useRef(false); const receipt = useRef(false);
   const contacts = readInspectionContacts(charId, options);
   const home = readPage('home');
@@ -67,7 +70,7 @@ function InspectionViewer({ charId, chatId, actorName, avatarUrl, userName, user
     const tab: Tab = id === 'remark' || id.startsWith('contact:') ? 'contacts' : id === 'moments' ? 'discover' : 'home';
     if (routeRef.current.detail) { await tap('back', signal); show(routeRef.current.tab); await wait(260, signal); }
     if (routeRef.current.tab !== tab || id === 'home') { await tap(`tab:${tab}`, signal); show(tab); if (id === 'home') remember(readPage(id)); await wait(300, signal); }
-    if (id !== 'home') { await tap(id, signal); const opened = readPage(id); setPage(opened); show(tab, id); remember(opened); await wait(330, signal); }
+    if (id !== 'home') { await tap(id, signal); const opened = prepared.current.find(step => step.page.id === id)?.page ?? readPage(id); setPage(opened); show(tab, id); remember(opened); await wait(330, signal); }
     // Swipe toward recent messages instead of jumping straight to the bottom.
     if (id.startsWith('chat:') && scroll.current) {
       scroll.current.scrollTop = 0;
@@ -95,6 +98,7 @@ function InspectionViewer({ charId, chatId, actorName, avatarUrl, userName, user
     } finally { mutation.current = null; if (alive.current) { setOperation(null); setOperationText(''); } }
   };
   const finish = async () => {
+    if (!prepared.current.length) { request.current?.abort(); onClose(); return; }
     if (ending.current || finished) return; ending.current = true; request.current?.abort(); setAutomatic(false); setBusy(false); setSaving(true); setError('');
     try { await mutation.current?.catch(() => {}); const text = await finishPhoneInspection(state.current, actorName, userName); if (!alive.current) return; if (!receipt.current) { onFinished(text, state.current.archiveKey, state.current.id); receipt.current = true; } setActions(readInspectionActions(state.current.id)); setFinished(true); }
     catch (e) { if (alive.current) setError(e instanceof Error ? e.message : '保存失败，请重试'); }
@@ -106,13 +110,18 @@ function InspectionViewer({ charId, chatId, actorName, avatarUrl, userName, user
     setBusy(true); setError(''); setComments([]); setNextId('');
     try {
       await navigate(id, controller.signal);
-      const nextPage = readPage(id); setPage(nextPage);
+      const nextPage = prepared.current.find(step => step.page.id === id)?.page ?? readPage(id); setPage(nextPage);
       const steps = state.current.steps.filter(s => s.page.id !== id); commit([...steps, { page: nextPage, comments: [] }]);
-      const result = await reactToInspection(state.current, nextPage, userName, controller.signal);
+      const result = prepared.current.find(step => step.page.id === id) ?? { comments: [], action: undefined, nextId: prepared.current.find(step => !state.current.steps.some(seen => seen.page.id === step.page.id))?.page.id ?? '', end: false };
       if (!alive.current || controller.signal.aborted || ending.current) return;
       if (result.action) await perform(result.action, nextPage, controller.signal);
       if (!alive.current || controller.signal.aborted || ending.current) return;
-      setComments(result.comments); commit(state.current.steps.map(s => s.page.id === id ? { ...s, comments: result.comments } : s));
+      const spoken: string[] = [];
+      for (const comment of result.comments) {
+        if (controller.signal.aborted) return;
+        spoken.push(comment); setComments([...spoken]); commit(state.current.steps.map(s => s.page.id === id ? { ...s, comments: [...spoken] } : s));
+        await wait(Math.min(2600, Math.max(1200, comment.length * 65)), controller.signal);
+      }
       if (result.end || state.current.steps.length >= 8) { setBusy(false); await finish(); }
       else setNextId(result.nextId);
     } catch (e) { if (alive.current && !controller.signal.aborted) { setAutomatic(false); setError(e instanceof Error ? e.message : '查看失败，请重试'); } }
@@ -120,11 +129,22 @@ function InspectionViewer({ charId, chatId, actorName, avatarUrl, userName, user
   };
   const manualTab = (tab: Tab) => { if (saving || finished || operation) return; request.current?.abort(); setBusy(false); setAutomatic(false); setError(''); show(tab); };
   const manualOpen = (id: string) => { if (saving || finished || operation) return; setAutomatic(false); void visit(id); };
-  useEffect(() => { alive.current = true; const timer = window.setTimeout(() => { if (!started.current) { started.current = true; void visit('home'); } }, 0); return () => { window.clearTimeout(timer); alive.current = false; request.current?.abort(); }; }, []);
+  const prepare = async () => {
+    request.current?.abort(); const controller = new AbortController(); request.current = controller;
+    setPreparing(true); setError('');
+    try {
+      const plan = await preparePhoneInspection(state.current, userName, controller.signal);
+      if (!alive.current || controller.signal.aborted) return;
+      prepared.current = plan; setPreparing(false); await wait(70, controller.signal); void visit('home');
+    } catch (e) { if (alive.current && !controller.signal.aborted) setError(e instanceof Error ? e.message : '准备失败，请重试'); }
+  };
+  useEffect(() => { alive.current = true; const timer = window.setTimeout(() => { if (!started.current) { started.current = true; void prepare(); } }, 0); return () => { window.clearTimeout(timer); alive.current = false; request.current?.abort(); }; }, []);
+  useEffect(() => { reactionPanel.current?.scrollTo({ top: reactionPanel.current.scrollHeight, behavior: 'smooth' }); }, [comments]);
   useEffect(() => { if (!automatic || busy || saving || finished || !nextId || error) return; const timer = window.setTimeout(() => void visit(nextId), 3000); return () => window.clearTimeout(timer); }, [automatic, busy, saving, finished, nextId, error]);
   useEffect(() => { if (!touch) return; const timer = window.setTimeout(() => setTouch(null), 900); return () => window.clearTimeout(timer); }, [touch]);
   const detail = route.detail !== null;
   const title = detail ? (page.kind === 'remark' || page.kind === 'contact' ? '详细资料' : page.title) : tabs.find(t => t.id === route.tab)!.label;
+  if (preparing) return <section className="phone-inspection inspection-preparing" role="dialog" aria-modal="true" aria-label="准备反查手机"><button type="button" className="inspection-prepare-cancel" onClick={() => { request.current?.abort(); onClose(); }}>取消</button><div className="inspection-preparing-orbit"><Avatar name={actorName} src={avatarUrl} large /><span /><span /></div><h2>{actorName}接过了手机</h2><p>{error || '稍等片刻，故事正在展开…'}</p>{error && <button type="button" className="inspection-prepare-retry" onClick={() => void prepare()}><RefreshCw size={14} />重新准备</button>}</section>;
   return <section className="phone-inspection" role="dialog" aria-modal="true" aria-label="反查手机">
     <header className="inspection-header"><Smartphone size={17} /><div><h2>反查手机</h2><p>{actorName}{finished ? '归还了手机' : '正在翻看'}</p></div><button type="button" disabled={saving} onClick={() => finished ? onClose() : void finish()}>{saving ? '保存中…' : finished ? '返回聊天' : '结束查看'}</button></header>
     <div className="inspection-screen" ref={screen} onPointerDownCapture={event => { const bounds = screen.current!.getBoundingClientRect(); pulse(event.clientX - bounds.left, event.clientY - bounds.top); }}>
@@ -143,7 +163,7 @@ function InspectionViewer({ charId, chatId, actorName, avatarUrl, userName, user
       {operation?.type === 'post-moment' && <div className="inspection-post-editor"><div><strong>发表朋友圈</strong><button type="button" data-inspection-target="action:confirm">发表</button></div><textarea readOnly aria-label="角色正在写朋友圈" value={operationText} /></div>}
       {touch && <span key={touch.id} className={`inspection-touch${touch.swipe ? ' is-swipe' : ''}`} style={{ left: touch.x, top: touch.y }} aria-hidden="true" />}
     </div>
-    <aside className="inspection-reaction"><div className="inspection-actor"><Avatar name={actorName} src={avatarUrl} /><strong>{actorName}</strong>{busy && <small>正在看…</small>}</div>
+    <aside ref={reactionPanel} className="inspection-reaction"><div className="inspection-actor"><Avatar name={actorName} src={avatarUrl} /><strong>{actorName}</strong>{busy && <small>正在看…</small>}</div>
       <div className="inspection-comments" aria-live="polite">{comments.map((comment, i) => <p key={i}>{comment}</p>)}{finished && <small>这次查看已记住</small>}{error && <p role="alert">{error}</p>}</div>
       {!!actions.length && <div className="inspection-action-receipts" aria-live="polite">{actions.map(action => <p key={action.id}><Check size={12} /><span>{inspectionActionLabel(action)}</span></p>)}</div>}
       {!finished && <div className="inspection-controls"><button type="button" disabled={saving} onClick={() => { setAutomatic(!automatic); if (!automatic && !busy && !nextId && !error) void visit(page.id); }}>{automatic ? <Pause size={13} /> : <Play size={13} />}{automatic ? '暂停' : '自动翻看'}</button>{error ? <button type="button" disabled={busy || saving} onClick={() => void visit(page.id)}><RefreshCw size={13} />重试</button> : <button type="button" disabled={busy || saving || !nextId} onClick={() => void visit(nextId)}>继续翻看<ChevronRight size={13} /></button>}</div>}
