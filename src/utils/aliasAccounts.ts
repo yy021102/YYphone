@@ -1,0 +1,124 @@
+import { readStoredValue, writeStoredValue } from './localStorage';
+import { activeMemoryArchive } from './memoryArchives';
+import { SETTINGS_KEYS } from './settings';
+
+export const ALIAS_ACCOUNTS_KEY = 'yyphone:alias-accounts';
+export const ALIAS_EVENT = 'yyphone:alias-accounts';
+export type AliasProfile = { id: string; owner: 'user' | 'character'; userProfileId: string; charId?: string; name: string; handle: string; avatarUrl: string; bio: string; createdAt: string };
+export type AliasMessage = { id: string; from: 'user' | 'character' | 'system'; text: string; createdAt: string; identityAtTime?: 'unknown' | 'suspected' | 'revealed' };
+export type AliasIdentityEvidence = { messageId: string; quote: string; referenceQuote: string; kind: 'shared-memory' | 'signature-phrase' };
+export type AliasThread = {
+  id: string; charId: string; userProfileId: string; archiveKey: string;
+  userAccountId: string; characterAccountId: string; requester: 'user' | 'character';
+  status: 'pending' | 'accepted' | 'rejected'; requestText: string; requestReply: string;
+  identity: 'unknown' | 'suspected' | 'revealed'; blocked: boolean; unread: number;
+  createdAt: string; updatedAt: string; revision: number; messages: AliasMessage[];
+  identityEvidence?: AliasIdentityEvidence[];
+  contactMotive?: string;
+};
+export type AliasState = { profiles: AliasProfile[]; threads: AliasThread[]; autoEnabled: boolean; switcherHidden?: boolean; checks: Record<string, number>; lastError: string };
+export const ALIAS_MEMORY_RULES = '【账号来源与记忆边界】主号、小号是独立的消息来源。涉及其他账号时，保留账号昵称、谁用哪个账号向谁说了什么，以及当时是否知道真实身份；不把小号原话改写成主号当面说过的话，不把主号的转述当作新的小号发言。未确认身份的陌生账号，其喜好、承诺和经历不能归给玩家；角色自己使用小号时的经历，也不能记成发生在角色主号里。相似语气、猜测和试探不等于身份确认；后来坦白只能记作后来得知，不改写之前的认知。资料没有说明来源或确认经过时，保留未知，不补造认出身份的经过。';
+export const row = (v: unknown): v is Record<string, any> => !!v && typeof v === 'object' && !Array.isArray(v);
+export const aliasId = () => crypto.randomUUID();
+const strings = (v: Record<string, any>, keys: string[]) => keys.every(k => typeof v[k] === 'string');
+export const emptyAliasState = (): AliasState => ({ profiles: [], threads: [], autoEnabled: false, checks: {}, lastError: '' });
+export function isAliasState(v: unknown): v is AliasState {
+  return row(v) && typeof v.autoEnabled === 'boolean' && (v.switcherHidden === undefined || typeof v.switcherHidden === 'boolean') && typeof v.lastError === 'string' && row(v.checks) && Object.values(v.checks).every(n => typeof n === 'number' && Number.isFinite(n)) &&
+    Array.isArray(v.profiles) && new Set(v.profiles.map(p => row(p) ? p.id : null)).size === v.profiles.length && v.profiles.every(p => row(p) && strings(p, ['id', 'userProfileId', 'name', 'handle', 'avatarUrl', 'bio', 'createdAt']) && ['user', 'character'].includes(p.owner) && (p.owner === 'user' || typeof p.charId === 'string')) &&
+    Array.isArray(v.threads) && new Set(v.threads.map(t => row(t) ? t.id : null)).size === v.threads.length && v.threads.every(t => row(t) && strings(t, ['id', 'charId', 'userProfileId', 'archiveKey', 'userAccountId', 'characterAccountId', 'requestText', 'requestReply', 'createdAt', 'updatedAt']) && ['user', 'character'].includes(t.requester) && ['pending', 'accepted', 'rejected'].includes(t.status) && ['unknown', 'suspected', 'revealed'].includes(t.identity) && typeof t.blocked === 'boolean' && Number.isInteger(t.unread) && Number.isInteger(t.revision) && Array.isArray(t.messages) && t.messages.every(m => row(m) && strings(m, ['id', 'text', 'createdAt']) && ['user', 'character', 'system'].includes(m.from) && (m.identityAtTime === undefined || ['unknown', 'suspected', 'revealed'].includes(m.identityAtTime))) &&
+      (t.identityEvidence === undefined || Array.isArray(t.identityEvidence) && t.identityEvidence.every(e => row(e) && strings(e, ['messageId', 'quote', 'referenceQuote']) && ['shared-memory', 'signature-phrase'].includes(e.kind))) &&
+      (t.contactMotive === undefined || typeof t.contactMotive === 'string'));
+}
+export function readAliasState(): AliasState {
+  const stored = readStoredValue<unknown>(ALIAS_ACCOUNTS_KEY, null, (_v): _v is unknown => true);
+  if (stored === null) return emptyAliasState();
+  if (!isAliasState(stored)) throw new Error('小号数据格式异常，未覆盖已有记录。');
+  return stored;
+}
+export function writeAliasState(next: AliasState): void {
+  if (!isAliasState(next)) throw new Error('小号数据无效，未保存。');
+  writeStoredValue(ALIAS_ACCOUNTS_KEY, next);
+  if (typeof window.dispatchEvent === 'function') window.dispatchEvent(new Event(ALIAS_EVENT));
+}
+export function setAliasSwitcherHidden(hidden: boolean): void {
+  writeAliasState({ ...readAliasState(), switcherHidden: hidden });
+}
+export const aliasRows = (key: string): Record<string, any>[] => readStoredValue(key, [], (v): v is Record<string, any>[] => Array.isArray(v) && v.every(row));
+export function currentAliasUser() {
+  const collection = readStoredValue(SETTINGS_KEYS.personas, {}, row);
+  const profile = Array.isArray(collection.profiles) ? collection.profiles.find((p: unknown) => row(p) && p.id === collection.activeProfileId) : undefined;
+  return { id: typeof profile?.id === 'string' ? profile.id : 'persona-default', name: profile?.nickname?.trim() || '我', avatarUrl: typeof profile?.avatarUrl === 'string' ? profile.avatarUrl : '', bio: typeof profile?.description === 'string' ? profile.description : '' };
+}
+export const aliasCharacter = (id: string) => aliasRows('pocketos:wechat-contacts').find(c => c.id === id);
+export const visibleAliasThreads = (state = readAliasState()) => state.threads.filter(t => t.userProfileId === currentAliasUser().id && aliasCharacter(t.charId) && t.archiveKey === activeMemoryArchive(t.charId));
+export function aliasPeer(thread: AliasThread, state = readAliasState()) {
+  if (thread.characterAccountId !== 'main') return state.profiles.find(p => p.id === thread.characterAccountId);
+  const char = aliasCharacter(thread.charId);
+  return char ? { name: char.name, handle: char.wechatId || '', avatarUrl: char.avatarUrl || '', bio: char.intro || '' } : undefined;
+}
+export function aliasSelf(thread: AliasThread, state = readAliasState()) {
+  return thread.userAccountId === 'main' ? currentAliasUser() : state.profiles.find(p => p.id === thread.userAccountId);
+}
+export function saveUserAlias(input: Pick<AliasProfile, 'name' | 'handle' | 'avatarUrl' | 'bio'>, id?: string): AliasProfile {
+  const state = readAliasState(), user = currentAliasUser();
+  const existing = id ? state.profiles.find(p => p.id === id && p.owner === 'user' && p.userProfileId === user.id) : undefined;
+  if (id && !existing) throw new Error('这个小号已不存在。');
+  const name = input.name.trim(), handle = input.handle.trim();
+  if (!name || name.length > 30 || !/^[a-zA-Z0-9_-]{3,40}$/.test(handle)) throw new Error('请填写昵称，微信号需为3～40位字母、数字、下划线或短横线。');
+  if (state.profiles.some(p => p.id !== id && p.handle.toLowerCase() === handle.toLowerCase())) throw new Error('这个微信号已经被使用。');
+  const profile: AliasProfile = { ...input, name, handle, bio: input.bio.trim().slice(0, 1000), id: existing?.id || aliasId(), owner: 'user', userProfileId: user.id, createdAt: existing?.createdAt || new Date().toISOString() };
+  writeAliasState({ ...state, profiles: existing ? state.profiles.map(p => p.id === id ? profile : p) : [...state.profiles, profile] });
+  return profile;
+}
+export function deleteUserAlias(id: string) {
+  const state = readAliasState();
+  if (!state.profiles.some(p => p.id === id && p.owner === 'user' && p.userProfileId === currentAliasUser().id)) throw new Error('这个小号已不存在。');
+  writeAliasState({ ...state, profiles: state.profiles.filter(p => p.id !== id), threads: state.threads.filter(t => t.userAccountId !== id) });
+}
+export function updateAliasThread(id: string, update: (thread: AliasThread) => AliasThread) {
+  const state = readAliasState(), thread = state.threads.find(t => t.id === id);
+  if (!thread || !visibleAliasThreads(state).some(t => t.id === id)) throw new Error('对话或聊天存档已经变化，请重新打开。');
+  const next = update(thread);
+  writeAliasState({ ...state, threads: state.threads.map(t => t.id === id ? { ...next, revision: thread.revision + 1 } : t) });
+}
+export function respondAliasRequest(id: string, accepted: boolean) {
+  updateAliasThread(id, t => {
+    if (t.requester !== 'character' || t.status !== 'pending') throw new Error('这条好友申请已经处理过了。');
+    return { ...t, status: accepted ? 'accepted' : 'rejected', unread: 0, updatedAt: new Date().toISOString() };
+  });
+}
+export function sendAliasMessage(id: string, text: string) {
+  const value = text.trim(); if (!value || value.length > 4000) throw new Error('消息需为1～4000字。');
+  updateAliasThread(id, t => {
+    if (t.status !== 'accepted' || t.blocked) throw new Error('请先通过好友验证并解除此小号对话的拉黑。');
+    const now = new Date().toISOString();
+    const name = currentAliasUser().name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const explicitDisclosure = t.userAccountId !== 'main' && new RegExp(`^(?:其实[，,\\s]*)?我(?:就)?是\\s*${name}(?:[\\s，,。.!！]|$)`).test(value);
+    return { ...t, identity: explicitDisclosure ? 'revealed' : t.identity, updatedAt: now, unread: 0, messages: [...t.messages, { id: aliasId(), from: 'user', text: value, createdAt: now, identityAtTime: explicitDisclosure ? 'revealed' : t.identity }] };
+  });
+}
+export function revealUserAlias(id: string) {
+  updateAliasThread(id, t => {
+    if (t.userAccountId === 'main' || t.status !== 'accepted' || t.blocked || t.identity === 'revealed') throw new Error('当前无法坦白身份。');
+    const now = new Date().toISOString();
+    return { ...t, identity: 'revealed', updatedAt: now, messages: [...t.messages, { id: aliasId(), from: 'user', text: `我是${currentAliasUser().name} 这是我的小号`, createdAt: now, identityAtTime: 'revealed' }] };
+  });
+}
+/** Knowledge projection only: never serialize account owners or internal character IDs into this text. */
+export function buildAliasMemoryContext(charIds: string[]): string {
+  const state = readAliasState();
+  const threads = visibleAliasThreads(state).filter(t => charIds.includes(t.charId) && (t.status === 'accepted' || t.requester === 'user' && t.status === 'rejected') && (t.messages.length || t.requestReply || t.requestText)).sort((a,b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 4);
+  if (!threads.length) return '';
+  return '【你亲历的其他账号对话】以下不是主号当前对话，也不代表眼前的人说过这些话。未公开身份的陌生账号不能归到主号玩家身上，不把怀疑当成确认。\n' + ALIAS_MEMORY_RULES + '\n你可以在主号有合适话题时自然聊到这些实际接触，视为谈起另一个账号或陌生人的事；不自动揭穿对方，也不每次切换回来都固定提起、吐槽或照搬同一句台词。\n' + threads.map(t => {
+    const self = aliasSelf(t, state), peer = aliasPeer(t, state), char = aliasCharacter(t.charId);
+    const context = t.characterAccountId !== 'main'
+      ? `${char?.name}自己使用账号「${peer?.name}」与主号相识者联系。来源：角色小号「${peer?.name}」↔ 玩家主号「${currentAliasUser().name}」。${t.contactMotive ? `你当初的私下动机：${t.contactMotive}。对方不自动知道这个动机。` : ''}${t.identity === 'revealed' ? '目前已向对方公开自己的身份，不能因此认定对方从一开始就知道。' : '对方尚未得到你的身份确认，不假定对方知道你是谁；主号发言也不要直接接续小号的语境或假定对方认出了你。'}`
+      : `${char?.name}与账号「${self?.name}」有过接触。来源：角色主号「${char?.name}」↔ ${t.identity === 'revealed' ? '已公开身份的账号' : '陌生账号'}「${self?.name}」。${t.identity === 'revealed' ? `对方已明确坦白自己是${currentAliasUser().name}的小号；此前的发言仍属于这个账号，当时不一定已知身份。` : t.identity === 'suspected' && t.identityEvidence?.length ? '存在实际线索，最多谨慎怀疑，没有确证。' : '对方身份尚未确认，只能记作这个陌生账号；没有明确线索时不猜测主号身份。'}`;
+    const characterLabel = t.characterAccountId === 'main' ? `角色主号「${char?.name}」` : `角色小号「${peer?.name}」`;
+    const userLabel = t.userAccountId === 'main' ? `玩家主号「${currentAliasUser().name}」` : `账号「${self?.name}」`;
+    return `${context}\n好友验证：${t.status === 'accepted' ? '已通过' : '未通过'}。申请附言来自${t.requester === 'character' ? characterLabel : userLabel}：「${t.requestText}」。${t.requestReply ? `角色的验证回复：「${t.requestReply}」。` : ''}\n${t.messages.filter(m => m.from !== 'system').slice(-10).map(m => `[${m.createdAt}] [${m.identityAtTime === 'revealed' ? '此时身份已公开' : m.identityAtTime === 'suspected' ? '当时仅怀疑身份' : m.identityAtTime === 'unknown' ? '当时身份未确认' : '当时身份状态未记录'}] ${m.from === 'character' ? characterLabel : userLabel}：${m.text.slice(0, 500)}`).join('\n')}`;
+  }).join('\n\n');
+}
+export function aliasStateWithoutCharacter(state: AliasState, charId: string): AliasState {
+  return { ...state, profiles: state.profiles.filter(p => p.charId !== charId), threads: state.threads.filter(t => t.charId !== charId), checks: Object.fromEntries(Object.entries(state.checks).filter(([key]) => { try { return JSON.parse(key)[0] !== charId; } catch { return false; } })) };
+}

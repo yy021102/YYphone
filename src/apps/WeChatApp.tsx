@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { acknowledgeCouponRequests, assertCouponAvailable, coupleBlockProtection, coupleRewardContext, useCoupleCoupon, type CoupleProductId } from '../utils/coupleRewards';
 import { CoupleCorrespondence } from '../components/CoupleCorrespondence';
+import { AliasAccountSwitcher, AliasChat, AliasConversationList, AliasFriendRequests, AliasManager, useAliasAccounts } from '../components/WeChatAliases';
+import { currentAliasUser, setAliasSwitcherHidden, visibleAliasThreads } from '../utils/aliasAccounts';
 import {
   MessageSquare,
   Users,
@@ -919,7 +921,14 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
   const delivery = useRef({ isVisible, activeChatId: '', onMessage, onIncomingCall, runtimeSettings });
   const [activeTab, setActiveTab] = useState<WeChatTab>('chats');
   const [discoverPage, setDiscoverPage] = useState<DiscoverPage>('home');
-  const [mePage, setMePage] = useState<'home' | 'settings' | 'beauty' | 'favorites'>('home');
+  const [mePage, setMePage] = useState<'home' | 'settings' | 'beauty' | 'favorites' | 'aliases'>('home');
+  const aliasState = useAliasAccounts();
+  const [activeAliasAccountId, setActiveAliasAccountId] = useState('');
+  const [activeAliasThreadId, setActiveAliasThreadId] = useState('');
+  const aliasUserId = currentAliasUser().id;
+  useEffect(() => { setActiveAliasThreadId(''); setActiveAliasAccountId(''); }, [aliasUserId]);
+  useEffect(() => { if (aliasState.switcherHidden) setActiveAliasAccountId(''); }, [aliasState.switcherHidden]);
+  useEffect(() => { if (activeAliasAccountId && !aliasState.profiles.some(p => p.id === activeAliasAccountId)) setActiveAliasAccountId(''); }, [activeAliasAccountId, aliasState.profiles]);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchFocused, setSearchFocused] = useState(false);
   const [chatBanner, setChatBanner] = useState(() => readStoredValue(CHAT_BANNER_KEY, DEFAULT_CHAT_BANNER, isChatBanner));
@@ -1029,6 +1038,8 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
 
   useEffect(() => {
     if (!requestedChat) return;
+    setActiveAliasThreadId('');
+    setActiveAliasAccountId('');
     setChats(readStoredValue(CHATS_STORAGE_KEY, [], isChatList));
     setActiveChatId(requestedChat.id);
   }, [requestedChat]);
@@ -4244,6 +4255,10 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
   };
 
   const activeChat = chats.find((chat) => chat.id === activeChatId);
+  const aliasThreads = visibleAliasThreads(aliasState);
+  const activeAliasThread = aliasThreads.find(t => t.id === activeAliasThreadId);
+  const pendingAliasCount = aliasThreads.filter(t => t.requester === 'character' && t.status === 'pending').length;
+  const openAliasThread = (id: string) => { setActiveAliasThreadId(id); setActiveChatId(''); setActiveTab('chats'); setMePage('home'); };
   const displayChatMessages = activeChat
     ? buildPaymentDisplayMessages(activeChat.messages.filter(message => !hiddenMessageIds.includes(message.id)), activeChat.participantIds[0] ?? '')
       .filter(message => !selectMode || (!message.paymentReceiptId && !message.paymentNotice))
@@ -4288,6 +4303,8 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
     setChatBannerEditing(false);
   };
 
+  if (activeAliasThread) return <div data-wechat-theme={useWeChatDark ? 'dark' : 'light'} className="wechat-app wechat-chat-open relative flex-1 min-h-0 w-full flex flex-col overflow-hidden"><AliasChat key={activeAliasThread.id} thread={activeAliasThread} state={aliasState} onBack={() => { setActiveAliasAccountId(activeAliasThread.userAccountId === 'main' ? '' : activeAliasThread.userAccountId); setActiveAliasThreadId(''); }} wallpaper={!useWeChatDark ? chatAppearance.backgroundUrl : undefined} userColor={useWeChatDark ? '#38534a' : chatAppearance.userBubbleColor} characterColor={useWeChatDark ? '#30343a' : chatAppearance.characterBubbleColor} /></div>;
+
   return (
     <div data-wechat-theme={useWeChatDark ? 'dark' : 'light'} className={`wechat-app ${activeTab === 'me' && mePage === 'favorites' ? 'wechat-favorites-open' : ''} relative flex-1 min-h-0 w-full flex flex-col overflow-hidden ${activeChat ? 'wechat-chat-open bg-[#ededed]' : 'bg-[#ededed]'} ${!activeChat && !isDiscoverSubpage && !isMeSubpage ? 'wechat-main-tabs' : ''}`}>
       {(activeTab !== 'me' || mePage !== 'home') && !(activeTab === 'discover' && (discoverPage === 'moments' || discoverPage === 'channels')) && <AppHeader
@@ -4301,7 +4318,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
             ? '通讯录'
             : activeTab === 'discover'
             ? selectedGame?.name ?? (discoverPage === 'moments' ? '朋友圈' : discoverPage === 'channels' ? '视频号' : discoverPage === 'wechat-reading' ? '微信读书' : discoverPage === 'text-adventure' ? '文字冒险' : discoverPage === 'time-capsule' ? '时间胶囊' : discoverPage === 'games' ? '游戏' : '发现')
-            : mePage === 'settings' ? '设置' : mePage === 'beauty' ? '美化' : mePage === 'favorites' ? '收藏' : '我'
+            : mePage === 'settings' ? '设置' : mePage === 'beauty' ? '美化' : mePage === 'favorites' ? '收藏' : mePage === 'aliases' ? '小号' : '我'
         }
         onBack={() => {
           if (activeChat) {
@@ -4329,6 +4346,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
               type="button"
               aria-label="发起聊天"
               onClick={() => {
+                if (activeAliasAccountId) { setActiveTab('me'); setMePage('aliases'); return; }
                 setChatError('');
                 setChatCreateMenuOpen((open) => !open);
               }}
@@ -5285,8 +5303,11 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
               </div>}
             </div>
 
+            <AliasAccountSwitcher state={aliasState} selected={activeAliasAccountId} onChange={setActiveAliasAccountId} />
             <div className="bg-white">
+              <AliasConversationList state={aliasState} accountId={activeAliasAccountId} search={searchQuery} onOpen={openAliasThread} />
               {[...chats]
+                .filter(() => !activeAliasAccountId)
                 .filter((chat) => {
                   const title = getChatTitle(chat);
                   const last = chat.messages.at(-1)?.text ?? '';
@@ -5349,9 +5370,10 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                     </div>
                   );
                 })}
-              {chats.length === 0 && (
+              {!activeAliasAccountId && chats.length === 0 && !aliasThreads.some(t => t.userAccountId === 'main' && t.status === 'accepted') && (
                 <p className="px-4 py-10 text-center text-xs text-slate-400">还没有聊天，点击右上角 + 发起聊天。</p>
               )}
+              {activeAliasAccountId && !aliasThreads.some(t => t.userAccountId === activeAliasAccountId) && <button type="button" onClick={() => { setActiveTab('me'); setMePage('aliases'); }} className="w-full px-4 py-10 text-center text-xs text-slate-400">添加朋友</button>}
             </div>
           </div>
         )}
@@ -5363,10 +5385,11 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
             <div className="space-y-3 px-3 pt-3">
             <section className="space-y-1.5">
               <h3 className="px-1 text-[11px] font-bold text-slate-400">
-                新的朋友{blockedInteractions.filter((item) => item.type === 'friend-request' && item.status === 'pending').length > 0
-                  ? ` · ${blockedInteractions.filter((item) => item.type === 'friend-request' && item.status === 'pending').length}` : ''}
+                新的朋友{blockedInteractions.filter((item) => item.type === 'friend-request' && item.status === 'pending').length + pendingAliasCount > 0
+                  ? ` · ${blockedInteractions.filter((item) => item.type === 'friend-request' && item.status === 'pending').length + pendingAliasCount}` : ''}
               </h3>
               <div className="divide-y divide-[#ededed] overflow-hidden rounded-lg bg-white">
+                <AliasFriendRequests state={aliasState} onOpen={openAliasThread} />
                 {blockedInteractions.filter((item) => item.type === 'friend-request' && item.status === 'pending').map((request) => (
                   <div key={request.id} className="p-3">
                     <div className="flex items-center justify-between gap-2">
@@ -5397,7 +5420,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                     </div>
                   </div>
                 ))}
-                {!blockedInteractions.some((item) => item.type === 'friend-request' && item.status === 'pending') && (
+                {!pendingAliasCount && !blockedInteractions.some((item) => item.type === 'friend-request' && item.status === 'pending') && (
                   <p className="px-3 py-3 text-[10px] text-slate-400">暂无新的好友申请</p>
                 )}
               </div>
@@ -6241,6 +6264,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
             </button>
             <div className="mt-3 bg-white">
               <button type="button" onClick={() => setMePage('favorites')} className="flex w-full items-center gap-4 px-6 py-3 text-left active:bg-slate-50"><Bookmark className="h-5 w-5 text-amber-500" /><span className="flex-1 text-[15px] text-[#222]">收藏</span><ChevronRight className="h-4 w-4 text-[#b4b4b4]" /></button>
+              <button type="button" onClick={() => setMePage('aliases')} className="flex w-full items-center gap-4 px-6 py-3 text-left active:bg-slate-50"><Users className="h-5 w-5 text-sky-500" /><span className="flex-1 text-[15px] text-[#222]">小号</span>{pendingAliasCount > 0 && <span className="rounded-full bg-rose-400 px-1.5 text-[10px] text-white">{pendingAliasCount}</span>}<ChevronRight className="h-4 w-4 text-[#b4b4b4]" /></button>
             </div>
             <div className="mt-3 bg-white">
               <button type="button" onClick={() => setMePage('beauty')} className="flex w-full items-center gap-4 px-6 py-3 text-left active:bg-slate-50"><Palette className="h-5 w-5 text-violet-500" /><span className="flex-1 text-[15px] text-[#222]">美化</span><ChevronRight className="h-4 w-4 text-[#b4b4b4]" /></button>
@@ -6250,6 +6274,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
             </div>
           </div>
         )}
+        {activeTab === 'me' && mePage === 'aliases' && <AliasManager state={aliasState} contacts={contacts} onOpen={openAliasThread} onSelect={id => { setAliasSwitcherHidden(false); setActiveAliasAccountId(id); setActiveTab('chats'); setMePage('home'); }} />}
         {activeTab === 'me' && mePage === 'favorites' && <WeChatFavorites items={favorites} onShare={shareFavorite}
           onDelete={id => { const latest = readStoredValue(WECHAT_FAVORITES_KEY, favorites, isWeChatFavorites); if (saveFavorites(latest.filter(item => item.id !== id))) setFavoriteNotice('已删除收藏'); }}
           composeOpen={favoriteComposeOpen} onComposeClose={() => setFavoriteComposeOpen(false)}
@@ -8397,6 +8422,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
             >
               <div className="relative">
                 <TabIcon className={`w-5 h-5 ${isActive ? 'stroke-[2.4]' : 'stroke-[1.8]'}`} />
+                {key === 'contacts' && pendingAliasCount > 0 && <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-rose-400" />}
               </div>
               <span className="text-[10px] mt-0.5">{label}</span>
             </button>

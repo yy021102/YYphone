@@ -6,6 +6,7 @@ import { getWorldBookEntriesForContacts } from './worldBookPrompt';
 import { readStoredValue } from './localStorage';
 import { getChatRelationContexts } from './chatContext';
 import { giftMemoryContent } from './giftMemory';
+import { ALIAS_MEMORY_RULES } from './aliasAccounts';
 import {
   addMemoryCandidates,
   isMemoryCategory,
@@ -21,7 +22,7 @@ import {
 
 export const requestMemoryAiText: typeof requestConfiguredAiText = (system, user, options = {}) => {
   const settings = readMemorySettings();
-  return requestConfiguredAiText(system, user, {
+  return requestConfiguredAiText(`${system}\n${ALIAS_MEMORY_RULES}`, user, {
     ...options,
     ...(settings.useSecondaryApi ? { api: settings.secondaryApi } : {}),
   });

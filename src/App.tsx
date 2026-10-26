@@ -131,6 +131,7 @@ function BlockedContactRuntime({ enabled }: { enabled: boolean }) {
       setInteraction(pending ?? null);
     };
     const process = () => {
+      void import('./utils/aliasAi').then(module => module.processCharacterAliases()).catch(error => console.warn('Alias request scheduling failed.', error));
       void processBlockedContactSchedules().catch((error: unknown) => {
         console.error('Blocked-contact scheduling failed.', error);
         showYyError(error instanceof Error ? error.message : '拉黑后的联系调度失败。');

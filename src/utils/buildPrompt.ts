@@ -20,6 +20,7 @@ import { describeChatSource, resolveChatHistoryCount } from './chatHistory';
 import { buildPaperMemoryInjection } from './paperNotes';
 import { buildGroupJournalInjection } from './groupJournal';
 import { buildChannelMemory } from './channelMemory';
+import { buildAliasMemoryContext } from './aliasAccounts';
 
 export interface PromptChatMessage {
   externalUrl?: string;
@@ -647,6 +648,10 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
   }
 
   // 朋友圈：只注入对聊天中角色尚未读过的动态/评论，已读的不再重复。
+  if (chat.type === 'direct') {
+    const aliasContext = buildAliasMemoryContext(chat.participantIds);
+    if (aliasContext) messages.push({ role: 'system', content: aliasContext });
+  }
   const unreadMoments = momentsInjection ?? buildMomentsInjection(
     chat.participantIds,
     chat.type === 'observer',
