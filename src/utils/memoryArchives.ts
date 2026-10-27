@@ -130,6 +130,8 @@ export const guardMemoryArchive = (charId: string) => {
 
 export const deleteMemoryArchive = (charId: string, archiveId: string) => {
   const scope = chatArchiveKey(charId, archiveId);
+  const portraits = readStoredValue('yyphone:character-perspectives', [], (v): v is Array<{ identity?: { archiveKey?: string } }> => Array.isArray(v));
+  if (portraits.some(p => p?.identity?.archiveKey === scope)) writeStoredValue('yyphone:character-perspectives', portraits.filter(p => p?.identity?.archiveKey !== scope));
   forgetPaperMemories({ archiveKey: scope });
   const aliases = readStoredValue('yyphone:alias-accounts', null, (value): value is Record<string, unknown> | null => value === null || isRecord(value));
   if (aliases && Array.isArray(aliases.threads) && aliases.threads.every(isRecord) && isRecord(aliases.checks)) {

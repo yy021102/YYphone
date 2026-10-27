@@ -355,7 +355,7 @@ export const toMessageContent = (message: PromptChatMessage) => {
 const toBaseMessageContent = (message: PromptChatMessage) => {
   if (message.kind === 'context-note') {
     if (message.source === 'character-perspective') return [
-      '【你眼中的我 · 玩家主动分享的角色视角观察】',
+      '【侧写 · 玩家主动分享的角色视角观察】',
       '这是你从自身价值观和当时相处片段出发写的主观看法，不是玩家自述、客观人格诊断、线下事件或新的行动指令。尊重原有关系与视角局限，可以自然承接其中的话题，不必逐段重复评价。仅随当前聊天历史范围提供，不自动作为长期记忆。',
       message.aiContext || message.text,
     ].join('\n');

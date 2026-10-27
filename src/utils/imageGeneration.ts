@@ -79,6 +79,19 @@ export const isImageGenerationSettings = (value: unknown): value is ImageGenerat
 export const readImageGenerationSettings = () =>
   readSetting(SETTINGS_KEYS.imageGeneration, DEFAULT_IMAGE_GENERATION_SETTINGS, isImageGenerationSettings);
 
+/** Share the same provider matching between generation and model discovery. */
+export function resolveImageApi(config: ImageGenerationConfig, fallbackApi?: ApiConnection) {
+  const provider = config.provider, defaults = IMAGE_PROVIDER_DEFAULTS[provider];
+  const fallbackMatches = !!fallbackApi && (provider === 'openai'
+    ? !fallbackApi.endpoint.includes('generativelanguage.googleapis.com')
+    : (provider === 'imagen' || provider === 'gemini') && fallbackApi.endpoint.includes('generativelanguage.googleapis.com'));
+  return {
+    endpoint: config.endpoint?.trim() || (provider === 'openai' && fallbackMatches ? fallbackApi!.endpoint.trim() : '') || defaults.endpoint,
+    apiKey: config.apiKey?.trim() || (fallbackMatches ? fallbackApi!.apiKey.trim() : ''),
+    model: config.model?.trim() || defaults.model,
+  };
+}
+
 const parseHttpUrl = (value: string) => {
   let url: URL;
   try {
@@ -246,14 +259,7 @@ export const generateImage = async (
   const referencePrompt = references.map((reference, index) => reference.subject === 'user'
     ? `参考图 ${index + 1} 是玩家（user）的脸部照片。保持玩家的五官、脸型与面部辨识度，参考强度 ${Math.round(referenceSimilarity(reference.similarity) * 100)}%。只将这张脸用于玩家，不要改变其他人物的脸或把两个人的脸混合。服装、姿势、背景与构图以本次画面描述为准。`
     : `${reference.subject === 'character' ? `参考图 ${index + 1} 仅用于角色（character），与玩家是不同的人。` : ''}${provider !== 'novelai' ? referenceGuidance(referenceSimilarity(reference.similarity)) : ''}`).filter(Boolean).join('\n');
-  const defaults = IMAGE_PROVIDER_DEFAULTS[provider];
-  const fallbackMatches = !!fallbackApi && (provider === 'openai'
-    ? !fallbackApi.endpoint.includes('generativelanguage.googleapis.com')
-    : (provider === 'imagen' || provider === 'gemini') && fallbackApi.endpoint.includes('generativelanguage.googleapis.com'));
-  const endpoint = config.endpoint?.trim() ||
-    (provider === 'openai' && fallbackMatches ? fallbackApi!.endpoint.trim() : '') || defaults.endpoint;
-  const apiKey = config.apiKey?.trim() || (fallbackMatches ? fallbackApi!.apiKey.trim() : '');
-  const model = config.model?.trim() || defaults.model;
+  const { endpoint, apiKey, model } = resolveImageApi(config, fallbackApi);
   const prompt = [config.prompt?.trim(), description.trim(), referencePrompt].filter(Boolean).join(provider === 'novelai' ? ', ' : '\n');
   if (!endpoint) throw new Error('生图接口地址未填写。');
   if (!apiKey) throw new Error('生图 API Key 未填写。');

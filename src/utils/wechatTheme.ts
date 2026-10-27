@@ -144,7 +144,34 @@ function splitSelectors(source: string): string[] {
   return result;
 }
 
-export function compileWeChatTheme(css: string): string {
+export interface WeChatCssOptions {
+  root?: string;
+  bubbles?: 'exclude' | 'only';
+  animationPrefix?: string;
+}
+
+/** Restrict the matched element, including pseudo-elements, rather than relying on specificity. */
+function restrictBubbleSelector(selector: string, mode: WeChatCssOptions['bubbles']) {
+  if (!mode) return selector;
+  const bubble = ':where(.yy-chat-message-bubble.is-plain, .yy-chat-message-bubble.is-plain *)';
+  const restriction = mode === 'only' ? `:is(${bubble})` : `:not(${bubble})`;
+  let depth = 0, quote = '', escaped = false;
+  for (let i = 0; i < selector.length; i++) {
+    const char = selector[i];
+    if (escaped) { escaped = false; continue; }
+    if (char === '\\') { escaped = true; continue; }
+    if (quote) { if (char === quote) quote = ''; continue; }
+    if (char === '"' || char === "'") quote = char;
+    if (char === '(' || char === '[') depth++;
+    if (char === ')' || char === ']') depth--;
+    if (!depth && !quote && char === ':' && (selector[i + 1] === ':' || /^:(before|after|first-line|first-letter)\b/.test(selector.slice(i)))) {
+      return `${selector.slice(0, i)}${restriction}${selector.slice(i)}`;
+    }
+  }
+  return `${selector}${restriction}`;
+}
+
+export function compileWeChatTheme(css: string, options: WeChatCssOptions = {}): string {
   if (css.length > WECHAT_THEME_CSS_LIMIT) throw new Error(`完整主题 CSS 最多支持 ${WECHAT_THEME_CSS_LIMIT} 个字符。`);
   if (!css.trim()) return '';
   const sheet = new CSSStyleSheet();
@@ -152,7 +179,7 @@ export function compileWeChatTheme(css: string): string {
   const animations = new Map<string, string>();
   const collect = (rules: CSSRuleList) => {
     for (const rule of Array.from(rules)) {
-      if (rule instanceof CSSKeyframesRule) animations.set(rule.name, `yy-wechat-theme-${rule.name}`);
+      if (rule instanceof CSSKeyframesRule) animations.set(rule.name, `${options.animationPrefix ?? 'yy-wechat-theme-'}${rule.name}`);
       else if (rule instanceof CSSMediaRule || rule instanceof CSSSupportsRule) collect(rule.cssRules);
     }
   };
@@ -177,7 +204,7 @@ export function compileWeChatTheme(css: string): string {
         const rootMatch = /^(?:\.wechat-app|:root|html|body)(?=[\s.#[:>+~]|$)/.exec(selector);
         if (!rootMatch) {
           if (/^[+~]/.test(selector.trimStart())) throw new Error('主题只能修改微信页面内部的元素。');
-          return `${ROOT} ${selector}`;
+          return restrictBubbleSelector(`${options.root ?? ROOT} ${selector}`, options.bubbles);
         }
         const remainder = rootMatch ? selector.slice(rootMatch[0].length) : selector;
         let depth = 0, quote = '', escaped = false;
@@ -194,7 +221,7 @@ export function compileWeChatTheme(css: string): string {
             break;
           }
         }
-        return rootMatch ? `${ROOT}${remainder}` : `${ROOT} ${selector}`;
+        return restrictBubbleSelector(`${options.root ?? ROOT}${remainder}`, options.bubbles);
       });
       return `${selectors.join(', ')} { ${declarations(rule.style)} }`;
     }

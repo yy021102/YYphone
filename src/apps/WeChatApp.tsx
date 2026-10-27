@@ -61,7 +61,9 @@ import { ChatPaymentCard } from '../components/ChatPaymentCard';
 import { WeChatFavorites } from '../components/WeChatFavorites';
 import { WECHAT_FAVORITES_KEY, isWeChatFavorites, snapshotFavoriteMessage, favoriteShareContent, type WeChatFavorite } from '../utils/wechatFavorites';
 import { buildPaymentDisplayMessages } from '../utils/chatPaymentDisplay';
-import { compileWeChatTheme, DEFAULT_WECHAT_THEME_CSS, WECHAT_THEME_CSS_LIMIT } from '../utils/wechatTheme';
+import { compileChatAppearance, DEFAULT_CHAT_APPEARANCE, isChatAppearance } from '../utils/chatAppearance';
+import { setStorageItemsAtomically } from '../utils/dbStorage';
+import { WeChatAppearanceWorkshop } from '../components/WeChatAppearanceWorkshop';
 import { MomentsTab } from '../components/MomentsTab';
 import { GomokuGame } from '../components/GomokuGame';
 import { GoGame } from '../components/GoGame';
@@ -86,14 +88,14 @@ import { TurtleSoupGame } from '../components/TurtleSoupGame';
 import { LiarsBarGame } from '../components/LiarsBarGame';
 import { ZhaJinHuaGame } from '../components/ZhaJinHuaGame';
 import { importMysteryScript } from '../components/scriptMysteryData';
-import { ColorWheel, hexToRgba } from '../components/ColorWheel';
+import { hexToRgba } from '../components/ColorWheel';
 import { musicPlayer } from '../utils/musicPlayer';
 import { findMusicTrackByTitle, readMusicPlaybackSnapshot } from '../utils/musicPlayback';
 import { PersonaCollection, UserPersona } from '../types';
 import { getUserRealName } from '../utils/userPersona';
 import { readStorageString, readStoredValue, writeStorageString, writeStoredValue } from '../utils/localStorage';
 import { readSetting, saveSetting, SETTINGS_KEYS } from '../utils/settings';
-import { compressChatPhoto, compressImageFile, compressWallpaper } from '../utils/imageFile';
+import { compressChatPhoto, compressImageFile } from '../utils/imageFile';
 import { buildPrompt } from '../utils/buildPrompt';
 import { PhoneInspection } from '../components/PhoneInspection';
 import { ExternalLinkCard } from '../components/ExternalLinkCard';
@@ -113,7 +115,6 @@ import { isImageReference } from '../utils/imageReference';
 import { hasUserFaceReference, parseImageSubject, selectChatImageReferences, validUserFaceFields, type ImageSubject } from '../utils/userImageReference';
 import { ChatImageReference } from '../components/ChatImageReference';
 import { showYyError, useErrorDialog } from '../components/ErrorDialog';
-import { AvatarFrameEditor } from '../components/AvatarFrameEditor';
 import { CallScreen } from '../components/CallScreen';
 import { normalizeForumHandle, readGeneratedForumHandles } from '../utils/forumIdentity';
 import { estimateConversationTokens, estimatePromptTokens } from '../utils/chatTokens';
@@ -415,44 +416,6 @@ interface ChatContextPreset {
   ownerId?: string;
 }
 
-interface ChatAppearancePreset {
-  id: string;
-  name: string;
-  backgroundUrl: string;
-  userBubbleColor?: string;
-  characterBubbleColor?: string;
-  userBubbleOpacity?: number;
-  characterBubbleOpacity?: number;
-  bubbleCss?: string;
-  layoutCss?: string;
-  themeCss?: string;
-  sendIconUrl?: string;
-  generateIconUrl?: string;
-}
-
-interface BubbleCssPreset {
-  id: string;
-  name: string;
-  css: string;
-}
-
-interface ChatAppearance {
-  backgroundUrl: string;
-  userBubbleColor: string;
-  characterBubbleColor: string;
-  userBubbleOpacity?: number;
-  characterBubbleOpacity?: number;
-  bubbleCss?: string;
-  layoutCss?: string;
-  themeCss?: string;
-  sendIconUrl?: string;
-  generateIconUrl?: string;
-  presets: ChatAppearancePreset[];
-  bubblePresets?: BubbleCssPreset[];
-  userAvatarFrame?: AvatarFrameStyle;
-  characterAvatarFrame?: AvatarFrameStyle;
-}
-
 type ChatArchive = ChatArchiveSlot<ChatMessage>;
 
 interface ChatConversation {
@@ -514,21 +477,6 @@ const CONTACTS_STORAGE_KEY = 'pocketos:wechat-contacts';
 const CONTACT_EXPORT_FORMAT = 'yyphone-contacts';
 const CHATS_STORAGE_KEY = 'yyphone:wechat-chats';
 const BASIC_EMOJIS = ['😀', '😂', '🥰', '😍', '😎', '😭', '🥺', '😡', '🤔', '👍', '👎', '❤️', '💕', '🎉', '🙏', '🌹'];
-const DEFAULT_CHAT_APPEARANCE: ChatAppearance = {
-  backgroundUrl: '',
-  userBubbleColor: '#95ec69',
-  characterBubbleColor: '#ffffff',
-  userBubbleOpacity: 1,
-  characterBubbleOpacity: 1,
-  bubbleCss: '',
-  layoutCss: '',
-  themeCss: DEFAULT_WECHAT_THEME_CSS,
-  sendIconUrl: '',
-  generateIconUrl: '',
-  presets: [],
-  bubblePresets: [],
-};
-
 const getDefaultReplyMessageRange = (chat: ChatConversation) => ({
   min: chat.type === 'direct'
     ? 1
@@ -784,93 +732,6 @@ const isChatContextPresetList = (value: unknown): value is ChatContextPreset[] =
       (preset.ownerId === undefined || typeof preset.ownerId === 'string')
   );
 
-const isChatAppearance = (value: unknown): value is ChatAppearance =>
-  !!value &&
-  typeof value === 'object' &&
-  typeof (value as ChatAppearance).backgroundUrl === 'string' &&
-  typeof (value as ChatAppearance).userBubbleColor === 'string' &&
-  typeof (value as ChatAppearance).characterBubbleColor === 'string' &&
-  ((value as ChatAppearance).bubbleCss === undefined || typeof (value as ChatAppearance).bubbleCss === 'string') &&
-  ((value as ChatAppearance).layoutCss === undefined || typeof (value as ChatAppearance).layoutCss === 'string') &&
-  ((value as ChatAppearance).themeCss === undefined || typeof (value as ChatAppearance).themeCss === 'string') &&
-  ((value as ChatAppearance).sendIconUrl === undefined || typeof (value as ChatAppearance).sendIconUrl === 'string') &&
-  ((value as ChatAppearance).generateIconUrl === undefined || typeof (value as ChatAppearance).generateIconUrl === 'string') &&
-  Array.isArray((value as ChatAppearance).presets) &&
-  (value as ChatAppearance).presets.every(
-    (preset) =>
-      !!preset &&
-      typeof preset.id === 'string' &&
-      typeof preset.name === 'string' &&
-      typeof preset.backgroundUrl === 'string' &&
-      (preset.userBubbleColor === undefined || typeof preset.userBubbleColor === 'string') &&
-      (preset.characterBubbleColor === undefined || typeof preset.characterBubbleColor === 'string') &&
-      (preset.bubbleCss === undefined || typeof preset.bubbleCss === 'string') &&
-      (preset.layoutCss === undefined || typeof preset.layoutCss === 'string') &&
-      (preset.themeCss === undefined || typeof preset.themeCss === 'string') &&
-      (preset.sendIconUrl === undefined || typeof preset.sendIconUrl === 'string') &&
-      (preset.generateIconUrl === undefined || typeof preset.generateIconUrl === 'string')
-  ) &&
-  ((value as ChatAppearance).bubblePresets === undefined ||
-    (Array.isArray((value as ChatAppearance).bubblePresets) &&
-      (value as ChatAppearance).bubblePresets!.every(
-        (preset) =>
-          !!preset &&
-          typeof preset.id === 'string' &&
-          typeof preset.name === 'string' &&
-          typeof preset.css === 'string'
-      )));
-
-const splitCssSelectors = (selectorText: string) => {
-  const selectors: string[] = [];
-  let current = '';
-  let depth = 0;
-  let quote = '';
-  for (const character of selectorText) {
-    if (quote) {
-      current += character;
-      if (character === quote) quote = '';
-      continue;
-    }
-    if (character === '"' || character === "'") quote = character;
-    if (character === '(' || character === '[') depth += 1;
-    if (character === ')' || character === ']') depth -= 1;
-    if (character === ',' && depth === 0) {
-      selectors.push(current.trim());
-      current = '';
-    } else {
-      current += character;
-    }
-  }
-  if (current.trim()) selectors.push(current.trim());
-  return selectors;
-};
-
-const scopeChatCss = (css: string) => {
-  if (!css.trim()) return '';
-  if (css.length > 20000) throw new Error('CSS 最多支持 20000 个字符。');
-  if (/@|url\s*\(|expression\s*\(|javascript\s*:/i.test(css)) {
-    throw new Error('CSS 不支持 @ 规则、外部资源链接或脚本表达式。');
-  }
-  const sheet = new CSSStyleSheet();
-  sheet.replaceSync(css);
-  return Array.from(sheet.cssRules).map((rule) => {
-    if (!(rule instanceof CSSStyleRule)) {
-      throw new Error('仅支持普通 CSS 选择器和样式声明，不支持 @ 规则。');
-    }
-    for (let index = 0; index < rule.style.length; index += 1) {
-      const property = rule.style.item(index);
-      const value = rule.style.getPropertyValue(property);
-      if (/url\s*\(|expression\s*\(|javascript\s*:/i.test(value)) {
-        throw new Error('CSS 样式声明中不能引用外部资源或脚本。');
-      }
-    }
-    const scopedSelectors = splitCssSelectors(rule.selectorText)
-      .map((selector) => `.yy-chat-surface ${selector}`)
-      .join(', ');
-    return `${scopedSelectors} { ${rule.style.cssText} }`;
-  }).join('\n');
-};
-
 const readContactWorldBooks = (): ContactWorldBook[] => {
   try {
     const raw = readStorageString('yyphone:world-books');
@@ -964,23 +825,6 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       ...(migrateCharacter ? { characterBubbleColor: DEFAULT_CHAT_APPEARANCE.characterBubbleColor, characterBubbleOpacity: 1 } : {}),
     };
   });
-  const [chatAppearancePresetName, setChatAppearancePresetName] = useState('');
-  const [themeCssDraft, setThemeCssDraft] = useState(chatAppearance.themeCss ?? DEFAULT_WECHAT_THEME_CSS);
-  const [themeCssError, setThemeCssError] = useState('');
-  useEffect(() => {
-    setThemeCssDraft(chatAppearance.themeCss ?? DEFAULT_WECHAT_THEME_CSS);
-    setThemeCssError('');
-  }, [chatAppearance.themeCss]);
-  const [selectedChatAppearancePresetId, setSelectedChatAppearancePresetId] = useState('');
-  const [bubbleCssPresetName, setBubbleCssPresetName] = useState('');
-  const [selectedBubbleCssPresetId, setSelectedBubbleCssPresetId] = useState('');
-  const [chatAppearanceMessage, setChatAppearanceMessage] = useState('');
-  const [chatAppearanceError, setChatAppearanceError] = useState('');
-  useErrorDialog(chatAppearanceError);
-  const chatAppearanceImportRef = useRef<HTMLInputElement>(null);
-  const bubbleCssImportRef = useRef<HTMLInputElement>(null);
-  const sendIconUploadRef = useRef<HTMLInputElement>(null);
-  const generateIconUploadRef = useRef<HTMLInputElement>(null);
   const [activeCallMode, setActiveCallMode] = useState<'voice' | 'video' | null>(null);
   const [callStartedAt, setCallStartedAt] = useState('');
   const [callConnectedAt, setCallConnectedAt] = useState<number | null>(null);
@@ -1313,18 +1157,15 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       styleElement.textContent = [
         '.yy-chat-surface .yy-chat-message-bubble:not(.is-special) { background-color: var(--yy-character-bubble-color); }',
         '.yy-chat-surface .yy-chat-message-bubble.is-user:not(.is-special) { background-color: var(--yy-user-bubble-color); }',
-        useWeChatDark ? '' : scopeChatCss(chatAppearance.bubbleCss ?? ''),
-        useWeChatDark ? '' : scopeChatCss(chatAppearance.layoutCss ?? ''),
-        useWeChatDark ? '' : compileWeChatTheme(chatAppearance.themeCss ?? ''),
+        compileChatAppearance(chatAppearance, useWeChatDark),
       ].filter(Boolean).join('\n');
       document.head.appendChild(styleElement);
-      setChatAppearanceError('');
     } catch (error) {
       console.error('Could not apply chat appearance CSS.', error);
-      setChatAppearanceError(error instanceof Error ? error.message : 'CSS 样式无效，无法应用。');
+      showYyError(error instanceof Error ? error.message : 'CSS 样式无效，无法应用。');
     }
     return () => styleElement.remove();
-  }, [chatAppearance.bubbleCss, chatAppearance.layoutCss, chatAppearance.themeCss, useWeChatDark]);
+  }, [chatAppearance, useWeChatDark]);
 
   const savePersonaCollection = (updatedCollection: PersonaCollection) => {
     try {
@@ -1432,286 +1273,6 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       setPersonaError(uploadError instanceof Error ? uploadError.message : '图片处理失败。');
     } finally {
       setIsProcessingAvatar(false);
-    }
-  };
-
-  const updateChatAppearance = (updates: Partial<ChatAppearance>) => {
-    setChatAppearance((current) => ({ ...current, ...updates }));
-    setChatAppearanceMessage('');
-    setChatAppearanceError('');
-  };
-
-  const persistChatAppearance = (nextAppearance: ChatAppearance) => {
-    try {
-      compileWeChatTheme(nextAppearance.themeCss ?? '');
-      saveSetting(SETTINGS_KEYS.chatAppearance, nextAppearance);
-      setChatAppearance(nextAppearance);
-      setChatAppearanceError('');
-      setChatAppearanceMessage('聊天美化已保存。');
-      return true;
-    } catch (error) {
-      console.error('Could not save chat appearance.', error);
-      setChatAppearanceMessage('');
-      setChatAppearanceError(error instanceof Error ? error.message : '保存失败，请检查本地存储空间。');
-      return false;
-    }
-  };
-
-  const applyFullTheme = (css: string) => {
-    try {
-      compileWeChatTheme(css);
-      if (persistChatAppearance({ ...chatAppearance, themeCss: css })) {
-        setThemeCssDraft(css);
-        setThemeCssError('');
-        setChatAppearanceMessage('完整主题已保存，浅色聊天页面生效。');
-      }
-    } catch (error) {
-      setThemeCssError(error instanceof Error ? error.message : '主题 CSS 无效，请检查后重试。');
-    }
-  };
-
-  const copyFullTheme = async () => {
-    try {
-      await navigator.clipboard.writeText(themeCssDraft);
-      setChatAppearanceMessage('完整主题 CSS 已复制，可直接交给 AI 修改。');
-    } catch {
-      setThemeCssError('未能自动复制，请在代码框内全选并复制。');
-    }
-  };
-
-  const handleChatBackgroundUpload = async (file?: File) => {
-    if (!file) return;
-    setIsProcessingChatImage(true);
-    setChatAppearanceError('');
-    try {
-      const backgroundUrl = await compressWallpaper(file);
-      updateChatAppearance({ backgroundUrl });
-    } catch (error) {
-      setChatAppearanceError(error instanceof Error ? error.message : '背景图片处理失败。');
-    } finally {
-      setIsProcessingChatImage(false);
-    }
-  };
-
-  const handleAppearanceIconUpload = async (
-    key: 'sendIconUrl' | 'generateIconUrl',
-    file?: File
-  ) => {
-    if (!file) return;
-    setIsProcessingChatImage(true);
-    setChatAppearanceError('');
-    try {
-      const iconUrl = await compressImageFile(file);
-      updateChatAppearance({ [key]: iconUrl });
-    } catch (error) {
-      setChatAppearanceError(error instanceof Error ? error.message : '图标处理失败。');
-    } finally {
-      setIsProcessingChatImage(false);
-    }
-  };
-
-  const saveChatAppearancePreset = () => {
-    const name = chatAppearancePresetName.trim();
-    if (!name) {
-      setChatAppearanceError('请填写美化预设名称。');
-      return;
-    }
-    const preset: ChatAppearancePreset = {
-      id: `chat-style-${Date.now()}`,
-      name,
-      backgroundUrl: chatAppearance.backgroundUrl,
-      userBubbleColor: chatAppearance.userBubbleColor,
-      characterBubbleColor: chatAppearance.characterBubbleColor,
-      userBubbleOpacity: chatAppearance.userBubbleOpacity,
-      characterBubbleOpacity: chatAppearance.characterBubbleOpacity,
-      bubbleCss: chatAppearance.bubbleCss ?? '',
-      layoutCss: chatAppearance.layoutCss ?? '',
-      themeCss: chatAppearance.themeCss,
-      sendIconUrl: chatAppearance.sendIconUrl ?? '',
-      generateIconUrl: chatAppearance.generateIconUrl ?? '',
-    };
-    const nextAppearance = { ...chatAppearance, presets: [...chatAppearance.presets, preset] };
-    if (persistChatAppearance(nextAppearance)) {
-      setChatAppearancePresetName('');
-      setSelectedChatAppearancePresetId(preset.id);
-    }
-  };
-
-  const applyChatAppearancePreset = (presetId: string) => {
-    setSelectedChatAppearancePresetId(presetId);
-    const preset = chatAppearance.presets.find((item) => item.id === presetId);
-    if (!preset) return;
-    updateChatAppearance({
-      backgroundUrl: preset.backgroundUrl,
-      userBubbleColor: preset.userBubbleColor ?? DEFAULT_CHAT_APPEARANCE.userBubbleColor,
-      characterBubbleColor: preset.characterBubbleColor ?? DEFAULT_CHAT_APPEARANCE.characterBubbleColor,
-      userBubbleOpacity: preset.userBubbleOpacity ?? DEFAULT_CHAT_APPEARANCE.userBubbleOpacity,
-      characterBubbleOpacity: preset.characterBubbleOpacity ?? DEFAULT_CHAT_APPEARANCE.characterBubbleOpacity,
-      bubbleCss: preset.bubbleCss ?? '',
-      layoutCss: preset.layoutCss ?? '',
-      themeCss: preset.themeCss,
-      sendIconUrl: preset.sendIconUrl ?? '',
-      generateIconUrl: preset.generateIconUrl ?? '',
-    });
-  };
-
-  const deleteChatAppearancePreset = () => {
-    if (!selectedChatAppearancePresetId) return;
-    const nextAppearance = {
-      ...chatAppearance,
-      presets: chatAppearance.presets.filter(
-        (preset) => preset.id !== selectedChatAppearancePresetId
-      ),
-    };
-    if (persistChatAppearance(nextAppearance)) setSelectedChatAppearancePresetId('');
-  };
-
-  const saveBubbleCssPreset = () => {
-    const name = bubbleCssPresetName.trim();
-    if (!name) {
-      setChatAppearanceError('请填写气泡预设名称。');
-      return;
-    }
-    const preset: BubbleCssPreset = {
-      id: `bubble-css-${Date.now()}`,
-      name,
-      css: chatAppearance.bubbleCss ?? '',
-    };
-    if (persistChatAppearance({
-      ...chatAppearance,
-      bubblePresets: [...(chatAppearance.bubblePresets ?? []), preset],
-    })) {
-      setBubbleCssPresetName('');
-    }
-  };
-
-  const applyBubbleCssPreset = (presetId: string) => {
-    setSelectedBubbleCssPresetId(presetId);
-    const preset = chatAppearance.bubblePresets?.find((item) => item.id === presetId);
-    if (!preset) return;
-    scopeChatCss(preset.css);
-    updateChatAppearance({ bubbleCss: preset.css });
-  };
-
-  const deleteBubbleCssPreset = (presetId: string) => {
-    setSelectedBubbleCssPresetId('');
-    persistChatAppearance({
-      ...chatAppearance,
-      bubblePresets: (chatAppearance.bubblePresets ?? []).filter((item) => item.id !== presetId),
-    });
-  };
-
-  const exportChatAppearance = () => {
-    const content = JSON.stringify({
-      format: 'yyphone-chat-appearance',
-      version: 1,
-      style: {
-        backgroundUrl: chatAppearance.backgroundUrl,
-        userBubbleColor: chatAppearance.userBubbleColor,
-        characterBubbleColor: chatAppearance.characterBubbleColor,
-        bubbleCss: chatAppearance.bubbleCss ?? '',
-        layoutCss: chatAppearance.layoutCss ?? '',
-        themeCss: chatAppearance.themeCss,
-        userBubbleOpacity: chatAppearance.userBubbleOpacity,
-        characterBubbleOpacity: chatAppearance.characterBubbleOpacity,
-        sendIconUrl: chatAppearance.sendIconUrl ?? '',
-        generateIconUrl: chatAppearance.generateIconUrl ?? '',
-      },
-    }, null, 2);
-    const url = URL.createObjectURL(new Blob([content], { type: 'application/json' }));
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = 'yyphone-chat-appearance.json';
-    anchor.click();
-    window.setTimeout(() => URL.revokeObjectURL(url), 0);
-  };
-
-  const importChatAppearance = async (file?: File) => {
-    if (!file) return;
-    try {
-      const parsed: unknown = JSON.parse(await file.text());
-      if (
-        !parsed ||
-        typeof parsed !== 'object' ||
-        (parsed as { format?: unknown }).format !== 'yyphone-chat-appearance' ||
-        (parsed as { version?: unknown }).version !== 1
-      ) {
-        throw new Error('美化文件格式不正确。');
-      }
-      const style = (parsed as { style?: unknown }).style;
-      if (
-        !style ||
-        typeof style !== 'object' ||
-        typeof (style as ChatAppearancePreset).backgroundUrl !== 'string' ||
-        ((style as ChatAppearancePreset).userBubbleColor !== undefined && typeof (style as ChatAppearancePreset).userBubbleColor !== 'string') ||
-        ((style as ChatAppearancePreset).characterBubbleColor !== undefined && typeof (style as ChatAppearancePreset).characterBubbleColor !== 'string') ||
-        ((style as ChatAppearancePreset).bubbleCss !== undefined && typeof (style as ChatAppearancePreset).bubbleCss !== 'string') ||
-        ((style as ChatAppearancePreset).layoutCss !== undefined && typeof (style as ChatAppearancePreset).layoutCss !== 'string') ||
-        ((style as ChatAppearancePreset).themeCss !== undefined && typeof (style as ChatAppearancePreset).themeCss !== 'string') ||
-        ((style as ChatAppearancePreset).userBubbleOpacity !== undefined && (typeof (style as ChatAppearancePreset).userBubbleOpacity !== 'number' || !Number.isFinite((style as ChatAppearancePreset).userBubbleOpacity) || (style as ChatAppearancePreset).userBubbleOpacity! < 0 || (style as ChatAppearancePreset).userBubbleOpacity! > 1)) ||
-        ((style as ChatAppearancePreset).characterBubbleOpacity !== undefined && (typeof (style as ChatAppearancePreset).characterBubbleOpacity !== 'number' || !Number.isFinite((style as ChatAppearancePreset).characterBubbleOpacity) || (style as ChatAppearancePreset).characterBubbleOpacity! < 0 || (style as ChatAppearancePreset).characterBubbleOpacity! > 1)) ||
-        ((style as ChatAppearancePreset).sendIconUrl !== undefined && typeof (style as ChatAppearancePreset).sendIconUrl !== 'string') ||
-        ((style as ChatAppearancePreset).generateIconUrl !== undefined && typeof (style as ChatAppearancePreset).generateIconUrl !== 'string')
-      ) {
-        throw new Error('美化文件内容缺失或无效。');
-      }
-      const nextAppearance = {
-        ...chatAppearance,
-        backgroundUrl: (style as ChatAppearancePreset).backgroundUrl,
-        userBubbleColor: (style as ChatAppearancePreset).userBubbleColor ?? DEFAULT_CHAT_APPEARANCE.userBubbleColor,
-        characterBubbleColor: (style as ChatAppearancePreset).characterBubbleColor ?? DEFAULT_CHAT_APPEARANCE.characterBubbleColor,
-        bubbleCss: (style as ChatAppearancePreset).bubbleCss ?? '',
-        layoutCss: (style as ChatAppearancePreset).layoutCss ?? '',
-        themeCss: (style as ChatAppearancePreset).themeCss,
-        userBubbleOpacity: (style as ChatAppearancePreset).userBubbleOpacity ?? DEFAULT_CHAT_APPEARANCE.userBubbleOpacity,
-        characterBubbleOpacity: (style as ChatAppearancePreset).characterBubbleOpacity ?? DEFAULT_CHAT_APPEARANCE.characterBubbleOpacity,
-        sendIconUrl: (style as ChatAppearancePreset).sendIconUrl ?? '',
-        generateIconUrl: (style as ChatAppearancePreset).generateIconUrl ?? '',
-      };
-      scopeChatCss(nextAppearance.bubbleCss);
-      scopeChatCss(nextAppearance.layoutCss);
-      compileWeChatTheme(nextAppearance.themeCss ?? '');
-      if (persistChatAppearance(nextAppearance)) setChatAppearanceMessage('美化样式已导入并应用。');
-    } catch (error) {
-      console.error('Could not import chat appearance.', error);
-      setChatAppearanceError(error instanceof Error ? error.message : '导入美化失败。');
-    }
-  };
-
-  const exportBubbleCss = () => {
-    const content = JSON.stringify({
-      format: 'yyphone-chat-bubble-css',
-      version: 1,
-      bubbleCss: chatAppearance.bubbleCss ?? '',
-    }, null, 2);
-    const url = URL.createObjectURL(new Blob([content], { type: 'application/json' }));
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = 'yyphone-chat-bubbles.json';
-    anchor.click();
-    window.setTimeout(() => URL.revokeObjectURL(url), 0);
-  };
-
-  const importBubbleCss = async (file?: File) => {
-    if (!file) return;
-    try {
-      const parsed: unknown = JSON.parse(await file.text());
-      if (
-        !parsed ||
-        typeof parsed !== 'object' ||
-        (parsed as { format?: unknown }).format !== 'yyphone-chat-bubble-css' ||
-        (parsed as { version?: unknown }).version !== 1 ||
-        typeof (parsed as { bubbleCss?: unknown }).bubbleCss !== 'string'
-      ) {
-        throw new Error('气泡 CSS 预设文件格式不正确。');
-      }
-      const bubbleCss = (parsed as { bubbleCss: string }).bubbleCss;
-      scopeChatCss(bubbleCss);
-      updateChatAppearance({ bubbleCss });
-      setChatAppearanceMessage('气泡 CSS 预设已导入。');
-    } catch (error) {
-      console.error('Could not import bubble CSS preset.', error);
-      setChatAppearanceError(error instanceof Error ? error.message : '导入气泡预设失败。');
     }
   };
 
@@ -4317,8 +3878,8 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
             : activeTab === 'contacts'
             ? '通讯录'
             : activeTab === 'discover'
-            ? selectedGame?.name ?? (discoverPage === 'moments' ? '朋友圈' : discoverPage === 'channels' ? '视频号' : discoverPage === 'character-perspective' ? '你眼中的我' : discoverPage === 'wechat-reading' ? '微信读书' : discoverPage === 'text-adventure' ? '文字冒险' : discoverPage === 'time-capsule' ? '时间胶囊' : discoverPage === 'games' ? '游戏' : '发现')
-            : mePage === 'settings' ? '设置' : mePage === 'beauty' ? '美化' : mePage === 'favorites' ? '收藏' : mePage === 'aliases' ? '小号' : '我'
+            ? selectedGame?.name ?? (discoverPage === 'moments' ? '朋友圈' : discoverPage === 'channels' ? '视频号' : discoverPage === 'character-perspective' ? '侧写' : discoverPage === 'wechat-reading' ? '微信读书' : discoverPage === 'text-adventure' ? '文字冒险' : discoverPage === 'time-capsule' ? '时间胶囊' : discoverPage === 'games' ? '游戏' : '发现')
+            : mePage === 'settings' ? '设置' : mePage === 'beauty' ? '美化工坊' : mePage === 'favorites' ? '收藏' : mePage === 'aliases' ? '小号' : '我'
         }
         onBack={() => {
           if (activeChat) {
@@ -4428,7 +3989,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       />
 
       {/* Main Content Area */}
-      <div className={`flex-1 min-h-0 ${activeChat || (activeTab === 'discover' && (discoverPage === 'moments' || discoverPage === 'channels' || discoverPage === 'character-perspective')) ? 'overflow-hidden flex flex-col' : 'overflow-y-auto no-scrollbar'}`}>
+      <div className={`flex-1 min-h-0 ${activeChat || activeTab === 'me' && mePage === 'beauty' || (activeTab === 'discover' && (discoverPage === 'moments' || discoverPage === 'channels' || discoverPage === 'character-perspective')) ? 'overflow-hidden flex flex-col' : 'overflow-y-auto no-scrollbar'}`}>
         {/* TAB 1: CHATS */}
         {activeTab === 'chats' && activeChat && (
           <div
@@ -4588,7 +4149,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                             : message.source === 'phone-inspection'
                               ? '🔎 角色查手机'
                             : message.source === 'character-perspective'
-                              ? '🪞 你眼中的我'
+                              ? '🪞 侧写'
                             : message.source === 'pomodoro'
                               ? `⏱️ ${message.title}`
                               : message.source === 'xianyu'
@@ -5515,7 +5076,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
               <Hourglass className="h-6 w-6 shrink-0 text-sky-500" /><span className="flex-1 text-[15px] text-slate-800">时间胶囊</span><ChevronRight className="h-4 w-4 text-slate-400" />
             </button>
             <button type="button" onClick={() => setDiscoverPage('character-perspective')} className="mt-3 flex w-full items-center gap-4 bg-white px-5 py-3 text-left active:bg-slate-50">
-              <Eye className="h-6 w-6 shrink-0 text-[#9890b8]" /><span className="flex-1 text-[15px] text-slate-800">你眼中的我</span><ChevronRight className="h-4 w-4 text-slate-400" />
+              <Eye className="h-6 w-6 shrink-0 text-[#9890b8]" /><span className="flex-1 text-[15px] text-slate-800">侧写</span><ChevronRight className="h-4 w-4 text-slate-400" />
             </button>
             <button
               type="button"
@@ -6280,8 +5841,6 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
             <div className="mt-3 bg-white">
               <button type="button" onClick={() => setMePage('favorites')} className="flex w-full items-center gap-4 px-6 py-3 text-left active:bg-slate-50"><Bookmark className="h-5 w-5 text-amber-500" /><span className="flex-1 text-[15px] text-[#222]">收藏</span><ChevronRight className="h-4 w-4 text-[#b4b4b4]" /></button>
               <button type="button" onClick={() => setMePage('aliases')} className="flex w-full items-center gap-4 px-6 py-3 text-left active:bg-slate-50"><Users className="h-5 w-5 text-sky-500" /><span className="flex-1 text-[15px] text-[#222]">小号</span>{pendingAliasCount > 0 && <span className="rounded-full bg-rose-400 px-1.5 text-[10px] text-white">{pendingAliasCount}</span>}<ChevronRight className="h-4 w-4 text-[#b4b4b4]" /></button>
-            </div>
-            <div className="mt-3 bg-white">
               <button type="button" onClick={() => setMePage('beauty')} className="flex w-full items-center gap-4 px-6 py-3 text-left active:bg-slate-50"><Palette className="h-5 w-5 text-violet-500" /><span className="flex-1 text-[15px] text-[#222]">美化</span><ChevronRight className="h-4 w-4 text-[#b4b4b4]" /></button>
             </div>
             <div className="mt-3 bg-white">
@@ -6455,302 +6014,14 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
             </section>
           </div>
         )}
-        {activeTab === 'me' && mePage === 'beauty' && (
-          <div className="p-4 space-y-3 pb-4">
-            <section className="glass-card rounded-2xl p-3.5 space-y-3">
-              <div>
-                <h3 className="text-xs font-bold text-[#2C4A5C]">聊天美化</h3>
-                <p className="mt-1 text-[10px] text-slate-500">完整主题可修改浅色聊天页面的布局和外观，深色模式统一覆盖；按钮功能保持不变。</p>
-              </div>
-              <section className="space-y-2 rounded-xl border border-slate-200 bg-white/70 p-3">
-                <label htmlFor="wechat-full-theme-css" className="block text-xs font-bold text-[#2C4A5C]">完整聊天主题 CSS（浅色模式）</label>
-                <p className="text-[10px] leading-relaxed text-slate-500">框内已提供带分区注释的默认样式。可整段复制给 AI 修改，再粘贴回来应用；支持顶部栏、背景、头像、气泡、红包转账、输入栏和菜单。</p>
-                <textarea id="wechat-full-theme-css" value={themeCssDraft} onChange={(event) => { setThemeCssDraft(event.target.value); setThemeCssError(''); }}
-                  rows={18} maxLength={WECHAT_THEME_CSS_LIMIT} spellCheck={false} autoCapitalize="off" autoCorrect="off"
-                  className="w-full resize-y rounded-lg border border-slate-200 bg-white p-3 font-mono text-[11px] leading-relaxed text-slate-800 outline-none focus:border-emerald-500" />
-                <div className="grid grid-cols-3 gap-2">
-                  <button type="button" onClick={() => applyFullTheme(themeCssDraft)} className="rounded-lg bg-[#07c160] px-2 py-2 text-[11px] font-semibold text-white">应用并保存主题</button>
-                  <button type="button" onClick={() => void copyFullTheme()} className="rounded-lg bg-slate-100 px-2 py-2 text-[11px] text-slate-700">复制完整 CSS</button>
-                  <button type="button" onClick={() => applyFullTheme(DEFAULT_WECHAT_THEME_CSS)} className="rounded-lg bg-slate-100 px-2 py-2 text-[11px] text-slate-700">恢复默认主题</button>
-                </div>
-                {themeCssDraft !== (chatAppearance.themeCss ?? DEFAULT_WECHAT_THEME_CSS) && <p className="text-[10px] text-amber-700">代码已修改，点击“应用并保存主题”后生效。</p>}
-                {themeCssError && <p role="alert" className="text-[11px] text-rose-600">{themeCssError}</p>}
-              </section>
-
-              <label className="block text-[11px] font-semibold text-[#2C4A5C]">
-                聊天背景图片链接
-                <input
-                  type="url"
-                  value={chatAppearance.backgroundUrl.startsWith('data:') ? '' : chatAppearance.backgroundUrl}
-                  onChange={(event) => updateChatAppearance({ backgroundUrl: event.target.value })}
-                  placeholder="粘贴图片链接"
-                  className="mt-1 w-full rounded-xl border border-white bg-white/70 px-3 py-2 text-xs outline-none"
-                />
-              </label>
-              <label className="block text-[11px] font-semibold text-[#2C4A5C]">
-                本地上传聊天背景
-                <input
-                  type="file"
-                  accept="image/*"
-                  disabled={isProcessingChatImage}
-                  onChange={(event) => {
-                    void handleChatBackgroundUpload(event.target.files?.[0]);
-                    event.currentTarget.value = '';
-                  }}
-                  className="mt-1 block max-w-full text-[10px]"
-                />
-              </label>
-              {([
-                { title: '我的气泡', colorKey: 'userBubbleColor', opacityKey: 'userBubbleOpacity' },
-                { title: '对方气泡（角色，群聊共用）', colorKey: 'characterBubbleColor', opacityKey: 'characterBubbleOpacity' },
-              ] as const).map(({ title, colorKey, opacityKey }) => (
-                <section key={colorKey} className="space-y-2 rounded-xl border border-white/80 bg-white/50 p-3">
-                  <div className="flex items-center justify-between">
-                    <h4 className="text-[11px] font-bold text-[#2C4A5C]">{title}</h4>
-                    <button
-                      type="button"
-                      onClick={() => updateChatAppearance({ [colorKey]: DEFAULT_CHAT_APPEARANCE[colorKey], [opacityKey]: DEFAULT_CHAT_APPEARANCE[opacityKey] })}
-                      className="text-[10px] text-slate-500 underline"
-                    >
-                      恢复默认
-                    </button>
-                  </div>
-                  <ColorWheel
-                    label={title}
-                    value={chatAppearance[colorKey]}
-                    onChange={(hex) => updateChatAppearance({ [colorKey]: hex })}
-                  />
-                  <label className="block text-[10px] font-semibold text-slate-500">
-                    透明度 {Math.round((chatAppearance[opacityKey] ?? 1) * 100)}%
-                    <input
-                      type="range"
-                      min="30"
-                      max="100"
-                      value={Math.round((chatAppearance[opacityKey] ?? 1) * 100)}
-                      onChange={(event) => updateChatAppearance({ [opacityKey]: Number(event.target.value) / 100 })}
-                      className="mt-1 w-full"
-                    />
-                  </label>
-                  <div className="flex">
-                    <div
-                      className={`rounded-2xl border border-white/60 px-3 py-2 text-xs text-slate-700 ${colorKey === 'userBubbleColor' ? 'ml-auto' : ''}`}
-                      style={{ backgroundColor: hexToRgba(chatAppearance[colorKey], chatAppearance[opacityKey] ?? 1) }}
-                    >
-                      气泡预览
-                    </div>
-                  </div>
-                </section>
-              ))}
-              <AvatarFrameEditor
-                title="我的头像框"
-                description="聊天里我的头像外面的渐变边框。"
-                value={chatAppearance.userAvatarFrame}
-                onChange={(next) => updateChatAppearance({ userAvatarFrame: next })}
-                previewUrl={personaDraft.avatarUrl}
-                previewText={personaNickname.charAt(0)}
-                radiusClass="rounded-xl"
-              />
-              <AvatarFrameEditor
-                title="对方头像框（角色，群聊共用）"
-                description="聊天里角色头像外面的渐变边框。"
-                value={chatAppearance.characterAvatarFrame}
-                onChange={(next) => updateChatAppearance({ characterAvatarFrame: next })}
-                previewText="TA"
-                radiusClass="rounded-xl"
-              />
-              <details className="space-y-3">
-                <summary className="cursor-pointer text-[11px] text-slate-500">旧版气泡与布局 CSS（兼容已有美化）</summary>
-              <section className="space-y-2 rounded-xl border border-white/80 bg-white/50 p-3">
-                <div>
-                  <h4 className="text-[11px] font-bold text-[#2C4A5C]">气泡 CSS 美化</h4>
-                  <p className="mt-1 text-[9px] leading-relaxed text-slate-500">
-                    支持 CSS 选择器和样式声明，自动限制在聊天窗口内。可使用 .yy-chat-message-bubble、.is-user、.is-character。
-                  </p>
-                </div>
-                <textarea
-                  value={chatAppearance.bubbleCss ?? ''}
-                  onChange={(event) => updateChatAppearance({ bubbleCss: event.target.value })}
-                  rows={6}
-                  maxLength={20000}
-                  spellCheck={false}
-                  placeholder={`.yy-chat-message-bubble {\n  border-radius: 18px;\n  box-shadow: 0 4px 12px #0002;\n}\n.yy-chat-message-bubble.is-user {\n  background: #d1fae5;\n}`}
-                  className="w-full resize-y rounded-lg border border-slate-200 bg-white px-2.5 py-2 font-mono text-[10px] leading-relaxed outline-none"
-                />
-                <div className="flex gap-2">
-                  <select
-                    value={selectedBubbleCssPresetId}
-                    onChange={(event) => applyBubbleCssPreset(event.target.value)}
-                    aria-label="切换气泡 CSS 预设"
-                    className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 py-2 text-[10px] text-slate-700"
-                  >
-                    <option value="">选择气泡预设</option>
-                    {(chatAppearance.bubblePresets ?? []).map((preset) => (
-                      <option key={preset.id} value={preset.id}>{preset.name}</option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    disabled={!selectedBubbleCssPresetId}
-                    onClick={() => deleteBubbleCssPreset(selectedBubbleCssPresetId)}
-                    className="rounded-lg bg-rose-50 px-2 text-[10px] font-semibold text-rose-600 disabled:opacity-40"
-                  >
-                    删除
-                  </button>
-                </div>
-                <div className="flex gap-2">
-                  <input
-                    value={bubbleCssPresetName}
-                    onChange={(event) => setBubbleCssPresetName(event.target.value)}
-                    placeholder="输入气泡预设名称"
-                    aria-label="气泡预设名称"
-                    className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 py-2 text-[10px]"
-                  />
-                  <button
-                    type="button"
-                    onClick={saveBubbleCssPreset}
-                    className="rounded-lg bg-teal-600 px-3 text-[10px] font-semibold text-white"
-                  >
-                    新建预设
-                  </button>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <button onClick={exportBubbleCss} className="rounded-lg bg-slate-100 py-2 text-[10px] font-semibold text-slate-700">
-                    <Download className="mr-1 inline h-3.5 w-3.5" />导出气泡预设
-                  </button>
-                  <button onClick={() => bubbleCssImportRef.current?.click()} className="rounded-lg bg-slate-100 py-2 text-[10px] font-semibold text-slate-700">
-                    <Upload className="mr-1 inline h-3.5 w-3.5" />导入气泡预设
-                  </button>
-                  <input
-                    ref={bubbleCssImportRef}
-                    type="file"
-                    accept="application/json,.json"
-                    className="hidden"
-                    onChange={(event) => {
-                      void importBubbleCss(event.target.files?.[0]);
-                      event.currentTarget.value = '';
-                    }}
-                  />
-                </div>
-              </section>
-              <section className="space-y-2 rounded-xl border border-white/80 bg-white/50 p-3">
-                <div>
-                  <h4 className="text-[11px] font-bold text-[#2C4A5C]">聊天布局 CSS</h4>
-                  <p className="mt-1 text-[9px] leading-relaxed text-slate-500">
-                    可用 .yy-chat-message-row、.yy-chat-avatar、.yy-chat-composer、.yy-chat-attachments、.yy-chat-voice、.yy-chat-emoji、.yy-chat-send、.yy-chat-generate 调整布局。
-                  </p>
-                </div>
-                <textarea
-                  value={chatAppearance.layoutCss ?? ''}
-                  onChange={(event) => updateChatAppearance({ layoutCss: event.target.value })}
-                  rows={5}
-                  maxLength={20000}
-                  spellCheck={false}
-                  placeholder={`.yy-chat-message-row {\n  align-items: flex-end;\n}\n.yy-chat-avatar {\n  border-radius: 50%;\n}`}
-                  className="w-full resize-y rounded-lg border border-slate-200 bg-white px-2.5 py-2 font-mono text-[10px] leading-relaxed outline-none"
-                />
-              </section>
-              </details>
-              <section className="space-y-2 rounded-xl border border-white/80 bg-white/50 p-3">
-                <h4 className="text-[11px] font-bold text-[#2C4A5C]">聊天小图标</h4>
-                {([
-                  ['sendIconUrl', '发送图标', sendIconUploadRef],
-                  ['generateIconUrl', '生成图标', generateIconUploadRef],
-                ] as const).map(([key, label, uploadRef]) => (
-                  <div key={key} className="space-y-1.5">
-                    <label className="block text-[10px] font-semibold text-slate-600">
-                      {label}链接
-                      <input
-                        type="url"
-                        value={chatAppearance[key] ?? ''}
-                        onChange={(event) => updateChatAppearance({ [key]: event.target.value })}
-                        placeholder="图片链接（支持 GIF/SVG/PNG）"
-                        className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-[10px] outline-none"
-                      />
-                    </label>
-                    <button type="button" onClick={() => uploadRef.current?.click()} className="w-full rounded-lg bg-slate-100 py-2 text-[10px] font-semibold text-slate-600">
-                      本地上传{label}
-                    </button>
-                    <button
-                      type="button"
-                      disabled={!chatAppearance[key]}
-                      onClick={() => updateChatAppearance({ [key]: '' })}
-                      className="w-full rounded-lg bg-rose-50 py-2 text-[10px] font-semibold text-rose-500 disabled:opacity-40"
-                    >
-                      恢复默认{label}
-                    </button>
-                    <input
-                      ref={uploadRef}
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      disabled={isProcessingChatImage}
-                      onChange={(event) => {
-                        void handleAppearanceIconUpload(key, event.target.files?.[0]);
-                        event.currentTarget.value = '';
-                      }}
-                    />
-                  </div>
-                ))}
-              </section>
-              <div className="flex gap-2">
-                <input
-                  value={chatAppearancePresetName}
-                  onChange={(event) => setChatAppearancePresetName(event.target.value)}
-                  maxLength={40}
-                  placeholder="预设名称"
-                  className="min-w-0 flex-1 rounded-xl border border-white bg-white/70 px-3 py-2 text-xs outline-none"
-                />
-                <button onClick={saveChatAppearancePreset} className="shrink-0 rounded-xl bg-sky-100 px-3 py-2 text-[10px] font-bold text-sky-800">
-                  新建预设
-                </button>
-              </div>
-              <div className="flex gap-2">
-                <select
-                  value={selectedChatAppearancePresetId}
-                  onChange={(event) => applyChatAppearancePreset(event.target.value)}
-                  aria-label="切换聊天美化预设"
-                  className="min-w-0 flex-1 rounded-xl border border-white bg-white/75 px-3 py-2 text-xs text-[#2C4A5C] outline-none"
-                >
-                  <option value="">选择已保存的美化预设</option>
-                  {chatAppearance.presets.map((preset) => (
-                    <option key={preset.id} value={preset.id}>{preset.name}</option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  onClick={deleteChatAppearancePreset}
-                  disabled={!selectedChatAppearancePresetId}
-                  className="shrink-0 rounded-xl bg-rose-50 px-3 text-[10px] font-semibold text-rose-700 disabled:opacity-40"
-                  aria-label="删除聊天美化预设"
-                >
-                  <Trash2 className="mr-1 inline h-3.5 w-3.5" />删除
-                </button>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <button onClick={() => persistChatAppearance(chatAppearance)} className="rounded-xl bg-teal-600 py-2 text-xs font-bold text-white">保存美化</button>
-                <button onClick={exportChatAppearance} className="rounded-xl bg-slate-100 py-2 text-xs font-semibold text-slate-700">
-                  <Download className="mr-1 inline h-3.5 w-3.5" />导出
-                </button>
-                <button onClick={() => chatAppearanceImportRef.current?.click()} className="col-span-2 rounded-xl bg-slate-100 py-2 text-xs font-semibold text-slate-700">
-                  <Upload className="mr-1 inline h-3.5 w-3.5" />导入并应用
-                </button>
-                <input
-                  ref={chatAppearanceImportRef}
-                  type="file"
-                  accept="application/json,.json"
-                  className="hidden"
-                  onChange={(event) => {
-                    void importChatAppearance(event.target.files?.[0]);
-                    event.currentTarget.value = '';
-                  }}
-                />
-              </div>
-              {isProcessingChatImage && <p className="text-[10px] text-sky-700">正在压缩图片…</p>}
-              {chatAppearanceMessage && <p role="status" className="text-[10px] text-emerald-700">{chatAppearanceMessage}</p>}
-              {chatAppearanceError && <p role="alert" className="text-[10px] text-rose-600">{chatAppearanceError}</p>}
-            </section>
-          </div>
-        )}
+        {activeTab === 'me' && mePage === 'beauty' && <WeChatAppearanceWorkshop
+          appearance={chatAppearance} userName={personaNickname} userAvatar={personaDraft.avatarUrl}
+          onSave={async next => {
+            compileChatAppearance(next);
+            await setStorageItemsAtomically({ [SETTINGS_KEYS.chatAppearance]: next });
+            setChatAppearance(next);
+          }}
+        />}
       </div>
       {chatCreateMode && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-5">

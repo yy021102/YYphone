@@ -1,0 +1,62 @@
+.wechat-workshop { --workshop-ink: #496176; --workshop-muted: #8a99a6; --workshop-card: #ffffffb8; --workshop-line: #ffffffdc; --workshop-input: #ffffffbd; position: relative; flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 18px 15px 20px; background: radial-gradient(ellipse at 0 0,#f9e9f1,transparent 55%),radial-gradient(ellipse at 100% 22%,#e3f2fb,transparent 60%),#f3f5fa; color: var(--workshop-ink); overflow-wrap: anywhere; }
+.wechat-workshop button,.wechat-workshop input,.wechat-workshop textarea,.wechat-workshop select { font: inherit; }
+.wechat-workshop button { cursor: pointer; } .wechat-workshop button:disabled { cursor: default; opacity: .45; }
+.workshop-heading { display: flex; gap: 12px; align-items: center; margin-bottom: 18px; }
+.workshop-heading-icon { display: flex; width: 45px; height: 45px; border-radius: 16px; align-items: center; justify-content: center; background: linear-gradient(140deg,#e7d9ef,#d8eaf7); color: #8e8ab0; border: 1px solid #fff; }
+.workshop-heading h2 { font-size: 19px; letter-spacing: .04em; margin: 0 0 4px; font-weight: 600; }
+.workshop-heading p,.workshop-note { font-size: 10px; line-height: 1.8; color: var(--workshop-muted); margin: 0; }
+.workshop-tabs { display: flex; border-radius: 16px; background: var(--workshop-card); border: 1px solid var(--workshop-line); padding: 4px; gap: 4px; margin-bottom: 13px; }
+.workshop-tabs button { display: flex; flex: 1; align-items: center; justify-content: center; gap: 6px; padding: 10px 0; border: 0; border-radius: 12px; color: var(--workshop-muted); background: transparent; font-size: 12px; }
+.workshop-tabs button[aria-selected=true] { color: #6b789d; background: linear-gradient(135deg,#eeebf7,#e9f2fa); box-shadow: 0 3px 8px #a5b5ce12; }
+.workshop-preview-card { border: 1px solid var(--workshop-line); border-radius: 20px; padding: 10px; background: var(--workshop-card); margin-bottom: 15px; overflow: hidden; }
+.workshop-preview-heading { display: flex; align-items: center; justify-content: space-between; margin: 0 2px 10px; font-size: 11px; }
+.workshop-preview-mode { display: flex; background: #9da8c014; border-radius: 9px; padding: 2px; gap: 2px; }
+.workshop-preview-mode button { padding: 4px 9px; border: 0; border-radius: 7px; background: transparent; color: var(--workshop-muted); font-size: 10px; }
+.workshop-preview-mode button[aria-pressed=true] { color: var(--workshop-ink); background: var(--workshop-card); }
+.wechat-workshop-preview iframe { display: block; width: 100%; border: 0; border-radius: 13px; background: #ededed; }
+.workshop-preview-card > .workshop-note { margin: 8px 2px 0; }
+.workshop-fields { min-width: 0; padding: 0; border: 0; display: grid; gap: 12px; }
+.workshop-card { min-width: 0; border: 1px solid var(--workshop-line); background: var(--workshop-card); border-radius: 19px; padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+.workshop-card h3 { margin: 0; font-size: 12px; font-weight: 600; }
+.workshop-card-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.workshop-card-heading button,.workshop-text-button { display: flex; align-items: center; gap: 4px; padding: 0; background: transparent; border: 0; color: var(--workshop-muted); font-size: 10px !important; }
+.workshop-card textarea { width: 100%; max-width: 100%; min-width: 0; resize: vertical; border: 1px solid #a6b3c82b; border-radius: 11px; padding: 10px; background: var(--workshop-input); color: var(--workshop-ink); font: 11px/1.8 Consolas,monospace; outline: none; tab-size: 2; }
+.workshop-card input:not([type=file]):not([type=range]):not([type=color]),.workshop-card select { width: 100%; min-width: 0; background: var(--workshop-input); color: var(--workshop-ink); border: 1px solid #a6b3c82b; border-radius: 10px; padding: 9px 10px; outline: none; font-size: 11px; }
+.workshop-card select { text-overflow: ellipsis; }
+.workshop-card input::placeholder { color: var(--workshop-muted); }
+.workshop-card input:focus,.workshop-card textarea:focus { border-color: #a4b6d1; }
+.workshop-image-field { display: grid; gap: 7px; padding-top: 8px; }
+.workshop-card label { display: block; font-size: 11px; line-height: 1.7; }
+.workshop-image-field input { margin-top: 5px; }
+.workshop-inline { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.workshop-inline > input,.workshop-inline > select { flex: 1; }
+.workshop-inline > button { flex-shrink: 0; border: 0; color: var(--workshop-ink); background: transparent; padding: 8px 4px; font-size: 11px; }
+.workshop-upload { display: inline-flex !important; align-items: center; gap: 4px; border-radius: 9px; background: #9caece15; padding: 7px 10px; cursor: pointer; }
+.workshop-upload input { display: none; }
+.workshop-inline .workshop-soft-button { background: #aebbd324; border-radius: 10px; padding: 9px 10px; }
+.workshop-inline .workshop-delete { color: #b58298; }
+.workshop-inline .workshop-secondary { display: flex; flex: 1; align-items: center; justify-content: center; gap: 5px; border-radius: 10px; background: #9caece15; padding: 9px 5px; }
+.workshop-card summary { cursor: pointer; font-size: 11px; list-style-position: inside; }
+.workshop-detail-body { display: grid; gap: 14px; margin-top: 13px; }
+.workshop-mode { display: flex; gap: 7px; }
+.workshop-mode button { flex: 1; border-radius: 11px; padding: 10px 4px; border: 1px solid #aab7cc33; background: transparent; color: var(--workshop-muted); font-size: 11px; }
+.workshop-mode button[aria-pressed=true] { color: #7985a6; background: #aebbd324; border-color: #b7c0d4; }
+.workshop-colors { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.workshop-color-input { display: flex; align-items: center; gap: 5px; margin-top: 6px; }
+.workshop-color-input input[type=color] { flex-shrink: 0; width: 31px; height: 31px; border-radius: 9px; border: 0; padding: 1px; background: transparent; }
+.workshop-card .workshop-color-input input:not([type=color]) { padding: 7px 4px; font-size: 10px; }
+.workshop-colors input[type=range] { width: 100%; accent-color: #9ba6c4; margin-top: 7px; }
+.workshop-restores > button { display: flex; align-items: center; justify-content: center; gap: 6px; color: var(--workshop-ink); font-size: 11px; border: 1px solid #aab7cc33; border-radius: 11px; background: transparent; padding: 10px; }
+.workshop-save-bar { position: sticky; z-index: 5; bottom: 0; margin: 15px -3px 0; border: 1px solid var(--workshop-line); border-radius: 17px; background: var(--workshop-card); backdrop-filter: blur(25px); padding: 10px 12px; box-shadow: 0 -4px 20px #8597b110; }
+.workshop-save-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.workshop-save-row > span { color: var(--workshop-muted); font-size: 10px; }
+.workshop-save-row > button { display: flex; align-items: center; gap: 5px; border: 0; border-radius: 11px; background: linear-gradient(135deg,#91aac5,#ad99b8); color: white; padding: 10px 13px; font-size: 11px; }
+.workshop-error,.workshop-message { font-size: 10px; line-height: 1.8; margin: 0 0 7px; color: #b77189; }
+.workshop-message { color: #759487; }
+.workshop-spin { animation: workshop-spin 1s linear infinite; } @keyframes workshop-spin { to { transform: rotate(360deg); } }
+.wechat-app[data-wechat-theme=dark] .wechat-workshop { --workshop-ink: #c8d4df; --workshop-muted: #8c9aaa; --workshop-card: #262e38ed; --workshop-line: #3b4652; --workshop-input: #202832; background: radial-gradient(ellipse at 0 0,#352f3e,transparent 55%),radial-gradient(ellipse at 100% 25%,#263c4b,transparent 60%),#1e252e; }
+.wechat-app[data-wechat-theme=dark] .workshop-tabs button[aria-selected=true] { background: #3e485b; color: #d6ddeb; }
+.wechat-app[data-wechat-theme=dark] .workshop-heading-icon { background: linear-gradient(140deg,#4d405a,#354e62); border-color: #667080; }
+.wechat-app[data-wechat-theme=dark] .workshop-mode button[aria-pressed=true] { color: #bdc9e2; border-color: #71819c; }
+@media (max-width: 340px) { .wechat-workshop { padding-left: 10px; padding-right: 10px; } .workshop-card { padding: 11px; } .workshop-colors { gap: 7px; } }
+@media (prefers-reduced-motion: reduce) { .workshop-spin { animation: none; } }

@@ -42,6 +42,18 @@
 .perspective-report-mark { font-size: 9px; letter-spacing: .16em; color: var(--perspective-muted); }
 .perspective-report-header h3 { margin: 12px 0 17px; font-size: 22px; font-weight: 500; line-height: 1.55; letter-spacing: .04em; }
 .perspective-prose p { font-size: 14px; line-height: 2.1; margin: 0 0 19px; text-align: start; }
+.perspective-prose.is-collapsed { max-height: 250px; overflow: hidden; mask-image: linear-gradient(to bottom, #000 65%, transparent); }
+.perspective-expand { display: flex; align-items: center; justify-content: center; gap: 5px; width: 100%; padding: 8px; border: 0; background: transparent; color: var(--perspective-accent); font-size: 11px !important; }
+.perspective-inject .perspective-preserve { margin-bottom: 9px; }
+.perspective-shelf { margin: 24px 0 0; }
+.perspective-shelf h3 { font-size: 12px; margin: 0 5px 12px; font-weight: 500; }
+.perspective-shelf-list { display: grid; gap: 10px; max-height: 350px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: #a9aec655 transparent; }
+.perspective-shelf-card { position: relative; border: 1px solid var(--perspective-line); background: var(--perspective-paper); border-radius: 17px; }
+.perspective-shelf-open { display: block; width: 100%; border: 0; padding: 16px 38px 15px 16px; text-align: left; color: var(--perspective-ink); background: transparent; border-radius: inherit; }
+.perspective-shelf-open strong { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 13px; line-height: 1.7; font-weight: 500; }
+.perspective-shelf-open > span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 11px; line-height: 1.8; color: var(--perspective-muted); margin-top: 7px; }
+.perspective-shelf-open time { display: block; color: var(--perspective-muted); font-size: 9px; margin-top: 9px; }
+.perspective-shelf-delete { position: absolute; right: 9px; top: 10px; padding: 6px; border: 0; border-radius: 9px; background: transparent; color: var(--perspective-muted); }
 .character-perspective summary { display: flex; align-items: center; gap: 5px; cursor: pointer; list-style: none; font-size: 10px; width: fit-content; padding: 4px 0; }
 .character-perspective summary::-webkit-details-marker { display: none; }
 .character-perspective details[open] > summary > svg { transform: rotate(180deg); }

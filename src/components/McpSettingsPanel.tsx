@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { ChevronDown, Globe, Plus, Trash2 } from 'lucide-react';
 import { changeSearchProvider, configuredToolRelay, executeSearchTool, isBuiltinSearchTool, listMcpTools, mergeMcpDiscovery, newSearchTool, newTavilyMcpTool, readMcpSettings, redactSearchSecrets, saveMcpSettings, searchToolAuthType, type McpSettings, type SearchProvider, type SearchTool } from '../utils/mcpTools';
 import { searchToolErrorMessage } from '../utils/builtinTools';
+import { ApiModelPicker } from './ApiModelPicker';
 
 const providers: Array<[SearchProvider | 'tavily-mcp', string]> = [['tavily-mcp', 'Tavily（MCP）'], ['mcp', '自定义 MCP'], ['tavily', 'Tavily（REST）'], ['bocha', '博查搜索（REST）'], ['exa', 'Exa（REST）'], ['rest', '自定义 REST']];
 const inputClass = 'mt-1 w-full min-w-0 rounded-xl border border-white bg-white/70 px-3 py-2 text-xs text-slate-700 outline-none';
@@ -66,6 +67,9 @@ export function McpSettingsPanel() {
         {field('决策 API 地址', settings.decisionApi.endpoint, endpoint => save({ ...settings, decisionApi: { ...settings.decisionApi, endpoint } }), 'url', 'https://…/v1')}
         {field('决策 API Key', settings.decisionApi.apiKey, apiKey => save({ ...settings, decisionApi: { ...settings.decisionApi, apiKey } }), 'password')}
         {field('决策模型', settings.decisionApi.model || '', model => save({ ...settings, decisionApi: { ...settings.decisionApi, model } }))}
+        <ApiModelPicker label="决策" identity={JSON.stringify([settings.decisionApi.endpoint, settings.decisionApi.apiKey])}
+          resolveConnection={() => ({ ...latest.current.decisionApi, purpose: 'decision' })} model={settings.decisionApi.model || ''}
+          onSelect={model => save({ ...latest.current, decisionApi: { ...latest.current.decisionApi, model } })} />
       </div></details>
       <details aria-label="内置免 Key 工具" open={settings.builtinExpanded !== false} onToggle={e => { if (e.currentTarget.open !== (settings.builtinExpanded !== false)) save({ ...settings, builtinExpanded: e.currentTarget.open }); }} className="space-y-2 rounded-2xl bg-[#f1f6f5]/70 p-3">
         <summary className="cursor-pointer text-xs font-semibold text-slate-600">内置工具 <span className="ml-1 text-[10px] font-normal text-slate-400">免 Key</span></summary>

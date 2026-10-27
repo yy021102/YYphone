@@ -7,6 +7,7 @@ import { chatArchiveKey } from './memoryArchives';
 import { changeChatArchive } from './chatArchives';
 import { readDirectMessages } from './journalData';
 import { buildPrompt, toMessageContent } from './buildPrompt';
+import { PERSPECTIVE_SHELF_KEY, readSavedPerspectives, removeSavedPerspective, reopenPerspective, savePerspective } from './perspectiveShelf';
 
 const values = new Map<string, string>(); let failKey = '';
 Object.defineProperty(globalThis, 'window', { configurable: true, value: { setTimeout, clearTimeout, dispatchEvent: () => true, localStorage: {
@@ -133,4 +134,30 @@ test('a failed write leaves all original data intact and a retry writes exactly 
   const s = readPerspectiveSnapshot('a'), r = reportFor(); const before = readStorageString('yyphone:wechat-chats');
   failKey = 'yyphone:wechat-chats'; await assert.rejects(injectCharacterPerspective(s, r), /QUOTA_TEST/); assert.equal(readStorageString('yyphone:wechat-chats'), before);
   await injectCharacterPerspective(s, r); assert.equal(read('yyphone:wechat-chats')[0].messages.length, 5);
+});
+
+test('selective retention saves only the article and identity, never prompts, raw transcripts, memory or automatic context', async () => {
+  const snapshot = readPerspectiveSnapshot('a'), report = reportFor(); const chatBefore = readStorageString('yyphone:wechat-chats'), memoryBefore = readStorageString('yyphone:memory-items');
+  assert.deepEqual(readSavedPerspectives('a'), []); await Promise.all([savePerspective(snapshot, report), savePerspective(snapshot, report)]);
+  const saved = readSavedPerspectives('a'); assert.equal(saved.length, 1); assert.deepEqual(saved[0].report, report);
+  const raw = readStorageString(PERSPECTIVE_SHELF_KEY)!; for (const secret of ['PRIVATE_THOUGHT', '今天我其实也有点累', 'worldBooks', 'sources', 'userDescription']) assert(!raw.includes(secret));
+  assert.equal(readStorageString('yyphone:wechat-chats'), chatBefore); assert.equal(readStorageString('yyphone:memory-items'), memoryBefore);
+  await removeSavedPerspective(report.id); assert.deepEqual(readSavedPerspectives('a'), []); assert.equal(readStorageString('yyphone:wechat-chats'), chatBefore);
+});
+
+test('retained articles stay in their player and archive and can be reopened after returning to that timeline', async () => {
+  const old = readPerspectiveSnapshot('a'), report = reportFor(); await savePerspective(old, report);
+  const branch = await changeChatArchive('a-chat', { mode: 'branch' }); assert.deepEqual(readSavedPerspectives('a'), []); await assert.rejects(savePerspective(old, report), /变化/);
+  await changeChatArchive('a-chat', { mode: 'switch', targetId: 'archive-default' }, branch); const saved = readSavedPerspectives('a')[0];
+  const current = reopenPerspective(saved, readPerspectiveSnapshot('a')); assert.notEqual(current.archiveRevision, old.archiveRevision); await injectCharacterPerspective(current, report);
+  writeStoredValue('pocketos:personas', { activeProfileId: 'other', profiles: [{ id: 'other', nickname: '另一位' }] }); assert.deepEqual(readSavedPerspectives('a'), []); await assert.rejects(removeSavedPerspective(report.id), /玩家/);
+  assert.throws(() => reopenPerspective(saved, readPerspectiveSnapshot('a')), /另一个玩家/);
+});
+
+test('failed retention keeps the old shelf intact and deleting an archive removes only its retained articles', async () => {
+  const snapshot = readPerspectiveSnapshot('a'), first = reportFor(); await savePerspective(snapshot, first); const before = readStorageString(PERSPECTIVE_SHELF_KEY);
+  failKey = PERSPECTIVE_SHELF_KEY; await assert.rejects(savePerspective(snapshot, reportFor()), /QUOTA_TEST/); assert.equal(readStorageString(PERSPECTIVE_SHELF_KEY), before);
+  const branch = await changeChatArchive('a-chat', { mode: 'branch' }); await savePerspective(readPerspectiveSnapshot('a'), reportFor());
+  await changeChatArchive('a-chat', { mode: 'switch', targetId: 'archive-default' }, branch);
+  const { deleteMemoryArchive } = await import('./memoryArchives'); deleteMemoryArchive('a', branch); assert.equal(read(PERSPECTIVE_SHELF_KEY).length, 1); assert.equal(readSavedPerspectives('a')[0].report.id, first.id);
 });

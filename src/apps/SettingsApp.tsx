@@ -1,5 +1,8 @@
 import React, { useState } from 'react';
 import { McpSettingsPanel } from '../components/McpSettingsPanel';
+import { ApiModelPicker } from '../components/ApiModelPicker';
+import { getActiveApiPreset } from '../utils/aiApi';
+import { ACTIVE_IMAGE_PRESET_KEY, deleteImageGenerationPreset, normalizeImageSettings, readImageGenerationPresets, saveImageGenerationPreset, selectImageGenerationPreset } from '../utils/imageGenerationPresets';
 import {
   Check,
   ChevronDown,
@@ -53,6 +56,7 @@ import {
   defaultImageSize,
   imageSizeOptions,
   isImageSizePreset,
+  resolveImageApi,
 } from '../utils/imageGeneration';
 
 interface ApiPreset {
@@ -164,7 +168,15 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
   const voiceDefaults = getVoiceProviderDefaults(voiceProvider);
   const [imageGenerationDraft, setImageGenerationDraft] = useState<ImageGenerationSettings>(readImageGenerationSettings);
   const [imageGenerationMessage, setImageGenerationMessage] = useState('');
+  const [imagePresets, setImagePresets] = useState(readImageGenerationPresets);
+  const [imagePresetName, setImagePresetName] = useState('');
+  const [imagePresetId, setImagePresetId] = useState(() => readSetting(ACTIVE_IMAGE_PRESET_KEY, '', (v): v is string => typeof v === 'string'));
+  const [imagePresetBusy, setImagePresetBusy] = useState(false);
+  const [imagePresetError, setImagePresetError] = useState('');
   const imageDefaults = IMAGE_PROVIDER_DEFAULTS[imageGenerationDraft.provider];
+  let imageFallback;
+  try { imageFallback = getActiveApiPreset(); } catch { /* Independent image connections need no main API. */ }
+  const imageModelConnection = resolveImageApi(imageGenerationDraft, imageFallback);
   const [imageCompressionBusy, setImageCompressionBusy] = useState(false);
   const [imageCompressionMessage, setImageCompressionMessage] = useState('');
 
@@ -392,7 +404,7 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
       }
     }
     try {
-      saveSetting(SETTINGS_KEYS.imageGeneration, { ...imageGenerationDraft, endpoint });
+      saveSetting(SETTINGS_KEYS.imageGeneration, normalizeImageSettings({ ...imageGenerationDraft, endpoint }));
       setImageGenerationMessage('生图模型配置已保存。');
       setStatusBarError('');
     } catch (error) {
@@ -400,6 +412,23 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
       setImageGenerationMessage('');
       setStatusBarError('生图模型配置保存失败，请检查浏览器本地存储空间。');
     }
+  };
+
+  const handleImagePreset = async (action: 'save' | 'select' | 'delete', id = imagePresetId) => {
+    if (imagePresetBusy) return;
+    setImagePresetBusy(true); setImagePresetError(''); setImageGenerationMessage('');
+    try {
+      if (action === 'save') {
+        const preset = await saveImageGenerationPreset(imagePresetName, imageGenerationDraft);
+        setImagePresetId(preset.id); setImageGenerationDraft(preset.settings); setImagePresetName(''); setImageGenerationMessage('生图预设已保存并应用。');
+      } else if (action === 'select') {
+        const settings = await selectImageGenerationPreset(id); setImageGenerationDraft(settings); setImagePresetId(id); setImageGenerationMessage('已切换生图预设。');
+      } else {
+        await deleteImageGenerationPreset(id); setImagePresetId(''); setImageGenerationMessage('预设已删除，当前生图配置保留。');
+      }
+      setImagePresets(readImageGenerationPresets());
+    } catch (cause) { setImagePresetError(cause instanceof Error ? cause.message : '预设操作失败，请重试。'); }
+    finally { setImagePresetBusy(false); }
   };
 
   const handleSaveVoiceModel = () => {
@@ -773,10 +802,10 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
             <span className="settings-heading-copy"><strong>生图模型</strong><small>把聊天里的想象变成画面</small></span>
             <ChevronDown size={16} className="settings-chevron" />
           </summary>
-          <div className="settings-panel-body space-y-3">
+          <fieldset disabled={imagePresetBusy} className="settings-panel-body min-w-0 space-y-3">
             <label className="block text-[11px] font-semibold text-[#2C4A5C]">
               服务商
-              <select value={imageGenerationDraft.provider}
+              <select aria-label="生图服务商" value={imageGenerationDraft.provider}
                 onChange={(event) => setImageGenerationDraft({
                   ...imageGenerationDraft,
                   provider: isImageGenerationProvider(event.target.value) ? event.target.value : 'openai',
@@ -787,25 +816,28 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
             </label>
             <label className="block text-[11px] font-semibold text-[#2C4A5C]">
               接口地址（选填）
-              <input type="url" value={imageGenerationDraft.endpoint}
+              <input aria-label="生图接口地址" type="url" value={imageGenerationDraft.endpoint}
                 onChange={(event) => setImageGenerationDraft({ ...imageGenerationDraft, endpoint: event.target.value })}
                 placeholder={imageDefaults.endpoint ? `留空默认：${imageDefaults.endpoint}` : '留空使用当前 API 地址'}
                 className="mt-1 w-full rounded-xl border border-white bg-white/70 px-3 py-2 text-xs font-mono outline-none" />
             </label>
             <label className="block text-[11px] font-semibold text-[#2C4A5C]">
               API Key{imageGenerationDraft.provider === 'novelai' ? '' : '（选填）'}
-              <input type="password" autoComplete="off" value={imageGenerationDraft.apiKey}
+              <input aria-label="生图 API Key" type="password" autoComplete="off" value={imageGenerationDraft.apiKey}
                 onChange={(event) => setImageGenerationDraft({ ...imageGenerationDraft, apiKey: event.target.value })}
                 placeholder={imageGenerationDraft.provider === 'novelai' ? 'NovelAI 必填（pst-...）' : '留空则在格式匹配时使用当前 API 的 Key'}
                 className="mt-1 w-full rounded-xl border border-white bg-white/70 px-3 py-2 text-xs font-mono outline-none" />
             </label>
             <label className="block text-[11px] font-semibold text-[#2C4A5C]">
               模型（选填）
-              <input value={imageGenerationDraft.model}
+              <input aria-label="生图模型 ID" value={imageGenerationDraft.model}
                 onChange={(event) => setImageGenerationDraft({ ...imageGenerationDraft, model: event.target.value })}
                 placeholder={`留空默认：${imageDefaults.model}`}
                 className="mt-1 w-full rounded-xl border border-white bg-white/70 px-3 py-2 text-xs font-mono outline-none" />
             </label>
+            <ApiModelPicker label="生图" identity={JSON.stringify([imageGenerationDraft.provider, imageModelConnection.endpoint, imageModelConnection.apiKey])}
+              resolveConnection={() => ({ ...imageModelConnection, purpose: 'image', protocol: imageGenerationDraft.provider === 'gemini' || imageGenerationDraft.provider === 'imagen' ? 'google' : 'openai', unsupported: imageGenerationDraft.provider === 'novelai' && /^https?:\/\/(?:image|api)\.novelai\.net(?:\/|$)/i.test(imageModelConnection.endpoint) })}
+              model={imageGenerationDraft.model} onSelect={model => setImageGenerationDraft(current => ({ ...current, model }))} />
             <label className="block text-[11px] font-semibold text-[#2C4A5C]">图片尺寸
               <select aria-label="图片尺寸" value={imageGenerationDraft.size ?? defaultImageSize(imageGenerationDraft.provider)}
                 onChange={(event) => { if (isImageSizePreset(event.target.value)) setImageGenerationDraft({ ...imageGenerationDraft, size: event.target.value }); }}
@@ -817,8 +849,14 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
             <p className="text-[10px] leading-relaxed text-slate-400">在聊天的对话设置中开启“生图”后生效。留空地址或 Key 时，按服务商匹配规则复用已保存的主 API 配置。密钥保存在本地。</p>
             <ImageConnectionTest settings={imageGenerationDraft} />
             <button type="button" onClick={handleSaveImageGeneration} className="w-full rounded-xl settings-primary bg-sky-600 py-2 text-xs font-bold text-white">保存生图模型</button>
+            <div className="space-y-2 rounded-xl border border-white/80 bg-white/50 p-3">
+              <h3 className="text-[11px] font-semibold text-[#2C4A5C]">生图预设</h3>
+              <div className="flex gap-2"><input aria-label="生图预设名称" value={imagePresetName} onChange={e => setImagePresetName(e.target.value)} maxLength={40} placeholder="预设名称" className="min-w-0 flex-1 rounded-xl border border-white bg-white/70 px-3 py-2 text-xs outline-none" /><button type="button" onClick={() => void handleImagePreset('save')} className="shrink-0 rounded-xl bg-sky-100 px-3 py-2 text-[11px] font-semibold text-sky-800">保存为预设</button></div>
+              <div className="flex gap-2"><select aria-label="选择生图预设" value={imagePresets.some(p => p.id === imagePresetId) ? imagePresetId : ''} onChange={e => { if (e.target.value) void handleImagePreset('select', e.target.value); }} className="min-w-0 flex-1 rounded-xl border border-white bg-white/70 px-3 py-2 text-xs"><option value="">选择已保存的生图预设</option>{imagePresets.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select><button type="button" disabled={!imagePresetId} onClick={() => void handleImagePreset('delete')} className="shrink-0 rounded-xl bg-rose-50 px-3 py-2 text-[11px] text-rose-600">删除预设</button></div>
+              {imagePresetError && <p role="alert" className="text-[11px] text-rose-600">{imagePresetError}</p>}
+            </div>
             {imageGenerationMessage && <p role="status" className={`text-[11px] ${imageGenerationMessage.includes('无效') ? 'text-red-600' : 'text-emerald-700'}`}>{imageGenerationMessage}</p>}
-          </div>
+          </fieldset>
         </details>
         <h2 className="settings-section-label">日常与体验<span>照顾你的使用习惯</span></h2>
         <section className="settings-card settings-preferences space-y-3">
