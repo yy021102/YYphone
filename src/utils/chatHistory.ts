@@ -1,5 +1,9 @@
 export const DEFAULT_CHAT_HISTORY_COUNT = 200;
 
+// Alias continuity remains in chronological AI history, without appearing as a chat message.
+// Check the source so existing saved entries become silent as well.
+export const isVisibleChatMessage = (message: { source?: string }): boolean => message.source !== 'alias-experience';
+
 export const resolveChatHistoryCount = (value: unknown, fallback = DEFAULT_CHAT_HISTORY_COUNT): number =>
   typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : fallback;
 

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, mock, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { clearDbStorage, setStorageItemsAtomically } from './dbStorage';
 import { readStorageString, writeStoredValue } from './localStorage';
-import { ALIAS_ACCOUNTS_KEY, buildAliasMemoryContext, deleteAliasMessage, editAliasMessage, emptyAliasState, pendingAliasFollowup, readAliasState, sendAliasMessage, updateAliasThread, writeAliasState, type AliasThread } from './aliasAccounts';
+import { ALIAS_ACCOUNTS_KEY, aliasRoundThought, buildAliasMemoryContext, deleteAliasMessage, editAliasMessage, emptyAliasState, pendingAliasFollowup, readAliasState, sendAliasMessage, updateAliasThread, writeAliasState, type AliasThread } from './aliasAccounts';
 import { newAliasMessageIds, rememberAliasMessages, syncAliasExperiences } from './aliasExperiences';
 import { changeChatArchive } from './chatArchives';
 import { invalidateMemoryArchive } from './memoryArchives';
@@ -11,6 +11,7 @@ import { buildAliasPrompt } from './aliasAi';
 import { readDirectMessages } from './journalData';
 import { SETTINGS_KEYS } from './settings';
 import { effectiveChatTimeZone, formatChatTimestamp, shouldShowTimestamp } from './chatTimestamp';
+import { isVisibleChatMessage } from './chatHistory';
 
 const values = new Map<string, string>(), events = new EventTarget();
 Object.defineProperty(globalThis, 'window', { configurable: true, value: { setTimeout, clearTimeout, dispatchEvent: events.dispatchEvent.bind(events), localStorage: {
@@ -52,10 +53,37 @@ test('alternating alias and main conversations only appends new experiences, inc
   assert(!notes()[1].aiContext.includes('FIRST_ALIAS_ONLY')); assert.match(notes()[1].aiContext, /SECOND_ALIAS_ONLY/);
   appendMain('第二次回主号');
   assert.equal(await syncAliasExperiences('main'), 0); assert.equal(notes().length, 2);
+  assert.deepEqual(history().filter(isVisibleChatMessage).map(m => m.text), ['你今天怎么样', '第一次回主号', '第二次回主号']);
+  assert.equal(history().filter(isVisibleChatMessage).at(-1)?.text, '第二次回主号');
   assert(history().findIndex(m => m.id === first.id) < history().findIndex(m => m.text === '第一次回主号'));
   assert.equal(buildAliasMemoryContext(['char'], true), '');
   assert.equal(prompt().split('FIRST_ALIAS_ONLY').length - 1, 1); assert.equal(prompt().split('SECOND_ALIAS_ONLY').length - 1, 1);
   assert.equal(read('yyphone:memory-items'), null); assert.equal(readDirectMessages('char').some(m => m.note), false);
+});
+
+test('alias thoughts remain available to inspect but never enter either account prompt or follow-up context', async () => {
+  const chats = read('yyphone:wechat-chats'); chats[0].includeLatestThought = true;
+  chats[0].messages[0].thought = 'MAIN_ACCOUNT_THOUGHT'; writeStoredValue('yyphone:wechat-chats', chats);
+  updateAliasThread('alias', t => ({ ...t, messages: [
+    { id: 'private-answer', from: 'character', text: '窗外下雨了', thought: 'ALIAS_PRIVATE_THOUGHT', createdAt: at, replyBatchId: 'batch' },
+    { id: 'private-image', from: 'character', kind: 'image', text: '雨落在窗台的花盆上', thought: 'ALIAS_IMAGE_THOUGHT', createdAt: at, replyBatchId: 'batch' },
+    { id: 'private-system', from: 'system', text: '对方已将此账号移出通讯录', thought: 'ALIAS_SYSTEM_THOUGHT', createdAt: at },
+  ] }));
+  const t = readAliasState().threads[0];
+  assert.equal(aliasRoundThought(t.messages[0], t.messages), 'ALIAS_PRIVATE_THOUGHT');
+  assert.equal(await syncAliasExperiences('main'), 2);
+  const payloads = [prompt(), buildAliasPrompt(t), buildAliasMemoryContext(['char']), buildAliasMemoryContext(['char'], true), pendingAliasFollowup('char').text, JSON.stringify(notes())];
+  for (const payload of payloads) {
+    for (const secret of ['ALIAS_PRIVATE_THOUGHT', 'ALIAS_IMAGE_THOUGHT', 'ALIAS_SYSTEM_THOUGHT']) assert(!payload.includes(secret));
+  }
+  assert.match(prompt(), /MAIN_ACCOUNT_THOUGHT/);
+  assert.match(prompt(), /窗外下雨了/); assert.match(prompt(), /雨落在窗台的花盆上/);
+  const oldEntry = notes()[0];
+  assert.equal(isVisibleChatMessage(oldEntry), false);
+  assert.equal(isVisibleChatMessage({ source: 'phone-inspection' }), true);
+  updateAliasThread('alias', t => ({ ...t, messages: t.messages.map(m => ({ ...m, thought: 'CHANGED_PRIVATE_THOUGHT' })) }));
+  assert.equal(await syncAliasExperiences('main'), 0);
+  assert.deepEqual(notes()[0], oldEntry); assert(!prompt().includes('CHANGED_PRIVATE_THOUGHT'));
 });
 
 test('manual multi-select does not skip unselected messages or repeat an already remembered selection', async () => {

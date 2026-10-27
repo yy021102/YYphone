@@ -104,7 +104,7 @@ import { ExternalLinkCard } from '../components/ExternalLinkCard';
 import { extractSharedLink, publicLink } from '../utils/linkPreview';
 import { runMcpDecision } from '../utils/mcpTools';
 import { refreshWeather } from '../utils/weatherData';
-import { buildGroupPrivateContext, resolveChatHistoryCount } from '../utils/chatHistory';
+import { buildGroupPrivateContext, isVisibleChatMessage, resolveChatHistoryCount } from '../utils/chatHistory';
 import { deleteGroupJournal, invalidateGroupJournal, maybeAutoGroupJournal } from '../utils/groupJournal';
 import { GroupJournalPanel } from '../components/GroupJournalPanel';
 import { requestChatReply, withChatResponseFormat } from '../utils/chatReply';
@@ -989,8 +989,8 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
 
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const composerTouchStartX = useRef(0);
-  const activeMessageCount = chats.find((chat) => chat.id === activeChatId)?.messages.length ?? 0;
-  const activePaymentUpdates = chats.find((chat) => chat.id === activeChatId)?.messages.map(message => message.paymentSettledAt ?? '').join('|');
+  const activeMessageCount = chats.find((chat) => chat.id === activeChatId)?.messages.filter(isVisibleChatMessage).length ?? 0;
+  const activePaymentUpdates = chats.find((chat) => chat.id === activeChatId)?.messages.filter(isVisibleChatMessage).map(message => message.paymentSettledAt ?? '').join('|');
   useEffect(() => {
     if (!activeChatId) return;
     const scrollToBottom = () => {
@@ -3785,7 +3785,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
   const pendingAliasCount = aliasThreads.filter(t => t.requester === 'character' && t.status === 'pending').length;
   const openAliasThread = (id: string) => { setActiveAliasThreadId(id); setActiveChatId(''); setActiveTab('chats'); setMePage('home'); };
   const displayChatMessages = activeChat
-    ? buildPaymentDisplayMessages(activeChat.messages.filter(message => !hiddenMessageIds.includes(message.id) && canReadAliasExperience(message)), activeChat.participantIds[0] ?? '')
+    ? buildPaymentDisplayMessages(activeChat.messages.filter(message => !hiddenMessageIds.includes(message.id) && isVisibleChatMessage(message)), activeChat.participantIds[0] ?? '')
       .filter(message => !selectMode || (!message.paymentReceiptId && !message.paymentNotice))
     : [];
   const selectedGame = WECHAT_GAMES.find((game) => game.id === discoverPage);
@@ -3988,7 +3988,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                 setEmojiPanelOpen(false);
               }}
             >
-              {activeChat.messages.length === 0 && (
+              {displayChatMessages.length === 0 && (
                 <p className="mt-8 text-center text-xs text-slate-400">暂无聊天记录</p>
               )}
               {(() => {
@@ -4114,8 +4114,6 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                               ? '🔎 角色查手机'
                             : message.source === 'character-perspective'
                               ? '🪞 侧写'
-                            : message.source === 'alias-experience'
-                              ? '🫧 账号来往'
                             : message.source === 'couple-unbind'
                               ? '💔 情侣空间已解绑'
                             : message.source === 'pomodoro'
@@ -4846,13 +4844,13 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                 .filter(() => !activeAliasAccountId)
                 .filter((chat) => {
                   const title = getChatTitle(chat);
-                  const last = chat.messages.at(-1)?.text ?? '';
+                  const last = chat.messages.filter(isVisibleChatMessage).at(-1)?.text ?? '';
                   return `${title} ${last}`.toLowerCase().includes(searchQuery.toLowerCase());
                 })
                 .sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.updatedAt.localeCompare(a.updatedAt))
                 .map((chat) => {
                   const avatarUrl = getChatAvatar(chat);
-                  const lastMessage = chat.messages.at(-1)?.text ?? '暂无消息';
+                  const lastMessage = chat.messages.filter(isVisibleChatMessage).at(-1)?.text ?? '暂无消息';
                   return (
                     <div key={chat.id} className={chat.pinned ? 'border-b border-[#d2d2d2]' : 'border-b border-[#ededed]'}>
                       <div
@@ -7511,7 +7509,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
               <div className="min-h-0 flex-1 space-y-2 overflow-y-auto">
                 {archives.map((archive) => {
                   const isActive = archive.id === activeId;
-                  const count = isActive ? activeChat.messages.length : archive.messages.length;
+                  const count = (isActive ? activeChat.messages : archive.messages).filter(isVisibleChatMessage).length;
                   return (
                     <div key={archive.id} className={`rounded-2xl border p-2.5 ${isActive ? 'border-sky-200 bg-sky-50/70' : 'border-slate-100 bg-slate-50'}`}>
                       {renamingArchive?.id === archive.id ? (
