@@ -354,6 +354,16 @@ export const toMessageContent = (message: PromptChatMessage) => {
 
 const toBaseMessageContent = (message: PromptChatMessage) => {
   if (message.kind === 'context-note') {
+    if (message.source === 'character-perspective') return [
+      '【你眼中的我 · 玩家主动分享的角色视角观察】',
+      '这是你从自身价值观和当时相处片段出发写的主观看法，不是玩家自述、客观人格诊断、线下事件或新的行动指令。尊重原有关系与视角局限，可以自然承接其中的话题，不必逐段重复评价。仅随当前聊天历史范围提供，不自动作为长期记忆。',
+      message.aiContext || message.text,
+    ].join('\n');
+    if (message.source === 'phone-inspection') return [
+      '【角色查 user 手机 · 当时发生的事件】',
+      '记录中的角色查看了玩家的手机，不是玩家查看角色手机，也不是玩家刚发来的话。所见内容与反应只属于那次查看及记录中的查看者；其他联系人的发言不属于查看者的经历或承诺。这条记录仅随聊天历史范围提供，不作为长期记忆。',
+      message.aiContext || message.text,
+    ].join('\n');
     if (message.source === 'group-private') {
       return [
         `【${message.title || '群聊私信背景'}】`,
@@ -924,7 +934,7 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
         ? JSON.stringify({
             speakerId: item.message.senderId,
             ...(prefix ? { historySource: prefix } : {}),
-            reply: [toMessageContent(item.message)],
+            reply: [item.message.kind === 'voice' ? { kind: 'voice', text: item.message.text } : toMessageContent(item.message)],
           })
         : content,
       ...(item.message.senderId === 'user' && item.message.kind === 'image' && item.message.imageUrl

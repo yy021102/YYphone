@@ -1,0 +1,74 @@
+.character-perspective {
+  --perspective-ink: #43566c;
+  --perspective-muted: #8996a5;
+  --perspective-paper: rgba(255,255,255,.77);
+  --perspective-line: rgba(255,255,255,.92);
+  --perspective-accent: #77799e;
+  position: relative; flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  padding: 22px 18px calc(26px + env(safe-area-inset-bottom, 0px));
+  color: var(--perspective-ink);
+  background: radial-gradient(ellipse at 0 0, #fcebf3 0, transparent 53%), radial-gradient(ellipse at 100% 18%, #e3f2fc 0, transparent 57%), #f4f5fa;
+  font-family: inherit; overflow-wrap: anywhere;
+}
+.character-perspective button, .character-perspective select { font: inherit; }
+.character-perspective button { cursor: pointer; }
+.character-perspective button:disabled { cursor: default; opacity: .55; }
+.character-perspective button:focus-visible, .character-perspective select:focus-visible, .character-perspective summary:focus-visible { outline: 2px solid #9599bf; outline-offset: 4px; }
+.perspective-intro { text-align: center; padding: 0 0 22px; }
+.perspective-mirror { position: relative; width: 164px; height: 126px; margin: 0 auto 15px; }
+.perspective-mirror-halo { position: absolute; inset: 0 20px; border-radius: 70px 70px 36px 36px; border: 1px solid rgba(255,255,255,.92); background: linear-gradient(140deg, rgba(255,255,255,.86), rgba(230,232,249,.26)); box-shadow: inset 0 0 18px #ffffffb0, 0 14px 28px #b0b6d025; transform: rotate(-6deg); }
+.perspective-avatar { display: inline-flex; width: 38px; height: 38px; flex-shrink: 0; align-items: center; justify-content: center; overflow: hidden; border-radius: 13px; color: #827a94; background: linear-gradient(135deg, #f5e1ee, #e2eef7); }
+.perspective-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.perspective-self { position: absolute; width: 64px; height: 76px; top: 19px; left: 34px; border-radius: 35px 35px 20px 20px; border: 3px solid #ffffffd9; box-shadow: 0 8px 18px #b6b1ce33; font-size: 23px; }
+.perspective-observer { position: absolute; width: 43px; height: 43px; bottom: 10px; right: 25px; border: 3px solid #fff; border-radius: 50%; box-shadow: 0 5px 16px #a9b6cc33; }
+.perspective-mirror-line { position: absolute; left: 34px; bottom: 19px; width: 67px; height: 1px; background: #b5bbcf55; }
+.perspective-spark { position: absolute; top: 13px; right: 23px; color: #9d9fc0; }
+.perspective-eyebrow { font-size: 10px; letter-spacing: .22em; color: var(--perspective-muted); margin: 0 0 9px; }
+.perspective-intro h2 { font-size: 25px; font-weight: 500; letter-spacing: .12em; margin: 0; }
+.perspective-subtitle { font-size: 11px; margin: 11px 0 0; color: var(--perspective-muted); }
+.perspective-controls { display: flex; gap: 9px; align-items: stretch; }
+.perspective-choose { display: flex; align-items: center; gap: 9px; flex: 1; min-width: 0; padding: 10px 12px; border: 1px solid var(--perspective-line); border-radius: 18px; background: var(--perspective-paper); backdrop-filter: blur(15px); }
+.perspective-select-wrap { display: block; flex: 1; min-width: 0; }
+.perspective-select-wrap > span { display: block; font-size: 9px; color: var(--perspective-muted); margin-bottom: 3px; }
+.character-perspective .perspective-select-wrap select { appearance: none; width: 100%; background: transparent; border: 0; color: var(--perspective-ink); font-size: 13px; font-weight: 500; padding: 0; text-overflow: ellipsis; cursor: pointer; }
+.character-perspective select option { color: #43566c; background: #fff; }
+.perspective-generate { border: 1px solid #ffffffb0; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 5px; min-width: 67px; border-radius: 18px; padding: 8px 10px; background: linear-gradient(145deg, #8795b8, #9a89ac); color: white; font-size: 11px !important; box-shadow: 0 6px 15px #7b80a322; }
+.perspective-privacy { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 35px; font-size: 9px; color: var(--perspective-muted); padding: 0 5px; }
+.perspective-privacy button { display: inline-flex; align-items: center; gap: 3px; border: 0; background: none; color: inherit; padding: 7px; }
+.perspective-empty, .perspective-error { border: 1px solid var(--perspective-line); border-radius: 16px; padding: 18px; background: var(--perspective-paper); font-size: 12px; line-height: 1.8; }
+.perspective-error { color: #ad667a; margin: 8px 0 16px; }
+.perspective-reading { scroll-margin-top: 16px; border-radius: 24px; border: 1px solid var(--perspective-line); background: var(--perspective-paper); backdrop-filter: blur(20px); box-shadow: 0 12px 38px #8d9ab312; padding: 27px 21px 20px; animation: perspective-appear .6s ease both; }
+.perspective-reading-muted { opacity: .5; }
+.perspective-report-mark { font-size: 9px; letter-spacing: .16em; color: var(--perspective-muted); }
+.perspective-report-header h3 { margin: 12px 0 17px; font-size: 22px; font-weight: 500; line-height: 1.55; letter-spacing: .04em; }
+.perspective-prose p { font-size: 14px; line-height: 2.1; margin: 0 0 19px; text-align: start; }
+.character-perspective summary { display: flex; align-items: center; gap: 5px; cursor: pointer; list-style: none; font-size: 10px; width: fit-content; padding: 4px 0; }
+.character-perspective summary::-webkit-details-marker { display: none; }
+.character-perspective details[open] > summary > svg { transform: rotate(180deg); }
+.perspective-signoff { border-top: 1px solid #aab8c322; padding-top: 18px; margin-top: 25px; text-align: right; }
+.perspective-signoff > span { display: block; font-size: 12px; }
+.perspective-signoff > time { display: block; font-size: 9px; color: var(--perspective-muted); margin-top: 7px; }
+.perspective-inject { margin-top: 25px; text-align: center; }
+.perspective-inject button { display: flex; align-items: center; justify-content: center; gap: 7px; width: 100%; border-radius: 13px; border: 1px solid #aaa9c333; background: #a2a1c00e; color: var(--perspective-accent); padding: 12px 8px; font-size: 12px; }
+.perspective-inject > p { margin: 9px 0 0; font-size: 9px; line-height: 1.8; color: var(--perspective-muted); }
+.perspective-scope { margin: 18px 6px 0; color: var(--perspective-muted); }
+.perspective-scope > p { font-size: 10px; line-height: 1.9; }
+.perspective-loading { border: 1px solid var(--perspective-line); border-radius: 23px; background: var(--perspective-paper); padding: 30px 25px; text-align: center; margin: 5px 0 15px; }
+.perspective-loading-orbit { display: flex; width: 59px; height: 59px; border: 1px solid #c7c8da; border-radius: 50%; margin: 0 auto 18px; align-items: center; justify-content: center; color: #969bb4; animation: perspective-breathe 2s ease-in-out infinite; }
+.perspective-loading > p { font-size: 11px; color: var(--perspective-muted); }
+.perspective-loading-lines { display: grid; gap: 9px; margin-top: 24px; }
+.perspective-loading-lines i { display: block; height: 5px; border-radius: 8px; background: linear-gradient(90deg, #c7c6d621, #b7c1d43d, #c7c6d621); animation: perspective-breathe 2s ease-in-out infinite; }
+.perspective-loading-lines i:nth-child(2) { width: 84%; animation-delay: .2s; }
+.perspective-loading-lines i:nth-child(3) { width: 60%; animation-delay: .4s; }
+.perspective-spin { animation: perspective-spin 1.2s linear infinite; }
+@keyframes perspective-spin { to { transform: rotate(360deg); } }
+@keyframes perspective-appear { from { opacity: 0; transform: translateY(9px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes perspective-breathe { 50% { opacity: .4; } }
+.wechat-app[data-wechat-theme='dark'] .character-perspective { --perspective-ink: #d0d5e1; --perspective-muted: #8b93a6; --perspective-paper: #252831eb; --perspective-line: #363b49; --perspective-accent: #b1afd0; background: radial-gradient(ellipse at 0 0, #342c3c, transparent 55%), radial-gradient(ellipse at 100% 20%, #243345, transparent 55%), #1b1e25; }
+.wechat-app[data-wechat-theme='dark'] .character-perspective .perspective-mirror-halo { background: linear-gradient(140deg, #444356, #27324088); border-color: #65637766; box-shadow: inset 0 0 18px #77708215, 0 14px 28px #0002; }
+.wechat-app[data-wechat-theme='dark'] .character-perspective .perspective-avatar { background: linear-gradient(135deg, #5c4e68, #384f63); color: #d6c9db; }
+.wechat-app[data-wechat-theme='dark'] .character-perspective .perspective-self, .wechat-app[data-wechat-theme='dark'] .character-perspective .perspective-observer { border-color: #60616e; }
+.wechat-app[data-wechat-theme='dark'] .character-perspective .perspective-generate { background: linear-gradient(145deg, #52617d, #73627f); border-color: #777187; }
+.wechat-app[data-wechat-theme='dark'] .character-perspective select option { background: #252831; color: #d0d5e1; }
+@media (max-width: 340px) { .character-perspective { padding-left: 12px; padding-right: 12px; } .perspective-reading { padding-left: 17px; padding-right: 17px; } }
+@media (prefers-reduced-motion: reduce) { .character-perspective *, .character-perspective *::before { animation: none !important; scroll-behavior: auto !important; } }

@@ -4,7 +4,8 @@ import { clearDbStorage } from './dbStorage';
 import { readStorageString, writeStoredValue } from './localStorage';
 import { activeMemoryArchive } from './memoryArchives';
 import { readMemories } from './memoryData';
-import { applyInspectionAction, finishPhoneInspection, readPhoneInspections, readInspectionActions, inspectionTargets, readInspectionContacts, readInspectionPage, reactToInspection, preparePhoneInspection, type InspectionSession } from './phoneInspection';
+import { applyInspectionAction, finishPhoneInspection, restorePhoneInspectionHistory, readPhoneInspections, readInspectionActions, inspectionTargets, readInspectionContacts, readInspectionPage, reactToInspection, preparePhoneInspection, type InspectionSession } from './phoneInspection';
+import { readDirectMessages } from './journalData';
 import { readMoments, subscribeMoments } from './momentsData';
 import { buildPrompt } from './buildPrompt';
 const values = new Map<string,string>();
@@ -51,10 +52,42 @@ test('WeChat list entries navigate to their real chat or contact without exposin
   const page=readInspectionPage(directory.find(c=>c.id==='b')!.targetId,'a','玩家');assert.equal(page.kind,'contact');assert.equal(page.lines[0].text,'时予');
   assert(!JSON.stringify([directory,page,home]).includes('PRIVATE_PERSONA'));assert(!JSON.stringify(home).includes('NEVER_INCLUDE'));assert.throws(()=>readInspectionPage('contact:deleted','a','玩家'));
 });
-test('finishing writes one source-attributed memory to the current actor/archive and preserves original chats',async()=>{
+test('finishing inserts one attributed historical note without adding long-term memories or changing other chats',async()=>{
   const before=readStorageString('yyphone:wechat-chats');const s=session();s.steps=[{page:{...readInspectionPage('chat:chat-b','a','玩家'),lines:[...readInspectionPage('chat:chat-b','a','玩家').lines,{from:'玩家',text:'图片',own:true,image:'data:image/png;base64,AAA'}]},comments:['你们聊得挺开心']}];
   await finishPhoneInspection(s,'林渡','玩家');await finishPhoneInspection(s,'林渡','玩家');
-  const memories=readMemories();assert.equal(memories.length,1);assert.equal(memories[0].charId,'a');assert.equal(memories[0].archiveKey,s.archiveKey);assert.match(memories[0].content,/其他联系人说过的话不属于林渡/);assert.match(memories[0].content,/2024-01-01/);assert.equal(readPhoneInspections().length,1);assert(!JSON.stringify(readPhoneInspections()).includes('base64'));assert.equal(readStorageString('yyphone:wechat-chats'),before);
+  assert.equal(readMemories().length,0);
+  const chats=JSON.parse(readStorageString('yyphone:wechat-chats')!),original=JSON.parse(before!);const notes=chats[0].messages.filter((m:any)=>m.source==='phone-inspection');
+  assert.equal(notes.length,1);assert.match(notes[0].text,/其他联系人说过的话不属于林渡/);assert.match(notes[0].text,/2024-01-01/);assert.equal(notes[0].senderId,'narrator');assert.equal(notes[0].createdAt,readPhoneInspections()[0].finishedAt);
+  assert.deepEqual(chats[0].messages[0],original[0].messages[0]);assert.deepEqual(chats[1],original[1]);
+  assert.equal(readPhoneInspections().length,1);assert(!JSON.stringify(readPhoneInspections()).includes('base64'));
+  assert(!readDirectMessages('a',{fullText:true}).some(m=>m.id===notes[0].id));
+});
+
+test('inspection notes are repeated only within the selected chronological chat window, not injected forever',async()=>{
+  const chats=JSON.parse(readStorageString('yyphone:wechat-chats')!);chats[0].context='';chats[1].noteName='';writeStoredValue('yyphone:wechat-chats',chats);
+  await finishPhoneInspection(session(),'林渡','玩家');
+  const prompt=()=>JSON.stringify(buildPrompt({chatId:'chat-a',historyLimit:2,timeAwarenessEnabled:false}));
+  assert.match(prompt(),/角色查 user 手机/);assert.match(prompt(),/角色查 user 手机/);
+  const updated=JSON.parse(readStorageString('yyphone:wechat-chats')!);updated[0].messages.push(...Array.from({length:4},(_,i)=>({id:`after-${i}`,senderId:i%2?'a':'user',text:`后来的日常${i}`,createdAt:new Date(Date.now()+i+1000).toISOString()})));writeStoredValue('yyphone:wechat-chats',updated);
+  assert(!prompt().includes('角色查 user 手机'));assert.equal(updated[0].messages.filter((m:any)=>m.source==='phone-inspection').length,1);assert.equal(readMemories().length,0);
+});
+
+test('concurrent finishes retain both chronological records and migrating the old temporary version preserves its original time',async()=>{
+  await Promise.all([finishPhoneInspection(session(),'林渡','玩家'),finishPhoneInspection({...session(),id:'concurrent-session'},'林渡','玩家')]);
+  let chats=JSON.parse(readStorageString('yyphone:wechat-chats')!);assert.equal(chats[0].messages.filter((m:any)=>m.source==='phone-inspection').length,2);
+  const legacy={...session(),id:'legacy-temp',finishedAt:'2026-10-26T13:00:00Z',pendingContext:'TEMPORARY_PAST_EVENT'};writeStoredValue('yyphone:phone-inspections',[...readPhoneInspections(),legacy]);
+  await restorePhoneInspectionHistory('chat-b');chats=JSON.parse(readStorageString('yyphone:wechat-chats')!);assert(!JSON.stringify(chats).includes('TEMPORARY_PAST_EVENT'));
+  await restorePhoneInspectionHistory('chat-a');await restorePhoneInspectionHistory('chat-a');chats=JSON.parse(readStorageString('yyphone:wechat-chats')!);
+  const notes=chats[0].messages.filter((m:any)=>m.id==='inspection-note:legacy-temp');assert.equal(notes.length,1);assert.equal(notes[0].createdAt,legacy.finishedAt);assert.equal(notes[0].text,legacy.pendingContext);assert.equal(readMemories().length,0);
+});
+
+test('legacy automatically stored inspection memories move losslessly into history without removing unrelated memories',async()=>{
+  const s={...session(),id:'old-memory',finishedAt:'2026-10-26T14:00:00Z'};writeStoredValue('yyphone:phone-inspections',[s]);
+  const old={id:`inspection:${s.id}`,charId:'a',archiveKey:s.archiveKey,content:'OLD_INSPECTION_MEMORY_CONTENT',category:'event',importance:4,pinned:false,createdAt:s.finishedAt,updatedAt:s.finishedAt,recallCount:0,source:'manual'};
+  const unrelated={...old,id:'independent-memory',content:'KEEP_THIS_PERSONAL_MEMORY'};writeStoredValue('yyphone:memory-items',[old,unrelated]);
+  await restorePhoneInspectionHistory('chat-a');await restorePhoneInspectionHistory('chat-a');
+  const chat=JSON.parse(readStorageString('yyphone:wechat-chats')!)[0];const notes=chat.messages.filter((m:any)=>m.id===`inspection-note:${s.id}`);assert.equal(notes.length,1);assert.equal(notes[0].text,old.content);assert.equal(notes[0].createdAt,s.finishedAt);
+  assert.deepEqual(readMemories().map(m=>m.id),[unrelated.id]);assert(!readDirectMessages('a',{fullText:true}).some(m=>m.id===notes[0].id));
 });
 test('a changed archive prevents the inspection from writing into a different character timeline',async()=>{
   const s=session();const chats=JSON.parse(readStorageString('yyphone:wechat-chats')!);chats[0].activeArchiveId='different';writeStoredValue('yyphone:wechat-chats',chats);

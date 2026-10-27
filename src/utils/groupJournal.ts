@@ -112,6 +112,17 @@ const groupOf = (state: GroupJournalState, chatId: string) =>
 const archiveOf = (state: GroupJournalState, chat: GroupChat) =>
   groupOf(state, chat.id).archives[archiveIdOf(chat)] ?? emptyArchive();
 
+/** Prepare a branch snapshot; the chat archive owner commits it together with the chat itself. */
+export function forkGroupJournalState(chatId: string, fromArchiveId: string, toArchiveId: string) {
+  const state = readState(), group = state.groups[chatId], source = group?.archives[fromArchiveId];
+  if (!source) return undefined;
+  const ids = new Map(source.entries.map(entry => [entry.id, `gj-${crypto.randomUUID()}`]));
+  const copied = structuredClone(source);
+  copied.entries = copied.entries.map(entry => ({ ...entry, id: ids.get(entry.id)!, mergedInto: entry.mergedInto ? ids.get(entry.mergedInto) : undefined }));
+  copied.lastError = '';
+  return { ...state, groups: { ...state.groups, [chatId]: { ...group, archives: { ...group.archives, [toArchiveId]: copied } } } };
+}
+
 const updateArchive = (chat: GroupChat, update: (archive: GroupJournalArchive) => GroupJournalArchive) => {
   const state = readState();
   const group = groupOf(state, chat.id);

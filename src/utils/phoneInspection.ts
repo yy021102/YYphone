@@ -1,7 +1,7 @@
 import { readStorageString, readStoredValue, writeStoredValue } from './localStorage';
 import { MOMENTS_STORAGE_KEY, notifyMomentsChanged, readMoments, type MomentPost } from './momentsData';
 import { getWorldBookEntriesForContacts } from './worldBookPrompt';
-import { buildMemoryInjection, MEMORY_ITEMS_KEY, readMemories, type MemoryItem } from './memoryData';
+import { buildMemoryInjection, MEMORY_ITEMS_KEY } from './memoryData';
 import { activeMemoryArchive, guardMemoryArchive } from './memoryArchives';
 import { buildGrowthInjection, buildJournalInjection } from './journalData';
 import { requestConfiguredAiText } from './aiApi';
@@ -33,7 +33,7 @@ export async function preparePhoneInspection(session: InspectionSession, userNam
 }
 export type InspectionOptions = { hiddenChatIds: string[]; allowMessages: boolean };
 export const DEFAULT_INSPECTION_OPTIONS: InspectionOptions = { hiddenChatIds: [], allowMessages: false };
-export type InspectionSession = { id: string; charId: string; chatId: string; archiveKey: string; createdAt: string; finishedAt?: string; steps: InspectionStep[]; options?: InspectionOptions };
+export type InspectionSession = { id: string; charId: string; chatId: string; archiveKey: string; createdAt: string; finishedAt?: string; steps: InspectionStep[]; options?: InspectionOptions; pendingContext?: string; contextConsumedAt?: string };
 export type InspectionAction = { type: 'rename-self' | 'post-moment'; text: string } | { type: 'send-message'; chatId: string; text: string };
 export type InspectionActionReceipt = { id: string; sessionId: string; charId: string; archiveKey: string; type: InspectionAction['type']; text: string; targetName: string; chatId?: string; createdAt: string };
 export type InspectionTarget = { id: string; kind: InspectionPage['kind']; title: string };
@@ -175,6 +175,45 @@ export async function reactToInspection(session: InspectionSession, page: Inspec
 }
 function sessionList(v: unknown): v is InspectionSession[] { return Array.isArray(v) && v.every(s => record(s) && typeof s.id === 'string' && typeof s.charId === 'string' && typeof s.archiveKey === 'string' && Array.isArray(s.steps)); }
 export const readPhoneInspections = () => readStoredValue(INSPECTION_KEY, [], sessionList);
+let inspectionHistoryWrite = Promise.resolve();
+function updateInspectionHistory(edit: (history: InspectionSession[]) => Record<string, unknown>) {
+  const task = inspectionHistoryWrite.then(async () => {
+    await initializeDbStorage();
+    await setStorageItemsAtomically(edit(readPhoneInspections()));
+  });
+  inspectionHistoryWrite = task.catch(() => {});
+  return task;
+}
+/** Recover records created by the previous one-turn version at their original historical time. */
+export async function restorePhoneInspectionHistory(chatId: string) {
+  const legacyNote = (m: any) => typeof m.id === 'string' && m.id.startsWith('inspection-note:') && m.kind === 'context-note' && m.source !== 'phone-inspection';
+  const memoryRows = () => readStoredValue<unknown>(MEMORY_ITEMS_KEY, [], (_value): _value is unknown => true);
+  const memoryOf = (session: InspectionSession, memories: unknown) => Array.isArray(memories) ? memories.find(m => record(m) && m.id === `inspection:${session.id}` && m.charId === session.charId && (!m.archiveKey || m.archiveKey === session.archiveKey) && typeof m.content === 'string' && m.content.trim()) : undefined;
+  const initialMemories = memoryRows();
+  if (!readPhoneInspections().some(s => s.chatId === chatId && s.finishedAt && (s.pendingContext || s.contextConsumedAt || memoryOf(s, initialMemories))) && !list(CHATS).some(chat => chat.id === chatId && chat.messages?.some(legacyNote))) return;
+  await updateInspectionHistory(history => {
+    const chats = list(CHATS), target = chats.find(chat => chat.id === chatId && chat.type === 'direct' && chat.participantIds?.length === 1);
+    if (!target || !Array.isArray(target.messages)) return {};
+    const charId = target.participantIds[0], archiveKey = activeMemoryArchive(charId);
+    const memories = memoryRows();
+    const recoverable = history.filter(s => s.chatId === chatId && s.charId === charId && s.archiveKey === archiveKey && s.finishedAt && (s.pendingContext || s.contextConsumedAt || memoryOf(s, memories)));
+    if (!recoverable.length && !target.messages.some(legacyNote)) return {};
+    const notes = recoverable.filter(s => !target.messages.some((m: any) => m.id === `inspection-note:${s.id}`)).map(s => {
+      const text = memoryOf(s, memories)?.content || s.pendingContext || inspectionMemoryText(s, list(CONTACTS).find(c => c.id === charId)?.name || '角色', '玩家');
+      return { id: `inspection-note:${s.id}`, senderId: 'narrator', kind: 'context-note', source: 'phone-inspection', title: '角色查手机', text, aiContext: text, content: text, createdAt: s.finishedAt };
+    });
+    const relocatedMemories = new Set(recoverable.map(s => memoryOf(s, memories)).filter(Boolean));
+    return {
+      [INSPECTION_KEY]: history.map(s => recoverable.some(old => old.id === s.id) ? { ...s, pendingContext: undefined, contextConsumedAt: undefined } : s),
+      ...(Array.isArray(memories) ? { [MEMORY_ITEMS_KEY]: memories.filter(memory => !relocatedMemories.has(memory)) } : {}),
+      [CHATS]: chats.map(chat => chat.id === chatId ? { ...chat, messages: [...chat.messages.map((m: any) => {
+        const session = recoverable.find(s => m.id === `inspection-note:${s.id}`), memory = session ? memoryOf(session, memories) : undefined;
+        const text = memory && !String(m.text || '').includes(memory.content) ? `${m.text || ''}\n补充记录：${memory.content}` : m.text;
+        return legacyNote(m) || session ? { ...m, source: 'phone-inspection', title: '角色查手机', text, aiContext: text, content: text } : m;
+      }), ...notes].sort((a: any,b: any) => String(a.createdAt).localeCompare(String(b.createdAt))) } : chat),
+    };
+  });
+}
 export function inspectionActionLabel(action: InspectionActionReceipt) {
   return action.type === 'rename-self' ? `把自己的备注改为“${action.text}”` : action.type === 'send-message' ? `向${action.targetName}代发：“${action.text}”` : `替玩家发朋友圈：“${action.text}”`;
 }
@@ -191,14 +230,22 @@ export function inspectionMemoryText(session: InspectionSession, actorName: stri
 }
 export async function finishPhoneInspection(session: InspectionSession, actorName: string, userName: string): Promise<string> {
   const assertArchive = guardMemoryArchive(session.charId); if (activeMemoryArchive(session.charId) !== session.archiveKey) throw new Error('角色存档已切换，未写入其他存档。');
-  const history = readPhoneInspections(); const existing = history.find(s => s.id === session.id);
-  if (existing?.finishedAt) return inspectionMemoryText(existing, actorName, userName);
-  const text = inspectionMemoryText(session, actorName, userName); const now = new Date().toISOString();
-  readMemories(); // Ensure legacy entries are assigned to their proper archive before the atomic append.
-  const all: MemoryItem[] = JSON.parse(readStorageString(MEMORY_ITEMS_KEY) ?? '[]');
-  const memory: MemoryItem = { id: `inspection:${session.id}`, charId: session.charId, archiveKey: session.archiveKey, content: text, category: 'event', importance: 4, pinned: false, createdAt: now, updatedAt: now, recallCount: 0, source: 'manual' };
-  assertArchive();
-  const storedSession = { ...session, finishedAt: now, steps: retainedSteps(session).map(s => ({ ...s, page: { ...s.page, lines: s.page.lines.map(({ image: _image, avatar: _avatar, ...line }) => line) } })) };
-  await setStorageItemsAtomically({ [INSPECTION_KEY]: [...history.filter(s => s.id !== session.id), storedSession].slice(-80), [MEMORY_ITEMS_KEY]: [...all.filter(m => m.id !== memory.id), memory] });
+  let text = inspectionMemoryText(session, actorName, userName);
+  await updateInspectionHistory(history => {
+    assertArchive();
+    const existing = history.find(s => s.id === session.id);
+    if (existing?.finishedAt) text = existing.pendingContext || inspectionMemoryText(existing, actorName, userName);
+    const finishedAt = existing?.finishedAt || new Date().toISOString();
+    const storedSession = { ...(existing || session), finishedAt, pendingContext: undefined, contextConsumedAt: undefined, steps: retainedSteps(existing || session).map(s => ({ ...s, page: { ...s.page, lines: s.page.lines.map(({ image: _image, avatar: _avatar, ...line }) => line) } })) };
+    const chats = list(CHATS), target = chats.find(chat => chat.id === session.chatId && chat.type === 'direct' && chat.participantIds?.length === 1 && chat.participantIds[0] === session.charId);
+    if (!target || !Array.isArray(target.messages)) throw new Error('原对话已不存在，未写入其他聊天。');
+    const noteId = `inspection-note:${session.id}`;
+    const note = { id: noteId, senderId: 'narrator', kind: 'context-note', source: 'phone-inspection', title: '角色查手机', text, aiContext: text, content: text, createdAt: finishedAt };
+    return {
+      [INSPECTION_KEY]: [...history.filter(s => s.id !== session.id), storedSession].slice(-80),
+      [CHATS]: chats.map(chat => chat.id !== target.id ? chat : { ...chat, updatedAt: chat.updatedAt && chat.updatedAt > finishedAt ? chat.updatedAt : finishedAt,
+        messages: chat.messages.some((message: any) => message.id === noteId) ? chat.messages : [...chat.messages, note].sort((a: any, b: any) => String(a.createdAt).localeCompare(String(b.createdAt))) }),
+    };
+  });
   return text;
 }

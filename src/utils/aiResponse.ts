@@ -1,3 +1,5 @@
+import { normalizeChatVoicePart } from './chatVoice';
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === 'object' && !Array.isArray(value);
 
@@ -44,7 +46,7 @@ export const parseAiJson = (text: string): unknown => {
   throw new Error('AI 返回的 JSON 格式不完整或无效，已取消本次生成，请重试或更换模型。');
 };
 
-export const parseChatResponse = (text: string): Record<string, unknown> => {
+export const parseChatResponse = (text: string, options: { normalizeVoice?: boolean } = {}): Record<string, unknown> => {
   const parsed = parseAiJson(text);
   if (!isRecord(parsed)) throw new Error('AI 回复必须是包含 reply 数组的 JSON 对象。');
   let reply = parsed.reply;
@@ -57,13 +59,14 @@ export const parseChatResponse = (text: string): Record<string, unknown> => {
     }
   }
   if (!Array.isArray(reply) || reply.length === 0) throw new Error('AI 回复缺少有效的 reply 消息数组。');
+  const parts = options.normalizeVoice ? reply.map(normalizeChatVoicePart) : reply;
   if (parsed.thought !== undefined && typeof parsed.thought !== 'string') {
     throw new Error('AI 回复的 thought 心声必须是字符串。');
   }
   if (parsed.speakerId !== undefined && typeof parsed.speakerId !== 'string') {
     throw new Error('AI 回复的 speakerId 必须是字符串。');
   }
-  for (const part of reply) {
+  for (const part of parts) {
     if ((typeof part !== 'string' && !isRecord(part)) || (typeof part === 'string' && !part.trim())) {
       throw new Error('AI 回复的 reply 包含空消息或无效消息格式。');
     }
@@ -83,7 +86,7 @@ export const parseChatResponse = (text: string): Record<string, unknown> => {
       throw new Error('AI 把消息元数据写进了正文，已取消本次生成，请重试。');
     }
   }
-  return { ...parsed, reply };
+  return { ...parsed, reply: parts };
 };
 
 export const parseForumPost = (text: string): { title: string; content: string; comments: unknown[]; authorHandle?: string } => {

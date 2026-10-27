@@ -43,7 +43,7 @@
 .alias-conversation time { align-self:flex-start; color:#a6afb6; font-size:9px; }
 .alias-request { padding:13px 10px; border-bottom:1px solid #edf0f3; }
 .alias-request p { margin-top:10px; color:#7d8993; font-size:12px; white-space:pre-wrap; }
-.alias-chat { display:flex; flex-direction:column; flex:1; min-height:0; overflow:hidden; background:#ededed; }
+.alias-chat { position:relative; display:flex; flex-direction:column; flex:1; min-height:0; overflow:hidden; background:#ededed; }
 .alias-chat-header { display:flex; align-items:center; flex-shrink:0; justify-content:space-between; padding:calc(8px + env(safe-area-inset-top,0px)) 12px 8px; border-bottom:1px solid #dedede; color:#222; }
 .alias-chat-header button { width:34px; height:36px; display:grid; place-items:center; }
 .alias-chat-header div { min-width:0; text-align:center; }
@@ -60,7 +60,7 @@
 .alias-composer button { width:30px; height:40px; display:grid; place-items:center; flex-shrink:0; color:#333; }
 .alias-composer .yy-chat-attachments { border:0; border-radius:50%; background:transparent; }
 .alias-composer textarea { flex:1; min-width:0; max-height:120px; resize:none; outline:none; border-radius:5px; background:white; padding:8px 10px; font-size:16px; line-height:24px; color:#111; }
-.alias-chat-extras,.alias-emoji-grid { flex-shrink:0; display:flex; gap:10px; padding:14px; background:#f6f6f6; }
+.alias-chat-extras,.alias-emoji-grid { flex-shrink:0; display:flex; flex-wrap:wrap; gap:10px; padding:14px; background:#f6f6f6; }
 .alias-chat-extras button { display:flex; align-items:center; gap:12px; border-radius:12px; padding:12px; background:#fff; font-size:12px; color:#6d8394; }
 .alias-emoji-grid { display:grid; grid-template-columns:repeat(6,1fr); }
 .alias-emoji-grid button { font-size:24px; }
@@ -74,3 +74,21 @@
 .wechat-app[data-wechat-theme=dark] .alias-message .yy-chat-message-bubble { background:#30343a; color:#e1e5ea; }
 .wechat-app[data-wechat-theme=dark] .alias-message .yy-chat-message-bubble.is-user { background:#38534a; }
 .wechat-app[data-wechat-theme=dark] :is(.alias-conversation-copy strong,.alias-composer button) { color:#d6dae0; }
+.alias-avatar-button { flex-shrink:0; padding:0; border:0; border-radius:4px; }
+.alias-message .yy-chat-message-bubble { display:block; text-align:left; user-select:none; -webkit-touch-callout:none; }
+.alias-message-actions { display:flex; flex-wrap:wrap; align-items:center; gap:4px; padding-top:7px; }
+.alias-message-actions button { display:flex; align-items:center; gap:4px; padding:7px 9px; border-radius:8px; background:#ffffffe6; color:#738593; font-size:11px; }
+.alias-message .alias-message-image { width:210px; max-width:100%; padding:14px; background:linear-gradient(135deg,#f9fbfc,#e9eff1); border:1px solid #dce5e8; color:#687f8a; }
+.alias-image-heading { display:flex; align-items:center; gap:8px; font-size:12px; margin-bottom:10px; }
+.alias-image-description { display:-webkit-box; -webkit-line-clamp:5; -webkit-box-orient:vertical; overflow:hidden; font-size:12px; line-height:1.8; }
+.alias-system-thought { margin-left:8px; font-size:10px; color:#8c9eaa; text-decoration:underline; text-underline-offset:3px; }
+.alias-dialog-backdrop { position:absolute; inset:0; z-index:80; display:flex; align-items:center; justify-content:center; padding:20px; background:#17222f55; backdrop-filter:blur(5px); }
+.alias-dialog { width:100%; max-width:360px; max-height:90%; overflow-y:auto; border-radius:24px; padding:20px; background:#fafcfd; color:#455c6c; box-shadow:0 18px 55px #132d4033; }
+.alias-dialog header { display:flex; align-items:center; gap:12px; justify-content:space-between; margin-bottom:14px; }
+.alias-dialog h2 { font-size:16px; font-weight:600; }
+.alias-dialog header button { padding:6px; color:#8a9ba6; }
+.alias-dialog textarea { display:block; width:100%; border-radius:12px; background:#f0f4f7; padding:12px; outline:none; font-size:14px; line-height:1.8; resize:vertical; }
+.alias-thought-content { font-size:14px; line-height:1.9; white-space:pre-wrap; overflow-wrap:anywhere; }
+.wechat-app[data-wechat-theme=dark] :is(.alias-dialog,.alias-message-actions button) { background:#25292e; color:#d6dae0; }
+.wechat-app[data-wechat-theme=dark] .alias-dialog textarea { background:#33383e; color:#d6dae0; }
+.wechat-app[data-wechat-theme=dark] .alias-message .alias-message-image { background:linear-gradient(135deg,#303a40,#293138); border-color:#424c53; color:#c6d3db; }

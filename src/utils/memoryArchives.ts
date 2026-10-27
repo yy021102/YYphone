@@ -131,6 +131,17 @@ export const guardMemoryArchive = (charId: string) => {
 export const deleteMemoryArchive = (charId: string, archiveId: string) => {
   const scope = chatArchiveKey(charId, archiveId);
   forgetPaperMemories({ archiveKey: scope });
+  const aliases = readStoredValue('yyphone:alias-accounts', null, (value): value is Record<string, unknown> | null => value === null || isRecord(value));
+  if (aliases && Array.isArray(aliases.threads) && aliases.threads.every(isRecord) && isRecord(aliases.checks)) {
+    const threads = aliases.threads.filter(thread => thread.charId !== charId || thread.archiveKey !== scope);
+    const checks = Object.fromEntries(Object.entries(aliases.checks).filter(([key]) => {
+      try { const tuple = JSON.parse(key); return !Array.isArray(tuple) || tuple[0] !== charId || tuple[1] !== scope; } catch { return true; }
+    }));
+    if (threads.length !== aliases.threads.length || Object.keys(checks).length !== Object.keys(aliases.checks).length) {
+      writeStoredValue('yyphone:alias-accounts', { ...aliases, threads, checks });
+      if (typeof window.dispatchEvent === 'function') window.dispatchEvent(new Event('yyphone:alias-accounts'));
+    }
+  }
   const removedIds = new Set<string>();
   for (const key of RECORD_KEYS) {
     const all = readStoredValue(key, [], (value): value is ArchiveRecord[] => Array.isArray(value));

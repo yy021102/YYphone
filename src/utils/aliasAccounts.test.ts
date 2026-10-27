@@ -6,7 +6,7 @@ import { SETTINGS_KEYS } from './settings';
 import { activeMemoryArchive, invalidateMemoryArchive } from './memoryArchives';
 import { buildPrompt } from './buildPrompt';
 import { deleteWeChatContact } from './deleteWeChatContact';
-import { ALIAS_ACCOUNTS_KEY, ALIAS_MEMORY_RULES, aliasPeer, buildAliasMemoryContext, currentAliasUser, deleteUserAlias, emptyAliasState, readAliasState, respondAliasRequest, revealUserAlias, saveUserAlias, sendAliasMessage, setAliasSwitcherHidden, updateAliasThread, visibleAliasThreads, writeAliasState } from './aliasAccounts';
+import { ALIAS_ACCOUNTS_KEY, ALIAS_MEMORY_RULES, acknowledgeAliasFollowup, aliasPeer, aliasRoundThought, buildAliasMemoryContext, currentAliasUser, deleteAliasMessage, deleteUserAlias, editAliasMessage, emptyAliasState, pendingAliasFollowup, readAliasState, respondAliasRequest, revealUserAlias, saveUserAlias, sendAliasMessage, setAliasSwitcherHidden, updateAliasThread, visibleAliasThreads, writeAliasState } from './aliasAccounts';
 import { applyWithAlias, buildAliasPrompt, generateAliasReply, generateCharacterAliasRequest, processCharacterAliases, validatedAliasIdentityEvidence } from './aliasAi';
 import { extractMemoryCandidates, requestMemoryAiText } from './memoryAi';
 import { readDirectMessages } from './journalData';
@@ -15,7 +15,7 @@ const values = new Map<string, string>(), events = new EventTarget();
 Object.defineProperty(globalThis, 'window', { configurable: true, value: { setTimeout, clearTimeout, dispatchEvent: events.dispatchEvent.bind(events), localStorage: {
   getItem: (k: string) => values.get(k) ?? null, setItem: (k: string,v: string) => values.set(k,v), removeItem: (k: string) => values.delete(k), clear: () => values.clear(), key: (i: number) => [...values.keys()][i] ?? null, get length() { return values.size; },
 } } });
-const json = (content: unknown) => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(content) } }] }), { headers: { 'Content-Type': 'application/json' } });
+const json = (content: any) => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(Array.isArray(content?.reply) && !Object.hasOwn(content, 'thought') ? { ...content, thought: '我想先听听这个人要说什么，不急着下结论。' } : content) } }] }), { headers: { 'Content-Type': 'application/json' } });
 const read = (key: string) => JSON.parse(readStorageString(key) || 'null');
 beforeEach(async () => {
   await clearDbStorage();
@@ -213,4 +213,64 @@ test('a normally connected character may choose not to open a probing alias with
   mock.method(globalThis,'fetch',async()=>{calls++;return json({decision:'wait'});});
   await processCharacterAliases();assert.equal(calls,1);assert.equal(readAliasState().threads.length,0);assert.equal(readAliasState().profiles.length,0);
   await processCharacterAliases();assert.equal(calls,1);assert.equal(read('yyphone:wechat-chats')[0].blocked,false);
+});
+
+test('fresh stranger interactions encourage a main-account aside once, while newer activity and failed generations remain pending',async()=>{
+  const {id}=await accept();sendAliasMessage(id,'我看到你拍的那张海边照片了');
+  const snapshot=pendingAliasFollowup('character-private-id');assert.equal(snapshot.items.length,1);assert.match(snapshot.text,/不必等玩家问到小号/);assert.match(snapshot.text,/真实身份未确认/);assert.match(snapshot.text,/海边照片/);assert(!snapshot.text.includes('OWNER_ONLY_PRIVATE_PERSONA'));
+  assert.equal(pendingAliasFollowup('other-char').text,'');assert.equal(readAliasState().threads[0].identity,'unknown');
+  acknowledgeAliasFollowup(snapshot,undefined);assert.equal(pendingAliasFollowup('character-private-id').items.length,1);
+  acknowledgeAliasFollowup(snapshot,[id]);assert.equal(pendingAliasFollowup('character-private-id').text,'');
+  sendAliasMessage(id,'想问问在哪拍的');const newer=pendingAliasFollowup('character-private-id');
+  acknowledgeAliasFollowup(snapshot,[id]);assert.deepEqual(pendingAliasFollowup('character-private-id').items,newer.items);
+  acknowledgeAliasFollowup(newer,[id]);assert.equal(pendingAliasFollowup('character-private-id').text,'');
+  const message=readAliasState().threads[0].messages.at(-1)!;editAliasMessage(id,message.id,'想问一下拍摄地点');assert.equal(pendingAliasFollowup('character-private-id').text,'');deleteAliasMessage(id,message.id);assert.equal(pendingAliasFollowup('character-private-id').text,'');
+});
+
+test('text pictures retain their kind and source, and message edits/deletion invalidate identity evidence without touching main history',async()=>{
+  const {id}=await accept();const before=readStorageString('yyphone:wechat-chats');
+  sendAliasMessage(id,'一张窗边的雨景照片','image');let thread=readAliasState().threads[0],message=thread.messages[0];assert.equal(message.kind,'image');assert.match(buildAliasPrompt(thread),/图片内容：一张窗边/);
+  updateAliasThread(id,t=>({...t,identity:'suspected',identityEvidence:[{messageId:message.id,quote:'雨景照片',referenceQuote:'雨景照片',kind:'shared-memory'}]}));
+  editAliasMessage(id,message.id,'一张海边的落日照片');thread=readAliasState().threads[0];assert.equal(thread.messages[0].kind,'image');assert.equal(thread.identity,'unknown');assert.equal(thread.identityEvidence?.length,0);assert(thread.messages[0].editedAt);
+  assert(!buildAliasMemoryContext(['character-private-id']).includes('窗边的雨景'));assert.match(buildAliasMemoryContext(['character-private-id']),/图片内容：一张海边/);
+  deleteAliasMessage(id,message.id);assert.equal(readAliasState().threads[0].messages.length,0);assert.equal(readStorageString('yyphone:wechat-chats'),before);assert.throws(()=>editAliasMessage(id,message.id,'已不存在'),/不存在/);
+});
+
+test('alias replies save separate thoughts for every bubble and support character text pictures',async()=>{
+  const {id}=await accept();sendAliasMessage(id,'给我看看你窗外');const mainBefore=readStorageString('yyphone:wechat-chats');let body='';
+  mock.restoreAll();mock.method(globalThis,'fetch',async(_url:unknown,init?:RequestInit)=>{body=String(init?.body);return json({reply:['刚拍的',{kind:'image',text:'雨滴贴着窗，街灯是一团暖黄色的光'}],thought:'我竟然认真找了个角度，明明还不知道对方是谁。'});});
+  await generateAliasReply(id);const messages=readAliasState().threads[0].messages;assert.equal(messages.at(-1)?.kind,'image');assert.equal(messages.at(-2)?.kind,'text');assert.equal(messages.at(-1)?.replyBatchId,messages.at(-2)?.replyBatchId);assert.match(aliasRoundThought(messages.at(-1)!,messages),/还不知道对方是谁/);assert.match(body,/独立 thought/);
+  assert(!buildAliasMemoryContext(['character-private-id']).includes('认真找了个角度'));assert.equal(readStorageString('yyphone:wechat-chats'),mainBefore);
+  editAliasMessage(id,messages.at(-2)!.id,'就这一张');deleteAliasMessage(id,messages.at(-2)!.id);assert.match(aliasRoundThought(readAliasState().threads[0].messages.at(-1)!,readAliasState().threads[0].messages),/认真找了个角度/);
+});
+
+test('missing alias thoughts are corrected once and repeated invalid formats commit neither messages nor deletion',async()=>{
+  const {id}=await accept();sendAliasMessage(id,'你好');let calls=0;
+  mock.restoreAll();mock.method(globalThis,'fetch',async()=>json({reply:['在呢'],thought:++calls===1?'':'我在等对方说明来意'}));
+  await generateAliasReply(id);assert.equal(calls,2);assert.equal(readAliasState().threads[0].messages.at(-1)?.thought,'我在等对方说明来意');
+  const before=readAliasState().threads[0];calls=0;mock.restoreAll();mock.method(globalThis,'fetch',async()=>{calls++;return json({reply:[],deleteContact:true,thought:''});});
+  await assert.rejects(generateAliasReply(id),/心声/);assert.equal(calls,2);assert.deepEqual(readAliasState().threads[0],before);
+});
+
+test('a character may remove the added alias while keeping main friendship and history, and a new verification is required to reconnect',async()=>{
+  const {id}=await accept();sendAliasMessage(id,'我想继续打扰你');const before=readStorageString('yyphone:wechat-chats');
+  mock.restoreAll();mock.method(globalThis,'fetch',async()=>json({reply:['先到这里吧'],thought:'我不想再继续这段来往，这样的距离让我不舒服。',deleteContact:true}));
+  await generateAliasReply(id);let thread=readAliasState().threads[0];assert(thread.removedByCharacterAt);assert.equal(thread.status,'accepted');assert.equal(thread.messages.length,3);assert.match(thread.messages.at(-1)!.text,/移出通讯录/);assert.equal(readStorageString('yyphone:wechat-chats'),before);
+  assert.throws(()=>sendAliasMessage(id,'还能发吗'),/好友验证/);await assert.rejects(generateAliasReply(id),/当前不能/);assert.match(pendingAliasFollowup(thread.charId).text,/已将此账号移出通讯录/);
+  mock.restoreAll();mock.method(globalThis,'fetch',async()=>json({accept:true,reply:'这次有事就说吧'}));
+  await applyWithAlias(thread.userAccountId,thread.charId,'可以再加回来吗');thread=readAliasState().threads[0];assert.equal(thread.removedByCharacterAt,undefined);assert.equal(thread.messages.length,3);sendAliasMessage(id,'谢谢');assert.equal(readAliasState().threads[0].messages.length,4);
+});
+
+test('account changes or edits during generation cancel replies, thoughts, images and friend removal together',async()=>{
+  const {id}=await accept();sendAliasMessage(id,'你好');const message=readAliasState().threads[0].messages[0];let finish!:()=>void;
+  mock.restoreAll();mock.method(globalThis,'fetch',()=>new Promise<Response>(resolve=>{finish=()=>resolve(json({reply:[{kind:'image',text:'LATE_PICTURE'}],thought:'LATE_THOUGHT',deleteContact:true}));}));
+  const pending=generateAliasReply(id);editAliasMessage(id,message.id,'改过的消息');finish();await assert.rejects(pending,/已经变化/);
+  assert.equal(readAliasState().threads[0].removedByCharacterAt,undefined);assert.equal(readAliasState().threads[0].messages.length,1);assert(!JSON.stringify(readAliasState()).includes('LATE_'));
+});
+
+test('reapplying after removal preserves a previously disclosed identity rather than treating a known account as a stranger',async()=>{
+  const {id}=await accept();revealUserAlias(id);
+  mock.restoreAll();mock.method(globalThis,'fetch',async()=>json({reply:[],thought:'我现在还不想和她从这个账号聊天。',deleteContact:true}));await generateAliasReply(id);
+  const thread=readAliasState().threads[0];let body='';mock.restoreAll();mock.method(globalThis,'fetch',async(_url:unknown,init?:RequestInit)=>{body=String(init?.body);return json({accept:true,reply:'加回来了'});});
+  await applyWithAlias(thread.userAccountId,thread.charId,'可以重新加回来吗');assert.match(body,/此前已经明确公开了身份/);assert.equal(readAliasState().threads[0].identity,'revealed');assert.equal(readAliasState().threads[0].removedByCharacterAt,undefined);
 });

@@ -182,7 +182,7 @@ export const readDirectMessages = (
     : chat.messages;
   return messages
     .filter((m): m is Record<string, unknown> =>
-      isRecord(m) && typeof m.createdAt === 'string' && (m.senderId !== 'narrator' || m.kind === 'context-note'))
+      isRecord(m) && typeof m.createdAt === 'string' && m.source !== 'phone-inspection' && m.source !== 'character-perspective' && (m.senderId !== 'narrator' || m.kind === 'context-note'))
     .map((m) => ({
       ...(typeof m.id === 'string' ? { id: m.id } : {}),
       createdAt: m.createdAt as string,

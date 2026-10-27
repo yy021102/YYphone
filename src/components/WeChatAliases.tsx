@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, ChevronRight, EyeOff, Heart, MoreHorizontal, Plus, Send, ShieldCheck, Smile, UserRound, X } from 'lucide-react';
-import { ALIAS_EVENT, aliasCharacter, aliasPeer, aliasSelf, currentAliasUser, deleteUserAlias, readAliasState, respondAliasRequest, revealUserAlias, saveUserAlias, sendAliasMessage, setAliasSwitcherHidden, updateAliasThread, visibleAliasThreads, writeAliasState, type AliasProfile, type AliasState, type AliasThread } from '../utils/aliasAccounts';
-import { applyWithAlias, generateAliasReply, generateCharacterAliasRequest } from '../utils/aliasAi';
+import { EyeOff, Plus, UserRound, X } from 'lucide-react';
+import { ALIAS_EVENT, aliasPeer, currentAliasUser, deleteUserAlias, readAliasState, respondAliasRequest, saveUserAlias, setAliasSwitcherHidden, visibleAliasThreads, writeAliasState, type AliasProfile, type AliasState } from '../utils/aliasAccounts';
+import { applyWithAlias, generateCharacterAliasRequest } from '../utils/aliasAi';
 import { compressImageFile } from '../utils/imageFile';
 import './wechatAliases.css';
 
@@ -24,7 +24,7 @@ export function AliasAccountSwitcher({ state, selected, onChange }: { state: Ali
 export function AliasConversationList({ state, accountId, search, onOpen }: { state: AliasState; accountId: string; search: string; onOpen: (id: string) => void }) {
   return <>{visibleAliasThreads(state).filter(t => t.userAccountId === (accountId || 'main') && (t.status === 'accepted' || t.requester === 'user') && `${aliasPeer(t,state)?.name} ${t.messages.at(-1)?.text || t.requestText}`.toLowerCase().includes(search.toLowerCase())).sort((a,b) => b.updatedAt.localeCompare(a.updatedAt)).map(t => {
     const peer = aliasPeer(t,state); if (!peer) return null;
-    return <button type="button" key={t.id} className="alias-conversation" onClick={() => onOpen(t.id)}><span className="alias-avatar-wrap"><Avatar name={peer.name} url={peer.avatarUrl} />{t.unread > 0 && <i className="alias-unread">{t.unread > 99 ? '99+' : t.unread}</i>}</span><span className="alias-conversation-copy"><strong>{peer.name}</strong><small>{t.blocked ? '已拉黑' : t.status === 'pending' ? '好友验证中' : t.status === 'rejected' ? t.requestReply || '对方未通过申请' : t.messages.at(-1)?.text || t.requestReply || '已通过好友验证'}</small></span><time>{new Date(t.updatedAt).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })}</time></button>;
+    return <button type="button" key={t.id} className="alias-conversation" onClick={() => onOpen(t.id)}><span className="alias-avatar-wrap"><Avatar name={peer.name} url={peer.avatarUrl} />{t.unread > 0 && <i className="alias-unread">{t.unread > 99 ? '99+' : t.unread}</i>}</span><span className="alias-conversation-copy"><strong>{peer.name}</strong><small>{t.removedByCharacterAt ? '已被对方删除' : t.blocked ? '已拉黑' : t.status === 'pending' ? '好友验证中' : t.status === 'rejected' ? t.requestReply || '对方未通过申请' : t.messages.at(-1)?.text || t.requestReply || '已通过好友验证'}</small></span><time>{new Date(t.updatedAt).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })}</time></button>;
   })}</>;
 }
 export function AliasFriendRequests({ state, onOpen }: { state: AliasState; onOpen: (id: string) => void }) {
@@ -66,35 +66,4 @@ export function AliasManager({ state, contacts, onOpen, onSelect }: { state: Ali
   </div>;
 }
 
-export function AliasChat({ thread, state, onBack, wallpaper, userColor, characterColor }: { thread: AliasThread; state: AliasState; onBack: () => void; wallpaper?: string; userColor: string; characterColor: string }) {
-  const [text, setText] = useState(''), [busy, setBusy] = useState(false), [error, setError] = useState('');
-  const [menu, setMenu] = useState(false), [extras, setExtras] = useState<'more' | 'emoji' | ''>('');
-  const bottom = useRef<HTMLDivElement>(null), alive = useRef(true);
-  const peer = aliasPeer(thread,state), self = aliasSelf(thread,state);
-  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
-  useEffect(() => { bottom.current?.scrollIntoView({ block: 'end' }); if (thread.unread) { const next = readAliasState(); writeAliasState({ ...next, threads: next.threads.map(t => t.id === thread.id ? { ...t, unread: 0 } : t) }); } }, [thread.id, thread.messages.length, thread.unread]);
-  const act = async (task: () => Promise<void>) => { if (busy) return; setBusy(true); setError(''); try { await task(); } catch(e) { if (alive.current) setError(errorText(e)); } finally { if (alive.current) setBusy(false); } };
-  const send = () => { try { sendAliasMessage(thread.id,text); setText(''); setExtras(''); setError(''); } catch(e) { setError(errorText(e)); } };
-  if (!peer || !self) return null;
-  return <section className="alias-chat yy-chat-surface" style={{ '--yy-user-bubble-color': userColor, '--yy-character-bubble-color': characterColor } as React.CSSProperties}>
-    <header className="alias-chat-header yy-wechat-header"><button type="button" aria-label="返回消息列表" onClick={onBack}><ArrowLeft size={23} /></button><div><strong>{busy ? '对方正在输入…' : peer.name}</strong><small>{thread.userAccountId !== 'main' ? `以 ${self.name} 聊天` : peer.handle}</small></div><button type="button" aria-label="小号对话设置" onClick={() => setMenu(v => !v)}><MoreHorizontal size={24} /></button></header>
-    {menu && <div className="alias-chat-menu"><div className="alias-profile-line"><Avatar name={peer.name} url={peer.avatarUrl} /><span><strong>{peer.name}</strong><small>{peer.handle}</small></span></div>{peer.bio && <p>{peer.bio}</p>}{thread.identity === 'revealed' && <p className="alias-confirmed"><ShieldCheck size={14} />身份已公开{thread.characterAccountId !== 'main' ? ` · ${aliasCharacter(thread.charId)?.name}` : ''}</p>}<div className="alias-actions"><button type="button" onClick={() => { try { updateAliasThread(thread.id,t => ({ ...t, blocked: !t.blocked })); setMenu(false); } catch(e) { setError(errorText(e)); } }}>{thread.blocked ? '解除拉黑' : '拉黑此账号'}</button><button type="button" className="is-danger" onClick={() => { if (!window.confirm('删除这个小号对话？')) return; const current = readAliasState(); writeAliasState({ ...current, threads: current.threads.filter(t => t.id !== thread.id) }); onBack(); }}>删除对话</button></div></div>}
-    <div className="yy-chat-history alias-chat-history" style={wallpaper ? { backgroundImage: `url("${wallpaper.replaceAll('"','%22')}")` } : undefined}>
-      <p className="alias-chat-notice">{thread.requestText}</p>
-      {thread.requestReply && <p className="alias-chat-notice">{thread.requestReply}</p>}
-      {thread.messages.map(m => m.from === 'system' ? <p key={m.id} className="alias-chat-notice">{m.text}</p> : <div key={m.id} className={`yy-chat-message-row alias-message ${m.from === 'user' ? 'is-user' : 'is-character'}`}><Avatar name={m.from === 'user' ? self.name : peer.name} url={m.from === 'user' ? self.avatarUrl : peer.avatarUrl} className="yy-chat-avatar" /><div className="yy-chat-message-content"><div className={`yy-chat-message-bubble is-plain ${m.from === 'user' ? 'is-user' : 'is-character'}`}>{m.text}</div></div></div>)}
-      <div ref={bottom} />
-    </div>
-    {error && <p role="alert" className="alias-error">{error}</p>}
-    {thread.status !== 'accepted' || thread.blocked ? <div className="alias-chat-locked">{thread.blocked ? '此账号已被拉黑' : thread.status === 'pending' ? '好友验证中' : '对方未通过好友申请'}{thread.requester === 'user' && !thread.blocked && <button type="button" disabled={busy} className="ml-3 text-teal-600" onClick={() => void act(async () => { await applyWithAlias(thread.userAccountId,thread.charId,thread.requestText); })}>{busy ? '申请中…' : '重新申请'}</button>}</div> : <>
-      {extras === 'more' && <div className="alias-chat-extras"><button type="button" onClick={() => { setMenu(true); setExtras(''); }}>账号资料<ChevronRight size={15} /></button>{thread.userAccountId !== 'main' && thread.identity !== 'revealed' && <button type="button" disabled={busy} onClick={() => { try { revealUserAlias(thread.id); setExtras(''); } catch(e) { setError(errorText(e)); } }}>坦白身份<ShieldCheck size={15} /></button>}</div>}
-      {extras === 'emoji' && <div className="alias-emoji-grid">{['😀','😂','🥰','🥺','🤔','😡','😭','😎','❤️','💕','👍','🌹'].map(emoji => <button type="button" key={emoji} onClick={() => setText(t => t+emoji)}>{emoji}</button>)}</div>}
-      <form className="yy-chat-composer alias-composer" onSubmit={e => { e.preventDefault(); if (!busy) send(); }}>
-        <button type="button" className="yy-chat-attachments" aria-label="小号更多功能" onClick={() => setExtras(extras === 'more' ? '' : 'more')}><Plus size={26} /></button>
-        <textarea className="yy-chat-input" aria-label="小号消息输入框" rows={1} maxLength={4000} value={text} disabled={busy} onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); if (!busy && text.trim()) send(); } }} />
-        <button type="button" className="yy-chat-emoji" aria-label="小号表情" onClick={() => setExtras(extras === 'emoji' ? '' : 'emoji')}><Smile size={25} /></button>
-        {text.trim() ? <button type="submit" className="yy-chat-send" aria-label="发送小号消息" disabled={busy}><Send size={23} /></button> : <button type="button" className="yy-chat-generate" aria-label="生成小号回复" disabled={busy} onClick={() => void act(() => generateAliasReply(thread.id))}><Heart size={24} /></button>}
-      </form>
-    </>}
-  </section>;
-}
+export { AliasChat } from './AliasChat';

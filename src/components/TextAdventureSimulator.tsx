@@ -39,14 +39,19 @@ type Props = {
   onGenerateWorld: (idea: string) => Promise<AdventureWorld>;
   onShare: (snapshot: AdventureShare, recipients: string[]) => void;
 };
-type Session = {
+export type AdventureSession = {
   worldId: WorldId; companionId: string; turn: number; scene: Scene;
   stats: { courage: number; insight: number; fate: number };
   items: string[]; events: string[]; summaries: string[]; companionAction: string;
   interactions?: Array<{ role: 'user' | 'companion'; text: string }>;
   pausedAt?: string; endedAt?: string;
 };
-type Sessions = Partial<Record<WorldId, Session>>;
+type Sessions = Record<string, AdventureSession>;
+export const adventureSessionKey = (worldId: string, companionId: string) => JSON.stringify([worldId, companionId]);
+/** Legacy saves used only the world ID; keep each journey under its actual companion. */
+export const restoreAdventureSessions = (saved: Sessions): Sessions => Object.fromEntries(
+  Object.values(saved).map(session => [adventureSessionKey(session.worldId, session.companionId), session])
+);
 const KEY = 'yyppphh_text_adventure_sessions_v1';
 const isSessionMap = (value: unknown): value is Sessions => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
@@ -59,7 +64,7 @@ const isSessionMap = (value: unknown): value is Sessions => {
     && item.stats && typeof item.stats === 'object');
 };
 
-function initialSession(entry: AdventureWorld, companionId: string): Session {
+function initialSession(entry: AdventureWorld, companionId: string): AdventureSession {
   return { worldId: entry.world.id, companionId, turn: 0, scene: entry.world.scenes[0], stats: { courage: 0, insight: 0, fate: 0 }, items: [], events: [], summaries: [], companionAction: '', interactions: [] };
 }
 
@@ -100,7 +105,7 @@ export function parseAdventureBeat(value: Record<string, unknown>, turn: number,
 export function TextAdventureSimulator({ userName, contacts, worldBooks, onAdvance, onInteract, onGenerateWorld, onShare }: Props) {
   const rootRef = useRef<HTMLDivElement>(null);
   const importRef = useRef<HTMLInputElement>(null);
-  const [sessions, setSessions] = useState<Sessions>(() => readStoredValue(KEY, {} as Sessions, isSessionMap));
+  const [sessions, setSessions] = useState<Sessions>(() => restoreAdventureSessions(readStoredValue(KEY, {} as Sessions, isSessionMap)));
   const [customWorlds, setCustomWorlds] = useState<CustomWorlds>(() => readStoredValue(CUSTOM_WORLDS_KEY, {} as CustomWorlds, isCustomWorlds));
   const [worldId, setWorldId] = useState<WorldId | null>(null);
   const [companionId, setCompanionId] = useState('');
@@ -118,25 +123,31 @@ export function TextAdventureSimulator({ userName, contacts, worldBooks, onAdvan
   const builtin = builtinWorlds();
   const allWorlds = [...builtin.map(entry => customWorlds[entry.world.id] ?? entry),
     ...Object.values(customWorlds).filter(entry => !builtin.some(item => item.world.id === entry.world.id))];
-  const session = worldId ? sessions[worldId] : undefined;
+  const session = worldId ? sessions[adventureSessionKey(worldId, companionId)] : undefined;
   const entry = allWorlds.find(item => item.world.id === worldId);
   const world = entry?.world;
   const companion = contacts.find(item => item.id === session?.companionId);
 
-  const save = (next: Sessions) => { setSessions(next); writeStoredValue(KEY, next); };
+  const save = (next: Sessions) => {
+    // An older request may finish after another journey was opened; update only its own save.
+    const latest = restoreAdventureSessions(readStoredValue(KEY, {} as Sessions, isSessionMap));
+    const changes = Object.fromEntries(Object.entries(next).filter(([key, value]) => value !== sessions[key]));
+    const merged = { ...latest, ...changes };
+    setSessions(merged); writeStoredValue(KEY, merged);
+  };
   const saveWorlds = (next: CustomWorlds) => { setCustomWorlds(next); writeStoredValue(CUSTOM_WORLDS_KEY, next); };
   useEffect(() => { rootRef.current?.parentElement?.scrollTo({ top: 0, behavior: 'smooth' }); }, [worldId, session?.turn]);
 
   const enter = (id: WorldId) => {
     const selected = allWorlds.find(item => item.world.id === id);
     if (!selected) return;
-    if (!sessions[id]) save({ ...sessions, [id]: initialSession(selected, companionId) });
-    else setCompanionId(sessions[id]!.companionId);
+    const key = adventureSessionKey(id, companionId);
+    if (!sessions[key]) save({ ...sessions, [key]: initialSession(selected, companionId) });
     setWorldId(id); setPanel('story'); setError(''); setDraft('');
   };
   const restart = () => {
     if (!worldId || !entry || busy) return;
-    save({ ...sessions, [worldId]: initialSession(entry, companionId) });
+    save({ ...sessions, [adventureSessionKey(worldId, companionId)]: initialSession(entry, companionId) });
     setConfirmRestart(false); setPanel('story'); setDraft(''); setError('');
   };
   const advance = async (decision: string, by: 'player' | 'companion', choice?: Choice) => {
@@ -163,7 +174,7 @@ export function TextAdventureSimulator({ userName, contacts, worldBooks, onAdvan
         ...(companion && beat.companionAction ? [`${companion.name}｜${beat.companionAction}`] : [])];
       const summary = nextTurn % 4 === 0
         ? beat.summary || `${session.summaries.at(-1) ?? ''}；第${nextTurn - 3}—${nextTurn}回合：${events.slice(-8).join('；')}`.slice(-1000) : '';
-      save({ ...sessions, [session.worldId]: { ...session, turn: nextTurn, scene: beat.scene, stats: nextStats,
+      save({ ...sessions, [adventureSessionKey(session.worldId, session.companionId)]: { ...session, turn: nextTurn, scene: beat.scene, stats: nextStats,
         items: nextItems, events, summaries: summary ? [...session.summaries, summary] : session.summaries,
         companionAction: beat.companionAction } });
       setDraft(''); setPanel('story');
@@ -182,7 +193,7 @@ export function TextAdventureSimulator({ userName, contacts, worldBooks, onAdvan
       if (!answer.trim()) throw new Error('同行角色没有回答，请重试。');
       const interactions = [...(session.interactions ?? []), { role: 'user' as const, text: message },
         { role: 'companion' as const, text: answer.trim() }].slice(-200);
-      save({ ...sessions, [session.worldId]: { ...session, interactions } });
+      save({ ...sessions, [adventureSessionKey(session.worldId, session.companionId)]: { ...session, interactions } });
       setTalkDraft('');
     } catch (cause) { setError(cause instanceof Error ? cause.message : '交流失败，请重试。'); }
     finally { setBusy(false); }
@@ -209,7 +220,7 @@ export function TextAdventureSimulator({ userName, contacts, worldBooks, onAdvan
   };
   const beginShare = () => {
     if (!session || busy) return;
-    if (!session.pausedAt && !session.endedAt) save({ ...sessions, [session.worldId]: { ...session, pausedAt: new Date().toISOString() } });
+    if (!session.pausedAt && !session.endedAt) save({ ...sessions, [adventureSessionKey(session.worldId, session.companionId)]: { ...session, pausedAt: new Date().toISOString() } });
     setShareRecipients(contacts.some(contact => contact.id === session.companionId) ? [session.companionId] : []);
     setShareNotice(''); setShareOpen(true);
   };
@@ -230,17 +241,17 @@ export function TextAdventureSimulator({ userName, contacts, worldBooks, onAdvan
   return <div ref={rootRef} className="min-h-full bg-[#11171c] text-[#f6f0e7]">
     {!world || !session ? <div className="mx-auto max-w-[520px] px-4 pb-12 pt-7">
       <div className="mb-7"><p className="text-[10px] font-bold tracking-[.3em] text-[#d4b79a]">PORTAL · STORY WORLDS</p><h2 className="mt-3 font-serif text-3xl font-semibold tracking-wide">下一段人生，<br/>从这里开始。</h2><p className="mt-3 text-xs leading-6 text-[#b7b9b8]">选一座世界，或亲手创造一座。你和同行者的决定会留下真实的痕迹。</p></div>
-      <label className="mb-5 block rounded-2xl border border-white/10 bg-white/5 p-3 text-xs text-[#c5c8c5]">新旅程的同行角色 <span className="text-[#8d9692]">· 可选</span><select value={companionId} onChange={event => setCompanionId(event.target.value)} className="mt-2 w-full rounded-lg bg-[#243037] px-3 py-2.5 text-sm text-white outline-none"><option value="">独自踏上旅途</option>{contacts.map(contact => <option key={contact.id} value={contact.id}>{contact.name}</option>)}</select></label>
+      <label className="mb-5 block rounded-2xl border border-white/10 bg-white/5 p-3 text-xs text-[#c5c8c5]">同行角色 <span className="text-[#8d9692]">· 可选</span><select value={companionId} onChange={event => setCompanionId(event.target.value)} className="mt-2 w-full rounded-lg bg-[#243037] px-3 py-2.5 text-sm text-white outline-none"><option value="">独自踏上旅途</option>{contacts.map(contact => <option key={contact.id} value={contact.id}>{contact.name}</option>)}</select></label>
       <div className="mb-4 grid grid-cols-2 gap-2"><button type="button" onClick={() => setEditing(blankWorld())} className="flex items-center justify-center gap-2 rounded-xl border border-[#d5bc99]/45 bg-[#d5bc99]/10 py-3 text-xs text-[#e5cfac]"><Plus size={15}/>新增 / AI 创造</button><button type="button" onClick={() => importRef.current?.click()} className="flex items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/5 py-3 text-xs text-[#d8ddd8]"><Upload size={15}/>导入世界</button><input ref={importRef} type="file" accept="application/json,.json" className="hidden" onChange={event => void importWorld(event.target.files?.[0])}/></div>
       {error && <p role="alert" className="mb-4 rounded-xl border border-rose-400/20 bg-rose-500/10 p-3 text-xs text-rose-200">{error}</p>}
-      <div className="space-y-3">{allWorlds.map((entry, index) => { const option = entry.world; return <button key={option.id} type="button" onClick={() => enter(option.id)} className={`group relative block min-h-40 w-full overflow-hidden rounded-[22px] bg-gradient-to-br ${option.card} p-5 text-left shadow-[0_15px_30px_rgba(0,0,0,.2)] active:scale-[.98]`}><div className="absolute -right-7 -top-9 h-40 w-40 rounded-full border border-white/15"/><div className="absolute -right-2 top-3 h-28 w-28 rounded-full border border-white/20"/><div className="absolute bottom-0 right-3 text-[85px] leading-none opacity-20">{index === 0 ? '✦' : index === 1 ? '☯' : index === 2 ? '☾' : '✧'}</div><span className="relative rounded-full border border-white/40 px-2 py-1 text-[10px] tracking-widest text-white/90">{option.tag}</span><h3 className="relative mt-5 font-serif text-2xl font-bold tracking-wider">{option.title}</h3><p className="relative mt-2 max-w-[82%] text-xs leading-5 text-white/80">{option.subtitle}</p><span className="relative mt-3 block text-[11px] text-white/90">{sessions[option.id] ? `${sessions[option.id]!.endedAt ? '已结束' : sessions[option.id]!.pausedAt ? '已暂停' : '继续旅程'} · 第 ${sessions[option.id]!.turn + 1} 回合` : '开启新旅程'}</span><ArrowRight className="absolute bottom-5 right-5 h-5 w-5"/></button>; })}</div>
+      <div className="space-y-3">{allWorlds.map((entry, index) => { const option = entry.world; return <button key={option.id} type="button" onClick={() => enter(option.id)} className={`group relative block min-h-40 w-full overflow-hidden rounded-[22px] bg-gradient-to-br ${option.card} p-5 text-left shadow-[0_15px_30px_rgba(0,0,0,.2)] active:scale-[.98]`}><div className="absolute -right-7 -top-9 h-40 w-40 rounded-full border border-white/15"/><div className="absolute -right-2 top-3 h-28 w-28 rounded-full border border-white/20"/><div className="absolute bottom-0 right-3 text-[85px] leading-none opacity-20">{index === 0 ? '✦' : index === 1 ? '☯' : index === 2 ? '☾' : '✧'}</div><span className="relative rounded-full border border-white/40 px-2 py-1 text-[10px] tracking-widest text-white/90">{option.tag}</span><h3 className="relative mt-5 font-serif text-2xl font-bold tracking-wider">{option.title}</h3><p className="relative mt-2 max-w-[82%] text-xs leading-5 text-white/80">{option.subtitle}</p><span className="relative mt-3 block text-[11px] text-white/90">{sessions[adventureSessionKey(option.id, companionId)] ? `${sessions[adventureSessionKey(option.id, companionId)]!.endedAt ? '已结束' : sessions[adventureSessionKey(option.id, companionId)]!.pausedAt ? '已暂停' : '继续旅程'} · 第 ${sessions[adventureSessionKey(option.id, companionId)]!.turn + 1} 回合` : '开启新旅程'}</span><ArrowRight className="absolute bottom-5 right-5 h-5 w-5"/></button>; })}</div>
       <p className="mt-6 text-center text-[11px] text-[#7f8d8a]">旅程保存在当前设备 · 动态剧情需要聊天 API</p>
     </div> : <div className="mx-auto min-h-full max-w-[540px] bg-[#171e23]">
       <div className="relative h-52 overflow-hidden bg-[#263540]"><SceneArtwork world={world.id}/><div className="absolute inset-0 bg-gradient-to-t from-[#171e23] via-transparent to-black/30"/><button type="button" onClick={() => setWorldId(null)} aria-label="返回世界选择" className="absolute left-4 top-4 rounded-full border border-white/30 bg-black/30 p-2 backdrop-blur"><ArrowLeft className="h-4 w-4"/></button><div className="absolute right-4 top-4 rounded-full border border-white/25 bg-black/30 px-3 py-1.5 text-[10px] tracking-widest backdrop-blur">{world.tag}</div><div className="absolute bottom-4 left-5"><p className="text-[10px] tracking-[.25em]" style={{ color: world.accent }}>{session.scene.chapter} · 第 {session.turn + 1} 回合</p><h2 className="mt-1 font-serif text-2xl font-bold">{world.title}</h2></div></div>
       <div className="relative px-4 pb-12"><div className="-mt-1 flex items-center gap-2 text-[11px] text-[#a9b6b4]"><Compass className="h-3.5 w-3.5"/>{session.scene.place}<span className="ml-auto">{userName}{companion ? ` · 与${companion.name}同行` : ' · 独行'}</span></div>
         <div className="mt-4 flex justify-end gap-2"><button type="button" onClick={() => setEditing(entry)} className="rounded-full border border-white/15 px-3 py-1.5 text-[11px] text-[#d5dcd5]">编辑世界</button><button type="button" onClick={() => exportWorld(entry)} className="flex items-center gap-1 rounded-full border border-white/15 px-3 py-1.5 text-[11px] text-[#d5dcd5]"><Download size={12}/>导出世界</button></div>
         {(entry.worldBookIds ?? []).length > 0 && <p className="mt-2 text-right text-[10px] text-[#b9c9bd]">已绑定世界书：{worldBooks.filter(book => (entry.worldBookIds ?? []).includes(book.id)).map(book => book.name).join('、') || '当前设备缺少对应世界书'}</p>}
-        <div className="mt-4 rounded-2xl border border-[#d7bd97]/25 bg-[#d7bd97]/[0.07] p-3"><div className="flex items-center justify-between gap-2"><span className="text-[11px] text-[#dfcfb5]">{session.endedAt ? '旅程已结束 · 可以分享结局' : session.pausedAt ? '旅程已暂停 · 随时可以继续' : '旅程进行中 · 可以暂停分享'}</span><span className="text-lg text-[#d7bd97]">✧</span></div>{shareNotice && <p className="mt-1 text-[10px] text-[#bad3c3]">{shareNotice}</p>}<div className="mt-2 flex gap-2">{!session.endedAt && (session.pausedAt ? <button type="button" onClick={() => save({ ...sessions, [session.worldId]: { ...session, pausedAt: undefined } })} className="flex flex-1 items-center justify-center gap-1 rounded-lg bg-[#d7bd97] py-2 text-[11px] font-semibold text-[#25323a]"><Play size={12}/>继续旅程</button> : <button type="button" onClick={beginShare} disabled={busy} className="flex flex-1 items-center justify-center gap-1 rounded-lg bg-[#d7bd97] py-2 text-[11px] font-semibold text-[#25323a] disabled:opacity-40"><Pause size={12}/>暂停并分享</button>)}{(session.pausedAt || session.endedAt) && <button type="button" onClick={beginShare} className="flex flex-1 items-center justify-center gap-1 rounded-lg border border-[#d7bd97]/40 py-2 text-[11px] text-[#e8d1ac]"><Share2 size={12}/>分享进度卡</button>}{!session.endedAt && <button type="button" onClick={() => setConfirmEnd(true)} disabled={busy} className="flex-1 rounded-lg border border-white/15 py-2 text-[11px] text-[#aebdb7] disabled:opacity-40">结束旅程</button>}</div></div>
+        <div className="mt-4 rounded-2xl border border-[#d7bd97]/25 bg-[#d7bd97]/[0.07] p-3"><div className="flex items-center justify-between gap-2"><span className="text-[11px] text-[#dfcfb5]">{session.endedAt ? '旅程已结束 · 可以分享结局' : session.pausedAt ? '旅程已暂停 · 随时可以继续' : '旅程进行中 · 可以暂停分享'}</span><span className="text-lg text-[#d7bd97]">✧</span></div>{shareNotice && <p className="mt-1 text-[10px] text-[#bad3c3]">{shareNotice}</p>}<div className="mt-2 flex gap-2">{!session.endedAt && (session.pausedAt ? <button type="button" onClick={() => save({ ...sessions, [adventureSessionKey(session.worldId, session.companionId)]: { ...session, pausedAt: undefined } })} className="flex flex-1 items-center justify-center gap-1 rounded-lg bg-[#d7bd97] py-2 text-[11px] font-semibold text-[#25323a]"><Play size={12}/>继续旅程</button> : <button type="button" onClick={beginShare} disabled={busy} className="flex flex-1 items-center justify-center gap-1 rounded-lg bg-[#d7bd97] py-2 text-[11px] font-semibold text-[#25323a] disabled:opacity-40"><Pause size={12}/>暂停并分享</button>)}{(session.pausedAt || session.endedAt) && <button type="button" onClick={beginShare} className="flex flex-1 items-center justify-center gap-1 rounded-lg border border-[#d7bd97]/40 py-2 text-[11px] text-[#e8d1ac]"><Share2 size={12}/>分享进度卡</button>}{!session.endedAt && <button type="button" onClick={() => setConfirmEnd(true)} disabled={busy} className="flex-1 rounded-lg border border-white/15 py-2 text-[11px] text-[#aebdb7] disabled:opacity-40">结束旅程</button>}</div></div>
         <div className="mt-5 grid grid-cols-3 gap-2">{([{ icon: Shield, label: '胆识', value: session.stats.courage }, { icon: Sparkles, label: '洞察', value: session.stats.insight }, { icon: Flame, label: '命数', value: session.stats.fate }] as const).map(({ icon: Icon, label, value }) => <div key={label} className="rounded-xl border border-white/10 bg-white/5 px-3 py-2"><div className="flex items-center gap-1.5 text-[10px] text-[#aab6b0]"><Icon className="h-3.5 w-3.5"/>{label}</div><p className="mt-1 font-serif text-lg" style={{ color: world.accent }}>{String(value).padStart(2, '0')}</p></div>)}</div>
         <div className="mt-5 flex gap-1 overflow-x-auto border-b border-white/10 pb-3">{([{ id: 'story', label: '剧情', icon: BookOpen }, { id: 'bag', label: '行囊', icon: Backpack }, { id: 'journal', label: '旅程', icon: ScrollText }, { id: 'codex', label: '世界', icon: Users }] as const).map(({ id, label, icon: Icon }) => <button key={id} type="button" onClick={() => setPanel(id)} className={`flex shrink-0 items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs ${panel === id ? 'bg-white/10 text-white' : 'text-[#85928f]'}`}><Icon className="h-3.5 w-3.5"/>{label}</button>)}</div>
         {panel === 'story' && <><div className="mt-6"><div className="flex items-center gap-2"><span className="h-px w-6" style={{ background: world.accent }}/><span className="text-[10px] tracking-[.2em] text-[#a3aaa7]">命运正在展开</span></div><h3 className="mt-3 font-serif text-[23px] font-semibold leading-8">{session.scene.title}</h3><p className="mt-4 whitespace-pre-wrap border-l-2 pl-4 text-[14px] leading-8 text-[#d1d3cf]" style={{ borderColor: world.accent }}>{session.scene.text}</p></div>
@@ -257,7 +268,7 @@ export function TextAdventureSimulator({ userName, contacts, worldBooks, onAdvan
       </div>
     </div>}
     {confirmRestart && <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/75 px-6"><div className="w-full max-w-sm rounded-2xl border border-white/15 bg-[#263038] p-5"><button type="button" onClick={() => setConfirmRestart(false)} className="float-right text-[#a9b3ad]"><X size={18}/></button><h3 className="font-serif text-lg">重开这个世界？</h3><p className="mt-3 text-xs leading-6 text-[#bfc8c2]">当前世界的剧情、行囊和纪要会从序章重新开始。</p><div className="mt-5 flex gap-2"><button type="button" onClick={() => setConfirmRestart(false)} className="flex-1 rounded-xl border border-white/20 py-2.5 text-xs">再想想</button><button type="button" onClick={restart} className="flex-1 rounded-xl bg-[#dcc29e] py-2.5 text-xs font-semibold text-[#263038]">确认重开</button></div></div></div>}
-    {confirmEnd && session && <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/75 px-6"><div className="w-full max-w-sm rounded-2xl border border-white/15 bg-[#263038] p-5"><button type="button" onClick={() => setConfirmEnd(false)} className="float-right text-[#a9b3ad]"><X size={18}/></button><h3 className="font-serif text-lg">在这里结束旅程？</h3><p className="mt-3 text-xs leading-6 text-[#bfc8c2]">结局会停在当前场景。之后仍可查看和分享，想从头再玩可以重开。</p><div className="mt-5 flex gap-2"><button type="button" onClick={() => setConfirmEnd(false)} className="flex-1 rounded-xl border border-white/20 py-2.5 text-xs">继续游玩</button><button type="button" onClick={() => { save({ ...sessions, [session.worldId]: { ...session, endedAt: new Date().toISOString(), pausedAt: undefined } }); setConfirmEnd(false); setShareRecipients(contacts.some(contact => contact.id === session.companionId) ? [session.companionId] : []); setShareOpen(true); }} className="flex-1 rounded-xl bg-[#dcc29e] py-2.5 text-xs font-semibold text-[#263038]">结束并选择分享</button></div></div></div>}
+    {confirmEnd && session && <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/75 px-6"><div className="w-full max-w-sm rounded-2xl border border-white/15 bg-[#263038] p-5"><button type="button" onClick={() => setConfirmEnd(false)} className="float-right text-[#a9b3ad]"><X size={18}/></button><h3 className="font-serif text-lg">在这里结束旅程？</h3><p className="mt-3 text-xs leading-6 text-[#bfc8c2]">结局会停在当前场景。之后仍可查看和分享，想从头再玩可以重开。</p><div className="mt-5 flex gap-2"><button type="button" onClick={() => setConfirmEnd(false)} className="flex-1 rounded-xl border border-white/20 py-2.5 text-xs">继续游玩</button><button type="button" onClick={() => { save({ ...sessions, [adventureSessionKey(session.worldId, session.companionId)]: { ...session, endedAt: new Date().toISOString(), pausedAt: undefined } }); setConfirmEnd(false); setShareRecipients(contacts.some(contact => contact.id === session.companionId) ? [session.companionId] : []); setShareOpen(true); }} className="flex-1 rounded-xl bg-[#dcc29e] py-2.5 text-xs font-semibold text-[#263038]">结束并选择分享</button></div></div></div>}
     {shareOpen && session && world && <div className="fixed inset-0 z-[135] flex items-end justify-center bg-black/80 px-3 sm:items-center" onClick={() => setShareOpen(false)}><div role="dialog" aria-modal="true" aria-label="分享文字冒险进度" onClick={event => event.stopPropagation()} className="w-full max-w-[480px] rounded-t-3xl border border-[#ddc5a2]/25 bg-[#1c2932] p-5 pb-8 shadow-2xl sm:rounded-3xl"><div className="flex items-center justify-between"><div><p className="text-[10px] tracking-[.2em] text-[#d8bc91]">ADVENTURE POSTCARD</p><h3 className="mt-1 font-serif text-xl">分享这段旅程</h3></div><button type="button" onClick={() => setShareOpen(false)} className="rounded-full p-2 text-[#a6b4ae]"><X size={19}/></button></div><div className={`mt-5 rounded-2xl bg-gradient-to-br ${world.card} p-[1px]`}><div className="rounded-2xl bg-[#1c2932]/90 p-4"><p className="text-[10px] tracking-widest text-[#e1c9a2]">{session.endedAt ? '已完结' : '暂停中'} · 第 {session.turn + 1} 回合</p><h4 className="mt-2 font-serif text-xl">{world.title}</h4><p className="mt-2 text-xs text-[#c4d0c8]">{session.scene.chapter} · {session.scene.place}</p><p className="mt-3 text-sm text-[#f1e7d7]">{session.scene.title}</p><p className="mt-2 line-clamp-3 text-xs leading-5 text-[#afbbb6]">{session.scene.text}</p><p className="mt-4 border-t border-white/15 pt-3 text-[10px] text-[#afbbb6]">{companion ? `${userName} 与 ${companion.name}的沉浸式文字冒险` : `${userName}的沉浸式文字冒险`} · 游戏番外</p></div></div><p className="mt-5 text-xs text-[#aebbb4]">发送给角色</p><div className="mt-2 max-h-32 space-y-1 overflow-y-auto">{contacts.map(contact => <label key={contact.id} className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-xs"><input type="checkbox" checked={shareRecipients.includes(contact.id)} onChange={event => setShareRecipients(previous => event.target.checked ? [...previous, contact.id] : previous.filter(id => id !== contact.id))} className="accent-[#d8bc91]"/>{contact.name}{contact.id === session.companionId && <span className="text-[10px] text-[#d8bc91]">同行者</span>}</label>)}</div><p className="mt-3 text-[11px] leading-5 text-[#899b94]">角色会看到这是共同扮演的游戏进度，不会把剧情当成现实中的穿越经历。</p><button type="button" onClick={share} disabled={shareRecipients.length === 0} className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-[#d8bc91] py-3 text-sm font-semibold text-[#26323a] disabled:opacity-40"><Share2 size={15}/>发送进度卡片</button></div></div>}
     {editing && <AdventureWorldEditor key={editing.world.id} initial={editing} worldBooks={worldBooks} onClose={() => setEditing(null)} onGenerate={onGenerateWorld} onSave={saved => { saveWorlds({ ...customWorlds, [saved.world.id]: saved }); setEditing(null); }}/>} 
   </div>;

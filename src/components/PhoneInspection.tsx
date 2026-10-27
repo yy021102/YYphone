@@ -17,7 +17,7 @@ function Avatar({ name, src, large = false }: { name: string; src?: string; larg
 }
 const dateLabel = (value?: string) => value && !Number.isNaN(Date.parse(value)) ? new Date(value).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' }) : '';
 
-type PhoneInspectionProps = { charId: string; chatId: string; actorName: string; avatarUrl?: string; userName: string; userAvatarUrl?: string; onClose: () => void; onChanged: () => void; onFinished: (text: string, archiveKey: string, sessionId: string) => void };
+type PhoneInspectionProps = { charId: string; chatId: string; actorName: string; avatarUrl?: string; userName: string; userAvatarUrl?: string; onClose: () => void; onChanged: () => void };
 export function PhoneInspection(props: PhoneInspectionProps) {
   const [draft, setDraft] = useState(() => readInspectionOptions(props.charId));
   const [options, setOptions] = useState<InspectionOptions | null>(null);
@@ -31,7 +31,7 @@ export function PhoneInspection(props: PhoneInspectionProps) {
   </section>;
 }
 
-function InspectionViewer({ charId, chatId, actorName, avatarUrl, userName, userAvatarUrl, onClose, onChanged, onFinished, options }: PhoneInspectionProps & { options: InspectionOptions }) {
+function InspectionViewer({ charId, chatId, actorName, avatarUrl, userName, userAvatarUrl, onClose, onChanged, options }: PhoneInspectionProps & { options: InspectionOptions }) {
   const readPage = (id: string) => readInspectionPage(id, charId, userName, options);
   const [session, setSession] = useState<InspectionSession>(() => ({ id: crypto.randomUUID(), charId, chatId, archiveKey: activeMemoryArchive(charId), createdAt: new Date().toISOString(), steps: [], options }));
   const state = useRef(session); state.current = session;
@@ -48,7 +48,7 @@ function InspectionViewer({ charId, chatId, actorName, avatarUrl, userName, user
   const prepared = useRef<PreparedInspectionStep[]>([]);
   const [preparing, setPreparing] = useState(true);
   const reactionPanel = useRef<HTMLElement>(null);
-  const request = useRef<AbortController | null>(null); const alive = useRef(true); const started = useRef(false); const ending = useRef(false); const receipt = useRef(false);
+  const request = useRef<AbortController | null>(null); const alive = useRef(true); const started = useRef(false); const ending = useRef(false);
   const contacts = readInspectionContacts(charId, options);
   const home = readPage('home');
   const show = (tab: Tab, detail: string | null = null) => { const value = { tab, detail }; routeRef.current = value; setRoute(value); };
@@ -100,7 +100,7 @@ function InspectionViewer({ charId, chatId, actorName, avatarUrl, userName, user
   const finish = async () => {
     if (!prepared.current.length) { request.current?.abort(); onClose(); return; }
     if (ending.current || finished) return; ending.current = true; request.current?.abort(); setAutomatic(false); setBusy(false); setSaving(true); setError('');
-    try { await mutation.current?.catch(() => {}); const text = await finishPhoneInspection(state.current, actorName, userName); if (!alive.current) return; if (!receipt.current) { onFinished(text, state.current.archiveKey, state.current.id); receipt.current = true; } setActions(readInspectionActions(state.current.id)); setFinished(true); }
+    try { await mutation.current?.catch(() => {}); await finishPhoneInspection(state.current, actorName, userName); if (!alive.current) return; onChanged(); setActions(readInspectionActions(state.current.id)); setFinished(true); }
     catch (e) { if (alive.current) setError(e instanceof Error ? e.message : '保存失败，请重试'); }
     finally { ending.current = false; if (alive.current) setSaving(false); }
   };
