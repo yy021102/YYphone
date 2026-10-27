@@ -10,6 +10,35 @@ test('OpenAI-compatible catalogs normalize base, chat, image and models endpoint
   }
   assert.equal(modelListRequest({ endpoint: 'https://api.openai.com', apiKey: 'key' }).url.pathname, '/v1/models');
 });
+
+test('DeepSeek catalogs support official base and full endpoints and never duplicate copied Bearer authentication', async () => {
+  const requests: string[] = [];
+  globalThis.fetch = async (input, init) => {
+    const url = new URL(String(input)); requests.push(url.pathname);
+    assert.equal(url.origin, 'https://api.deepseek.com'); assert.equal(init?.method, 'GET'); assert.equal(init?.body, undefined);
+    assert.equal(new Headers(init?.headers).get('Authorization'), 'Bearer ds-test-secret'); assert.equal(init?.credentials, 'omit');
+    return Response.json({ object: 'list', data: [{ id: 'deepseek-flash', object: 'model', owned_by: 'deepseek', name: 'DeepSeek' }] });
+  };
+  for (const path of ['', '/', '/v1', '/v1/', '/chat/completions', '/v1/chat/completions', '/models', '/v1/models']) {
+    const models = await fetchApiModels({ endpoint: `https://api.deepseek.com${path}`, apiKey: '  Bearer ds-test-secret  ', purpose: 'decision' });
+    assert.equal(models[0].id, 'deepseek-flash');
+  }
+  assert.deepEqual([...new Set(requests)].sort(), ['/models', '/v1/models']);
+  assert.throws(() => modelListRequest({ endpoint: 'https://api.deepseek.com', apiKey: 'Bearer' }), /不能只填写 Bearer/);
+});
+
+test('catalog requests accept copied punctuation and invisible marks without changing gateway routing', async () => {
+  let calls = 0;
+  globalThis.fetch = async (input) => {
+    calls++;
+    assert.equal(String(input), 'https://api.deepseek.com/v1/models?tenant=Keep%2fCase');
+    return Response.json({ data: [{ id: 'returned-model' }] });
+  };
+  for (const endpoint of ['“https：//api.deepseek.com/v1?tenant=Keep%2fCase”', '\u200Fhttps://api.deepseek.com/v1?tenant=Keep%2fCase']) {
+    assert.equal((await fetchApiModels({ endpoint, apiKey: 'key' }))[0].id, 'returned-model');
+  }
+  assert.equal(calls, 2);
+});
 test('native Google catalogs handle full generate/predict URLs, use key headers and reset pagination', () => {
   for (const endpoint of ['https://generativelanguage.googleapis.com', 'https://google-proxy.invalid/v1beta', 'https://google-proxy.invalid/v1beta/models/imagen:predict?key=old&pageToken=old', 'https://google-proxy.invalid/v1/models/gemini:generateContent']) {
     const r = modelListRequest({ endpoint, apiKey: 'new', protocol: 'google' });

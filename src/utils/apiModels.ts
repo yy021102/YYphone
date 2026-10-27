@@ -1,4 +1,6 @@
 import type { ApiConnection } from './aiApi';
+import { bearerApiKey } from './apiAuthentication';
+import { parseApiEndpoint } from './apiEndpoint';
 
 export interface ApiModel { id: string; label: string }
 export interface ModelListConnection extends ApiConnection { protocol?: 'auto' | 'openai' | 'google'; purpose?: 'decision' | 'image'; unsupported?: boolean }
@@ -7,9 +9,7 @@ const record = (v: unknown): v is Record<string, unknown> => !!v && typeof v ===
 export function modelListRequest(connection: ModelListConnection) {
   if (connection.unsupported) throw new Error('当前服务未提供可拉取的生图模型列表，请手动填写模型 ID。');
   if (!connection.endpoint.trim() || !connection.apiKey.trim()) throw new Error('请先填写接口地址和 API Key。');
-  let url: URL;
-  try { url = new URL(connection.endpoint.trim()); } catch { throw new Error('接口地址无效，请填写 HTTP(S) 地址。'); }
-  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) throw new Error('请使用不含账号密码的 HTTP(S) 接口地址。');
+  const url = parseApiEndpoint(connection.endpoint);
   const google = connection.protocol === 'google' || connection.protocol !== 'openai' &&
     (url.hostname === 'generativelanguage.googleapis.com' || /\/v1beta(?:\/|$)/i.test(url.pathname)) && !/\/openai(?:\/|$)/i.test(url.pathname);
   let path = url.pathname.replace(/\/+$/, '');
@@ -24,7 +24,9 @@ export function modelListRequest(connection: ModelListConnection) {
     path = path.replace(/\/(?:chat\/completions|completions|images\/(?:generations|edits)|models(?:\/[^/]+)?)$/i, '');
     if (url.hostname === 'api.openai.com' && !path) path = '/v1';
     url.pathname = `${path}/models`;
-    headers.Authorization = `Bearer ${connection.apiKey.trim()}`;
+    const key = bearerApiKey(connection.apiKey);
+    if (!key) throw new Error('请填写 API Key，不能只填写 Bearer。');
+    headers.Authorization = `Bearer ${key}`;
   }
   url.hash = '';
   return { url, headers, google };
@@ -57,7 +59,15 @@ export async function fetchApiModels(connection: ModelListConnection, signal?: A
   try {
     for (let page = 0; page < 10; page++) {
       const response = await fetch(request.url.toString(), { method: 'GET', headers: request.headers, credentials: 'omit', signal: controller.signal });
-      if (!response.ok) throw new Error(`模型拉取失败（HTTP ${response.status}）。${response.status === 401 || response.status === 403 ? '请检查 Key 和权限。' : '服务可能未开放模型列表，也可手动填写模型 ID。'}`);
+      if (!response.ok) {
+        const reason = response.status === 401 ? '认证失败，请检查 API Key 是否完整有效，且与当前服务地址对应。'
+          : response.status === 403 ? '服务拒绝访问，请检查账号权限或服务限制。'
+          : response.status === 404 ? '当前地址未提供模型列表，请检查 API 地址；仍可手动填写服务商提供的模型 ID。'
+          : response.status === 429 ? '请求过于频繁或服务额度受限，请稍后重试并查看服务商控制台。'
+          : response.status >= 500 ? '服务商接口暂时异常，请稍后重试。'
+          : '服务未返回可用模型列表，可手动填写服务商提供的模型 ID。';
+        throw new Error(`模型拉取失败（HTTP ${response.status}）。${reason}`);
+      }
       let data: unknown;
       try { data = await response.json(); } catch { throw new Error('接口返回的不是有效模型列表，可继续手动填写模型 ID。'); }
       for (const model of parseModelList(data, connection.purpose)) result.set(model.id, model);

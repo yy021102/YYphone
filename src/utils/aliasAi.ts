@@ -2,6 +2,7 @@ import { requestConfiguredAiText } from './aiApi';
 import { activeMemoryArchive, guardMemoryArchive } from './memoryArchives';
 import { readMemories } from './memoryData';
 import { getWorldBookEntriesForContacts } from './worldBookPrompt';
+import { CHAT_COMMUNICATION_RULES } from './chatCommunication';
 import { ALIAS_MEMORY_RULES, aliasCharacter, aliasId, aliasMessageContext, aliasPeer, aliasRows, aliasSelf, currentAliasUser, readAliasState, row, updateAliasThread, visibleAliasThreads, writeAliasState, type AliasIdentityEvidence, type AliasThread } from './aliasAccounts';
 
 const running = new Set<string>();
@@ -48,6 +49,7 @@ function mainBackground(charId: string): string {
   const memories = readMemories().filter(m => m.charId === charId).sort((a,b) => Number(b.pinned) - Number(a.pinned) || b.importance - a.importance).slice(0, 10).map(m => m.content).join('\n');
   return [
     `你是${char.name}。角色人设：${char.persona || '按已有相处保持一致。'}`,
+    CHAT_COMMUNICATION_RULES,
     `相关世界设定：\n${getWorldBookEntriesForContacts([charId]).join('\n\n') || '无'}`,
     `【你的生活背景，发生在另一个主号对话】你认识的人叫${user.name}。${chat?.blocked ? '你与这个人的主号目前处于被拉黑状态，小号联系不会改变此状态。' : '你们的主号没有被拉黑，可以正常联系；不要编造被拉黑或必须靠小号才能联系的情况。'}\n${history || '暂无近期主号对话。'}`,
     `【你自己的长期记忆】\n${memories || '暂无'}`,
@@ -152,39 +154,59 @@ export async function generateAliasReply(id: string): Promise<void> {
         ...(result.deleteContact === true ? [{ id: aliasId(), from: 'system' as const, text: '对方已将此账号移出通讯录', thought, replyBatchId, createdAt: now, identityAtTime: replyIdentity }] : [])] }));
   } finally { running.delete(id); }
 }
-export async function generateCharacterAliasRequest(charId: string, automatic = false): Promise<string> {
+export type CharacterAliasRequestResult =
+  | { status: 'created'; threadId: string }
+  | { status: 'existing'; threadId: string; pending: boolean }
+  | { status: 'disabled' | 'cooldown' | 'busy' | 'wait' };
+
+/** Manual creation and background decisions have different intent; never collapse their outcomes into an empty UI status. */
+export async function generateCharacterAliasRequestResult(charId: string, automatic = false): Promise<CharacterAliasRequestResult> {
   const assertArchive = guardMemoryArchive(charId);
   const user = currentAliasUser(), archiveKey = activeMemoryArchive(charId), key = JSON.stringify([charId, archiveKey, user.id]);
-  if (running.has(key)) return ''; running.add(key);
+  if (running.has(key)) return { status: 'busy' }; running.add(key);
   try {
     let state = readAliasState();
-    if (automatic && !state.autoEnabled) return '';
-    if (visibleAliasThreads(state).some(t => t.charId === charId && t.characterAccountId !== 'main' && t.status !== 'rejected')) return '';
-    if (Date.now() - (state.checks[key] || 0) < (automatic ? 24 * 60 * 60000 : 60000)) return '';
+    if (automatic && !state.autoEnabled) return { status: 'disabled' };
+    const existing = visibleAliasThreads(state).find(t => t.charId === charId && t.characterAccountId !== 'main' && t.status !== 'rejected');
+    if (existing) return { status: 'existing', threadId: existing.id, pending: existing.status === 'pending' };
+    if (automatic && Date.now() - (state.checks[key] || 0) < 24 * 60 * 60000) return { status: 'cooldown' };
     const previousStamp = state.checks[key] || 0;
     const generationStamp = Date.now();
     writeAliasState({ ...state, checks: { ...state.checks, [key]: generationStamp }, lastError: '' });
     try {
-      const result = object(await requestConfiguredAiText(mainBackground(charId), '你可以用一个不暴露身份的小号联系主号相识者，也可以选择暂时不联系。小号不只用于被拉黑后：主号正常联系、没有吵架时，你也可能想换个身份试探对方，想知道对方如何对待陌生人，想问一句主号不好意思问的话，或出于好奇、玩心接近对方。是否产生这些念头及具体动机，必须符合你的人设、实际关系、近期聊天和记忆；不凭空认定对方隐瞒事情，也不为开小号编造吵架或被拉黑。若主号实际已被拉黑，可以考虑换个身份重新接近，也可以暂时不联系；不强制和好、试探或发申请，不威胁、纠缠。若决定联系，给出一句不超过240字的私下动机motive，并编一个独立的自然昵称、英文数字微信号、简短介绍，以及不会直接暴露真实身份的好友申请附言。动机不放进公开资料或申请附言，不把自己的真名或主号昵称直接当小号昵称。只返回 {"decision":"wait"} 或 {"decision":"request","motive":"角色私下的实际动机","profile":{"name":"昵称","handle":"独立微信号","bio":"介绍"},"message":"申请附言"}。', { json: true, includeGlobalWorldBooks: false, maxTokens: 1400 }));
+      const intent = automatic
+        ? '你可以用一个不暴露身份的小号联系主号相识者，也可以选择暂时不联系。根据当前关系与情境，自主决定是否发申请，不强制联系。'
+        : '本次是玩家手动点击「生成申请」。请直接创作你用小号联系主号相识者的一条好友申请，不再判断是否联系，也不返回wait；这只生成待玩家接受的申请，不代表已成为好友。';
+      const output = '{"decision":"request","motive":"角色私下的实际动机","profile":{"name":"昵称","handle":"独立微信号","bio":"介绍"},"message":"申请附言"}';
+      const result = object(await requestConfiguredAiText(mainBackground(charId), `${intent}小号不只用于被拉黑后：主号正常联系、没有吵架时，你也可能想换个身份试探对方，想知道对方如何对待陌生人，想问一句主号不好意思问的话，或出于好奇、玩心接近对方。具体动机必须符合你的人设、实际关系、近期聊天和记忆；不凭空认定对方隐瞒事情，也不为开小号编造吵架或被拉黑。若主号实际已被拉黑，可以结合当前关系换个身份重新接近，不强制和好，不威胁、纠缠。生成申请时，给出一句不超过240字的私下动机motive，并编一个独立的自然昵称、英文数字微信号、简短介绍，以及不会直接暴露真实身份的好友申请附言。动机不放进公开资料或申请附言，不把自己的真名或主号昵称直接当小号昵称。只返回${automatic ? '{"decision":"wait"} 或 ' : ''}${output}。`, { json: true, includeGlobalWorldBooks: false, maxTokens: 1400 }));
       state = readAliasState();
       assertArchive();
       if (!aliasCharacter(charId) || state.checks[key] !== generationStamp || currentAliasUser().id !== user.id || activeMemoryArchive(charId) !== archiveKey || (automatic && !state.autoEnabled)) throw new Error('角色、账号或存档已变化，申请未保存。');
-      if (result.decision === 'wait') return '';
+      if (result.decision === 'wait') {
+        if (automatic) return { status: 'wait' };
+        throw new Error('本次没有生成好友申请，请重试。');
+      }
       if (result.decision !== 'request' || !row(result.profile) || typeof result.profile.name !== 'string' || !result.profile.name.trim() || result.profile.name.length > 30 || typeof result.profile.handle !== 'string' || !/^[a-zA-Z0-9_-]{3,40}$/.test(result.profile.handle) || typeof result.profile.bio !== 'string' || result.profile.bio.length > 1000 || typeof result.message !== 'string' || !result.message.trim() || result.message.length > 500) throw new Error('小号申请格式无效，请重试。');
       if (result.motive !== undefined && (typeof result.motive !== 'string' || result.motive.length > 240)) throw new Error('小号联系动机格式无效，请重试。');
-      if (visibleAliasThreads(state).some(t => t.charId === charId && t.characterAccountId !== 'main' && t.status !== 'rejected')) return '';
+      const added = visibleAliasThreads(state).find(t => t.charId === charId && t.characterAccountId !== 'main' && t.status !== 'rejected');
+      if (added) return { status: 'existing', threadId: added.id, pending: added.status === 'pending' };
       const now = new Date().toISOString(), id = aliasId(), profileId = aliasId();
       let handle = result.profile.handle;
       if (state.profiles.some(p => p.handle.toLowerCase() === handle.toLowerCase())) handle = `${handle.slice(0, 30)}_${id.slice(0, 6)}`;
       writeAliasState({ ...state, profiles: [...state.profiles, { id: profileId, owner: 'character', charId, userProfileId: user.id, name: result.profile.name.trim(), handle, bio: result.profile.bio.trim(), avatarUrl: '', createdAt: now }],
         threads: [...state.threads, { id, charId, userProfileId: user.id, archiveKey, userAccountId: 'main', characterAccountId: profileId, requester: 'character', status: 'pending', requestText: result.message.trim(), requestReply: '', identity: 'unknown', blocked: false, unread: 1, createdAt: now, updatedAt: now, revision: 0, messages: [], ...(typeof result.motive === 'string' && result.motive.trim() ? { contactMotive: result.motive.trim() } : {}) }] });
-      return id;
+      return { status: 'created', threadId: id };
     } catch (error) {
       state = readAliasState();
       if (aliasCharacter(charId) && state.checks[key] === generationStamp) writeAliasState({ ...state, checks: { ...state.checks, [key]: automatic ? Date.now() - 24 * 60 * 60000 + 5 * 60000 : previousStamp }, lastError: error instanceof Error ? error.message : '申请生成失败' });
       throw error;
     }
   } finally { running.delete(key); }
+}
+/** Legacy callers only need the ID of a newly created request. */
+export async function generateCharacterAliasRequest(charId: string, automatic = false): Promise<string> {
+  const result = await generateCharacterAliasRequestResult(charId, automatic);
+  return result.status === 'created' ? result.threadId : '';
 }
 export async function processCharacterAliases() {
   const scheduleKey = JSON.stringify(['schedule', currentAliasUser().id]);

@@ -51,6 +51,18 @@
 .alias-chat-header small { display:block; font-size:10px; color:#999; margin-top:2px; }
 .alias-chat-history { min-height:0; flex:1; overflow-y:auto; background-size:cover; background-position:center; padding:18px 12px; }
 .alias-chat-notice { text-align:center; color:#999; white-space:pre-wrap; font-size:11px; line-height:1.7; padding:4px 16px; }
+.alias-chat-timestamp { padding:10px 0 4px; text-align:center; font-size:10px; color:#999; }
+.alias-remember-dialog { display:flex; flex-direction:column; overflow:hidden; }
+.alias-remember-tools { display:flex; gap:8px; padding-bottom:12px; flex-shrink:0; }
+.alias-remember-tools button { border:1px solid #dae6eb; border-radius:20px; padding:5px 12px; font-size:12px; }
+.alias-remember-list { min-height:0; overflow-y:auto; max-height:52dvh; margin-bottom:16px; }
+.alias-remember-list label { display:flex; align-items:flex-start; gap:10px; padding:12px 0; border-bottom:1px solid #e4ebef; }
+.alias-remember-list input { margin-top:5px; flex-shrink:0; accent-color:#92aebb; width:17px; height:17px; }
+.alias-remember-list label>span { min-width:0; flex:1; }
+.alias-remember-list small { display:block; font-size:10px; color:#8e9ba6; margin-bottom:5px; }
+.alias-remember-list label>span>span { display:block; font-size:13px; line-height:1.7; overflow-wrap:anywhere; white-space:pre-wrap; }
+.alias-remember-dialog>.alias-primary { flex-shrink:0; }
+.wechat-app[data-wechat-theme=dark] :is(.alias-remember-tools button,.alias-remember-list label) { border-color:#40474e; }
 .alias-message { display:flex; align-items:flex-start; gap:12px; margin-top:20px; }
 .alias-message.is-user { flex-direction:row-reverse; }
 .alias-message .yy-chat-message-content { min-width:0; max-width:calc(100% - 104px); }

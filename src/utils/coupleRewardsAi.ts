@@ -19,6 +19,7 @@ export async function generateCoupleRewardAction(charId: string, options: { sign
   await settleCouplePoints();
   const space = readCoupleSpaces()[charId];
   if (space?.bindStatus !== 'bound') throw new Error('请先开通情侣空间。');
+  const spaceRevision = space.dataRevision || '';
   const chat = direct(charId), wallet = readCoupleWallet(charId);
   const blocked = options.blockedSince !== undefined;
   if (!chat || (blocked && (!chat.blocked || chat.blockedSince !== options.blockedSince))) throw new Error('聊天状态已变化，请重新操作。');
@@ -50,6 +51,8 @@ export async function generateCoupleRewardAction(charId: string, options: { sign
   }), { json: true, maxTokens: 650, temperature: .8, signal: options.signal, includeGlobalWorldBooks: false });
   if (options.signal?.aborted) throw new DOMException('已取消', 'AbortError');
   const fresh = direct(charId);
+  const currentSpace = readCoupleSpaces()[charId];
+  if (currentSpace?.bindStatus !== 'bound' || (currentSpace.dataRevision || '') !== spaceRevision) throw new Error('生成期间情侣空间已变化，未扣除积分或库存。');
   if (!fresh || activeMemoryArchive(charId) !== archiveKey || fresh.id !== chat.id || fresh.blocked !== chat.blocked ||
     (blocked && fresh.blockedSince !== options.blockedSince)) throw new Error('生成期间聊天状态已变化，没有扣除积分或库存。');
   const data = parseAiJson(response);
@@ -61,11 +64,11 @@ export async function generateCoupleRewardAction(charId: string, options: { sign
   const requestId = `char-reward:${crypto.randomUUID()}`;
   if (data.action === 'buy') {
     if (!affordable.some(p => p.id === product.id)) throw new Error('这件商品不在本次可兑换范围中，未扣积分。');
-    await buyCoupleCoupon(charId, 'char', product.id, requestId, reason);
+    await buyCoupleCoupon(charId, 'char', product.id, requestId, reason, spaceRevision);
   } else {
     if (!available.some(p => p.id === product.id)) throw new Error('这张券不在本次可使用范围中，未扣库存。');
     assertCouponAvailable(charId, 'char', product.id);
-    await useCoupleCoupon(charId, 'char', product.id, requestId, { note: reason, expectedChatId: chat.id, expectedArchiveId: archiveId,
+    await useCoupleCoupon(charId, 'char', product.id, requestId, { note: reason, expectedChatId: chat.id, expectedArchiveId: archiveId, expectedSpaceRevision: spaceRevision,
       ...(blocked ? { expectedBlockedSince: options.blockedSince } : {}),
     });
   }

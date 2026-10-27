@@ -1,4 +1,5 @@
 import { readStorageString, writeStorageString } from './localStorage';
+import { activeMemoryArchive } from './memoryArchives';
 
 export interface CharacterContextEvent {
   id: string;
@@ -6,6 +7,7 @@ export interface CharacterContextEvent {
   createdAt: string;
   content: string;
   source: 'taobao' | 'xianyu' | 'couple';
+  archiveKey?: string;
   // 高优先级事件会在角色下一次聊天时单独告知，读过之后标记为 consumed。
   priority?: 'high';
   consumed?: boolean;
@@ -49,7 +51,7 @@ export const appendCharacterContextEvent = (
 
 export const readPendingHighPriorityEvents = (charIds: string[], source: CharacterContextEvent['source']) =>
   readContextEvents().filter(
-    (event) => event.priority === 'high' && !event.consumed && event.source === source && charIds.includes(event.charId)
+    (event) => event.priority === 'high' && !event.consumed && event.source === source && charIds.includes(event.charId) && (!event.archiveKey || event.archiveKey === activeMemoryArchive(event.charId))
   );
 
 export const markCharacterContextEventsConsumed = (eventIds: string[]) => {

@@ -15,7 +15,9 @@ export function generateCoupleLetter(charId: string, useId: string): Promise<str
   if (existing) return existing;
   const task = (async () => {
     const use = findCouponUse(charId, useId);
-    if (readCoupleSpaces()[charId]?.bindStatus !== 'bound') throw new Error('请先开通情侣空间。');
+    const space = readCoupleSpaces()[charId];
+    if (space?.bindStatus !== 'bound') throw new Error('请先开通情侣空间。');
+    const spaceRevision = space.dataRevision || '';
     if (!use || use.owner !== 'user' || use.productId !== 'letter') throw new Error('这张情书券需要由你亲手写信。');
     if (use.fulfilledAt) return use.fulfillmentMessageId!;
     const chats = readStoredValue('yyphone:wechat-chats', [], (v): v is Record<string, any>[] => Array.isArray(v));
@@ -38,7 +40,7 @@ export function generateCoupleLetter(charId: string, useId: string): Promise<str
     const body = typeof letter.body === 'string' ? letter.body.trim() : '';
     const count = Array.from(body.replace(/\s/g, '')).length;
     if (count < 160 || count > 300) throw new Error('这封信的篇幅不合适，请重新收取。');
-    return fulfillCoupleLetter(charId, useId, 'char', { title: typeof letter.title === 'string' ? letter.title : '给你的一封信', body });
+    return fulfillCoupleLetter(charId, useId, 'char', { title: typeof letter.title === 'string' ? letter.title : '给你的一封信', body }, spaceRevision);
   })().finally(() => running.delete(key));
   running.set(key, task); return task;
 }

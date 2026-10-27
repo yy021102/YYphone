@@ -7,6 +7,7 @@ import {
 import { ChannelsProfile } from './ChannelsProfile';
 import { readStoredValue, writeStoredValue } from '../utils/localStorage';
 import { requestConfiguredAiText } from '../utils/aiApi';
+import { CHAT_COMMUNICATION_RULES } from '../utils/chatCommunication';
 import { ChannelsLiveRoom, LIVE_BACKGROUNDS, LIVE_GIFTS, type LiveBackground, type LiveGift } from './ChannelsLiveRoom';
 import { settleChannelGiftPayment } from '../utils/channelGiftFinance';
 import { writeAlipayData } from '../utils/alipayData';
@@ -230,6 +231,7 @@ export function ChannelsApp({ userName, avatarUrl, contacts: sourceContacts, onB
     return linked.length ? linked : contacts;
   };
   const promptContext = async (actors: Person[], privateConversation = false, query = '') => [
+    ...(privateConversation ? [CHAT_COMMUNICATION_RULES] : []),
     '你正在续写一个小手机内的虚构视频号平台。内容真实自然，符合人物设定、已有关系和时间线。不替玩家发言或决定行动。只输出 JSON。',
     '视频号只呈现公开可见的发言、行为和消息，不生成心声、内心独白、thought、thinking 或 think 标签。',
     `当前设备时间：${new Date().toLocaleString('zh-CN')}。保持当下的季节、作息与已有剧情连贯。`,

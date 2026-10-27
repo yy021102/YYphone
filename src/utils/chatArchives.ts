@@ -88,7 +88,7 @@ function copyCharacterMemory(charId: string, fromId: string, toId: string, branc
           if (Array.isArray(tuple) && tuple[0] === charId && tuple[1] === fromScope) checks[JSON.stringify([charId, toScope, tuple[2]])] = value;
         } catch { /* Global scheduling stamps do not belong to a chat archive. */ }
       }
-      changes[ALIAS_ACCOUNTS_KEY] = { ...aliases, checks, threads: [...aliases.threads, ...source.map(thread => ({ ...structuredClone(thread), id: crypto.randomUUID(), archiveKey: toScope, unread: 0 }))] };
+      changes[ALIAS_ACCOUNTS_KEY] = { ...aliases, checks, threads: [...aliases.threads, ...source.map(thread => ({ ...structuredClone(thread), id: crypto.randomUUID(), experienceKey: thread.experienceKey || thread.id, archiveKey: toScope, unread: 0 }))] };
     }
     const papers = readPaperNotes(), sourcePapers = papers.memories.filter(note => note.charId === charId && note.archiveKey === fromScope);
     if (sourcePapers.length) changes[PAPER_NOTES_KEY] = { ...papers, memories: [...papers.memories, ...sourcePapers.map(note => ({ ...structuredClone(note), id: `paper-branch-${crypto.randomUUID()}`, archiveKey: toScope }))] };

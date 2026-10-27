@@ -3,6 +3,7 @@ import { ChevronDown, Globe, Plus, Trash2 } from 'lucide-react';
 import { changeSearchProvider, configuredToolRelay, executeSearchTool, isBuiltinSearchTool, listMcpTools, mergeMcpDiscovery, newSearchTool, newTavilyMcpTool, readMcpSettings, redactSearchSecrets, saveMcpSettings, searchToolAuthType, type McpSettings, type SearchProvider, type SearchTool } from '../utils/mcpTools';
 import { searchToolErrorMessage } from '../utils/builtinTools';
 import { ApiModelPicker } from './ApiModelPicker';
+import { normalizeApiEndpoint } from '../utils/apiEndpoint';
 
 const providers: Array<[SearchProvider | 'tavily-mcp', string]> = [['tavily-mcp', 'Tavily（MCP）'], ['mcp', '自定义 MCP'], ['tavily', 'Tavily（REST）'], ['bocha', '博查搜索（REST）'], ['exa', 'Exa（REST）'], ['rest', '自定义 REST']];
 const inputClass = 'mt-1 w-full min-w-0 rounded-xl border border-white bg-white/70 px-3 py-2 text-xs text-slate-700 outline-none';
@@ -22,7 +23,8 @@ export function McpSettingsPanel() {
       ...(t.provider === 'mcp' && ['endpoint', 'apiKey', 'authType', 'authHeaderName', 'headers'].some(key => key in change) ? { remoteTools: undefined, toolName: '' } : {}) } : t) });
     setStatus(s => ({ ...s, [id]: '' }));
   };
-  const field = (label: string, value: string, change: (v: string) => void, type = 'text', placeholder = '') => <label className="block text-[11px] text-slate-600">{label}<input aria-label={label} type={type} value={value} onChange={e => change(e.target.value)} placeholder={placeholder} className={inputClass} autoComplete="off" /></label>;
+  const field = (label: string, value: string, change: (v: string) => void, type = 'text', placeholder = '', onBlur?: () => void) => <label className="block text-[11px] text-slate-600">{label}<input aria-label={label} type={type} value={value} onChange={e => change(e.target.value)} onBlur={onBlur} placeholder={placeholder} className={inputClass} autoComplete="off" /></label>;
+  const setDecisionEndpoint = (endpoint: string) => save({ ...latest.current, decisionApi: { ...latest.current.decisionApi, endpoint } });
   const area = (label: string, value: string, change: (v: string) => void) => <label className="block text-[11px] text-slate-600">{label}<textarea aria-label={label} rows={3} value={value} onChange={e => change(e.target.value)} className={`${inputClass} font-mono`} /></label>;
   const test = async (tool: SearchTool, call = false) => {
     setBusy(tool.id); setStatus(s => ({ ...s, [tool.id]: '' }));
@@ -64,10 +66,14 @@ export function McpSettingsPanel() {
       <p className="text-[10px] leading-relaxed text-slate-400">在角色的对话设置中开启后，由决策模型按需查询。外部搜索只发送查询词；决策模型会读取最近几条对话。</p>
       <details className="rounded-2xl bg-sky-50/60 p-3"><summary className="cursor-pointer text-xs font-semibold text-slate-600">决策副 API</summary><div className="mt-3 space-y-3">
         <p className="text-[10px] text-slate-400">全部留空使用当前主 API；填写后使用独立的副 API 判断是否调用工具。</p>
-        {field('决策 API 地址', settings.decisionApi.endpoint, endpoint => save({ ...settings, decisionApi: { ...settings.decisionApi, endpoint } }), 'url', 'https://…/v1')}
+        {field('决策 API 地址', settings.decisionApi.endpoint, setDecisionEndpoint, 'url', 'https://…/v1', () => {
+          const endpoint = normalizeApiEndpoint(latest.current.decisionApi.endpoint);
+          if (endpoint !== latest.current.decisionApi.endpoint) setDecisionEndpoint(endpoint);
+        })}
+        <p className="text-[10px] leading-relaxed text-slate-400">支持 DeepSeek 等 OpenAI 兼容接口。<button type="button" aria-label="使用 DeepSeek 官方地址" className="text-sky-700 underline underline-offset-2" onClick={() => setDecisionEndpoint('https://api.deepseek.com')}>填入 DeepSeek 官方地址</button>，使用对应开放平台的 API Key。</p>
         {field('决策 API Key', settings.decisionApi.apiKey, apiKey => save({ ...settings, decisionApi: { ...settings.decisionApi, apiKey } }), 'password')}
         {field('决策模型', settings.decisionApi.model || '', model => save({ ...settings, decisionApi: { ...settings.decisionApi, model } }))}
-        <ApiModelPicker label="决策" identity={JSON.stringify([settings.decisionApi.endpoint, settings.decisionApi.apiKey])}
+        <ApiModelPicker label="决策" identity={JSON.stringify([normalizeApiEndpoint(settings.decisionApi.endpoint), settings.decisionApi.apiKey])}
           resolveConnection={() => ({ ...latest.current.decisionApi, purpose: 'decision' })} model={settings.decisionApi.model || ''}
           onSelect={model => save({ ...latest.current, decisionApi: { ...latest.current.decisionApi, model } })} />
       </div></details>

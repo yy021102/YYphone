@@ -7,7 +7,7 @@ import { activeMemoryArchive, invalidateMemoryArchive } from './memoryArchives';
 import { buildPrompt } from './buildPrompt';
 import { deleteWeChatContact } from './deleteWeChatContact';
 import { ALIAS_ACCOUNTS_KEY, ALIAS_MEMORY_RULES, acknowledgeAliasFollowup, aliasPeer, aliasRoundThought, buildAliasMemoryContext, currentAliasUser, deleteAliasMessage, deleteUserAlias, editAliasMessage, emptyAliasState, pendingAliasFollowup, readAliasState, respondAliasRequest, revealUserAlias, saveUserAlias, sendAliasMessage, setAliasSwitcherHidden, updateAliasThread, visibleAliasThreads, writeAliasState } from './aliasAccounts';
-import { applyWithAlias, buildAliasPrompt, generateAliasReply, generateCharacterAliasRequest, processCharacterAliases, validatedAliasIdentityEvidence } from './aliasAi';
+import { applyWithAlias, buildAliasPrompt, generateAliasReply, generateCharacterAliasRequest, generateCharacterAliasRequestResult, processCharacterAliases, validatedAliasIdentityEvidence } from './aliasAi';
 import { extractMemoryCandidates, requestMemoryAiText } from './memoryAi';
 import { readDirectMessages } from './journalData';
 
@@ -213,6 +213,57 @@ test('a normally connected character may choose not to open a probing alias with
   mock.method(globalThis,'fetch',async()=>{calls++;return json({decision:'wait'});});
   await processCharacterAliases();assert.equal(calls,1);assert.equal(readAliasState().threads.length,0);assert.equal(readAliasState().profiles.length,0);
   await processCharacterAliases();assert.equal(calls,1);assert.equal(read('yyphone:wechat-chats')[0].blocked,false);
+});
+
+test('manual creation bypasses a recent automatic wait and explicitly generates a pending application', async () => {
+  writeAliasState({ ...readAliasState(), autoEnabled: true }); let calls = 0, manualPrompt = '';
+  mock.method(globalThis, 'fetch', async (_url: unknown, init?: RequestInit) => {
+    calls++;
+    if (calls === 1) return json({ decision: 'wait' });
+    manualPrompt = JSON.parse(String(init?.body)).messages.at(-1).content;
+    return json({ decision: 'request', motive: '想换一种方式问问近况', profile: { name: '借一阵风', handle: 'wind_guest', bio: '' }, message: '刚好路过 想和你聊聊' });
+  });
+  assert.deepEqual(await generateCharacterAliasRequestResult('character-private-id', true), { status: 'wait' });
+  assert.deepEqual(await generateCharacterAliasRequestResult('character-private-id', true), { status: 'cooldown' });
+  const result = await generateCharacterAliasRequestResult('character-private-id');
+  assert.equal(result.status, 'created'); assert.equal(calls, 2);
+  assert.match(manualPrompt, /手动点击「生成申请」/); assert.match(manualPrompt, /不再判断是否联系/);
+  assert(!manualPrompt.includes('只返回{"decision":"wait"} 或'));
+  assert.equal(readAliasState().threads[0].status, 'pending'); assert.equal(readAliasState().threads[0].identity, 'unknown');
+  assert.equal(read('yyphone:wechat-chats')[0].blocked, true);
+});
+
+test('existing pending and accepted alias contacts return their real destination without another API request', async () => {
+  let calls = 0;
+  mock.method(globalThis, 'fetch', async () => { calls++; return json({ decision: 'request', profile: { name: '路过', handle: 'passing_by', bio: '' }, message: '你好' }); });
+  const created = await generateCharacterAliasRequestResult('character-private-id'); assert.equal(created.status, 'created');
+  if (created.status !== 'created') return;
+  assert.deepEqual(await generateCharacterAliasRequestResult('character-private-id'), { status: 'existing', threadId: created.threadId, pending: true });
+  respondAliasRequest(created.threadId, true);
+  assert.deepEqual(await generateCharacterAliasRequestResult('character-private-id'), { status: 'existing', threadId: created.threadId, pending: false });
+  assert.equal(calls, 1); assert.equal(readAliasState().threads.length, 1);
+});
+
+test('rejection permits immediate manual creation while a repeated click during generation is reported as busy', async () => {
+  let finish!: () => void, calls = 0;
+  mock.method(globalThis, 'fetch', () => { calls++; return new Promise<Response>(resolve => { finish = () => resolve(json({ decision: 'request', profile: { name: '云外', handle: 'beyond_cloud', bio: '' }, message: '你好' })); }); });
+  const task = generateCharacterAliasRequestResult('character-private-id');
+  assert.deepEqual(await generateCharacterAliasRequestResult('character-private-id'), { status: 'busy' }); assert.equal(calls, 1);
+  finish(); const first = await task; assert.equal(first.status, 'created'); if (first.status !== 'created') return;
+  respondAliasRequest(first.threadId, false);
+  const retry = generateCharacterAliasRequestResult('character-private-id'); finish(); assert.equal((await retry).status, 'created');
+  assert.equal(calls, 2); assert.equal(readAliasState().threads.filter(t => t.status === 'pending').length, 1);
+});
+
+test('manual generation works with automatic contact disabled; an invalid wait or network error remains retryable', async () => {
+  let calls = 0;
+  mock.method(globalThis, 'fetch', async () => { calls++; if (calls === 1) return json({ decision: 'wait' }); if (calls === 2) return new Response('', { status: 503 }); return json({ decision: 'request', profile: { name: '巷口', handle: 'lane_corner', bio: '' }, message: '想认识你' }); });
+  assert.deepEqual(await generateCharacterAliasRequestResult('character-private-id', true), { status: 'disabled' }); assert.equal(calls, 0);
+  await assert.rejects(generateCharacterAliasRequestResult('character-private-id'), /没有生成好友申请/);
+  assert.equal(readAliasState().threads.length, 0);
+  await assert.rejects(generateCharacterAliasRequestResult('character-private-id'));
+  assert.equal(readAliasState().threads.length, 0);
+  assert.equal((await generateCharacterAliasRequestResult('character-private-id')).status, 'created'); assert.equal(calls, 3);
 });
 
 test('fresh stranger interactions encourage a main-account aside once, while newer activity and failed generations remain pending',async()=>{

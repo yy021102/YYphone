@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { EyeOff, Plus, UserRound, X } from 'lucide-react';
 import { ALIAS_EVENT, aliasPeer, currentAliasUser, deleteUserAlias, readAliasState, respondAliasRequest, saveUserAlias, setAliasSwitcherHidden, visibleAliasThreads, writeAliasState, type AliasProfile, type AliasState } from '../utils/aliasAccounts';
-import { applyWithAlias, generateCharacterAliasRequest } from '../utils/aliasAi';
+import { applyWithAlias, generateCharacterAliasRequestResult } from '../utils/aliasAi';
 import { compressImageFile } from '../utils/imageFile';
 import './wechatAliases.css';
 
@@ -47,6 +47,18 @@ export function AliasManager({ state, contacts, onOpen, onSelect }: { state: Ali
   useEffect(() => { if (!contacts.some(c => c.id === charId)) setCharId(contacts[0]?.id || ''); }, [contacts, charId]);
   const edit = (profile?: AliasProfile) => { setEditing(profile?.id || ''); setDraft(profile ? { name: profile.name, handle: profile.handle, avatarUrl: profile.avatarUrl, bio: profile.bio } : { name: '', handle: '', avatarUrl: '', bio: '' }); setError(''); };
   const act = async (task: () => Promise<void>) => { if (busy) return; setBusy(true); setError(''); setStatus(''); try { await task(); } catch(e) { setError(errorText(e)); } finally { setBusy(false); } };
+  const generateRequest = () => act(async () => {
+    const result = await generateCharacterAliasRequestResult(charId);
+    switch (result.status) {
+      case 'created': setStatus('收到新的好友申请'); break;
+      case 'existing':
+        if (result.pending) setStatus('已有一条好友申请待处理');
+        else onOpen(result.threadId);
+        break;
+      case 'busy': setStatus('申请正在生成中，请稍等'); break;
+      default: throw new Error('本次没有生成好友申请，请重试。');
+    }
+  });
   return <div className="alias-manager">
     <section className="alias-card"><label className="alias-toggle">显示账号切换条<input aria-label="显示账号切换条" type="checkbox" checked={!state.switcherHidden} onChange={e => setAliasSwitcherHidden(!e.target.checked)} /></label></section>
     <div className="alias-section-heading"><h2>我的小号</h2><button type="button" aria-label="新建小号" onClick={() => edit()}><Plus size={18} /></button></div>
@@ -61,7 +73,7 @@ export function AliasManager({ state, contacts, onOpen, onSelect }: { state: Ali
     {ownProfiles(state).map(p => <section className="alias-card" key={p.id}><div className="alias-profile-line"><Avatar name={p.name} url={p.avatarUrl} /><span><strong>{p.name}</strong><small>{p.handle}</small></span></div>{p.bio && <p className="alias-bio">{p.bio}</p>}<div className="alias-actions"><button type="button" onClick={() => edit(p)}>编辑</button><button type="button" className="is-primary" onClick={() => onSelect(p.id)}>进入消息</button><button type="button" className="is-danger" onClick={() => { if (!window.confirm('删除这个小号和它的全部对话？')) return; try { deleteUserAlias(p.id); } catch(e) { setError(errorText(e)); } }}>删除</button></div></section>)}
     {!ownProfiles(state).length && editing === null && <button type="button" className="alias-create-empty" onClick={() => edit()}><Plus size={24} /><span>创建一个新身份</span></button>}
     {ownProfiles(state).length > 0 && <section className="alias-card"><h3>添加朋友</h3><label>使用账号<select aria-label="申请使用的小号" value={applyAccount || ownProfiles(state)[0]?.id || ''} onChange={e => setApplyAccount(e.target.value)}>{ownProfiles(state).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label><label>添加角色<select aria-label="小号添加角色" value={charId} onChange={e => setCharId(e.target.value)}><option value="">请选择</option>{contacts.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label><label>申请附言<textarea aria-label="小号好友申请附言" rows={2} maxLength={500} value={note} onChange={e => setNote(e.target.value)} /></label><button type="button" className="alias-primary" disabled={busy || !charId} onClick={() => void act(async () => { const id = await applyWithAlias(applyAccount || ownProfiles(state)[0]?.id || '', charId, note); onOpen(id); })}>{busy ? '申请中…' : '发送好友申请'}</button></section>}
-    <section className="alias-card"><h3>新的朋友</h3><label className="alias-toggle">允许角色主动用小号联系我<input aria-label="允许角色主动用小号联系我" type="checkbox" checked={state.autoEnabled} onChange={e => writeAliasState({ ...readAliasState(), autoEnabled: e.target.checked })} /></label><div className="alias-inline"><select aria-label="生成小号申请的角色" value={charId} onChange={e => setCharId(e.target.value)}><option value="">请选择角色</option>{contacts.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select><button type="button" disabled={busy || !charId} onClick={() => void act(async () => { const id = await generateCharacterAliasRequest(charId); setStatus(id ? '收到新的好友申请' : '暂时没有新的好友申请'); })}>{busy ? '生成中…' : '生成申请'}</button></div><AliasFriendRequests state={state} onOpen={onOpen} /></section>
+    <section className="alias-card"><h3>新的朋友</h3><label className="alias-toggle">允许角色主动用小号联系我<input aria-label="允许角色主动用小号联系我" type="checkbox" checked={state.autoEnabled} onChange={e => writeAliasState({ ...readAliasState(), autoEnabled: e.target.checked })} /></label><div className="alias-inline"><select aria-label="生成小号申请的角色" value={charId} onChange={e => setCharId(e.target.value)}><option value="">请选择角色</option>{contacts.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select><button type="button" disabled={busy || !charId} onClick={() => void generateRequest()}>{busy ? '生成中…' : '生成申请'}</button></div><AliasFriendRequests state={state} onOpen={onOpen} /></section>
     {status && <p className="alias-status" role="status">{status}</p>}{(error || state.autoEnabled && state.lastError) && <p className="alias-error" role="alert">{error || state.lastError}</p>}
   </div>;
 }

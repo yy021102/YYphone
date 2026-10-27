@@ -7,10 +7,11 @@ import {
   StickyNote,
   ChevronLeft,
   ChevronRight,
+  ArrowLeft,
   Sparkles,
   Upload,
   Download,
-  Menu,
+  Settings,
   X,
   Send,
   Unlink,
@@ -20,14 +21,13 @@ import {
   ImagePlus,
   RotateCcw,
 } from 'lucide-react';
-import { AppHeader } from '../components/AppHeader';
 import { CoupleRecordEditor } from '../components/CoupleRecordEditor';
 import { CoupleSpacePages } from '../components/CoupleSpacePages';
 import { CoupleRewardsShop } from '../components/CoupleRewardsShop';
 import { deleteCoupleMood, editCoupleRecord, type CoupleRecordEdit } from '../utils/coupleRecords';
-import { showYyError } from '../components/ErrorDialog';
 import { readAlipayContacts, AlipayContact } from '../utils/alipayData';
-import { appendCharacterContextEvent } from '../utils/characterContext';
+import { clearCoupleSpace, exportCoupleSpace, importCoupleSpace, parseCoupleSpaceBackup, unbindCoupleSpace } from '../utils/coupleSpaceArchive';
+import { COUPLE_REWARDS_EVENT } from '../utils/coupleRewards';
 import { compressImageFile } from '../utils/imageFile';
 import {
   createEmptyCoupleSpace,
@@ -214,6 +214,7 @@ export interface StickyNoteItem {
 
 export interface CharacterCoupleSpace {
   charId: string;
+  dataRevision?: string;
   bindStatus: SpaceBindStatus;
   inviteMessage?: string;
   startDate: string;
@@ -253,14 +254,11 @@ export const CoupleSpaceApp: React.FC<CoupleSpaceAppProps> = ({ onBack }) => {
   const [spacesMap, setSpacesMap] = useState<Record<string, CharacterCoupleSpace>>(() => readCoupleSpaces());
   const spacesRef = useRef(spacesMap);
   spacesRef.current = spacesMap;
-  const persistReadyRef = useRef(false);
   useEffect(() => {
-    if (!persistReadyRef.current) {
-      persistReadyRef.current = true;
-      return;
-    }
-    writeCoupleSpaces(spacesMap);
-  }, [spacesMap]);
+    const refresh = () => { const latest = readCoupleSpaces(); spacesRef.current = latest; setSpacesMap(latest); };
+    window.addEventListener(COUPLE_REWARDS_EVENT, refresh);
+    return () => window.removeEventListener(COUPLE_REWARDS_EVENT, refresh);
+  }, []);
 
   const currentSpace: CharacterCoupleSpace =
     spacesMap[selectedCharId] || createEmptyCoupleSpace(selectedCharId);
@@ -269,10 +267,11 @@ export const CoupleSpaceApp: React.FC<CoupleSpaceAppProps> = ({ onBack }) => {
     charId: string,
     updater: (prev: CharacterCoupleSpace) => CharacterCoupleSpace
   ) => {
-    setSpacesMap((prev) => ({
-      ...prev,
-      [charId]: updater(prev[charId] || createEmptyCoupleSpace(charId)),
-    }));
+    const latest = readCoupleSpaces();
+    const next = { ...latest, [charId]: updater(latest[charId] || createEmptyCoupleSpace(charId)) };
+    writeCoupleSpaces(next);
+    spacesRef.current = next;
+    setSpacesMap(next);
   };
 
   const updateCurrentSpace = (updater: (prev: CharacterCoupleSpace) => CharacterCoupleSpace) =>
@@ -282,6 +281,8 @@ export const CoupleSpaceApp: React.FC<CoupleSpaceAppProps> = ({ onBack }) => {
     'none' | 'anniversary' | 'diary' | 'qa' | 'sticky'
   >('none');
   const [showTopMenu, setShowTopMenu] = useState(false);
+  const [managementBusy, setManagementBusy] = useState(false), [managementError, setManagementError] = useState('');
+  const managementWorking = useRef(false);
   const [showStartDateModal, setShowStartDateModal] = useState(false);
   const [tempStartDate, setTempStartDate] = useState(currentSpace.startDate);
   const [tempHeaderBg, setTempHeaderBg] = useState(currentSpace.headerBgUrl);
@@ -491,54 +492,32 @@ export const CoupleSpaceApp: React.FC<CoupleSpaceAppProps> = ({ onBack }) => {
     setBannerTip(accept ? `已正式开通与「${currentChar.name}」的情侣空间。` : '已婉拒邀请。');
   };
 
-  // 清除空间数据：静默执行，不写入 characterContext，不通知角色。
-  const handleClearSpaceSilently = () => {
-    if (aiWorking.current) { setBannerTip('请等待当前操作完成。'); return; }
-    if (
-      !window.confirm(
-        `确定清除与「${currentChar.name}」情侣空间内的所有数据吗？（此操作静默执行，不通知角色）`
-      )
-    )
-      return;
-    updateCurrentSpace((prev) => ({
-      ...prev,
-      moods: {},
-      anniversaries: [],
-      diaries: [],
-      qaList: [],
-      stickyNotes: [],
-    }));
-    setShowTopMenu(false);
-    setBannerTip(`已静默清空当前情侣空间数据。`);
+  const runManagement = async (task: () => Promise<void>) => {
+    if (managementWorking.current || aiWorking.current) return;
+    managementWorking.current = true; setManagementBusy(true); setManagementError('');
+    try { await task(); const latest = readCoupleSpaces(); spacesRef.current = latest; setSpacesMap(latest); }
+    catch (error) { setManagementError(error instanceof Error ? error.message : '操作失败，请重试。'); }
+    finally { managementWorking.current = false; setManagementBusy(false); }
   };
-
-  // 解除关系：重置为未开通，并向角色记忆写入高优先级事件。
-  const handleUnbindAndNotifyChar = () => {
-    if (aiWorking.current) { setBannerTip('请等待当前操作完成。'); return; }
-    if (
-      !window.confirm(
-        `确定要与「${currentChar.name}」解除情侣空间绑定关系吗？（解绑后将通知角色）`
-      )
-    )
-      return;
-    updateCurrentSpace((prev) => ({
-      ...prev,
-      bindStatus: 'unbound',
-      inviteMessage: undefined,
-    }));
-    try {
-      appendCharacterContextEvent(
-        selectedCharId,
-        `玩家解除了与你的情侣空间绑定关系，你们之间的情侣空间已关闭（${todayStr()}）。请根据你的人设和与玩家的关系，在下次聊天时自然地对此作出反应。`,
-        'couple',
-        { priority: 'high' }
-      );
-    } catch (error) {
-      console.error('Could not notify the character about the unbind.', error);
-    }
-    setShowTopMenu(false);
-    setBannerTip(`已解除与「${currentChar.name}」的情侣空间关系，TA 会在下次聊天时知道。`);
-  };
+  const handleClearSpaceSilently = () => runManagement(async () => {
+    if (!window.confirm(`清空与「${currentChar.name}」的心情、纪念日、日记、问答、便签、积分及券库存？绑定关系和壁纸会保留，不会通知角色。建议先导出备份。`)) return;
+    await clearCoupleSpace(selectedCharId);
+    setShowTopMenu(false); setBannerTip('已清空当前空间数据');
+  });
+  const handleUnbindAndNotifyChar = () => runManagement(async () => {
+    if (!window.confirm(`与「${currentChar.name}」解绑情侣空间？原有记录和积分会保留，微信对话中会出现解绑卡片，角色会知道这次变化。`)) return;
+    await unbindCoupleSpace(selectedCharId);
+    setShowTopMenu(false); setBannerTip('情侣空间已解绑');
+  });
+  const handleImportCoupleData = (file?: File) => runManagement(async () => {
+    if (!file) return;
+    const charId = selectedCharId;
+    if (file.size > 25 * 1024 * 1024) throw new Error('备份文件过大，请使用小于 25 MB 的文件。');
+    const backup = parseCoupleSpaceBackup(await file.text(), charId);
+    if (!window.confirm(`用这份备份覆盖与「${currentChar.name}」的当前空间内容和壁纸${backup.wallet ? '、积分及券库存' : ''}？不会改变当前绑定状态，也不会修改微信聊天记录。`)) return;
+    await importCoupleSpace(charId, backup);
+    setShowTopMenu(false); setBannerTip('已恢复当前空间数据');
+  });
 
   const handleSaveBackground = (value: string) => {
     updateCurrentSpace((prev) => ({
@@ -572,16 +551,17 @@ export const CoupleSpaceApp: React.FC<CoupleSpaceAppProps> = ({ onBack }) => {
     reader.readAsDataURL(file);
   };
 
-  const handleExportCoupleData = () => {
-    const dataStr = JSON.stringify({ spacesMap, selectedCharId }, null, 2);
+  const handleExportCoupleData = () => runManagement(async () => {
+    const dataStr = JSON.stringify(await exportCoupleSpace(selectedCharId), null, 2);
     const blob = new Blob([dataStr], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `couple_space_backup_${todayStr()}.json`;
+    a.download = `couple_space_${selectedCharId}_${todayStr()}.json`;
     a.click();
     URL.revokeObjectURL(url);
-  };
+    setBannerTip('已导出当前空间数据');
+  });
 
   const getMoodById = (id?: string) => MOOD_OPTIONS.find((m) => m.id === id);
 
@@ -599,16 +579,14 @@ export const CoupleSpaceApp: React.FC<CoupleSpaceAppProps> = ({ onBack }) => {
       <div className="absolute top-1/3 -right-20 w-64 h-64 rounded-full bg-sky-100/30 blur-3xl pointer-events-none" />
 
       {/* 顶栏 */}
-      {activePage === 'none' && <AppHeader
-        title="情侣空间"
-        onBack={onBack}
-        rightAction={
-          <div className="flex items-center gap-1.5">
-            {/* 角色切换下拉：去掉高亮玫粉，采用柔和灰紫/豆沙淡粉 */}
+      {activePage === 'none' && <header aria-label="情侣空间导航" className="sticky top-0 z-30 grid grid-cols-[40px_minmax(0,1fr)_40px] items-center gap-2 glass-nav px-4 pt-[env(safe-area-inset-top,0px)] md:pt-2.5 pb-1.5 shrink-0 border-b border-white/60">
+            <button type="button" onClick={onBack} aria-label="返回上一级" className="w-10 h-10 flex items-center justify-center rounded-full text-[#2C4A5C] hover:bg-black/5 active:scale-95"><ArrowLeft size={20} strokeWidth={2.4} /></button>
             <select
+              aria-label="选择情侣空间角色"
               value={selectedCharId}
-              onChange={(e) => setSelectedCharId(e.target.value)}
-              className="px-2.5 py-1 rounded-full bg-white/80 backdrop-blur-md border border-slate-200/80 text-[11px] font-bold text-[#7E7484] outline-none shadow-2xs cursor-pointer"
+              disabled={managementBusy}
+              onChange={(e) => { setSelectedCharId(e.target.value); setBannerTip(''); }}
+              className="justify-self-center min-w-28 max-w-full px-4 py-2 text-center rounded-full bg-white/80 backdrop-blur-md border border-slate-200/80 text-xs font-bold text-[#7E7484] outline-none shadow-2xs cursor-pointer"
             >
               {contacts.length === 0 ? (
                 <option value="default_char">恋人</option>
@@ -622,30 +600,19 @@ export const CoupleSpaceApp: React.FC<CoupleSpaceAppProps> = ({ onBack }) => {
             </select>
 
             <button
+              type="button"
+              aria-label="情侣空间设置"
+              disabled={managementBusy || !!aiBusy}
               onClick={() => {
-                setBgDraft(currentSpace.pageBgUrl || '');
-                setBgEditor('page');
-              }}
-              className="w-8 h-8 flex items-center justify-center text-slate-500 bg-white/75 hover:bg-white rounded-full border border-white shadow-2xs cursor-pointer active:scale-95"
-              title="更换空间背景"
-            >
-              <ImagePlus className="w-4 h-4" />
-            </button>
-
-            <button
-              onClick={() => {
-                setTempStartDate(currentSpace.startDate);
-                setTempHeaderBg(currentSpace.headerBgUrl);
+                setManagementError('');
                 setShowTopMenu(true);
               }}
-              className="w-8 h-8 flex items-center justify-center text-slate-500 bg-white/75 hover:bg-white rounded-full border border-white shadow-2xs cursor-pointer active:scale-95"
-              title="空间设置、导入导出与解绑"
+              className="w-10 h-10 flex items-center justify-center text-slate-500 bg-white/75 hover:bg-white rounded-full border border-white shadow-2xs cursor-pointer active:scale-95"
+              title="情侣空间设置"
             >
-              <Menu className="w-4 h-4" />
+              <Settings className="w-4 h-4" />
             </button>
-          </div>
-        }
-      />}
+      </header>}
 
       {/* 主体滚动容器 */}
       {activePage === 'none' && <div className="relative z-10 flex-1 min-h-0 overflow-y-auto no-scrollbar px-4 pt-1 space-y-3 pb-[max(env(safe-area-inset-bottom,0px),24px)]">
@@ -1053,7 +1020,7 @@ export const CoupleSpaceApp: React.FC<CoupleSpaceAppProps> = ({ onBack }) => {
                 </div>
               </button>
             </div>
-            <CoupleRewardsShop key={selectedCharId} charId={selectedCharId} charName={currentChar.name} userName={userProfile.name} />
+            <CoupleRewardsShop key={`${selectedCharId}:${currentSpace.dataRevision || ''}`} charId={selectedCharId} charName={currentChar.name} userName={userProfile.name} />
           </>
         )}
       </div>}
@@ -1335,49 +1302,47 @@ export const CoupleSpaceApp: React.FC<CoupleSpaceAppProps> = ({ onBack }) => {
 
       {/* ==================== 弹窗 D：右上角管理菜单 ==================== */}
       {showTopMenu && (
-        <div className="absolute inset-0 z-50 bg-slate-900/25 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="w-full max-w-sm bg-white/95 backdrop-blur-2xl border border-white rounded-[26px] p-5 shadow-lg space-y-3.5">
+        <div className="absolute inset-0 z-50 bg-slate-900/25 backdrop-blur-xs flex items-center justify-center p-4" onClick={event => { if (event.target === event.currentTarget && !managementBusy) setShowTopMenu(false); }}>
+          <section role="dialog" aria-modal="true" aria-label="情侣空间设置" className="w-full max-w-sm max-h-[85dvh] overflow-y-auto bg-white/95 backdrop-blur-2xl border border-white rounded-[26px] p-5 shadow-lg space-y-3.5">
             <div className="flex items-center justify-between">
-              <h3 className="text-xs font-bold text-slate-700">空间管理</h3>
+              <div><h3 className="text-sm font-bold text-slate-700">空间设置</h3><p className="mt-1 text-[11px] text-slate-400">{currentChar.name}</p></div>
               <button
+                type="button"
+                aria-label="关闭情侣空间设置"
+                disabled={managementBusy}
                 onClick={() => setShowTopMenu(false)}
                 className="w-6 h-6 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-600 cursor-pointer"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
             </div>
-
+            <fieldset disabled={managementBusy} className="space-y-3.5 disabled:opacity-60">
+            <div className="grid grid-cols-2 gap-2">
+              <button type="button" onClick={() => { setBgDraft(currentSpace.pageBgUrl || ''); setBgEditor('page'); setShowTopMenu(false); }} className="rounded-2xl border border-rose-100 bg-gradient-to-br from-rose-50 to-sky-50 p-3 text-xs text-slate-600 flex items-center justify-center gap-2"><ImagePlus size={16} />空间壁纸</button>
+              <button type="button" onClick={() => { setBgDraft(currentSpace.calendarBgUrl || ''); setBgEditor('calendar'); setShowTopMenu(false); }} className="rounded-2xl border border-sky-100 bg-gradient-to-br from-sky-50 to-rose-50 p-3 text-xs text-slate-600 flex items-center justify-center gap-2"><CalendarIcon size={16} />日历壁纸</button>
+            </div>
+            <button type="button" onClick={() => { setTempStartDate(currentSpace.startDate); setTempHeaderBg(currentSpace.headerBgUrl); setShowStartDateModal(true); setShowTopMenu(false); }} className="w-full rounded-2xl border border-slate-100 bg-slate-50/80 py-2.5 text-xs text-slate-500">起始日与头图</button>
             <div className="grid grid-cols-2 gap-2">
               <button
                 onClick={handleExportCoupleData}
                 className="p-3 rounded-2xl bg-slate-50 border border-slate-200/80 flex flex-col items-center gap-1 text-xs text-slate-600 cursor-pointer"
               >
                 <Download className="w-4 h-4 text-slate-400" />
-                <span>导出数据</span>
+                <span>导出当前空间</span>
               </button>
 
               <label className="p-3 rounded-2xl bg-slate-50 border border-slate-200/80 flex flex-col items-center gap-1 text-xs text-slate-600 cursor-pointer">
                 <Upload className="w-4 h-4 text-slate-400" />
-                <span>导入数据</span>
+                <span>导入当前空间</span>
                 <input
+                  aria-label="导入当前情侣空间"
                   type="file"
                   accept=".json"
                   className="hidden"
                   onChange={(e) => {
                     const file = e.target.files?.[0];
-                    if (!file) return;
-                    const reader = new FileReader();
-                    reader.onload = (ev) => {
-                      try {
-                        const data = JSON.parse(String(ev.target?.result));
-                        if (data.spacesMap) setSpacesMap(data.spacesMap);
-                        setShowTopMenu(false);
-                        setBannerTip('空间数据已恢复。');
-                      } catch {
-                        showYyError('导入文件格式有误', '导入失败');
-                      }
-                    };
-                    reader.readAsText(file);
+                    e.target.value = '';
+                    void handleImportCoupleData(file);
                   }}
                 />
               </label>
@@ -1389,18 +1354,22 @@ export const CoupleSpaceApp: React.FC<CoupleSpaceAppProps> = ({ onBack }) => {
                 className="w-full py-2.5 px-3 rounded-2xl bg-slate-100 hover:bg-slate-200/60 text-slate-600 text-xs flex items-center justify-center gap-1.5 cursor-pointer"
               >
                 <Eraser className="w-4 h-4 text-slate-400" />
-                <span>清空此空间数据（静默）</span>
+                <span>清空当前空间数据</span>
               </button>
 
               <button
+                disabled={currentSpace.bindStatus !== 'bound'}
                 onClick={handleUnbindAndNotifyChar}
                 className="w-full py-2.5 px-3 rounded-2xl bg-rose-50/70 hover:bg-rose-100/70 border border-rose-200/70 text-rose-500 text-xs font-medium flex items-center justify-center gap-1.5 cursor-pointer"
               >
                 <Unlink className="w-4 h-4" />
-                <span>解除绑定关系（通知角色）</span>
+                <span>解绑情侣空间</span>
               </button>
             </div>
-          </div>
+            </fieldset>
+            {managementBusy && <p role="status" className="text-center text-xs text-slate-400">正在处理…</p>}
+            {managementError && <p role="alert" className="text-xs leading-relaxed text-rose-500">{managementError}</p>}
+          </section>
         </div>
       )}
     </div>

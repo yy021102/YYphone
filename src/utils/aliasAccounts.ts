@@ -18,6 +18,9 @@ export type AliasThread = {
   removedByCharacterAt?: string;
   activityId?: string;
   mainMentionedActivityId?: string;
+  experienceKey?: string;
+  rememberedMessageIds?: string[];
+  rememberedRequestStamp?: string;
 };
 export type AliasState = { profiles: AliasProfile[]; threads: AliasThread[]; autoEnabled: boolean; switcherHidden?: boolean; checks: Record<string, number>; lastError: string };
 export const ALIAS_MEMORY_RULES = '【账号来源与记忆边界】主号、小号是独立的消息来源。涉及其他账号时，保留账号昵称、谁用哪个账号向谁说了什么，以及当时是否知道真实身份；不把小号原话改写成主号当面说过的话，不把主号的转述当作新的小号发言。未确认身份的陌生账号，其喜好、承诺和经历不能归给玩家；角色自己使用小号时的经历，也不能记成发生在角色主号里。相似语气、猜测和试探不等于身份确认；后来坦白只能记作后来得知，不改写之前的认知。资料没有说明来源或确认经过时，保留未知，不补造认出身份的经过。';
@@ -30,7 +33,8 @@ export function isAliasState(v: unknown): v is AliasState {
     Array.isArray(v.profiles) && new Set(v.profiles.map(p => row(p) ? p.id : null)).size === v.profiles.length && v.profiles.every(p => row(p) && strings(p, ['id', 'userProfileId', 'name', 'handle', 'avatarUrl', 'bio', 'createdAt']) && ['user', 'character'].includes(p.owner) && (p.owner === 'user' || typeof p.charId === 'string')) &&
     Array.isArray(v.threads) && new Set(v.threads.map(t => row(t) ? t.id : null)).size === v.threads.length && v.threads.every(t => row(t) && strings(t, ['id', 'charId', 'userProfileId', 'archiveKey', 'userAccountId', 'characterAccountId', 'requestText', 'requestReply', 'createdAt', 'updatedAt']) && ['user', 'character'].includes(t.requester) && ['pending', 'accepted', 'rejected'].includes(t.status) && ['unknown', 'suspected', 'revealed'].includes(t.identity) && typeof t.blocked === 'boolean' && Number.isInteger(t.unread) && Number.isInteger(t.revision) && Array.isArray(t.messages) && t.messages.every(m => row(m) && strings(m, ['id', 'text', 'createdAt']) && ['user', 'character', 'system'].includes(m.from) && (m.identityAtTime === undefined || ['unknown', 'suspected', 'revealed'].includes(m.identityAtTime))) &&
       (t.identityEvidence === undefined || Array.isArray(t.identityEvidence) && t.identityEvidence.every(e => row(e) && strings(e, ['messageId', 'quote', 'referenceQuote']) && ['shared-memory', 'signature-phrase'].includes(e.kind))) &&
-      ['contactMotive', 'removedByCharacterAt', 'activityId', 'mainMentionedActivityId'].every(key => t[key] === undefined || typeof t[key] === 'string') &&
+      ['contactMotive', 'removedByCharacterAt', 'activityId', 'mainMentionedActivityId', 'experienceKey', 'rememberedRequestStamp'].every(key => t[key] === undefined || typeof t[key] === 'string') &&
+      (t.rememberedMessageIds === undefined || Array.isArray(t.rememberedMessageIds) && t.rememberedMessageIds.every(id => typeof id === 'string')) &&
       t.messages.every(m => (m.kind === undefined || ['text', 'image'].includes(m.kind)) && ['thought', 'replyBatchId', 'editedAt'].every(key => m[key] === undefined || typeof m[key] === 'string')));
 }
 export function readAliasState(): AliasState {
@@ -53,6 +57,7 @@ export function currentAliasUser() {
   const profile = Array.isArray(collection.profiles) ? collection.profiles.find((p: unknown) => row(p) && p.id === collection.activeProfileId) : undefined;
   return { id: typeof profile?.id === 'string' ? profile.id : 'persona-default', name: profile?.nickname?.trim() || '我', avatarUrl: typeof profile?.avatarUrl === 'string' ? profile.avatarUrl : '', bio: typeof profile?.description === 'string' ? profile.description : '' };
 }
+export const canReadAliasExperience = (message: { source?: string; aliasExperience?: unknown }) => message.source !== 'alias-experience' || row(message.aliasExperience) && message.aliasExperience.userProfileId === currentAliasUser().id;
 export const aliasCharacter = (id: string) => aliasRows('pocketos:wechat-contacts').find(c => c.id === id);
 export const visibleAliasThreads = (state = readAliasState()) => state.threads.filter(t => t.userProfileId === currentAliasUser().id && aliasCharacter(t.charId) && t.archiveKey === activeMemoryArchive(t.charId));
 export function aliasPeer(thread: AliasThread, state = readAliasState()) {
@@ -133,17 +138,18 @@ export const aliasMessageContext = (message: AliasMessage) => message.kind === '
 export const aliasRoundThought = (message: AliasMessage, messages: AliasMessage[]) => message.thought?.trim() || (message.replyBatchId ? messages.find(m => m.from === 'character' && m.replyBatchId === message.replyBatchId && m.thought?.trim())?.thought : '') || '';
 
 /** A fresh contact is a possible topic for the next main-account reply, never evidence of ownership. */
-export function pendingAliasFollowup(charId: string) {
+export function pendingAliasFollowup(charId: string, visibleExperienceKeys?: Set<string>) {
   const state = readAliasState();
-  const threads = visibleAliasThreads(state).filter(t => t.charId === charId && t.characterAccountId === 'main' && (t.status === 'accepted' || t.status === 'rejected') &&
+  const threads = visibleAliasThreads(state).filter(t => t.charId === charId && (t.status === 'accepted' || t.requester === 'user' && t.status === 'rejected') &&
+    (!visibleExperienceKeys || visibleExperienceKeys.has(t.experienceKey || t.id)) &&
     (t.activityId || t.messages.at(-1)?.id || t.requestReply) && aliasActivityStamp(t) !== t.mainMentionedActivityId)
     .sort((a,b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 1);
   const items = threads.map(t => ({ threadId: t.id, activityId: aliasActivityStamp(t) }));
   return { charId, userProfileId: currentAliasUser().id, archiveKey: activeMemoryArchive(charId), items, text: !threads.length ? '' : [
     '【刚发生的账号来往 · 主号可以主动聊起】你刚与下面的账号实际接触过。接下来这轮主号回复，请优先找一个自然的空隙顺嘴提一句，分享你的感受或问问玩家的看法；不必等玩家问到小号，也不必长篇汇报。结合对方真说过的话和你的人设，语气可以是好奇、觉得好笑、困惑或随口一说，不统一写成“奇怪的人”。若玩家正在求助、处理急事或说沉重的话，先回应眼前的人，暂缓提及。',
-    '未明确公开身份时，只当作另一个陌生账号，不能说“刚才你的小号”、把两个账号的发言接成同一个人，或利用这件事套出身份。只引用下面实际存在的内容，不编造后续。已经提过的同一批来往不再机械重提。',
-    ...threads.map(t => `账号「${aliasSelf(t,state)?.name}」；${t.identity === 'revealed' ? '已公开身份' : '真实身份未确认'}；${t.removedByCharacterAt ? '你已将此账号移出通讯录' : t.status === 'accepted' ? '已通过申请' : '你未通过申请'}。申请附言：${t.requestText}。你的验证回复：${t.requestReply}。\n${t.messages.filter(m => m.from !== 'system').slice(-6).map(m => `${m.from === 'user' ? '该账号' : '你'}：${aliasMessageContext(m)}`).join('\n')}`),
-    `只有本轮 reply 确实提到了对应账号来往，才返回顶层 aliasFollowupIds 数组标记已提及；没有提及则省略。可用记录ID：${items.map(item => item.threadId).join('、')}。ID仅用于动作字段，不写进台词。`,
+    '先辨别下面是谁的小号。陌生账号未明确公开身份时，只当作另一个陌生人，不能说“刚才你的小号”或利用这件事套出身份。若是你自己使用的小号，你知道与玩家的来往，但玩家不自动知道你的身份：让这些经历影响你的关心、情绪与话题，必要时自然提一个由头，不假装是某个陌生人向你转述、不强迫坦白，也不直接说“你刚才对我小号说了”。只引用实际存在的内容，不编造后续。已提过的同一批来往不机械重提。',
+    ...threads.map(t => `${t.characterAccountId === 'main' && t.identity !== 'revealed' ? '真实身份未确认。' : ''}${t.removedByCharacterAt ? '你已将此账号移出通讯录。' : ''}${buildAliasThreadContext(t, state, t.messages.filter(m => m.from !== 'system').slice(-6))}`),
+    `只有本轮 reply 确实提及或自然承接了对应账号来往，才返回顶层 aliasFollowupIds 数组标记已承接。若是你自己的小号，可以通过与真实经历有关的话题、关心或感受自然延续，不必点出账号或坦白。仅仅看到了背景、说了一句无关的问候不算承接，未承接则省略。可用记录ID：${items.map(item => item.threadId).join('、')}。ID仅用于动作字段，不写进台词。`,
   ].join('\n') };
 }
 export function acknowledgeAliasFollowup(snapshot: ReturnType<typeof pendingAliasFollowup>, ids: unknown) {
@@ -156,20 +162,26 @@ export function acknowledgeAliasFollowup(snapshot: ReturnType<typeof pendingAlia
   }) });
 }
 /** Knowledge projection only: never serialize account owners or internal character IDs into this text. */
-export function buildAliasMemoryContext(charIds: string[]): string {
-  const state = readAliasState();
-  const threads = visibleAliasThreads(state).filter(t => charIds.includes(t.charId) && (t.status === 'accepted' || t.requester === 'user' && t.status === 'rejected') && (t.messages.length || t.requestReply || t.requestText)).sort((a,b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 4);
-  if (!threads.length) return '';
-  return '【你亲历的其他账号对话】以下不是主号当前对话，也不代表眼前的人说过这些话。未公开身份的陌生账号不能归到主号玩家身上，不把怀疑当成确认。\n' + ALIAS_MEMORY_RULES + '\n你可以在主号有合适话题时自然聊到这些实际接触，视为谈起另一个账号或陌生人的事；不自动揭穿对方，也不每次切换回来都固定提起、吐槽或照搬同一句台词。\n' + threads.map(t => {
+export const aliasRequestStamp = (t: AliasThread) => JSON.stringify([t.status, t.requestText, t.requestReply, t.identity, t.removedByCharacterAt || '']);
+export function buildAliasThreadContext(t: AliasThread, state: AliasState, messages: AliasMessage[], includeRequest = true): string {
     const self = aliasSelf(t, state), peer = aliasPeer(t, state), char = aliasCharacter(t.charId);
     const context = t.characterAccountId !== 'main'
       ? `${char?.name}自己使用账号「${peer?.name}」与主号相识者联系。来源：角色小号「${peer?.name}」↔ 玩家主号「${currentAliasUser().name}」。${t.contactMotive ? `你当初的私下动机：${t.contactMotive}。对方不自动知道这个动机。` : ''}${t.identity === 'revealed' ? '目前已向对方公开自己的身份，不能因此认定对方从一开始就知道。' : '对方尚未得到你的身份确认，不假定对方知道你是谁；主号发言也不要直接接续小号的语境或假定对方认出了你。'}`
       : `${char?.name}与账号「${self?.name}」有过接触。来源：角色主号「${char?.name}」↔ ${t.identity === 'revealed' ? '已公开身份的账号' : '陌生账号'}「${self?.name}」。${t.identity === 'revealed' ? `对方已明确坦白自己是${currentAliasUser().name}的小号；此前的发言仍属于这个账号，当时不一定已知身份。` : t.identity === 'suspected' && t.identityEvidence?.length ? '存在实际线索，最多谨慎怀疑，没有确证。' : '对方身份尚未确认，只能记作这个陌生账号；没有明确线索时不猜测主号身份。'}`;
     const characterLabel = t.characterAccountId === 'main' ? `角色主号「${char?.name}」` : `角色小号「${peer?.name}」`;
     const userLabel = t.userAccountId === 'main' ? `玩家主号「${currentAliasUser().name}」` : `账号「${self?.name}」`;
-    return `${context}\n好友验证：${t.status === 'accepted' ? '已通过' : '未通过'}。${t.removedByCharacterAt ? '后来角色已删除了这个联系人，对话历史仍属于这个账号。' : ''}申请附言来自${t.requester === 'character' ? characterLabel : userLabel}：「${t.requestText}」。${t.requestReply ? `角色的验证回复：「${t.requestReply}」。` : ''}\n${t.messages.filter(m => m.from !== 'system').slice(-10).map(m => `[${m.createdAt}] [${m.identityAtTime === 'revealed' ? '此时身份已公开' : m.identityAtTime === 'suspected' ? '当时仅怀疑身份' : m.identityAtTime === 'unknown' ? '当时身份未确认' : '当时身份状态未记录'}] ${m.from === 'character' ? characterLabel : userLabel}：${aliasMessageContext(m).slice(0, 500)}`).join('\n')}`;
-  }).join('\n\n');
+    return `${context}\n${includeRequest ? `好友验证：${t.status === 'accepted' ? '已通过' : '未通过'}。${t.removedByCharacterAt ? '后来角色已删除了这个联系人，对话历史仍属于这个账号。' : ''}申请附言来自${t.requester === 'character' ? characterLabel : userLabel}：「${t.requestText}」。${t.requestReply ? `角色的验证回复：「${t.requestReply}」。` : ''}` : ''}\n${messages.map(m => `[${m.createdAt}] [${m.identityAtTime === 'revealed' ? '此时身份已公开' : m.identityAtTime === 'suspected' ? '当时仅怀疑身份' : m.identityAtTime === 'unknown' ? '当时身份未确认' : '当时身份状态未记录'}] ${m.from === 'character' ? characterLabel : userLabel}：${aliasMessageContext(m)}`).join('\n')}`;
 }
+export function buildAliasMemoryContext(charIds: string[], pendingOnly = false): string {
+  const state = readAliasState();
+  const threads = visibleAliasThreads(state).filter(t => charIds.includes(t.charId) && (t.status === 'accepted' || t.requester === 'user' && t.status === 'rejected') && (t.messages.length || t.requestReply || t.requestText))
+    .filter(t => !pendingOnly || t.rememberedRequestStamp !== aliasRequestStamp(t) || t.messages.some(m => !t.rememberedMessageIds?.includes(m.id)))
+    .sort((a,b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 4);
+  if (!threads.length) return '';
+  return '【你亲历的其他账号对话】以下不是主号当前对话，也不代表眼前的人说过这些话。未公开身份的陌生账号不能归到主号玩家身上，不把怀疑当成确认。\n' + ALIAS_MEMORY_RULES + '\n' + threads.map(t => buildAliasThreadContext(t, state,
+    t.messages.filter(m => m.from !== 'system' && (!pendingOnly || !t.rememberedMessageIds?.includes(m.id))).slice(-10).map(m => ({ ...m, text: m.text.slice(0, 500) })), !pendingOnly || t.rememberedRequestStamp !== aliasRequestStamp(t))).join('\n\n');
+}
+
 export function aliasStateWithoutCharacter(state: AliasState, charId: string): AliasState {
   return { ...state, profiles: state.profiles.filter(p => p.charId !== charId), threads: state.threads.filter(t => t.charId !== charId), checks: Object.fromEntries(Object.entries(state.checks).filter(([key]) => { try { return JSON.parse(key)[0] !== charId; } catch { return false; } })) };
 }

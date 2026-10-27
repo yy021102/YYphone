@@ -1,8 +1,10 @@
+import { shouldShowTimestamp, effectiveChatTimeZone, formatChatTimestamp } from '../utils/chatTimestamp';
+import { syncAliasExperiences } from '../utils/aliasExperiences';
 import React, { useEffect, useRef, useState } from 'react';
 import { acknowledgeCouponRequests, assertCouponAvailable, coupleBlockProtection, coupleRewardContext, useCoupleCoupon, type CoupleProductId } from '../utils/coupleRewards';
 import { CoupleCorrespondence } from '../components/CoupleCorrespondence';
 import { AliasAccountSwitcher, AliasChat, AliasConversationList, AliasFriendRequests, AliasManager, useAliasAccounts } from '../components/WeChatAliases';
-import { acknowledgeAliasFollowup, currentAliasUser, pendingAliasFollowup, setAliasSwitcherHidden, visibleAliasThreads } from '../utils/aliasAccounts';
+import { acknowledgeAliasFollowup, canReadAliasExperience, currentAliasUser, pendingAliasFollowup, setAliasSwitcherHidden, visibleAliasThreads } from '../utils/aliasAccounts';
 import { restorePhoneInspectionHistory } from '../utils/phoneInspection';
 import { changeChatArchive, chatArchiveSlots, type ArchiveChoice, type ChatArchiveSlot } from '../utils/chatArchives';
 import {
@@ -102,7 +104,7 @@ import { ExternalLinkCard } from '../components/ExternalLinkCard';
 import { extractSharedLink, publicLink } from '../utils/linkPreview';
 import { runMcpDecision } from '../utils/mcpTools';
 import { refreshWeather } from '../utils/weatherData';
-import { buildGroupPrivateContext } from '../utils/chatHistory';
+import { buildGroupPrivateContext, resolveChatHistoryCount } from '../utils/chatHistory';
 import { deleteGroupJournal, invalidateGroupJournal, maybeAutoGroupJournal } from '../utils/groupJournal';
 import { GroupJournalPanel } from '../components/GroupJournalPanel';
 import { requestChatReply, withChatResponseFormat } from '../utils/chatReply';
@@ -260,58 +262,9 @@ interface PomodoroCardDetails {
   }>;
 }
 
-const TIMESTAMP_GAP_MS = 10 * 60 * 1000;
-
-const shouldShowTimestamp = (previous: string | undefined, current: string) => {
-  const currentTime = Date.parse(current);
-  if (Number.isNaN(currentTime)) return false;
-  if (!previous) return true;
-  const previousTime = Date.parse(previous);
-  return Number.isNaN(previousTime) || currentTime - previousTime >= TIMESTAMP_GAP_MS;
-};
-
-const effectiveChatTimeZone = (timeZone?: string) => timeZone === 'local' ? undefined : timeZone || 'Asia/Shanghai';
-
-const formatChatTimestamp = (value: string, timeZone?: string): string => {
-  const date = new Date(value);
-  const now = new Date();
-  const pad = (n: number) => String(n).padStart(2, '0');
-  const makeDateParts = (d: Date) => Object.fromEntries(
-    new Intl.DateTimeFormat('en', {
-      timeZone,
-      year: 'numeric',
-      month: 'numeric',
-      day: 'numeric',
-      weekday: 'short',
-      hour: '2-digit',
-      minute: '2-digit',
-      hourCycle: 'h23',
-    }).formatToParts(d).map((part) => [part.type, part.value])
-  );
-  let dateFields: Record<string, string>;
-  let nowFields: Record<string, string>;
-  try {
-    dateFields = makeDateParts(date);
-    nowFields = makeDateParts(now);
-  } catch (error) {
-    console.error('Could not format chat timestamp for the selected time zone.', error);
-    return timeZone ? formatChatTimestamp(value) : value;
-  }
-  const clock = `${pad(Number(dateFields.hour))}:${pad(Number(dateFields.minute))}`;
-  const dayStart = (fields: Record<string, string>) =>
-    Date.UTC(Number(fields.year), Number(fields.month) - 1, Number(fields.day));
-  const dayDiff = Math.round((dayStart(nowFields) - dayStart(dateFields)) / 86400000);
-  if (dayDiff === 0) return clock;
-  if (dayDiff === 1) return `昨天 ${clock}`;
-  if (dayDiff > 1 && dayDiff < 7) {
-    const weekday = { Sun: '周日', Mon: '周一', Tue: '周二', Wed: '周三', Thu: '周四', Fri: '周五', Sat: '周六' }[dateFields.weekday];
-    return `${weekday ?? dateFields.weekday} ${clock}`;
-  }
-  if (dateFields.year === nowFields.year) return `${dateFields.month}月${dateFields.day}日 ${clock}`;
-  return `${dateFields.year}年${dateFields.month}月${dateFields.day}日 ${clock}`;
-};
 
 interface ChatMessage {
+  aliasExperience?: { threadKey: string; userProfileId: string };
   couponUseId?: string;
   couponProductId?: string;
   letterFromName?: string;
@@ -1054,7 +1007,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
   useEffect(() => {
     if (!activeChatId) return;
     let alive = true;
-    void restorePhoneInspectionHistory(activeChatId).then(() => { if (alive) setChats(readStoredValue(CHATS_STORAGE_KEY, [], isChatList)); }).catch(error => { if (alive) setChatError(error instanceof Error ? error.message : '记录恢复失败'); });
+    void restorePhoneInspectionHistory(activeChatId).then(() => syncAliasExperiences(activeChatId)).then(() => { if (alive) setChats(readStoredValue(CHATS_STORAGE_KEY, [], isChatList)); }).catch(error => { if (alive) setChatError(error instanceof Error ? error.message : '记录恢复失败'); });
     return () => { alive = false; };
   }, [activeChatId, chats.find(chat => chat.id === activeChatId)?.activeArchiveId]);
   const [forumCardPreview, setForumCardPreview] = useState<ChatMessage | null>(null);
@@ -2857,8 +2810,8 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
     const latestChats = readStoredValue(CHATS_STORAGE_KEY, chats, isChatList);
     const storedChat = latestChats.find((item) => item.id === targetChatId);
     const replacedIds = regenerate && storedChat ? regeneratedReplyIds(storedChat.messages) : new Set<string>();
-    const chat = storedChat && { ...storedChat, messages: storedChat.messages.filter(message => !replacedIds.has(message.id)) };
-    if (!chat || (!previewOnly && chat.blocked) || generationRunning.current || tokenPreviewBusy) return;
+    if (!storedChat || (!previewOnly && storedChat.blocked) || generationRunning.current || tokenPreviewBusy) return;
+    let chat: ChatConversation = { ...storedChat, messages: storedChat.messages.filter(message => !replacedIds.has(message.id)) };
     const latestContacts = readStoredValue(CONTACTS_STORAGE_KEY, contacts, isContactList);
 
     const apiPresets = readSetting(SETTINGS_KEYS.apiPresets, [] as ApiPreset[], isApiPresetList);
@@ -2902,6 +2855,14 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
     }
     if (replacedIds.size) setHiddenMessageIds([...replacedIds]);
     try {
+      if (!previewOnly && chat.type === 'direct') {
+        await syncAliasExperiences(chat.id);
+        const updatedChats = readStoredValue(CHATS_STORAGE_KEY, chats, isChatList);
+        const updated = updatedChats.find(item => item.id === targetChatId);
+        if (!updated || updated.activeArchiveId !== chat.activeArchiveId || updated.blocked) throw new Error('对话状态已变化，请重新生成。');
+        chat = { ...updated, messages: updated.messages.filter(message => !replacedIds.has(message.id)) };
+        setChats(updatedChats);
+      }
       const currentInput = proactive ? '' : [...chat.messages].reverse().find((message) => message.senderId === 'user')?.text ?? '';
       if (!previewOnly && chat.type === 'direct' && chat.weatherAwarenessEnabled) {
         try { await refreshWeather(); } catch { /* Weather failure must not interrupt conversation. */ }
@@ -2934,7 +2895,10 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         allowCharInvite
       );
       const couponContext = coupleCharId ? coupleRewardContext(coupleCharId, chat.activeArchiveId ?? '') : { text: '', pendingIds: [] };
-      const aliasFollowup = chat.type === 'direct' && !regenerate && !activeCallMode ? pendingAliasFollowup(contact.id) : undefined;
+      const aliasFollowup = chat.type === 'direct' && !regenerate && !activeCallMode ? pendingAliasFollowup(contact.id, new Set(chat.messages.filter(canReadAliasExperience).slice(-resolveChatHistoryCount(chat.currentChatHistoryCount)).flatMap(message => {
+        const source = message.aliasExperience;
+        return source?.threadKey && source.userProfileId === currentAliasUser().id ? [source.threadKey] : [];
+      }))) : undefined;
       const plantInjection: PlantInjection = buildPlantInjection(
         chat.participantIds,
         chat.type,
@@ -3821,7 +3785,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
   const pendingAliasCount = aliasThreads.filter(t => t.requester === 'character' && t.status === 'pending').length;
   const openAliasThread = (id: string) => { setActiveAliasThreadId(id); setActiveChatId(''); setActiveTab('chats'); setMePage('home'); };
   const displayChatMessages = activeChat
-    ? buildPaymentDisplayMessages(activeChat.messages.filter(message => !hiddenMessageIds.includes(message.id)), activeChat.participantIds[0] ?? '')
+    ? buildPaymentDisplayMessages(activeChat.messages.filter(message => !hiddenMessageIds.includes(message.id) && canReadAliasExperience(message)), activeChat.participantIds[0] ?? '')
       .filter(message => !selectMode || (!message.paymentReceiptId && !message.paymentNotice))
     : [];
   const selectedGame = WECHAT_GAMES.find((game) => game.id === discoverPage);
@@ -3864,7 +3828,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
     setChatBannerEditing(false);
   };
 
-  if (activeAliasThread) return <div data-wechat-theme={useWeChatDark ? 'dark' : 'light'} className="wechat-app wechat-chat-open relative flex-1 min-h-0 w-full flex flex-col overflow-hidden"><AliasChat key={activeAliasThread.id} thread={activeAliasThread} state={aliasState} onBack={() => { setActiveAliasAccountId(activeAliasThread.userAccountId === 'main' ? '' : activeAliasThread.userAccountId); setActiveAliasThreadId(''); }} wallpaper={!useWeChatDark ? chatAppearance.backgroundUrl : undefined} userColor={useWeChatDark ? '#38534a' : chatAppearance.userBubbleColor} characterColor={useWeChatDark ? '#30343a' : chatAppearance.characterBubbleColor} /></div>;
+  if (activeAliasThread) return <div data-wechat-theme={useWeChatDark ? 'dark' : 'light'} className="wechat-app wechat-chat-open relative flex-1 min-h-0 w-full flex flex-col overflow-hidden"><AliasChat key={activeAliasThread.id} thread={activeAliasThread} state={aliasState} timeZone={chats.find(chat => chat.type === 'direct' && chat.participantIds.length === 1 && chat.participantIds[0] === activeAliasThread.charId)?.timeZone} onBack={() => { setActiveAliasAccountId(activeAliasThread.userAccountId === 'main' ? '' : activeAliasThread.userAccountId); setActiveAliasThreadId(''); }} wallpaper={!useWeChatDark ? chatAppearance.backgroundUrl : undefined} userColor={useWeChatDark ? '#38534a' : chatAppearance.userBubbleColor} characterColor={useWeChatDark ? '#30343a' : chatAppearance.characterBubbleColor} /></div>;
 
   return (
     <div data-wechat-theme={useWeChatDark ? 'dark' : 'light'} className={`wechat-app ${activeTab === 'me' && mePage === 'favorites' ? 'wechat-favorites-open' : ''} relative flex-1 min-h-0 w-full flex flex-col overflow-hidden ${activeChat ? 'wechat-chat-open bg-[#ededed]' : 'bg-[#ededed]'} ${!activeChat && !isDiscoverSubpage && !isMeSubpage ? 'wechat-main-tabs' : ''}`}>
@@ -4150,6 +4114,10 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                               ? '🔎 角色查手机'
                             : message.source === 'character-perspective'
                               ? '🪞 侧写'
+                            : message.source === 'alias-experience'
+                              ? '🫧 账号来往'
+                            : message.source === 'couple-unbind'
+                              ? '💔 情侣空间已解绑'
                             : message.source === 'pomodoro'
                               ? `⏱️ ${message.title}`
                               : message.source === 'xianyu'

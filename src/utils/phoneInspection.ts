@@ -13,7 +13,7 @@ const CHATS = 'yyphone:wechat-chats', CONTACTS = 'pocketos:wechat-contacts';
 const record = (v: unknown): v is Record<string, any> => !!v && typeof v === 'object' && !Array.isArray(v);
 const list = (key: string): Record<string, any>[] => readStoredValue(key, [], (v): v is Record<string, any>[] => Array.isArray(v) && v.every(record));
 export type InspectionLine = { from: string; text: string; own: boolean; image?: string; avatar?: string; targetId?: string; time?: string };
-export type InspectionPage = { id: string; kind: 'home' | 'chat' | 'remark' | 'contact' | 'moments'; title: string; subtitle: string; lines: InspectionLine[]; archiveId?: string };
+export type InspectionPage = { id: string; kind: 'home' | 'chat' | 'remark' | 'contact' | 'moments'; title: string; subtitle: string; lines: InspectionLine[]; archiveId?: string; timeZone?: string };
 export type InspectionStep = { page: InspectionPage; comments: string[] };
 export type PreparedInspectionStep = InspectionStep & { action?: InspectionAction; nextId: string; end: boolean };
 /** Prepare a read-only playback plan. No phone writes or memory commits happen here. */
@@ -88,7 +88,7 @@ export function readInspectionPage(id: string, actorId: string, userName: string
   }
   const chat = visibleChats(options).find(c => `chat:${c.id}` === id);
   if (!chat) throw new Error('这段聊天已不存在，请换一处查看。');
-  return { id, kind: 'chat', title: titleOf(chat), subtitle: chat.type === 'group' ? '玩家的群聊 · 当前存档最近记录' : '玩家的聊天 · 当前存档最近记录', lines: messagesOf(chat, userName), archiveId: chat.activeArchiveId ?? '' };
+  return { id, kind: 'chat', title: titleOf(chat), subtitle: chat.type === 'group' ? '玩家的群聊 · 当前存档最近记录' : '玩家的聊天 · 当前存档最近记录', lines: messagesOf(chat, userName), archiveId: chat.activeArchiveId ?? '', ...(typeof chat.timeZone === 'string' ? { timeZone: chat.timeZone } : {}) };
 }
 export function inspectionPageText(page: InspectionPage): string {
   return `${page.title}（${page.subtitle}）\n${page.lines.map(l => `${l.time ? `[${l.time}] ` : ''}${l.from}：${l.text}`).join('\n')}`.slice(0, 14000);

@@ -1,5 +1,5 @@
 import type { CharacterCoupleSpace } from '../apps/CoupleSpaceApp';
-import { readStoredValue } from './localStorage';
+import { readStorageString, readStoredValue } from './localStorage';
 import { setStorageItemsAtomically } from './dbStorage';
 import { ALIPAY_STORAGE_KEY, readAlipayData, type PaymentSource } from './alipayData';
 import { activeMemoryArchive } from './memoryArchives';
@@ -48,8 +48,10 @@ const validDay = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s) && rewardDay(new D
 const rawSpaces = () => readStoredValue(SPACES, {}, record) as Record<string, CharacterCoupleSpace>;
 const readChats = (): Row[] => readStoredValue(CHATS, [], (v): v is Row[] => Array.isArray(v) && v.every(record));
 
-function readWallets(): WalletMap {
-  const value = readStoredValue<unknown>(COUPLE_REWARDS_KEY, {}, (_v): _v is unknown => true);
+export function readCoupleWallets(): WalletMap {
+  let value: unknown;
+  try { const raw = readStorageString(COUPLE_REWARDS_KEY); value = raw === null ? {} : JSON.parse(raw); }
+  catch { throw new Error('积分账本格式异常，未覆盖原有数据。'); }
   if (!record(value)) throw new Error('积分账本格式异常，未覆盖原有数据。');
   for (const w of Object.values(value)) {
     if (!record(w) || !Array.isArray(w.awards) || !Array.isArray(w.purchases) || !Array.isArray(w.uses) ||
@@ -61,6 +63,7 @@ function readWallets(): WalletMap {
   }
   return { ...value } as WalletMap;
 }
+const readWallets = readCoupleWallets;
 export const readCoupleWallet = (charId: string): CoupleWallet => readWallets()[charId] ?? emptyWallet();
 export const coupleBalance = (wallet: CoupleWallet, owner: CouponOwner) => wallet.awards.length - wallet.purchases.filter(p => p.owner === owner).reduce((n, p) => n + p.cost, 0);
 export const couponStock = (wallet: CoupleWallet, owner: CouponOwner, productId: CoupleProductId) =>
@@ -91,6 +94,8 @@ let queue: Promise<unknown> = Promise.resolve();
 const serialized = <T,>(action: () => Promise<T>): Promise<T> => {
   const task = queue.then(action); queue = task.catch(() => undefined); return task;
 };
+/** Space import/reset/unbind must share the points queue with purchases and voucher uses. */
+export const withCoupleDataWrite = serialized;
 const changed = (chat = false) => {
   if (typeof window === 'undefined' || !window.dispatchEvent) return;
   window.dispatchEvent(new Event(COUPLE_REWARDS_EVENT));
@@ -118,8 +123,9 @@ export function assertCouponAvailable(charId: string, owner: CouponOwner, produc
   if (product.id === 'emperor' && readCoupleWallet(charId).uses.some(u => u.productId === 'emperor' && rewardDay(new Date(u.at)) === rewardDay())) throw new Error('今天的小皇帝已经就位，明天再用吧。');
   return product;
 }
-export const buyCoupleCoupon = (charId: string, owner: CouponOwner, productId: CoupleProductId, requestId: string, reason = '') => serialized(async () => {
+export const buyCoupleCoupon = (charId: string, owner: CouponOwner, productId: CoupleProductId, requestId: string, reason = '', expectedSpaceRevision?: string) => serialized(async () => {
   const space = requiredSpace(charId), all = readWallets();
+  if (expectedSpaceRevision !== undefined && expectedSpaceRevision !== (space.dataRevision || '')) throw new Error('情侣空间数据已变化，未扣除积分。');
   const wallet = settleWallet(all[charId] ?? emptyWallet(), space);
   if (wallet.purchases.some(p => p.id === requestId)) return wallet;
   const product = coupleProduct(productId);
@@ -130,8 +136,9 @@ export const buyCoupleCoupon = (charId: string, owner: CouponOwner, productId: C
 });
 
 export const useCoupleCoupon = (charId: string, owner: CouponOwner, productId: CoupleProductId, requestId: string,
-  options: { note?: string; expectedChatId?: string; expectedArchiveId?: string; expectedBlockedSince?: string } = {}) => serialized(async () => {
-  requiredSpace(charId); const all = readWallets(), wallet = all[charId] ?? emptyWallet();
+  options: { note?: string; expectedChatId?: string; expectedArchiveId?: string; expectedBlockedSince?: string; expectedSpaceRevision?: string } = {}) => serialized(async () => {
+  const space = requiredSpace(charId); const all = readWallets(), wallet = all[charId] ?? emptyWallet();
+  if (options.expectedSpaceRevision !== undefined && options.expectedSpaceRevision !== (space.dataRevision || '')) throw new Error('情侣空间数据已变化，未使用这张券。');
   const existing = wallet.uses.find(u => u.id === requestId);
   if (existing) return existing;
   const product = assertCouponAvailable(charId, owner, productId);
@@ -197,8 +204,9 @@ export const findCouponUse = (charId: string, useId: string) => readCoupleWallet
 export const pendingCharacterLetters = () => Object.entries(readWallets()).flatMap(([charId, w]) => w.uses
   .filter(u => u.productId === 'letter' && u.owner === 'user' && !u.fulfilledAt).map(use => ({ charId, use })));
 
-function fulfillmentTarget(charId: string, useId: string, productId: 'letter' | 'gift') {
-  requiredSpace(charId);
+function fulfillmentTarget(charId: string, useId: string, productId: 'letter' | 'gift', expectedSpaceRevision?: string) {
+  const space = requiredSpace(charId);
+  if (expectedSpaceRevision !== undefined && expectedSpaceRevision !== (space.dataRevision || '')) throw new Error('情侣空间数据已变化，请重新收取。');
   const all = readWallets(), wallet = all[charId], use = wallet?.uses.find(u => u.id === useId);
   if (!use || use.productId !== productId) throw new Error('找不到这张券的使用记录。');
   const chats = readChats(), chat = chats.find(c => c.id === use.chatId && c.type === 'direct' && c.participantIds?.length === 1 && c.participantIds[0] === charId);
@@ -222,8 +230,8 @@ const playerName = () => {
   const p = Array.isArray(personas.profiles) ? personas.profiles.find((v: Row) => v.id === personas.activeProfileId) : undefined;
   return p?.nickname || p?.name || '我';
 };
-export const fulfillCoupleLetter = (charId: string, useId: string, writer: CouponOwner, letter: { title: string; body: string }) => serialized(async () => {
-  const target = fulfillmentTarget(charId, useId, 'letter');
+export const fulfillCoupleLetter = (charId: string, useId: string, writer: CouponOwner, letter: { title: string; body: string }, expectedSpaceRevision?: string) => serialized(async () => {
+  const target = fulfillmentTarget(charId, useId, 'letter', expectedSpaceRevision);
   if (writer === target.use.owner) throw new Error('情书应由收到请求的另一方来写。');
   if (target.use.fulfilledAt) return target.use.fulfillmentMessageId!;
   const body = letter.body.trim();

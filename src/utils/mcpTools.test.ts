@@ -202,6 +202,25 @@ test('role/global switches bypass all network; secondary model chooses only conf
   const result = await runMcpDecision({ ...input, allowed: true }); assert.equal(calls, 2); assert.match(result.context, /不可信资料/); assert.match(result.context, /https:\/\/news.invalid/);
 });
 
+test('DeepSeek can run the decision API using a raw or copied Bearer key without calling the main API', async () => {
+  const config = settings(); let calls = 0;
+  mock.method(globalThis, 'fetch', async (url: unknown, init?: RequestInit) => {
+    calls++; assert.equal(String(url), 'https://api.deepseek.com/chat/completions');
+    assert.equal(new Headers(init?.headers).get('Authorization'), 'Bearer DS_SECONDARY_ONLY');
+    const body = JSON.parse(String(init?.body)); assert.equal(body.model, 'deepseek-flash'); assert.equal(body.response_format.type, 'json_object');
+    assert(!String(init?.body).includes('DS_SECONDARY_ONLY')); assert(!String(init?.body).includes('MAIN_SECRET'));
+    return ai({ calls: [] });
+  });
+  for (const apiKey of ['DS_SECONDARY_ONLY', ' Bearer DS_SECONDARY_ONLY ']) {
+    for (const endpoint of [' https://api.deepseek.com/ ', '“https：//api.deepseek.com/”', '\u200Fhttps://api.deepseek.com/\u2060']) {
+      config.decisionApi = { endpoint, apiKey, model: ' deepseek-flash ' };
+      const result = await runMcpDecision({ allowed: true, query: '你好', history: [], mainApi, settings: config });
+      assert.match(result.status, /无需查询/);
+    }
+  }
+  assert.equal(calls, 6);
+});
+
 test('no-use, malformed plans, partial failures and unavailable decision APIs do not break chat', async () => {
   const config = settings(); const input = { allowed: true, query: '你好', history: [], mainApi, settings: config };
   mock.method(globalThis, 'fetch', async () => ai({ calls: [] })); assert.equal((await runMcpDecision(input)).context, '');
