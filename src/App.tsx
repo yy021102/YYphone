@@ -19,9 +19,12 @@ import { CoupleLetterRuntime } from './components/CoupleLetterRuntime';
 import { findCouponUse, type CouponGiftTarget } from './utils/coupleRewards';
 import { LockScreen } from './components/LockScreen';
 import { BirthdayRuntime } from './components/BirthdayRuntime';
+import { HalloweenRuntime } from './components/HalloweenRuntime';
+import { birthdayIsDue, readBirthdaySettings, readBirthdaySeen } from './utils/birthday';
 import { HomeScreen } from './components/HomeScreen';
 import { CalendarWidget as CalendarApp } from './components/CalendarWidget';
 import { LittlePPanel } from './components/LittlePPanel';
+import { LittlePLauncher } from './components/LittlePLauncher';
 import { LITTLE_P_VISIBLE_KEY } from './utils/littleP';
 import { processPomodoroDeadline } from './utils/pomodoroRuntime';
 import { ErrorDialogHost, showYyError } from './components/ErrorDialog';
@@ -84,7 +87,7 @@ const isBeautySettings = (value: unknown): value is BeautySettings => {
   const settings = value as Partial<BeautySettings>;
   return (
     typeof settings.themeId === 'string' &&
-    (settings.homeStyle === undefined || settings.homeStyle === 'classic' || settings.homeStyle === 'minimal' || settings.homeStyle === 'moonlit') &&
+    (settings.homeStyle === undefined || settings.homeStyle === 'classic' || settings.homeStyle === 'minimal' || settings.homeStyle === 'moonlit' || settings.homeStyle === 'halloween') &&
     typeof settings.wallpaperId === 'string' &&
     !!settings.wallpapers &&
     typeof settings.wallpapers.lockScreen === 'string' &&
@@ -228,6 +231,7 @@ export default function App() {
   );
   const [isLocked, setIsLocked] = useState(() => lockSettings.mode !== 'none');
   const [activeApp, setActiveApp] = useState<AppId | null>(null);
+  const [birthdayOpen, setBirthdayOpen] = useState(false);
   const [littlePOpen, setLittlePOpen] = useState(false);
   const [littlePVisible, setLittlePVisible] = useState(() =>
     readSetting(LITTLE_P_VISIBLE_KEY, true, (value): value is boolean => typeof value === 'boolean')
@@ -245,8 +249,6 @@ export default function App() {
     }
   };
   useEffect(() => { if (isLocked || activeApp) setLittlePOpen(false); }, [isLocked, activeApp]);
-  const [showEmergencyDialog, setShowEmergencyDialog] = useState(false);
-  const emergencyTapTimesRef = useRef<number[]>([]);
   const [showStatusBar, setShowStatusBar] = useState(() =>
     readSetting(SETTINGS_KEYS.statusBarVisible, true, (value): value is boolean => typeof value === 'boolean')
   );
@@ -474,10 +476,10 @@ export default function App() {
     const homeImage = beautySettings.wallpapers.homeScreen;
     const background = homeImage
       ? `url("${homeImage}") center / cover no-repeat`
-      : currentWallpaper.style;
+      : !activeApp && !isLocked && beautySettings.homeStyle === 'halloween' ? '#2b263e' : currentWallpaper.style;
     document.documentElement.style.background = background;
     document.body.style.background = background;
-  }, [beautySettings.wallpapers.homeScreen, currentWallpaper.style]);
+  }, [beautySettings.wallpapers.homeScreen, beautySettings.homeStyle, activeApp, isLocked, currentWallpaper.style]);
 
   const handleOpenApp = (appId: AppId) => {
     setCouponGift(null);
@@ -487,25 +489,6 @@ export default function App() {
   const handleBackToHome = () => {
     setCouponGift(null);
     setActiveApp(null);
-  };
-
-  const handleEmergencyTap = () => {
-    if (showEmergencyDialog) return;
-    const now = Date.now();
-    const recentTaps = emergencyTapTimesRef.current.filter((timestamp) => now - timestamp <= 1500);
-    recentTaps.push(now);
-    if (recentTaps.length >= 5) {
-      emergencyTapTimesRef.current = [];
-      setShowEmergencyDialog(true);
-      return;
-    }
-    emergencyTapTimesRef.current = recentTaps;
-  };
-
-  const handleEmergencyReturn = () => {
-    setActiveApp(null);
-    setIsLocked(false);
-    setShowEmergencyDialog(false);
   };
 
   const handleUnlock = () => {
@@ -614,7 +597,6 @@ export default function App() {
         - pb: env(safe-area-inset-bottom) keeps dock above iPhone Home indicator bar
       */}
       <div
-        onPointerDown={handleEmergencyTap}
         data-phone-canvas
         data-home-style={!activeApp && !isLocked ? beautySettings.homeStyle : undefined}
         className={`w-full md:w-[min(412px,calc(93vh*9/19.5))] h-full md:h-[min(850px,93vh)] md:rounded-[44px] overflow-hidden relative flex flex-col shadow-[0_25px_80px_rgba(0,0,0,0.7),0_0_0_1px_rgba(255,255,255,0.14)] transition-all ${
@@ -629,18 +611,18 @@ export default function App() {
                 backgroundSize: 'cover',
                 backgroundPosition: 'center',
               }
-            : !activeApp && !isLocked && beautySettings.homeStyle === 'minimal' ? { background: '#f4f2ee' } : !activeApp && !isLocked && beautySettings.homeStyle === 'moonlit' ? { background: '#ede9f4' } : { background: currentWallpaper.style }
+            : !activeApp && !isLocked && beautySettings.homeStyle === 'halloween' ? { background: '#2b263e' } : !activeApp && !isLocked && beautySettings.homeStyle === 'minimal' ? { background: '#f4f2ee' } : !activeApp && !isLocked && beautySettings.homeStyle === 'moonlit' ? { background: '#ede9f4' } : { background: currentWallpaper.style }
         }
       >
         {/* Dynamic theme backdrop wash */}
-        {!beautySettings.wallpapers.homeScreen && (activeApp || isLocked || !['minimal', 'moonlit'].includes(beautySettings.homeStyle ?? 'classic')) && (
+        {!beautySettings.wallpapers.homeScreen && (activeApp || isLocked || !['minimal', 'moonlit', 'halloween'].includes(beautySettings.homeStyle ?? 'classic')) && (
           <div
             className={`absolute inset-0 bg-gradient-to-b ${currentTheme.gradient} opacity-90 pointer-events-none transition-all duration-700`}
           />
         )}
 
         {/* Ambient aesthetic glow patches */}
-        {!beautySettings.wallpapers.homeScreen && (activeApp || isLocked || !['minimal', 'moonlit'].includes(beautySettings.homeStyle ?? 'classic')) && (
+        {!beautySettings.wallpapers.homeScreen && (activeApp || isLocked || !['minimal', 'moonlit', 'halloween'].includes(beautySettings.homeStyle ?? 'classic')) && (
           <>
             <div className="absolute -top-32 -right-32 w-80 h-80 rounded-full bg-[#DFF1FA] blur-3xl pointer-events-none opacity-70" />
             <div className="absolute top-1/2 -left-32 w-80 h-80 rounded-full bg-[#FAD4E0] blur-3xl pointer-events-none opacity-50" />
@@ -775,17 +757,16 @@ export default function App() {
           </div>
         </div>
         {!isLocked && !activeApp && littlePVisible && (
-          <button type="button" onClick={() => setLittlePOpen(true)} aria-label="打开小P"
-            className={`absolute bottom-[18%] right-3 z-30 flex h-14 w-14 flex-col items-center justify-center overflow-hidden rounded-[22px] shadow-lg ${beautySettings.appIcons['little-p'] ? '' : 'border border-white bg-gradient-to-br from-sky-100 to-pink-100 text-sky-700'}`}>
-            {beautySettings.appIcons['little-p'] ? <img src={beautySettings.appIcons['little-p']} alt="" className="h-full w-full object-cover" /> : <><span aria-hidden="true" className="text-xl leading-none">✦</span><span className="mt-1 text-[10px] font-bold">小P</span></>}
-          </button>
+          <LittlePLauncher ghost={beautySettings.homeStyle === 'halloween'} imageUrl={beautySettings.appIcons['little-p']} onOpen={() => setLittlePOpen(true)}/>
         )}
         <LittlePPanel open={littlePOpen && littlePVisible && !isLocked && !activeApp}
           onClose={() => setLittlePOpen(false)} onHide={() => handleLittlePVisible(false)} />
         <BlockedContactRuntime enabled={!isLocked} />
         <CoupleBellNotice enabled={!isLocked} />
         <CoupleLetterRuntime />
-        <BirthdayRuntime unlocked={!isLocked} atHome={!isLocked && !activeApp} onOpenChat={openNotifiedChat} />
+        <BirthdayRuntime unlocked={!isLocked} atHome={!isLocked && !activeApp} onOpenChat={openNotifiedChat} onOpenChange={setBirthdayOpen} />
+        <HalloweenRuntime unlocked={!isLocked} atHome={!isLocked && !activeApp} onOpenBeauty={() => handleOpenApp('customizer')}
+          blocked={birthdayOpen || !activeApp && birthdayIsDue(readBirthdaySettings(), readBirthdaySeen())} />
         {notification && (
           <div className="absolute left-3 right-3 top-[max(env(safe-area-inset-top,0px),12px)] z-[100] flex items-center gap-3 rounded-3xl border border-white bg-white/95 p-3 shadow-xl backdrop-blur-xl" role="status">
             <button type="button" onClick={() => openNotifiedChat(notification.chatId)} className="flex min-w-0 flex-1 items-center gap-3 text-left" aria-label={`查看${notification.name}的新消息`}>
@@ -800,35 +781,7 @@ export default function App() {
             <button type="button" aria-label="关闭消息提醒" onClick={() => setNotification(null)} className="p-2 text-sm text-slate-400">×</button>
           </div>
         )}
-        {showEmergencyDialog && (
-          <div className="absolute inset-0 z-[120] flex items-center justify-center bg-slate-950/35 p-6 backdrop-blur-sm">
-            <section
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="emergency-return-title"
-              className="w-full max-w-xs rounded-3xl border border-white/80 bg-white/95 p-5 text-center shadow-2xl"
-            >
-              <h2 id="emergency-return-title" className="text-sm font-bold text-[#587589]">返回主页？</h2>
-              <p className="mt-2 text-xs leading-relaxed text-slate-500">检测到连续点击屏幕五下。确定要离开当前页面并返回主页吗？</p>
-              <div className="mt-4 grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowEmergencyDialog(false)}
-                  className="rounded-xl bg-slate-100 py-2.5 text-xs font-semibold text-slate-600"
-                >
-                  继续停留
-                </button>
-                <button
-                  type="button"
-                  onClick={handleEmergencyReturn}
-                  className="rounded-xl bg-gradient-to-r from-[#9BD2FC] to-[#F7B9D2] py-2.5 text-xs font-bold text-[#456176]"
-                >
-                  返回主页
-                </button>
-              </div>
-            </section>
-          </div>
-        )}
+
         <ErrorDialogHost />
       </div>
     </div>

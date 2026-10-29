@@ -73,11 +73,13 @@ export const withChatResponseFormat = (
   ];
 };
 
-const requestChatText = async (messages: OpenAiMessage[], api: ApiConnection): Promise<string> => {
+const requestChatText = async (messages: OpenAiMessage[], api: ApiConnection, signal?: AbortSignal): Promise<string> => {
+  signal?.throwIfAborted();
   const connection = textApiConfig(api), temperature = apiTemperature(api.temperature);
   if (connection.google) {
     const response = await fetch(connection.url, {
       method: 'POST',
+      signal,
       headers: connection.headers,
       body: JSON.stringify({
         systemInstruction: {
@@ -89,11 +91,13 @@ const requestChatText = async (messages: OpenAiMessage[], api: ApiConnection): P
     });
     if (!response.ok) throw new Error(`AI 请求失败（${response.status}）：${await response.text()}`);
     const data: unknown = await response.json();
+    signal?.throwIfAborted();
     const candidate = (data as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> }).candidates?.[0];
     return candidate?.content?.parts?.map((part) => part.text ?? '').join('') ?? '';
   }
   const response = await fetch(connection.url, {
     method: 'POST',
+    signal,
     headers: connection.headers,
     body: JSON.stringify({
       model: connection.model,
@@ -104,6 +108,7 @@ const requestChatText = async (messages: OpenAiMessage[], api: ApiConnection): P
   });
   if (!response.ok) throw new Error(`AI 请求失败（${response.status}）：${await response.text()}`);
   const data: unknown = await response.json();
+  signal?.throwIfAborted();
   const content = (data as { choices?: Array<{ message?: { content?: unknown } }> }).choices?.[0]?.message?.content;
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) {
@@ -119,12 +124,13 @@ export const requestChatReply = async (
   api: ApiConnection,
   onUsage: (usage: { input: number; output: number }) => void,
   speakers?: ChatSpeakerContext,
-  options: { retryOnFormatError?: boolean; requireThought?: boolean; groupChat?: boolean; normalizeVoice?: boolean } = {}
+  options: { retryOnFormatError?: boolean; requireThought?: boolean; groupChat?: boolean; normalizeVoice?: boolean; signal?: AbortSignal } = {}
 ): Promise<Record<string, unknown>> => {
   let input = 0;
   let output = 0;
   const request = async (turns: OpenAiMessage[]) => {
-    const text = await requestChatText(turns, api);
+    const text = await requestChatText(turns, api, options.signal);
+    options.signal?.throwIfAborted();
     input += estimatePromptTokens(turns);
     output += estimateTextTokens(text);
     onUsage({ input, output });

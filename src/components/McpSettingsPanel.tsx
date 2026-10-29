@@ -1,9 +1,11 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ChevronDown, Globe, Plus, Trash2 } from 'lucide-react';
-import { changeSearchProvider, configuredToolRelay, executeSearchTool, isBuiltinSearchTool, listMcpTools, mergeMcpDiscovery, newSearchTool, newTavilyMcpTool, readMcpSettings, redactSearchSecrets, saveMcpSettings, searchToolAuthType, type McpSettings, type SearchProvider, type SearchTool } from '../utils/mcpTools';
+import { changeSearchProvider, configuredToolRelay, executeSearchTool, isBuiltinSearchTool, listMcpTools, mergeMcpDiscovery, newSearchTool, newTavilyMcpTool, readMcpSettings, redactSearchSecrets, runMcpDecision, saveMcpSettings, searchToolAuthType, type McpSettings, type SearchProvider, type SearchTool } from '../utils/mcpTools';
+import { getActiveApiPreset } from '../utils/aiApi';
 import { searchToolErrorMessage } from '../utils/builtinTools';
 import { ApiModelPicker } from './ApiModelPicker';
 import { normalizeApiEndpoint } from '../utils/apiEndpoint';
+import { McpTriggerSettings } from './McpTriggerSettings';
 
 const providers: Array<[SearchProvider | 'tavily-mcp', string]> = [['tavily-mcp', 'Tavily（MCP）'], ['mcp', '自定义 MCP'], ['tavily', 'Tavily（REST）'], ['bocha', '博查搜索（REST）'], ['exa', 'Exa（REST）'], ['rest', '自定义 REST']];
 const inputClass = 'mt-1 w-full min-w-0 rounded-xl border border-white bg-white/70 px-3 py-2 text-xs text-slate-700 outline-none';
@@ -16,6 +18,8 @@ export function McpSettingsPanel() {
   const [testArguments, setTestArguments] = useState<Record<string, string>>({});
   const [testTools, setTestTools] = useState<Record<string, string>>({});
   const latest = useRef(settings);
+  const decisionTest = useRef<AbortController | null>(null);
+  useEffect(() => () => decisionTest.current?.abort(), []);
   const save = (next: McpSettings) => { try { saveMcpSettings(next); latest.current = next; setSettings(next); } catch { setStatus(s => ({ ...s, global: '保存失败，请检查存储空间。' })); } };
   const update = (id: string, change: Partial<SearchTool>) => {
     const source = latest.current;
@@ -26,6 +30,23 @@ export function McpSettingsPanel() {
   const field = (label: string, value: string, change: (v: string) => void, type = 'text', placeholder = '', onBlur?: () => void) => <label className="block text-[11px] text-slate-600">{label}<input aria-label={label} type={type} value={value} onChange={e => change(e.target.value)} onBlur={onBlur} placeholder={placeholder} className={inputClass} autoComplete="off" /></label>;
   const setDecisionEndpoint = (endpoint: string) => save({ ...latest.current, decisionApi: { ...latest.current.decisionApi, endpoint } });
   const area = (label: string, value: string, change: (v: string) => void) => <label className="block text-[11px] text-slate-600">{label}<textarea aria-label={label} rows={3} value={value} onChange={e => change(e.target.value)} className={`${inputClass} font-mono`} /></label>;
+  const testDecision = async () => {
+    if (decisionTest.current || busy) return;
+    const controller = new AbortController(); decisionTest.current = controller;
+    const snapshot = latest.current, identity = JSON.stringify(snapshot.decisionApi);
+    setBusy('decision'); setStatus(s => ({ ...s, decision: '' }));
+    try {
+      const secondary = snapshot.decisionApi;
+      const mainApi = secondary.endpoint.trim() || secondary.apiKey.trim() || secondary.model?.trim() ? { endpoint: '', apiKey: '' } : getActiveApiPreset();
+      const result = await runMcpDecision({ allowed: true, query: '请查询今天的微博热搜', history: [], mainApi, settings: { ...snapshot, enabled: true }, signal: controller.signal, testOnly: true });
+      if (!controller.signal.aborted && identity === JSON.stringify(latest.current.decisionApi)) setStatus(s => ({ ...s, decision: result.status }));
+    } catch {
+      if (!controller.signal.aborted) setStatus(s => ({ ...s, decision: '请先配置有效的主 API，或填写完整的决策副 API。' }));
+    } finally {
+      if (!controller.signal.aborted) setBusy('');
+      if (decisionTest.current === controller) decisionTest.current = null;
+    }
+  };
   const test = async (tool: SearchTool, call = false) => {
     setBusy(tool.id); setStatus(s => ({ ...s, [tool.id]: '' }));
     try {
@@ -63,7 +84,8 @@ export function McpSettingsPanel() {
     <summary className="settings-panel-heading"><span className="settings-icon"><Globe size={18} strokeWidth={1.7} /></span><span className="settings-heading-copy"><strong>MCP 与搜索工具</strong><small>按需查询与联网工具</small></span><ChevronDown size={16} className="settings-chevron" /></summary>
     <div className="settings-panel-body space-y-4">
       <label className="flex items-center justify-between text-xs text-slate-600">启用工具服务<input aria-label="启用工具服务" type="checkbox" checked={settings.enabled} onChange={e => save({ ...settings, enabled: e.target.checked })} /></label>
-      <p className="text-[10px] leading-relaxed text-slate-400">在角色的对话设置中开启后，由决策模型按需查询。外部搜索只发送查询词；决策模型会读取最近几条对话。</p>
+      <p className="text-[10px] leading-relaxed text-slate-400">在角色的对话设置中开启 MCP 后，分享网页会自动读取，全文失败时尝试标题与简介；关键词直接查询。</p>
+      <McpTriggerSettings settings={settings} onChange={save}/>
       <details className="rounded-2xl bg-sky-50/60 p-3"><summary className="cursor-pointer text-xs font-semibold text-slate-600">决策副 API</summary><div className="mt-3 space-y-3">
         <p className="text-[10px] text-slate-400">全部留空使用当前主 API；填写后使用独立的副 API 判断是否调用工具。</p>
         {field('决策 API 地址', settings.decisionApi.endpoint, setDecisionEndpoint, 'url', 'https://…/v1', () => {
@@ -76,6 +98,9 @@ export function McpSettingsPanel() {
         <ApiModelPicker label="决策" identity={JSON.stringify([normalizeApiEndpoint(settings.decisionApi.endpoint), settings.decisionApi.apiKey])}
           resolveConnection={() => ({ ...latest.current.decisionApi, purpose: 'decision' })} model={settings.decisionApi.model || ''}
           onSelect={model => save({ ...latest.current, decisionApi: { ...latest.current.decisionApi, model } })} />
+        <button type="button" disabled={!!busy} onClick={() => void testDecision()} className="w-full rounded-xl bg-sky-100 py-2 text-xs font-semibold text-sky-700 disabled:opacity-50">{busy === 'decision' ? '正在测试决策…' : '测试决策 API'}</button>
+        <p className="text-[10px] text-slate-400">使用当前填写的配置测试，会消耗 API 额度，不执行搜索。</p>
+        {status.decision && <p role="status" className="break-words text-[11px] leading-relaxed text-slate-600">{status.decision}</p>}
       </div></details>
       <details aria-label="内置免 Key 工具" open={settings.builtinExpanded !== false} onToggle={e => { if (e.currentTarget.open !== (settings.builtinExpanded !== false)) save({ ...settings, builtinExpanded: e.currentTarget.open }); }} className="space-y-2 rounded-2xl bg-[#f1f6f5]/70 p-3">
         <summary className="cursor-pointer text-xs font-semibold text-slate-600">内置工具 <span className="ml-1 text-[10px] font-normal text-slate-400">免 Key</span></summary>

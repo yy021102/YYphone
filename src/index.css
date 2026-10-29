@@ -4,6 +4,8 @@
 @import "./components/greenhouse.css";
 @import "./components/minimalHome.css";
 @import "./components/moonlitHome.css";
+@import "./components/halloweenHome.css";
+@import "./components/littlePLauncher.css";
 @import "./components/pastDiaryHall.css";
 @import "./components/externalLink.css";
 @import "./components/memoryTheater.css";
@@ -192,7 +194,7 @@ body {
 .yy-chat-history { background-image: var(--yy-chat-wallpaper, none); background-size: cover; background-position: center; background-attachment: scroll; overscroll-behavior-y: contain; }
 .yy-chat-surface .yy-chat-message-content { max-width: calc(100% - var(--yy-chat-avatar-size, 40px) - var(--yy-chat-avatar-size, 40px) - 24px); }
 .yy-chat-surface .yy-chat-message-bubble { color: #111; overflow-wrap: anywhere; }
-.yy-chat-surface .yy-chat-message-bubble.is-plain { position: relative; }
+.yy-chat-surface .yy-chat-message-bubble.is-plain { position: relative; white-space: pre-wrap; }
 .yy-chat-surface .yy-chat-message-bubble.is-plain::before {
   content: '';
   position: absolute;

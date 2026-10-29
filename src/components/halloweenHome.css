@@ -1,0 +1,82 @@
+﻿/* 南瓜夜宴：橱窗、入场券与夜市货架，只影响主页。 */
+.halloween-home { position:relative; isolation:isolate; display:flex; flex-direction:column; height:100%; min-height:0; width:100%; color:#f0ddc4; background:radial-gradient(ellipse at 50% 0,#7a5b7d55,transparent 50%),linear-gradient(165deg,#32293f,#392e48 55%,#292639); }
+.halloween-home-art { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; z-index:-1; }
+.hw-market-header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 23px 4px; flex-shrink:0; }
+.hw-market-header > span { color:#c8b0bd; font-size:9px; letter-spacing:2px; }
+.hw-market-header > span i { color:#e6c49c; font-size:8px; margin:0 4px; font-style:normal; }
+.hw-market-header > div { display:flex; gap:7px; }
+.hw-market-header button { width:30px; height:30px; display:grid; place-items:center; color:#dec8d8; border:1px solid #dcc2d12b; border-radius:50%; background:#fff8e806; }
+.hw-market button { cursor:pointer; -webkit-tap-highlight-color:transparent; }
+.hw-market button:focus-visible, .hw-market summary:focus-visible { outline:2px solid #f1cda6; outline-offset:4px; }
+.hw-market-scroll { flex:1; min-height:0; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; scrollbar-width:none; padding:0 23px max(16px,env(safe-area-inset-bottom,0px)); }
+.hw-market-window { position:relative; height:234px; margin:0 -6px; }
+.hw-market-shop-name { position:absolute; top:7px; left:0; right:0; text-align:center; z-index:1; }
+.hw-market-shop-name > span { font-size:6px; letter-spacing:3.5px; color:#cfb3be; }
+.hw-market-shop-name h1 { font-family:'Songti SC','STSong',Georgia,serif; font-size:31px; font-weight:400; letter-spacing:9px; margin:3px 0 0 9px; line-height:1.4; color:#f3ddbb; text-shadow:0 3px 15px #dca77520; }
+.hw-market-shop-name > i { position:absolute; right:12%; top:28px; color:#d3ac8e; font-size:17px; font-style:normal; }
+.hw-market-shop-art { position:absolute; width:264px; height:229px; left:50%; bottom:-8px; transform:translateX(-50%); pointer-events:none; }
+.hw-market-shop-art > svg { width:100%; height:100%; }
+.hw-market-shop-art .hw-town-moon { transform:translate(24px,70px); }
+.hw-market-clock { position:absolute; left:3px; bottom:11px; z-index:2; width:108px; min-height:85px; padding:10px 9px 11px; text-align:center; background:linear-gradient(130deg,#f3dabb,#e7c7b5); color:#735c71; border:1px solid #fff0d5; border-radius:5px 5px 16px 5px; box-shadow:3px 5px 0 #1c15282b,0 8px 20px #21162935; transform:rotate(-7deg); }
+.hw-market-clock::before { content:''; position:absolute; top:-8px; left:36px; width:35px; height:13px; background:#d2b3c8b0; transform:rotate(9deg); border:1px solid #ecd2dd60; }
+.hw-market-clock > small { display:block; font-size:7px; letter-spacing:2px; color:#a47c85; }
+.hw-market-clock > strong { display:block; font-size:31px; line-height:1.25; font-weight:350; letter-spacing:-1.5px; font-variant-numeric:tabular-nums; margin-top:3px; }
+.hw-market-clock > span { display:block; font-size:7px; color:#a3828b; letter-spacing:.3px; margin-top:2px; }
+.hw-market-pass { display:flex; align-items:center; gap:12px; padding:13px 14px; position:relative; border:1px solid #e9d4d13b; border-radius:14px; background:linear-gradient(115deg,#a587a526,#e0bfa114); margin:5px 0 0; box-shadow:inset 0 1px 0 #fff2df0b; backdrop-filter:blur(14px); }
+.hw-market-pass::before,.hw-market-pass::after { content:''; position:absolute; width:8px; height:8px; border-radius:50%; background:#352b43; border:1px solid #e9d4d12b; top:50%; transform:translateY(-50%); }
+.hw-market-pass::before { left:-5px; }.hw-market-pass::after { right:-5px; }
+.hw-market-avatar { flex-shrink:0; width:44px; height:50px; overflow:hidden; border-radius:23px 23px 7px 7px; display:grid; place-items:center; color:#eed8ce; background:#92788f; border:1px solid #dac5d4a0; }
+.hw-market-avatar img { width:100%; height:100%; object-fit:cover; border-radius:inherit; }
+.hw-market-avatar > span { font-size:23px; }
+.hw-market-pass > div { flex:1; min-width:0; }
+.hw-market-pass small { display:block; color:#bda0b8; font-size:8px; letter-spacing:1px; overflow-wrap:anywhere; }
+.hw-market-pass h2 { color:#f0d9c0; font-size:17px; font-weight:500; line-height:1.4; overflow-wrap:anywhere; margin:1px 0; }
+.hw-market-pass p { color:#c5acbd; font-size:9px; line-height:1.5; overflow-wrap:anywhere; white-space:pre-wrap; }
+.hw-market-pass-stamp { display:grid; place-items:center; flex-shrink:0; width:39px; height:39px; border:1px solid #d9bba262; border-radius:50%; color:#ccb196; font-family:'Songti SC',serif; font-size:9px; line-height:1.5; letter-spacing:2px; text-align:center; transform:rotate(12deg); }
+.hw-market-section-label { display:flex; align-items:center; gap:12px; margin:20px 1px 12px; color:#d8bdcb; font-size:10px; letter-spacing:2px; }
+.hw-market-section-label::after { content:''; flex:1; height:1px; background:linear-gradient(90deg,#d9b6c43d,transparent); }
+.hw-market-section-label > i { font-style:normal; font-size:8px; color:#c4a483; }
+.hw-market-section-label > small { font-size:7px; color:#b79bad; letter-spacing:1px; }
+.hw-market-cabinet { display:grid; grid-template-columns:53px minmax(0,1fr); gap:15px; }
+.hw-market-tools { display:flex; flex-direction:column; justify-content:space-around; border:1px solid #e3c2c930; border-radius:26px 26px 9px 9px; background:linear-gradient(180deg,#b995aa24,#bba5c00b); padding:12px 2px; position:relative; }
+.hw-market-tools::before { content:'✦'; position:absolute; left:0; right:0; top:-9px; text-align:center; color:#e6c7a3; font-size:12px; }
+.hw-market-app { display:flex; align-items:center; gap:8px; position:relative; min-width:0; color:#e2c8d4; font-size:10px; padding:0; }
+.hw-market-app > span:last-child { min-width:0; overflow-wrap:anywhere; }
+.hw-market-app-icon { position:relative; flex-shrink:0; display:grid; place-items:center; width:39px; height:45px; border:1px solid #f3e5cb94; border-radius:20px 20px 7px 7px; background:linear-gradient(135deg,#e8d1b9,#cdb6c5); color:#775a75; box-shadow:0 4px 8px #1f152829,inset 0 0 0 3px #fff5e31c; }
+.hw-market-glyph { width:20px; height:20px; stroke-width:1.45; }
+.hw-market-app-icon img { width:100%; height:100%; object-fit:cover; border-radius:inherit; }
+.hw-market-app.has-custom-icon .hw-market-app-icon { border:0; background:transparent; box-shadow:none; }
+.hw-market-badge { position:absolute; right:-3px; top:-4px; font-size:8px; color:#443145; background:#e6b69c; border:1px solid #f5d4b6; min-width:14px; line-height:13px; padding:0 3px; border-radius:9px; text-align:center; }
+.hw-market-tools .hw-market-app { flex-direction:column; gap:5px; font-size:8px; text-align:center; padding:6px 0; }
+.hw-market-tools .hw-market-app-icon { width:27px; height:27px; color:#d0b7ca; background:transparent; border:0; box-shadow:none; border-radius:8px; }
+.hw-market-tools .hw-market-glyph { width:19px; height:19px; }
+.hw-market-shelves { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:17px 15px; padding:2px 1px 8px; }
+.hw-market-shelves .hw-market-app { padding:2px 0 11px; flex-direction:column; gap:7px; font-size:9px; justify-content:flex-start; }
+.hw-market-shelves .hw-market-app::after { content:''; position:absolute; bottom:0; left:0; right:0; height:4px; border-radius:3px; background:linear-gradient(180deg,#aa869f80,#80667c80); border-top:1px solid #e2c7cb70; box-shadow:0 5px 5px #1f152836; }
+.hw-market-shelves .hw-market-app:nth-child(4n+2) .hw-market-app-icon { transform:rotate(5deg); background:linear-gradient(145deg,#c9b7d6,#b8a8cd); border-radius:13px 13px 6px 6px; }
+.hw-market-shelves .hw-market-app:nth-child(4n+3) .hw-market-app-icon { transform:rotate(-5deg); background:linear-gradient(145deg,#d7c9b8,#b5c2bb); border-radius:13px 13px 6px 6px; }
+.hw-market-shelves .hw-market-app:nth-child(4n) .hw-market-app-icon { background:linear-gradient(145deg,#e5bfa9,#c6a7b3); }
+.hw-market-shelves .hw-market-app.has-custom-icon .hw-market-app-icon { background:transparent; transform:none; }
+.hw-market-app:active .hw-market-app-icon { scale:.93; }
+.hw-market-music { margin-top:20px; border-top:1px dashed #cfb3c333; border-bottom:1px dashed #cfb3c333; }
+.hw-market-music > summary { display:flex; justify-content:space-between; align-items:center; cursor:pointer; list-style:none; padding:12px 3px; font-size:10px; color:#dec3ce; }
+.hw-market-music > summary::-webkit-details-marker { display:none; }
+.hw-market-music small { font-size:8px; color:#b89db5; letter-spacing:1px; }
+.hw-market-music i { font-size:13px; font-style:normal; margin-left:7px; }
+.hw-market-music > div { max-width:240px; margin:0 auto 13px; }
+.hw-market-footer { display:flex; justify-content:space-between; gap:12px; color:#aa8fa8; font-size:8px; line-height:1.7; padding-top:13px; }
+.hw-market-footer > span { min-width:0; overflow-wrap:anywhere; }
+.hw-market-custom .hw-market-pass::before,.hw-market-custom .hw-market-pass::after { display:none; }
+.hw-market-custom .hw-market-shop-name { text-shadow:0 2px 12px #24182e; }
+[data-home-style=halloween] .home-status-bar, [data-home-style=halloween] .home-status-bar :is(span,svg,button) { color:#e5d0d9; }
+.special-opening-settings[open] > summary .special-opening-chevron { transform:rotate(180deg); }
+.special-opening-list { margin-top:12px; display:flex; flex-direction:column; gap:10px; }
+.special-opening-list > .birthday-settings { margin-top:0; box-shadow:none; }
+.hw-theme-preview { height:64px; margin-bottom:12px; border-radius:8px; position:relative; overflow:hidden; background:radial-gradient(circle at 50% 30%,#8d6f8e55,transparent 60%),#302a43; color:#edceaa; }
+.hw-theme-preview > strong { position:absolute; top:6px; left:0; right:0; text-align:center; font-family:'Songti SC',serif; font-size:10px; letter-spacing:3px; font-weight:400; }
+.hw-theme-preview > span { position:absolute; left:12px; top:31px; font-size:7px; padding:3px 4px; border:1px solid #e3c4ca40; border-radius:9px 9px 3px 3px; }
+.hw-theme-preview > div { position:absolute; left:37px; right:12px; top:29px; display:grid; grid-template-columns:repeat(2,1fr); gap:6px 8px; }
+.hw-theme-preview em { width:100%; height:9px; display:flex; justify-content:center; border-bottom:2px solid #b394a7; }
+.hw-theme-preview em::after { content:''; width:7px; height:8px; border-radius:4px 4px 1px 1px; background:#ddc0a6; margin-top:-3px; }
+@media(max-height:740px) { .hw-market-window { height:210px; }.hw-market-shop-art { width:240px; height:209px; }.hw-market-shop-name h1 { font-size:28px; }.hw-market-header { padding-top:8px; }.hw-market-pass { padding:10px 12px; }.hw-market-shelves { row-gap:13px; } }
+@media(max-width:350px) { .hw-market-header { padding-inline:18px; }.hw-market-scroll { padding-inline:18px; }.hw-market-window { height:200px; }.hw-market-shop-art { width:220px; height:192px; left:54%; }.hw-market-shop-name h1 { font-size:26px; letter-spacing:7px; }.hw-market-clock { width:94px; min-height:76px; bottom:7px; }.hw-market-clock > strong { font-size:27px; }.hw-market-clock > span { font-size:6px; }.hw-market-cabinet { grid-template-columns:47px minmax(0,1fr); gap:13px; }.hw-market-pass-stamp { width:32px; height:32px; font-size:8px; }.hw-market-app-icon { width:35px; height:41px; } }

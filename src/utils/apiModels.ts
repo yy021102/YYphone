@@ -3,6 +3,13 @@ import { bearerApiKey } from './apiAuthentication';
 import { parseApiEndpoint } from './apiEndpoint';
 
 export interface ApiModel { id: string; label: string }
+export function filterApiModels(models: ApiModel[], query: string): ApiModel[] {
+  const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
+  return terms.length ? models.filter(model => {
+    const text = `${model.id} ${model.label}`.toLocaleLowerCase();
+    return terms.every(term => text.includes(term));
+  }) : models;
+}
 export interface ModelListConnection extends ApiConnection { protocol?: 'auto' | 'openai' | 'google'; purpose?: 'decision' | 'image'; unsupported?: boolean }
 const record = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 

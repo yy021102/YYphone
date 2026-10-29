@@ -208,6 +208,9 @@ test('DeepSeek can run the decision API using a raw or copied Bearer key without
     calls++; assert.equal(String(url), 'https://api.deepseek.com/chat/completions');
     assert.equal(new Headers(init?.headers).get('Authorization'), 'Bearer DS_SECONDARY_ONLY');
     const body = JSON.parse(String(init?.body)); assert.equal(body.model, 'deepseek-flash'); assert.equal(body.response_format.type, 'json_object');
+    assert(body.messages.some((message: { content: string }) => /json/i.test(message.content)), 'DeepSeek JSON mode requires the literal word JSON in a message');
+    assert(body.max_tokens >= 2048, 'decision output must leave room for thinking models');
+    assert(!Object.hasOwn(body, 'temperature'), 'decision requests must not force a temperature unsupported by some models');
     assert(!String(init?.body).includes('DS_SECONDARY_ONLY')); assert(!String(init?.body).includes('MAIN_SECRET'));
     return ai({ calls: [] });
   });
@@ -219,6 +222,79 @@ test('DeepSeek can run the decision API using a raw or copied Bearer key without
     }
   }
   assert.equal(calls, 6);
+});
+
+test('JSON-incompatible gateways retry once without forced JSON on the same selected API and accept wrapped JSON plans', async () => {
+  for (const google of [false, true]) for (const secondary of [false, true]) {
+    const config = settings();
+    const selected = google ? { endpoint: 'https://generativelanguage.googleapis.com/v1beta', apiKey: 'GEMINI_SECRET', model: 'gemini-test' }
+      : { endpoint: 'https://gateway.invalid/v1', apiKey: 'GATEWAY_SECRET', model: 'gemini-proxy-test' };
+    if (secondary) config.decisionApi = selected;
+    let requests = 0, searches = 0;
+    mock.method(globalThis, 'fetch', async (url: unknown, init?: RequestInit) => {
+      if (String(url).includes('api.tavily.com')) { searches++; return json({ results: [{ title: '真实结果', url: 'https://news.invalid', content: '今日新闻' }] }); }
+      requests++;
+      assert(String(url).includes(google ? 'generativelanguage.googleapis.com' : 'gateway.invalid'));
+      const body = JSON.parse(String(init?.body));
+      if (requests === 1) return new Response(JSON.stringify({ error: { message: `Unknown parameter ${google ? 'responseMimeType' : 'response_format'}` } }), { status: 400 });
+      assert.equal(requests, 2);
+      if (google) assert(!body.generationConfig.responseMimeType); else assert(!body.response_format);
+      const text = '<think>只判断查询需要，不输出心声。</think>\n查询计划如下：\n```json\n' + JSON.stringify({ calls: [{ toolId: config.tools[0].id, query: '今日新闻' }] }) + '\n```';
+      return google ? json({ candidates: [{ content: { parts: [{ text }] } }] }) : json({ choices: [{ message: { content: text } }] });
+    });
+    const result = await runMcpDecision({ allowed: true, query: '查新闻', history: [], mainApi: secondary ? mainApi : selected, settings: config });
+    assert.equal(requests, 2); assert.equal(searches, 1); assert.match(result.context, /真实结果/); assert.doesNotMatch(result.context, /判断查询需要/);
+    mock.restoreAll();
+  }
+});
+
+test('decision diagnostics distinguish HTTP failures and malformed plans without echoing keys, URLs, private text or provider bodies', async () => {
+  const config = settings();
+  config.decisionApi = { endpoint: 'https://secondary.invalid/v1?token=URL_SECRET', apiKey: 'SECONDARY_SECRET', model: 'test' };
+  const input = { allowed: true, query: 'PRIVATE_CHAT', history: [], mainApi, settings: config };
+  for (const [status, expected] of [[401, /认证或权限/], [403, /认证或权限/], [404, /地址或模型/], [429, /限流或额度/], [500, /HTTP 500/], [400, /温度参数/]] as const) {
+    let calls = 0;
+    mock.method(globalThis, 'fetch', async () => { calls++; return new Response('temperature PRIVATE_CHAT SECONDARY_SECRET MAIN_SECRET URL_SECRET TOOL_SECRET', { status }); });
+    const result = await runMcpDecision(input);
+    assert.equal(calls, 1, 'authentication, quota and generic HTTP errors must not trigger paid retries');
+    assert.match(result.status, expected); assert.doesNotMatch(JSON.stringify(result), /PRIVATE_CHAT|SECONDARY_SECRET|MAIN_SECRET|URL_SECRET|TOOL_SECRET/);
+    mock.restoreAll();
+  }
+  let calls = 0;
+  mock.method(globalThis, 'fetch', async () => { calls++; return new Response('{"error":"response_format unsupported SECONDARY_SECRET"}', { status: 400 }); });
+  const twice = await runMcpDecision(input); assert.equal(calls, 2); assert.match(twice.status, /JSON 输出参数/); assert.doesNotMatch(twice.status, /SECONDARY_SECRET/);
+  mock.restoreAll(); mock.method(globalThis, 'fetch', async () => json({ choices: [{ message: { content: '不完整 {"calls":[' } }] }));
+  assert.match((await runMcpDecision(input)).status, /完整的 JSON/);
+  mock.restoreAll(); mock.method(globalThis, 'fetch', async () => ai({ calls: [{ toolId: 'made-up', query: 'x' }] }));
+  assert.match((await runMcpDecision(input)).status, /不存在或未启用/);
+});
+
+test('decision timeout is 60 seconds, external cancellation stops the workflow, and no query starts after either', async () => {
+  const config = settings(), input = { allowed: true, query: '查新闻', history: [], mainApi, settings: config };
+  let expire: (() => void) | undefined, requests = 0;
+  const realTimeout = globalThis.setTimeout;
+  mock.method(globalThis, 'setTimeout', (callback: () => void, delay: number) => { assert.equal(delay, 60000); expire = callback; return realTimeout(() => {}, 60000); });
+  mock.method(globalThis, 'fetch', async (_url: unknown, init?: RequestInit) => {
+    requests++;
+    return new Promise<Response>((_resolve, reject) => init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true }));
+  });
+  const pending = runMcpDecision(input); assert(expire); expire();
+  const result = await pending; assert.match(result.status, /超时（60 秒）/); assert.equal(requests, 1);
+  const controller = new AbortController();
+  const cancelled = runMcpDecision({ ...input, signal: controller.signal }); controller.abort();
+  await assert.rejects(cancelled, { name: 'AbortError' }); assert.equal(requests, 2);
+  const before = requests;
+  await assert.rejects(runMcpDecision({ ...input, signal: controller.signal }), { name: 'AbortError' }); assert.equal(requests, before);
+});
+
+test('decision-only testing validates the plan without executing tools or changing service switches', async () => {
+  const config = settings(); let calls = 0;
+  mock.method(globalThis, 'fetch', async (url: unknown) => {
+    calls++; assert(String(url).includes('main.invalid'));
+    return ai({ calls: [{ toolId: config.tools[0].id, query: '新闻' }] });
+  });
+  const result = await runMcpDecision({ allowed: true, testOnly: true, query: '查新闻', history: [], mainApi, settings: config });
+  assert.equal(calls, 1); assert.equal(result.context, ''); assert.match(result.status, /决策连接正常/);
 });
 
 test('no-use, malformed plans, partial failures and unavailable decision APIs do not break chat', async () => {
@@ -336,7 +412,7 @@ test('decision sees all enabled discovered tools and executes schema-specific ar
     assert.equal(r.params.name, 'extract'); assert.deepEqual(r.params.arguments, { urls: ['https://example.com'] });
     return json({ id: r.id, result: { content: [{ type: 'text', text: '网页正文' }] } });
   });
-  const result = await runMcpDecision({ allowed: true, query: '读一下 https://example.com', history: [], mainApi, settings: config });
+  const result = await runMcpDecision({ allowed: true, query: '提取刚才那篇文章', history: [{ from: '玩家', text: 'https://example.com' }], mainApi, settings: config });
   assert(chosen); assert.match(result.context, /网页正文/);
 });
 

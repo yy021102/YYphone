@@ -7,7 +7,7 @@ import {
 } from '../utils/birthday';
 import { setStorageItemsAtomically } from '../utils/dbStorage';
 
-export function BirthdayRuntime({ unlocked, atHome, onOpenChat }: { unlocked: boolean; atHome: boolean; onOpenChat: (chatId: string) => void }) {
+export function BirthdayRuntime({ unlocked, atHome, onOpenChat, onOpenChange }: { unlocked: boolean; atHome: boolean; onOpenChat: (chatId: string) => void; onOpenChange?: (open: boolean) => void }) {
   const [scene, setScene] = useState<BirthdayPreviewRequest | null>(null);
   const [revision, setRevision] = useState(0);
   const [preparing, setPreparing] = useState(false);
@@ -16,6 +16,7 @@ export function BirthdayRuntime({ unlocked, atHome, onOpenChat }: { unlocked: bo
   const attempted = useRef(new Set<string>()), opening = useRef(false);
   const settings = readBirthdaySettings();
   const configKey = JSON.stringify(settings);
+  useEffect(() => { onOpenChange?.(unlocked && scene !== null); }, [unlocked, scene, onOpenChange]);
   useEffect(() => {
     mounted.current = true;
     const refresh = () => setRevision(v => v + 1);

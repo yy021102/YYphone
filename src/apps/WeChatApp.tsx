@@ -106,12 +106,14 @@ import { PhoneInspection } from '../components/PhoneInspection';
 import { ExternalLinkCard } from '../components/ExternalLinkCard';
 import { extractSharedLink, publicLink } from '../utils/linkPreview';
 import { runMcpDecision } from '../utils/mcpTools';
+import { pendingMcpInput } from '../utils/mcpTriggers';
 import { refreshWeather } from '../utils/weatherData';
 import { buildGroupPrivateContext, chatRangeMessageIds, isVisibleChatMessage, resolveChatHistoryCount } from '../utils/chatHistory';
 import { DocumentTextImport } from '../components/DocumentTextImport';
 import { deleteGroupJournal, invalidateGroupJournal, maybeAutoGroupJournal } from '../utils/groupJournal';
 import { GroupJournalPanel } from '../components/GroupJournalPanel';
 import { requestChatReply, withChatResponseFormat } from '../utils/chatReply';
+import { parseTransferActions, settleOutgoingTransfer } from '../utils/outgoingTransfer';
 import { regeneratedReplyIds } from '../utils/chatRegeneration';
 import { deleteWeChatContact, type FormerParticipant } from '../utils/deleteWeChatContact';
 import { ChatImageViewer } from '../components/ChatImageViewer';
@@ -736,6 +738,8 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
   }, []);
   const useWeChatDark = followSystemDark && systemPrefersDark;
   const generationRunning = useRef(false);
+  const generationController = useRef<AbortController | null>(null);
+  useEffect(() => () => generationController.current?.abort(), []);
   const enterReplyQueue = useRef(new Map<string, { archiveId: string; messageId: string }>());
   const [enterReplyTick, setEnterReplyTick] = useState(0);
   useEffect(() => () => enterReplyQueue.current.clear(), []);
@@ -2623,6 +2627,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
             : {}),
           ...(attachmentMode === 'transfer'
             ? {
+                paymentStatus: 'pending',
                 recipientId: attachmentDraft.recipientId || activeChat?.participantIds[0],
                 ...(intimatePayerId ? { payerId: intimatePayerId } : {}),
               }
@@ -2875,6 +2880,8 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       return;
     }
 
+    const controller = new AbortController();
+    generationController.current = controller;
     generationRunning.current = true;
     if (previewOnly) {
       setTokenPreviewBusy(true);
@@ -2887,6 +2894,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
     try {
       if (!previewOnly && chat.type === 'direct') {
         await syncAliasExperiences(chat.id);
+        controller.signal.throwIfAborted();
         const updatedChats = readStoredValue(CHATS_STORAGE_KEY, chats, isChatList);
         const updated = updatedChats.find(item => item.id === targetChatId);
         if (!updated || updated.activeArchiveId !== chat.activeArchiveId || updated.blocked) throw new Error('对话状态已变化，请重新生成。');
@@ -2898,6 +2906,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         try { await refreshWeather(); } catch { /* Weather failure must not interrupt conversation. */ }
       }
       const replyRange = getReplyMessageRange(chat);
+      controller.signal.throwIfAborted();
       const targetReplyCount = activeCallMode
         ? 1
         : previewOnly ? replyRange.max : replyRange.min + Math.floor(
@@ -3000,6 +3009,10 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         ...(chat.type === 'direct' && !contact.id.startsWith('npc:') && !regenerate && !activeCallMode ? [
           `【亲密付】玩家不能自行开卡。你可以结合人设、关系与经济情况主动赠予亲密付，返回可选字段 "intimatePayAction":{"type":"grant","monthlyLimit":正数,"note":"给玩家的留言"${pendingIntimateRequest ? `,"requestId":"${pendingIntimateRequest.id}"` : ''}}。额度由你决定，不必照搬申请额度，最大 1000000 元。${pendingIntimateRequest ? `玩家有待处理申请，申请 ID：${pendingIntimateRequest.id}，希望额度 ¥${pendingIntimateRequest.amount}。请本轮明确同意或拒绝；拒绝返回 "intimatePayAction":{"type":"decline","requestId":"${pendingIntimateRequest.id}"}。` : '没有申请时也可自然地主动赠予；不赠予则省略该字段。'}reply 中自然说明你的决定，不要只口头同意而不返回动作字段。`,
         ] : ['本轮禁止 intimatePayAction。']),
+        regenerate || chat.type === 'observer' ? '本轮禁止 paymentActions。' : [
+          '【处理玩家转账】可以按人设收取、退还或暂不处理玩家发给你的待收转账。决定收取或退还时，必须返回顶层 paymentActions:[{"messageId":"原转账ID","action":"received 或 returned"}]，action 只能写 received（收取）或 returned（退还）。仅顶层 speakerId 本人可操作；不要另发一笔 transfer 模拟退还。退还会原路退回余额或亲密付额度，并显示转账回执。',
+          `可处理的转账：${JSON.stringify(chat.messages.slice(-resolveChatHistoryCount(chat.currentChatHistoryCount)).filter(message => message.kind === 'transfer' && message.senderId === 'user' && (!message.paymentStatus || message.paymentStatus === 'pending')).map(message => ({ messageId: message.id, recipientId: message.recipientId ?? (chat.type === 'direct' ? contact.id : ''), amount: message.amount, note: message.text })))}`,
+        ].join('\n'),
         `表情包分类权限（必须遵守，每位角色只能从获准分类选择）：${chatMembers.map((member) =>
           `${member.id}：${'stickerCategories' in member && member.stickerCategories !== undefined ? member.stickerCategories.join('、') || '禁止使用表情包' : '全部分类'}`
         ).join('；')}。${allowedStickers.length === 0 ? '本轮禁止返回 sticker。' : ''}`,
@@ -3045,13 +3058,16 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         content: `【定时主动联系】这不是玩家新发来的消息。请根据人设、${chat.timeAwarenessEnabled === false ? '已有聊天' : '当前时间与已有聊天'}主动联系玩家，聊一个自然的新话题或关心近况。不要假装玩家刚说过话，不要机械重复上一轮回复，不要提定时器或后台任务。`,
       });
       if (!previewOnly && chat.type === 'direct' && apiPreset) {
+        controller.signal.throwIfAborted();
         setMcpStatus(null);
-        const mcp = await runMcpDecision({ allowed: chat.mcpEnabled === true, query: currentInput,
+        const mcp = await runMcpDecision({ allowed: chat.mcpEnabled === true, query: proactive ? '' : pendingMcpInput(chat.messages, chat.participantIds), signal: controller.signal,
           history: chat.messages.filter(m => m.senderId === 'user' || chat.participantIds.includes(m.senderId)).slice(-8).map(m => ({ from: m.senderId === 'user' ? '玩家' : '角色', text: m.text })), mainApi: apiPreset });
+        controller.signal.throwIfAborted();
         if (mcp.context) promptMessages.splice(Math.max(0, promptMessages.length - 1), 0, { role: 'system', content: mcp.context });
         if (mcp.status && mcp.status !== 'MCP：本轮无需查询。') setMcpStatus({ chatId: chat.id, text: mcp.status });
       }
       const requestMessages = withChatResponseFormat(promptMessages, responseInstructions);
+      controller.signal.throwIfAborted();
       if (!activeCallMode) requestMessages.splice(requestMessages.length - 1, 0, { role: 'system', content: [
         '【微信聊天心声必填】本轮每位实际发言角色都要有独立 thought，不能省略或留空。主要角色写在顶层，群聊其他发言者写在各自至少一条消息的 thought。心声仅供玩家点头像查看，不放进台词，角色彼此无法读到。',
         '结构示意（条数、成员和附件仍遵循本轮要求）：' + JSON.stringify(chat.type === 'direct'
@@ -3082,7 +3098,8 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         namesById: Object.fromEntries(chatMembers.map((member) => [
           member.id, [member.name, chat.groupNicknames?.[member.id] ?? ''],
         ])),
-      }, { requireThought: !activeCallMode, groupChat: chat.type !== 'direct', normalizeVoice: !activeCallMode });
+      }, { requireThought: !activeCallMode, groupChat: chat.type !== 'direct', normalizeVoice: !activeCallMode, signal: controller.signal });
+      controller.signal.throwIfAborted();
       let reply = '';
       let replyParts: GeneratedAiMessage[] = [];
       let thought = '';
@@ -3316,14 +3333,16 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
               ...readImageGenerationSettings(),
               prompt: chat.imageGenerationPrompt,
               references: selectChatImageReferences(part.imageSubject, imagePersona, chat.imageGenerationReferenceImage, chat.imageGenerationReferenceSimilarity),
-            }, apiPreset);
+            }, apiPreset, controller.signal);
           } catch (imageError) {
+            controller.signal.throwIfAborted();
             console.error('Image generation failed; keeping text image description.', imageError);
             // Saving the fallback message clears chatError, so report image failures directly.
             showYyError(`生图失败，已保留文字图片描述：${imageError instanceof Error ? imageError.message : '未知错误'}`);
           }
         }
       }
+      controller.signal.throwIfAborted();
       const liveChat = readStoredValue(CHATS_STORAGE_KEY, chats, isChatList).find((item) => item.id === chat.id);
       if (!liveChat || liveChat.blocked || liveChat.activeArchiveId !== chat.activeArchiveId || liveChat.archiveRevision !== chat.archiveRevision ||
         liveChat.participantIds.length !== chat.participantIds.length || !chat.participantIds.every(id => liveChat.participantIds.includes(id)) ||
@@ -3334,6 +3353,12 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       }
       let expectedCouponRevision = liveChat.coupleCouponRevision;
       const executionSocialContext = { ...socialContext, chat: liveChat };
+      if ((regenerate || chat.type === 'observer') && result.paymentActions !== undefined && (!Array.isArray(result.paymentActions) || result.paymentActions.length)) throw new Error('本轮不能处理转账。');
+      const paymentActions = parseTransferActions(result.paymentActions, liveChat.messages, speakerId, chat.type === 'direct' ? contact.id : undefined);
+      // Validate all actions before performing any other generated effects.
+      const paymentPreview = paymentActions.reduce((data, action) => settleOutgoingTransfer(data,
+        liveChat.messages.find(message => message.id === action.messageId)!, action.action, speakerId,
+        chat.type === 'direct' ? contact.id : undefined), readAlipayData());
       const socialActions = parseSocialActions(result, executionSocialContext, speakerId);
       if (socialActions.privateMessage) {
         const direct = readStoredValue(CHATS_STORAGE_KEY, chats, isChatList).find((item) => item.type === 'direct' &&
@@ -3499,9 +3524,10 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
               (!aiReaction!.target || (item.text && (item.text.includes(aiReaction!.target) || aiReaction!.target.includes(item.text))))
           ) ?? [...chat.messages].reverse().find((item) => item.senderId === 'user' && item.kind !== 'pat'))?.id
         : undefined;
-      const financeBeforeGrant = intimateAction?.type === 'grant' ? readAlipayData() : undefined;
+      const financeBeforeGrant = intimateAction?.type === 'grant' || paymentActions.length ? readAlipayData() : undefined;
       const socialActor = chatContacts.find((actor) => actor.id === speakerId);
       if (socialActor) applySocialWrites(socialActions, executionSocialContext, socialActor);
+      if (paymentActions.length) writeAlipayData(paymentPreview);
       if (intimateAction?.type === 'grant' && intimateAction.monthlyLimit) {
         grantIntimatePay(contact, intimateAction.monthlyLimit, intimateAction.note);
       }
@@ -3509,6 +3535,8 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         ...current,
         messages: [
           ...current.messages.filter((item) => !replacedIds.has(item.id)).map((item) => {
+            const paymentAction = paymentActions.find(action => action.messageId === item.id);
+            if (paymentAction) return { ...item, paymentStatus: paymentAction.action, paymentSettledAt: new Date().toISOString() };
             if (intimateAction?.requestId === item.id) return {
               ...item,
               intimateStatus: intimateAction.type === 'grant' ? 'granted' as const : 'declined' as const,
@@ -3532,8 +3560,10 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         }
         throw new Error('回复保存失败，亲密付未生效，请重试。');
       }
+      if (paymentActions.length) window.dispatchEvent(new Event('yyphone:finance-change'));
       if (couponUse && coupleCharId) {
         const used = await useCoupleCoupon(coupleCharId, 'char', couponUse, `chat-coupon:${replyBatchId}`, { expectedChatId: chat.id, expectedArchiveId: chat.activeArchiveId ?? '' });
+        controller.signal.throwIfAborted();
         expectedCouponRevision = used.id;
       }
       if (socialActions.privateMessage && socialActor) {
@@ -3583,6 +3613,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       for (const message of replyMessages.slice(1)) {
         const length = (message.text ?? '').length;
         await new Promise((resolve) => setTimeout(resolve, 500 + Math.min(1300, length * 40)));
+        controller.signal.throwIfAborted();
         const live = readStoredValue(CHATS_STORAGE_KEY, chats, isChatList).find(item => item.id === chat.id);
         if (!live || live.blocked || live.activeArchiveId !== chat.activeArchiveId || live.archiveRevision !== chat.archiveRevision || live.coupleCouponRevision !== expectedCouponRevision ||
           live.participantIds.length !== chat.participantIds.length || !chat.participantIds.every(id => live.participantIds.includes(id))) return;
@@ -3639,6 +3670,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         applyCoupleSeenAfterChat(coupleInjection);
         if (coupleCharId) {
           await acknowledgeCouponRequests(coupleCharId, couponContext.pendingIds);
+          controller.signal.throwIfAborted();
         }
         applyPlantSeenAfterChat(plantInjection);
         markMemoriesRecalled(memoryInjection.ids);
@@ -3694,17 +3726,30 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         }));
       }
     } catch (error) {
+      if (controller.signal.aborted) return;
       console.error('Could not generate AI chat reply.', error);
       if (previewOnly) setTokenPreviewError(error instanceof Error ? error.message : '完整输入估算失败。');
       else setChatError(error instanceof Error ? error.message : 'AI 回复失败，请检查网络与 API 配置。');
     } finally {
-      generationRunning.current = false;
-      if (previewOnly) setTokenPreviewBusy(false);
-      else {
-        setHiddenMessageIds([]);
-        setIsGeneratingReply(false);
+      if (generationController.current === controller) {
+        generationController.current = null;
+        generationRunning.current = false;
+        if (previewOnly) setTokenPreviewBusy(false);
+        else {
+          setHiddenMessageIds([]);
+          setIsGeneratingReply(false);
+        }
       }
     }
+  };
+
+  const stopGeneratingReply = () => {
+    generationController.current?.abort();
+    generationController.current = null;
+    generationRunning.current = false;
+    enterReplyQueue.current.clear();
+    setHiddenMessageIds([]);
+    setIsGeneratingReply(false);
   };
 
   useEffect(() => {
@@ -4162,6 +4207,14 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                   </div>
                 );
                 if (message.kind === 'context-note') {
+                  if (message.source === 'phone-inspection') return (
+                    <div key={message.id} className="yy-chat-system-notice py-1.5 text-center">
+                      {richMenu}
+                      <button type="button" onClick={() => handleMessageTap(message.id)} {...messagePress(message.id)}
+                        className="max-w-[88%] px-2 text-[10px] leading-relaxed text-slate-400">角色查看了你的手机</button>
+                      {messageActions}
+                    </div>
+                  );
                   return (
                     <div key={message.id} className="py-1.5 text-center">
                       {richMenu}
@@ -4174,8 +4227,6 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                         <span className="block text-[10px] font-semibold text-[#6F8CA0]">
                           {message.source === 'offline'
                             ? `📖 ${message.title} · 已写入记忆`
-                            : message.source === 'phone-inspection'
-                              ? '🔎 角色查手机'
                             : message.source === 'character-perspective'
                               ? '🪞 侧写'
                             : message.source === 'couple-unbind'
@@ -4611,12 +4662,12 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                 </button>
                 <button
                   type="button"
-                  disabled={isGeneratingReply}
-                  onClick={() => void generateAiReply()}
+                  aria-label={isGeneratingReply ? '停止生成回复' : '生成角色回复'}
+                  onClick={(event) => { event.preventDefault(); isGeneratingReply ? stopGeneratingReply() : void generateAiReply(); }}
                   className="yy-chat-generate h-9 w-9 shrink-0 rounded-xl text-lg leading-none disabled:opacity-50"
                   style={{ backgroundColor: '#EBEBF5', color: '#77778A' }}
                 >
-                  ♡
+                  {isGeneratingReply ? '■' : '♡'}
                 </button>
               </form>
             ) : (
@@ -4671,14 +4722,13 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                   rows={1}
                   className="yy-chat-input min-h-10 min-w-0 flex-1 resize-none overflow-y-hidden rounded-[5px] border-0 bg-white px-3 py-2 text-[16px] leading-6 outline-none"
                 />
-                {!chatMessageDraft.trim() ? <button
+                {!chatMessageDraft.trim() || isGeneratingReply ? <button
                   type="button"
-                  aria-label="生成角色回复"
-                  disabled={isGeneratingReply}
-                  onClick={() => void generateAiReply()}
+                  aria-label={isGeneratingReply ? '停止生成回复' : '生成角色回复'}
+                  onClick={(event) => { event.preventDefault(); isGeneratingReply ? stopGeneratingReply() : void generateAiReply(); }}
                   className="yy-chat-generate flex h-8 w-8 shrink-0 items-center justify-center rounded-full disabled:opacity-50"
                 >
-                  {!useWeChatDark && chatAppearance.generateIconUrl
+                  {isGeneratingReply ? <span aria-hidden="true" className="text-lg">■</span> : !useWeChatDark && chatAppearance.generateIconUrl
                     ? <img src={chatAppearance.generateIconUrl} alt="" className="h-6 w-6 object-contain" />
                     : <Heart className="h-6 w-6" strokeWidth={1.7} />}
                 </button>
@@ -7392,7 +7442,11 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                     if (window.confirm('确认退回这笔转账？退回后不可撤销。')) settlePayment('returned');
                   }} className="text-xs text-sky-700">立即退回</button>}
                 </>
-              ) : <p className="text-sm text-slate-500">{!incoming ? '已发出' : payment.paymentStatus === 'returned' ? '已退回对方，未计入余额' : payment.kind === 'red-packet' && payment.paymentStatus === 'pending' ? '红包已被抢完' : '已存入支付宝个人余额'}</p>}
+              ) : <p className="text-sm text-slate-500">{!incoming
+                ? payment.kind !== 'transfer' ? '已发出' : payment.paymentStatus === 'returned'
+                  ? payment.payerId ? '已原路退还亲密付，未计入个人余额' : '已退回支付宝余额'
+                  : payment.paymentStatus === 'received' ? '对方已收款' : '等待对方收款'
+                : payment.paymentStatus === 'returned' ? '已退回对方，未计入余额' : payment.kind === 'red-packet' && payment.paymentStatus === 'pending' ? '红包已被抢完' : '已存入支付宝个人余额'}</p>}
               <button type="button" onClick={() => setActivePaymentId('')} className="block w-full text-xs text-slate-400">关闭</button>
               <p className="text-[10px] text-slate-400">本地虚拟资金，不涉及真实支付</p>
             </section>

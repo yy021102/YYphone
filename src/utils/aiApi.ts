@@ -71,6 +71,7 @@ export const requestConfiguredAiText = async (
     signal?: AbortSignal;
   } = {}
 ) => {
+  options.signal?.throwIfAborted();
   if (options.includeGlobalWorldBooks !== false) systemPrompt = withGlobalWorldBooks(systemPrompt, [...(options.history ?? []).map(message => message.content), userPrompt]);
   const preset = options.api ?? getActiveApiPreset();
   if (!preset.endpoint.trim() || !preset.apiKey.trim()) {
@@ -134,6 +135,7 @@ export const requestConfiguredAiText = async (
     responseText = readOpenAiContent(await response.json());
   }
 
+  options.signal?.throwIfAborted();
   const trimmed = responseText.trim();
   if (!trimmed) throw new Error('AI 返回了空内容。');
   return trimmed.replace(/^```(?:json)?\s*|\s*```$/gi, '').trim();

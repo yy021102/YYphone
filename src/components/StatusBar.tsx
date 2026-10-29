@@ -8,7 +8,7 @@ interface StatusBarProps {
 
 export const StatusBar: React.FC<StatusBarProps> = ({ time, onLockClick }) => {
   return (
-    <div className="w-full pt-2 px-5 pb-1 flex items-center justify-between text-[#587589] text-xs font-semibold select-none z-30 transition-colors">
+    <div className="home-status-bar w-full pt-2 px-5 pb-1 flex items-center justify-between text-[#587589] text-xs font-semibold select-none z-30 transition-colors">
       {/* Left: Time and date indicator */}
       <div className="flex items-center gap-2 min-w-[50px]">
         <span className="tracking-tight text-[13px] font-bold">{time}</span>

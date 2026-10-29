@@ -1,4 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { parseAiJson } from '../utils/aiResponse';
+import { setStorageItemsAtomically } from '../utils/dbStorage';
+import { canBuyXianyuItem, isSelfXianyuThread, parseXianyuBuyers, settleXianyuSale } from '../utils/xianyuTrade';
+import { withWorldBooksForContacts } from '../utils/worldBookPrompt';
 import { findCouponUse, fulfillCoupleGift, type CouponGiftTarget } from '../utils/coupleRewards';
 import {
   ShoppingBag,
@@ -33,6 +37,7 @@ import {
   chargeAlipay,
   readAlipayContacts,
   readAlipayData,
+  ALIPAY_STORAGE_KEY,
 } from '../utils/alipayData';
 import { requestConfiguredAiText } from '../utils/aiApi';
 import { appendCharacterContextEvent } from '../utils/characterContext';
@@ -81,6 +86,8 @@ export interface XianyuProduct {
   isPlayerItem?: boolean;
   linkedCharId?: string;
   isAltAccount?: boolean;
+  soldToThreadId?: string;
+  soldAt?: string;
 }
 
 // 闲鱼聊天会话结构
@@ -90,6 +97,7 @@ export interface XianyuChatThread {
   itemTitle: string;
   itemPrice: number;
   peerName: string;
+  buyerId?: string;
   linkedCharId?: string;
   isAltAccount?: boolean;
   isPlayerItem?: boolean;
@@ -172,7 +180,9 @@ const isXianyuProductList = (value: unknown): value is XianyuProduct[] =>
     typeof item.price === 'number' &&
     typeof item.freeShipping === 'boolean' &&
     typeof item.emoji === 'string' &&
-    typeof item.sellerName === 'string'
+    typeof item.sellerName === 'string' &&
+    (item.soldToThreadId === undefined || typeof item.soldToThreadId === 'string') &&
+    (item.soldAt === undefined || typeof item.soldAt === 'string')
   );
 
 const isXianyuThreadList = (value: unknown): value is XianyuChatThread[] =>
@@ -183,6 +193,7 @@ const isXianyuThreadList = (value: unknown): value is XianyuChatThread[] =>
     typeof thread.itemTitle === 'string' &&
     typeof thread.itemPrice === 'number' &&
     typeof thread.peerName === 'string' &&
+    (thread.buyerId === undefined || typeof thread.buyerId === 'string') &&
     (thread.isPlayerItem === undefined || typeof thread.isPlayerItem === 'boolean') &&
     Array.isArray(thread.messages) &&
     thread.messages.every((message) =>
@@ -264,8 +275,13 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack, giftCoupon, onCoup
   );
 
   const [xianyuThreads, setXianyuThreads] = useState<XianyuChatThread[]>(() =>
-    readStoredValue(STORAGE_KEYS.xianyuThreads, [] as XianyuChatThread[], isXianyuThreadList)
+    readStoredValue(STORAGE_KEYS.xianyuThreads, [] as XianyuChatThread[], isXianyuThreadList).filter(thread => !isSelfXianyuThread(thread, xianyuItems))
   );
+  const buyerRequests = useRef(new Map<string, AbortController>());
+  const [buyerBusyIds, setBuyerBusyIds] = useState<string[]>([]);
+  const tradeQueue = useRef<Promise<unknown>>(Promise.resolve());
+  const replyRunning = useRef(false);
+  useEffect(() => () => { buyerRequests.current.forEach(controller => controller.abort()); }, []);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [chatInput, setChatInput] = useState('');
 
@@ -321,8 +337,6 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack, giftCoupon, onCoup
   useEffect(() => {
     try {
       writeStoredValue(STORAGE_KEYS.marketProducts, marketProducts);
-      writeStoredValue(STORAGE_KEYS.xianyuItems, xianyuItems);
-      writeStoredValue(STORAGE_KEYS.xianyuThreads, xianyuThreads);
       writeStoredValue(STORAGE_KEYS.playerProfile, playerProfile);
       saveSetting(STORAGE_KEYS.themePresets, themePresets);
       saveSetting(STORAGE_KEYS.activePresetId, activePresetId);
@@ -333,13 +347,13 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack, giftCoupon, onCoup
     }
   }, [
     marketProducts,
-    xianyuItems,
-    xianyuThreads,
     playerProfile,
     themePresets,
     activePresetId,
     currentTheme,
   ]);
+  useEffect(() => { writeStoredValue(STORAGE_KEYS.xianyuItems, xianyuItems); }, [xianyuItems]);
+  useEffect(() => { writeStoredValue(STORAGE_KEYS.xianyuThreads, xianyuThreads); }, [xianyuThreads]);
 
   useEffect(() => {
     if (themePresets.some((preset) => preset.id === activePresetId)) return;
@@ -435,7 +449,8 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack, giftCoupon, onCoup
 
   const handleSaveProduct = () => {
     const priceNum = parseFloat(formPrice);
-    if (!formTitle.trim() || isNaN(priceNum) || priceNum < 0) return;
+    if (!formTitle.trim() || !Number.isFinite(priceNum) || priceNum < 0) return;
+    if (activeTab === 'xianyu' && editingId && xianyuItems.find(item => item.id === editingId)?.soldToThreadId) { setAiError('已售出的商品不能编辑。'); return; }
 
     if (activeTab === 'shopping' || activeTab === 'eleme') {
       if (editingId) {
@@ -499,6 +514,8 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack, giftCoupon, onCoup
           isPlayerItem: true,
         };
         setXianyuItems((prev) => [newXy, ...prev]);
+        writeStoredValue(STORAGE_KEYS.xianyuItems, [newXy, ...xianyuItems]);
+        void generateXianyuBuyers(newXy);
       }
     }
     setShowEditorModal(false);
@@ -699,6 +716,10 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack, giftCoupon, onCoup
   // ==================== 9. 结算支付与送礼/通知角色 ====================
   const handleConfirmPurchase = async () => {
     if (!checkoutProduct) return;
+    if (checkoutProduct.type === 'xianyu' && !canBuyXianyuItem(readStoredValue(STORAGE_KEYS.xianyuItems, xianyuItems, isXianyuProductList).find(item => item.id === checkoutProduct.id))) {
+      setPaymentError('不能购买自己的商品或已售出的商品。');
+      return;
+    }
     if (giftCoupon) {
       if (couponPaying) return;
       setCouponPaying(true);
@@ -824,6 +845,12 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack, giftCoupon, onCoup
 
   // ==================== 10. 闲鱼聊一聊会话逻辑 ====================
   const handleStartXianyuChat = (item: XianyuProduct) => {
+    if (item.isPlayerItem) {
+      const buyer = xianyuThreads.find(thread => thread.itemId === item.id && !isSelfXianyuThread(thread, xianyuItems));
+      if (buyer) { setXianyuSubTab('messages'); setActiveThreadId(buyer.id); }
+      else if (!item.soldToThreadId) void generateXianyuBuyers(item);
+      return;
+    }
     setXianyuSubTab('messages');
     const existing = xianyuThreads.find((t) => t.itemId === item.id);
     if (existing) {
@@ -843,6 +870,75 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack, giftCoupon, onCoup
     };
     setXianyuThreads((prev) => [newThread, ...prev]);
     setActiveThreadId(newThread.id);
+  };
+
+  // Serialize settlements: a listing can sell once, and saving the wallet and order is atomic.
+  const commitXianyuResponses = (snapshot: XianyuProduct, responses: Array<{ thread: XianyuChatThread; messages: XianyuChatThread['messages']; buy: boolean; create?: boolean }>) => {
+    const task = tradeQueue.current.then(async () => {
+      const items = readStoredValue(STORAGE_KEYS.xianyuItems, [], isXianyuProductList);
+      const item = items.find(item => item.id === snapshot.id);
+      if (!item || item.title !== snapshot.title || item.desc !== snapshot.desc || item.price !== snapshot.price || !item.isPlayerItem) throw new Error('商品已修改或下架，本次咨询未保存，请刷新买家。');
+      let threads = readStoredValue(STORAGE_KEYS.xianyuThreads, [], isXianyuThreadList);
+      let soldItem = item;
+      let finance = readAlipayData();
+      let sale = false;
+      const updated: XianyuChatThread[] = [];
+      for (const response of responses) {
+        const current = threads.find(thread => thread.id === response.thread.id);
+        if (!current && !response.create) continue;
+        if (response.create && threads.some(thread => thread.itemId === item.id && thread.buyerId === response.thread.buyerId)) continue;
+        const thread = { ...(current ?? response.thread), itemTitle: item.title, itemPrice: item.price, messages: [...(current?.messages ?? []), ...response.messages] };
+        if (response.buy && !soldItem.soldToThreadId) {
+          const settled = settleXianyuSale(soldItem, thread, finance);
+          soldItem = settled.item; finance = settled.finance; sale = true;
+        }
+        threads = [thread, ...threads.filter(other => other.id !== thread.id)];
+        updated.push(thread);
+      }
+      const nextItems = items.map(other => other.id === item.id ? soldItem : other);
+      await setStorageItemsAtomically({ [STORAGE_KEYS.xianyuItems]: nextItems, [STORAGE_KEYS.xianyuThreads]: threads,
+        ...(sale ? { [ALIPAY_STORAGE_KEY]: finance } : {}) });
+      setXianyuItems(nextItems); setXianyuThreads(threads);
+      if (sale) { setFinanceData(finance); window.dispatchEvent(new Event('yyphone:finance-change')); }
+      for (const thread of updated) syncXianyuToChat(thread, thread.messages);
+      return updated;
+    });
+    tradeQueue.current = task.catch(() => {});
+    return task;
+  };
+
+  const generateXianyuBuyers = async (item: XianyuProduct) => {
+    if (!item.isPlayerItem || item.soldToThreadId || buyerRequests.current.has(item.id)) return;
+    const controller = new AbortController();
+    buyerRequests.current.set(item.id, controller);
+    setBuyerBusyIds(ids => [...ids, item.id]); setAiError('');
+    try {
+      const previous = readStoredValue(STORAGE_KEYS.xianyuThreads, [], isXianyuThreadList).filter(thread => thread.itemId === item.id);
+      const eligible = contacts.filter(contact => contact.name !== item.sellerName && !previous.some(thread => thread.linkedCharId === contact.id));
+      const chosen = includeCharInXianyuAi ? eligible.filter(contact => !xianyuAiCharTargets.length || xianyuAiCharTargets.includes(contact.id)) : [];
+      const character = chosen[Math.floor(Math.random() * chosen.length)];
+      const ids = [...(character ? [character.id] : []), `visitor:${crypto.randomUUID()}`, ...(!character ? [`visitor:${crypto.randomUUID()}`] : [])];
+      const response = await requestConfiguredAiText(withWorldBooksForContacts([
+        '模拟玩家刚发布闲置后收到的真实买家咨询。只返回 {"buyers":[{"buyerId":"指定ID","name":"买家昵称","message":"咨询或购买消息","buy":false}]}，每位指定买家一项。买家必须是其他人，不能是卖家自己。路人昵称各不相同。可以问成色、用途或议价，不要统一话术；也可以有买家决定直接按标价拍下并付款，此时 buy:true，最多一人直接买。尚在询问或议价必须 buy:false。不要声称降价成交，程序只按标价结算。角色依人设、需要和经济情况决定是否购买，不要强行买。',
+        character ? `角色买家 ${character.id} 必须用姓名「${character.name}」，人设：${getCharacterPersona(character.id)}` : '',
+      ].join('\n'), character ? [character.id] : [], undefined, [item.title, item.desc]), JSON.stringify({
+        seller: { name: item.sellerName, bio: playerProfile.bio }, item: { title: item.title, description: item.desc, price: item.price, freeShipping: item.freeShipping },
+        buyerIds: ids, visitors: 'visitor: 开头的是新路人，自拟昵称',
+      }), { json: true, signal: controller.signal, includeGlobalWorldBooks: false });
+      controller.signal.throwIfAborted();
+      const buyers = parseXianyuBuyers(parseAiJson(response), ids, item.sellerName);
+      await commitXianyuResponses(item, buyers.map(buyer => ({
+        create: true, buy: buyer.buy,
+        thread: { id: `thread-${crypto.randomUUID()}`, itemId: item.id, itemTitle: item.title, itemPrice: item.price,
+          peerName: buyer.buyerId === character?.id ? character.name : buyer.name, buyerId: buyer.buyerId,
+          linkedCharId: buyer.buyerId === character?.id ? character.id : undefined, isPlayerItem: true, messages: [] },
+        messages: [{ id: `m-${crypto.randomUUID()}`, sender: 'peer' as const, text: buyer.message, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }],
+      })));
+    } catch (error) {
+      if (!controller.signal.aborted) setAiError(`商品已发布，买家咨询暂未生成：${error instanceof Error ? error.message : '请重试。'}`);
+    } finally {
+      buyerRequests.current.delete(item.id); setBuyerBusyIds(ids => ids.filter(id => id !== item.id));
+    }
   };
 
   // 和角色账号/小号的闲鱼对话，同步成该角色微信聊天里的一条上下文记录（持续更新同一条）；
@@ -866,7 +962,8 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack, giftCoupon, onCoup
         title: `闲鱼 · ${thread.peerName}`,
         content: `《${thread.itemTitle}》${speaker(last)}：${last.text}`.slice(0, 70),
         detail: [
-          `${thread.isAltAccount ? '你的闲鱼小号' : '你的闲鱼账号'}「${thread.peerName}」与玩家的对话（商品《${thread.itemTitle}》¥${thread.itemPrice}）：`,
+          `${thread.isAltAccount ? '你的闲鱼小号' : '你的闲鱼账号'}「${thread.peerName}」作为${thread.isPlayerItem ? '买家，玩家是卖家' : '卖家，玩家是买家'}的对话（商品《${thread.itemTitle}》¥${thread.itemPrice}）：`,
+          ...(readStoredValue(STORAGE_KEYS.xianyuItems, [], isXianyuProductList).find(item => item.id === thread.itemId)?.soldToThreadId === thread.id ? ['你已按标价拍下并付款，商品已经售出给你。'] : []),
           ...messages.slice(-24).map((m) => `${speaker(m)}：${m.text}`),
         ].join('\n'),
         bump: true,
@@ -906,12 +1003,16 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack, giftCoupon, onCoup
   };
 
   const handleSendXianyuMessage = async () => {
-    if (!chatInput.trim() || !activeThreadId || isXianyuReplying) return;
+    if (!chatInput.trim() || !activeThreadId || replyRunning.current) return;
     const thread = xianyuThreads.find((item) => item.id === activeThreadId);
-    if (!thread) return;
+    if (!thread || isSelfXianyuThread(thread, xianyuItems)) return;
+    const listing = xianyuItems.find(item => item.id === thread.itemId);
+    if (thread.isPlayerItem && !listing) { setAiError('商品已下架，无法继续交易。'); return; }
+    replyRunning.current = true;
     const text = chatInput.trim();
     setChatInput('');
     const userMessage = { id: `m-${Date.now()}`, sender: 'me' as const, text, time: '刚刚' };
+    writeStoredValue(STORAGE_KEYS.xianyuThreads, xianyuThreads.map(current => current.id === thread.id ? { ...current, messages: [...current.messages, userMessage] } : current));
     setXianyuThreads((prev) =>
       prev.map((t) =>
         t.id === activeThreadId
@@ -933,14 +1034,26 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack, giftCoupon, onCoup
     const playerIdContext = `玩家闲鱼 ID：${playerProfile.xianyuId || '未设置'}。`;
     try {
       syncXianyuToChat(thread, [...thread.messages, userMessage]);
-      const reply = await requestConfiguredAiText(
-        linkedCharacter
-          ? `你正在闲鱼上扮演角色${linkedCharacter.name}${thread.isAltAccount ? '的小号' : ''}回复买家。角色人设：${getCharacterPersona(linkedCharacter.id) || '自然、可信地交流'}。回复要像真实闲鱼聊天，简洁有生活感，只返回消息正文。`
+      const response = await requestConfiguredAiText(withWorldBooksForContacts(
+        (linkedCharacter
+          ? `你正在闲鱼上扮演角色${linkedCharacter.name}${thread.isAltAccount ? '的小号' : ''}，你是${thread.isPlayerItem ? '买家，玩家是卖家' : '卖家，玩家是买家'}。角色人设：${getCharacterPersona(linkedCharacter.id) || '自然、可信地交流'}。回复要像真实闲鱼聊天，简洁有生活感。`
           : thread.isPlayerItem
-            ? `你是闲鱼用户「${thread.peerName}」，正在作为买家咨询玩家发布的二手商品。请像真实买家一样自然简短回复，只返回消息正文。`
-            : `你正在扮演闲鱼卖家「${thread.peerName}」，围绕商品自然、简短地回复买家，只返回消息正文。`,
-        `${playerIdContext}\n商品「${thread.itemTitle}」（¥${thread.itemPrice}）。\n此前对话：\n${history || '暂无'}\n玩家最新消息：${text}`
+            ? `你是闲鱼用户「${thread.peerName}」，正在作为买家咨询玩家发布的二手商品。请像真实买家一样自然简短回复。`
+            : `你正在扮演闲鱼卖家「${thread.peerName}」，围绕商品自然、简短地回复买家，只返回消息正文。`) +
+          (thread.isPlayerItem ? '\n只返回 {"reply":"买家的回复正文","buy":false}。决定按标价拍下并付款才设 buy:true。询问、议价、拒绝或已售出时 buy:false。不要另造订单或金额，不要替卖家说话。' : '\n只返回回复正文。'),
+        thread.linkedCharId ? [thread.linkedCharId] : [], undefined, [history, text]),
+        `${playerIdContext}\n商品「${listing?.title ?? thread.itemTitle}」（¥${listing?.price ?? thread.itemPrice}）。${listing?.soldToThreadId ? `状态：已售出${listing.soldToThreadId === thread.id ? '给你，已付款' : '给其他买家'}。` : '状态：在售。'}\n此前对话：\n${history || '暂无'}\n玩家最新消息：${text}`,
+        { json: !!thread.isPlayerItem, includeGlobalWorldBooks: false }
       );
+      let reply = response;
+      let buy = false;
+      if (thread.isPlayerItem) {
+        const parsed = parseAiJson(response);
+        if (!isRecord(parsed) || typeof parsed.reply !== 'string' || !parsed.reply.trim() || typeof parsed.buy !== 'boolean') throw new Error('买家回复格式无效，请重试。');
+        reply = parsed.reply.trim(); buy = parsed.buy;
+        await commitXianyuResponses(listing!, [{ thread, messages: [{ id: `m-${crypto.randomUUID()}`, sender: 'peer', text: reply, time: '刚刚' }], buy }]);
+        return;
+      }
       setXianyuThreads((previous) =>
         previous.map((item) =>
           item.id === activeThreadId
@@ -963,6 +1076,7 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack, giftCoupon, onCoup
       console.error('Could not generate Xianyu chat reply.', error);
       setAiError(error instanceof Error ? error.message : '闲鱼 AI 回复失败，请检查 API 配置。');
     } finally {
+      replyRunning.current = false;
       setIsXianyuReplying(false);
     }
   };
@@ -1302,6 +1416,7 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack, giftCoupon, onCoup
                           </span>
                           <button
                             onClick={() => openEditXianyuProduct(item)}
+                            disabled={!!item.soldToThreadId}
                             className="p-1 text-slate-400 hover:text-sky-500 cursor-pointer"
                           >
                             <Pencil className="w-3 h-3" />
@@ -1336,6 +1451,11 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack, giftCoupon, onCoup
                           ¥{Number(item.price).toFixed(2)}
                         </span>
                         <div className="flex items-center gap-1.5">
+                          {item.isPlayerItem ? <>
+                            {item.soldToThreadId && <span className="text-[10px] text-slate-400">已售出</span>}
+                            {xianyuThreads.some(thread => thread.itemId === item.id) && <button onClick={() => handleStartXianyuChat(item)} className="rounded-full border border-sky-100 bg-white px-2.5 py-1 text-[10px] font-bold text-sky-500">查看买家</button>}
+                            {!item.soldToThreadId && <button disabled={buyerBusyIds.includes(item.id)} onClick={() => void generateXianyuBuyers(item)} style={{ background: currentTheme.primaryGradient }} className="rounded-full px-2.5 py-1 text-[10px] font-bold text-white disabled:opacity-50">{buyerBusyIds.includes(item.id) ? '等待咨询…' : '刷新买家'}</button>}
+                          </> : <>
                           <button
                             onClick={() => handleStartXianyuChat(item)}
                             className="px-2.5 py-1 rounded-full bg-white border border-sky-100 text-sky-500 text-[10px] font-bold active:scale-95 cursor-pointer"
@@ -1358,6 +1478,7 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack, giftCoupon, onCoup
                           >
                             拍下
                           </button>
+                          </>}
                         </div>
                       </div>
                     </div>
@@ -1450,6 +1571,10 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack, giftCoupon, onCoup
                       </div>
                     </div>
 
+                    {activeThread.isPlayerItem && (() => {
+                      const listing = xianyuItems.find(item => item.id === activeThread.itemId);
+                      return listing?.soldToThreadId ? <p role="status" className="rounded-xl bg-sky-50 px-3 py-2 text-[11px] text-sky-600">{listing.soldToThreadId === activeThread.id ? `已成交 · ¥${Number(listing.price).toFixed(2)} 已存入支付宝余额` : '这件商品已售出给其他买家'}</p> : null;
+                    })()}
                     <div className="space-y-2 max-h-56 overflow-y-auto py-1">
                       {activeThread.messages.map((m) => (
                         <div

@@ -21,6 +21,32 @@ beforeEach(async () => {
 });
 afterEach(() => mock.restoreAll());
 
+test('chat and Little P requests pass cancellation to fetch and discard responses arriving after stop', async () => {
+  for (const google of [false, true]) {
+    const api = google ? { ...connection, endpoint: 'https://generativelanguage.googleapis.com/v1beta', model: 'gemini-test' } : connection;
+    for (const chat of [false, true]) {
+      const controller = new AbortController(); let calls = 0, usages = 0;
+      mock.method(globalThis, 'fetch', async (_url: unknown, init?: RequestInit) => {
+        assert.equal(init?.signal, controller.signal); calls++;
+        controller.abort(); // A gateway may finish its response even after the browser cancels.
+        return google ? Response.json({ candidates: [{ content: { parts: [{ text: 'bad response' }] } }] }) : response('bad response');
+      });
+      await assert.rejects(chat
+        ? requestChatReply(messages, api, () => usages++, undefined, { signal: controller.signal })
+        : requestConfiguredAiText('小P', '你好', { api, signal: controller.signal, includeGlobalWorldBooks: false }), { name: 'AbortError' });
+      assert.equal(calls, 1); assert.equal(usages, 0); // No format-correction request after cancellation.
+      mock.restoreAll();
+    }
+  }
+});
+test('an already stopped request never starts a network request', async () => {
+  const controller = new AbortController(); controller.abort();
+  const fetch = mock.method(globalThis, 'fetch', async () => response());
+  await assert.rejects(requestChatReply(messages, connection, () => {}, undefined, { signal: controller.signal }), { name: 'AbortError' });
+  await assert.rejects(requestConfiguredAiText('小P', '你好', { api: connection, signal: controller.signal }), { name: 'AbortError' });
+  assert.equal(fetch.mock.callCount(), 0);
+});
+
 test('temperature accepts zero and finite provider range, ignoring malformed imported values', () => {
   assert.equal(apiTemperature(0), 0); assert.equal(apiTemperature(2), 2); assert.equal(apiTemperature(.7), .7);
   for (const value of [-.1, 2.1, NaN, Infinity, '1', null, undefined]) assert.equal(apiTemperature(value), undefined);

@@ -106,7 +106,7 @@ export interface HomeAppearance {
 }
 
 export interface BeautySettings {
-  homeStyle?: 'classic' | 'minimal' | 'moonlit';
+  homeStyle?: 'classic' | 'minimal' | 'moonlit' | 'halloween';
   themeId: string;
   wallpaperId: string;
   wallpapers: CustomWallpapers;

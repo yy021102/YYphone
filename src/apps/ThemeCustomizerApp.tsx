@@ -12,7 +12,9 @@ import {
 } from 'lucide-react';
 import { AppHeader } from '../components/AppHeader';
 import { GlobalFontSettings } from '../components/GlobalFontSettings';
-import { BirthdaySettings } from '../components/BirthdaySettings';
+import { SpecialOpeningSettings } from '../components/SpecialOpeningSettings';
+import { HalloweenThemePreview } from '../components/HalloweenHomeArt';
+import { HALLOWEEN_CHANGE, readHalloweenReward } from '../utils/halloween';
 import type { FontSettings } from '../utils/fontSettings';
 import { useErrorDialog } from '../components/ErrorDialog';
 import { ALL_APPS, THEMES, WALLPAPERS } from '../data/mockData';
@@ -50,7 +52,7 @@ const isBeautySettings = (value: unknown): value is BeautySettings => {
   const settings = value as Partial<BeautySettings>;
   return (
     typeof settings.themeId === 'string' &&
-    (settings.homeStyle === undefined || settings.homeStyle === 'classic' || settings.homeStyle === 'minimal' || settings.homeStyle === 'moonlit') &&
+    (settings.homeStyle === undefined || settings.homeStyle === 'classic' || settings.homeStyle === 'minimal' || settings.homeStyle === 'moonlit' || settings.homeStyle === 'halloween') &&
     THEMES.some((theme) => theme.id === settings.themeId) &&
     typeof settings.wallpaperId === 'string' &&
     (WALLPAPERS.some((wallpaper) => wallpaper.id === settings.wallpaperId) || settings.wallpaperId === 'deep-sea-frost') &&
@@ -97,6 +99,12 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
   currentSettings,
 }) => {
   const [wallpaperDraft, setWallpaperDraft] = useState(customWallpapers);
+  const [halloweenUnlocked, setHalloweenUnlocked] = useState(() => readHalloweenReward().unlocked);
+  useEffect(() => {
+    const refresh = () => setHalloweenUnlocked(readHalloweenReward().unlocked);
+    window.addEventListener(HALLOWEEN_CHANGE, refresh);
+    return () => window.removeEventListener(HALLOWEEN_CHANGE, refresh);
+  }, []);
   const [iconDraft, setIconDraft] = useState<AppIconOverrides>(appIcons);
   const [lockAppearanceDraft, setLockAppearanceDraft] = useState(currentSettings.lockScreenAppearance ?? DEFAULT_LOCK_APPEARANCE);
   const [presets, setPresets] = useState(() =>
@@ -344,7 +352,7 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
             <ChevronDown size={13} className="shrink-0 text-slate-400 transition-transform group-open:rotate-180" />
           </summary>
           <h3 className="mt-4 px-0.5 text-[11px] font-semibold text-[#2C4A5C]">主页面风格</h3>
-          <div className="mt-3 grid grid-cols-2 gap-2">{([{ id: 'classic', name: '清新 · 轻透', colors: ['#dcecf8', '#f3dce7'], description: '渐变毛玻璃 · 组件桌面' }, { id: 'minimal', name: '素简 · 纸白', colors: ['#f4f2ee', '#55544f'], description: '暖白与石墨 · 简约布局' }, { id: 'moonlit', name: '月光 · 花笺', colors: ['#ede9f4', '#b7a5d0'], description: '月白雾紫 · 花枝信笺' }] as const).map(style => <button type="button" key={style.id} aria-pressed={(currentSettings.homeStyle ?? 'classic') === style.id} onClick={() => { if (onApplyPreset({ ...currentSettings, homeStyle: style.id })) { setStatus(`已应用主页面风格「${style.name}」。`); setError(''); } else setError('主页面风格保存失败。'); }} className={`rounded-xl border p-3 text-left ${(currentSettings.homeStyle ?? 'classic') === style.id ? 'border-slate-400 ring-1 ring-slate-300' : 'border-white bg-white/50'}`}><div className="mb-3 flex h-16 items-center justify-center gap-1 rounded-lg" style={{ background: style.colors[0] }}>{[0, 1, 2, 3].map(i => <span key={i} className="h-5 w-5 rounded-md border border-white/80" style={{ background: style.colors[1], opacity: .4 + i * .15 }} />)}</div><strong className="block text-[11px] font-semibold text-slate-600">{style.name}</strong><span className="mt-1 block text-[9px] text-slate-400">{style.description}</span></button>)}</div>
+          <div className="mt-3 grid grid-cols-2 gap-2">{([{ id: 'classic', name: '清新 · 轻透', colors: ['#dcecf8', '#f3dce7'], description: '渐变毛玻璃 · 组件桌面' }, { id: 'minimal', name: '素简 · 纸白', colors: ['#f4f2ee', '#55544f'], description: '暖白与石墨 · 简约布局' }, { id: 'moonlit', name: '月光 · 花笺', colors: ['#ede9f4', '#b7a5d0'], description: '月白雾紫 · 花枝信笺' }, ...(halloweenUnlocked ? [{ id: 'halloween' as const, name: '万圣 · 南瓜夜宴', colors: ['#2b263e', '#dfb996'], description: '夜间糖果铺 · 橱窗货架' }] : [])] as const).map(style => <button type="button" key={style.id} aria-pressed={(currentSettings.homeStyle ?? 'classic') === style.id} onClick={() => { if (onApplyPreset({ ...currentSettings, homeStyle: style.id })) { setStatus(`已应用主页面风格「${style.name}」。`); setError(''); } else setError('主页面风格保存失败。'); }} className={`rounded-xl border p-3 text-left ${(currentSettings.homeStyle ?? 'classic') === style.id ? 'border-slate-400 ring-1 ring-slate-300' : 'border-white bg-white/50'}`}>{style.id === 'halloween' ? <HalloweenThemePreview/> : <div className="mb-3 flex h-16 items-center justify-center gap-1 rounded-lg" style={{ background: style.colors[0] }}>{[0, 1, 2, 3].map(i => <span key={i} className="h-5 w-5 rounded-md border border-white/80" style={{ background: style.colors[1], opacity: .4 + i * .15 }} />)}</div>}<strong className="block text-[11px] font-semibold text-slate-600">{style.name}</strong><span className="mt-1 block text-[9px] text-slate-400">{style.description}</span></button>)}</div>
           <h3 className="mt-4 px-0.5 text-[11px] font-semibold text-[#2C4A5C]">系统主题配色</h3>
           <div className="mt-3 grid grid-cols-3 gap-2">
             {THEMES.map((theme) => {
@@ -439,7 +447,7 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
           </div>
         </details>
 
-        <BirthdaySettings />
+        <SpecialOpeningSettings/>
         <details className="glass-card group rounded-2xl p-3 space-y-3">
           <summary className="flex cursor-pointer list-none items-center gap-2 text-xs font-bold text-[#2C4A5C]">
             <ImageIcon className="h-3.5 w-3.5 shrink-0 text-sky-500" /><span className="flex-1">自定义壁纸</span>

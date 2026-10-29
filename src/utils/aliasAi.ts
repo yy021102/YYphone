@@ -6,6 +6,7 @@ import { CHAT_COMMUNICATION_RULES } from './chatCommunication';
 import { ALIAS_MEMORY_RULES, aliasCharacter, aliasId, aliasMessageContext, aliasPeer, aliasRows, aliasSelf, currentAliasUser, readAliasState, row, updateAliasThread, visibleAliasThreads, writeAliasState, type AliasIdentityEvidence, type AliasThread } from './aliasAccounts';
 
 const running = new Set<string>();
+const replyRuns = new Map<string, AbortSignal | undefined>();
 const object = (text: string) => {
   let result: unknown; try { result = JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] || text); } catch { throw new Error('角色返回格式无效，请重试。'); }
   if (!row(result)) throw new Error('角色返回格式无效，请重试。'); return result;
@@ -106,8 +107,10 @@ export async function applyWithAlias(accountId: string, charId: string, message:
     return thread.id;
   } finally { running.delete(key); }
 }
-export async function generateAliasReply(id: string): Promise<void> {
-  if (running.has(id)) throw new Error('对方正在输入。'); running.add(id);
+export async function generateAliasReply(id: string, signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted();
+  if (replyRuns.has(id) && !replyRuns.get(id)?.aborted) throw new Error('对方正在输入。');
+  replyRuns.set(id, signal);
   try {
     const thread = visibleAliasThreads().find(t => t.id === id);
     if (!thread || thread.status !== 'accepted' || thread.blocked || thread.removedByCharacterAt) throw new Error('当前不能生成此账号的回复。');
@@ -118,7 +121,8 @@ export async function generateAliasReply(id: string): Promise<void> {
     const task = `接续当前账号对话，生成1～5条自然、错落的微信消息。${thread.messages.at(-1)?.from !== 'user' ? '对方没有新发言，你可以继续当前话题或自然主动开口，不虚构对方刚刚说过话。' : '回应对方最新的话。'}只返回 {"reply":["短句"],"thought":"第一人称独立心声，必须非空","identityEvidence":[]${ownDisguise ? ',"revealSelf":false' : ''}}。想分享画面时，可以把对应一条写成 {"kind":"image","text":"具体图片描述"}，这是文字图，不编造图片URL，不必每轮发图。${allowDelete ? '你可以依照人设、关系与真实互动决定是否删除当前聊天的联系人，例如被冒犯、被持续打扰或确实不愿继续来往；不因普通闲聊或单纯陌生就机械删除，不影响主号好友关系。不删除时省略动作；确实决定删除时返回 "deleteContact":true，心声中说明你的真实想法，可以先说一句告别，也可以静默删除（此时reply可为空数组）。这是只删除当前小号的好友关系，不清空聊天记录。' : '本轮禁止deleteContact，不操作其他账号的好友关系。'}${ownDisguise ? 'revealSelf只有当你在本轮消息中明确坦白自己真实身份时才为true，不强制坦白。' : '你不能修改或确认对方真实身份。只有具体独家记忆或独特口头禅才能怀疑，identityEvidence填写最多3项 {"messageId":"当前对方消息ID","quote":"该消息的线索原话","referenceQuote":"你已知道的对应细节原话","kind":"shared-memory或signature-phrase"}；必须来自实际记录，否则保持空数组，台词和心声都不凭空说对方熟悉或猜身份。'}`;
     let result: Record<string, any> = {}, evidence: AliasIdentityEvidence[] = [], parts: Array<{ kind: 'text' | 'image'; text: string }> = [], thought = '', problem = '';
     for (let attempt = 0; attempt < 2; attempt++) {
-      const raw = await requestConfiguredAiText(prompt, task + (attempt ? `\n【仅纠正上一版】${problem}。上一版尚未展示、未执行动作，请保留原意重新返回合法JSON；不要新增或重复删除动作。` : ''), { json: true, includeGlobalWorldBooks: false, maxTokens: 2400 });
+      const raw = await requestConfiguredAiText(prompt, task + (attempt ? `\n【仅纠正上一版】${problem}。上一版尚未展示、未执行动作，请保留原意重新返回合法JSON；不要新增或重复删除动作。` : ''), { json: true, includeGlobalWorldBooks: false, maxTokens: 2400, signal });
+      signal?.throwIfAborted();
       assertCurrent();
       try {
         result = object(raw);
@@ -152,7 +156,7 @@ export async function generateAliasReply(id: string): Promise<void> {
       messages: [...t.messages, ...parts.map(part => ({ id: aliasId(), from: 'character' as const, ...part, thought, replyBatchId, createdAt: now, identityAtTime: replyIdentity })),
         ...(reveals && t.identity !== 'revealed' ? [{ id: aliasId(), from: 'system' as const, text: `${aliasPeer(t)?.name}向你坦白了身份：${aliasCharacter(t.charId)?.name}`, createdAt: now, identityAtTime: 'revealed' as const }] : []),
         ...(result.deleteContact === true ? [{ id: aliasId(), from: 'system' as const, text: '对方已将此账号移出通讯录', thought, replyBatchId, createdAt: now, identityAtTime: replyIdentity }] : [])] }));
-  } finally { running.delete(id); }
+  } finally { if (replyRuns.get(id) === signal) replyRuns.delete(id); }
 }
 export type CharacterAliasRequestResult =
   | { status: 'created'; threadId: string }

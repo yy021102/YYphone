@@ -56,6 +56,7 @@ export const DEFAULT_WECHAT_THEME_CSS = `/* 微信完整聊天主题 · 默认�
 
 /* 05 普通文字气泡：颜色变量与下方原有颜色设置联动，也可直接改成颜色值 */
 .yy-chat-message-bubble.is-plain {
+  white-space: pre-wrap; /* 保留消息里的换行和空行 */
   border-radius: 4px;
   padding: 8px 12px;
   color: #111;

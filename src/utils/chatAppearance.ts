@@ -38,6 +38,7 @@ export const DEFAULT_BUBBLE_CSS = `/* 独立气泡 · 仅浅色模式生效
 
 /* 01 气泡主体：形状、边框、内边距、文字、阴影 */
 .yy-chat-message-bubble.is-plain {
+  white-space: pre-wrap; /* 保留消息里的换行和空行 */
   border-radius: 4px;
   padding: 8px 12px;
   color: #111;

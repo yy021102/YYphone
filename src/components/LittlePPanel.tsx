@@ -17,8 +17,18 @@ export const LittlePPanel: React.FC<LittlePPanelProps> = ({ open, onClose, onHid
   const [stickersOpen, setStickersOpen] = useState(false);
   const [guideOpen, setGuideOpen] = useState(false);
   const running = useRef(false);
+  const generation = useRef<AbortController | null>(null);
   const scroll = useRef<HTMLDivElement>(null);
   const stickers = readAvailableChatStickers();
+
+  const stopGeneration = () => {
+    generation.current?.abort();
+    generation.current = null;
+    running.current = false;
+    setBusy(false);
+  };
+  useEffect(() => { if (!open) stopGeneration(); }, [open]);
+  useEffect(() => () => generation.current?.abort(), []);
 
   useEffect(() => {
     if (open && scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight;
@@ -45,6 +55,8 @@ export const LittlePPanel: React.FC<LittlePPanelProps> = ({ open, onClose, onHid
   const generate = async () => {
     if (running.current) return;
     running.current = true;
+    const controller = new AbortController();
+    generation.current = controller;
     setBusy(true);
     setError('');
     try {
@@ -55,17 +67,23 @@ export const LittlePPanel: React.FC<LittlePPanelProps> = ({ open, onClose, onHid
         json: true,
         history: latest?.role === 'user' ? history.slice(0, -1) : history.slice(-99),
         includeGlobalWorldBooks: false,
+        signal: controller.signal,
       });
+      controller.signal.throwIfAborted();
       const reply = parseLittlePReply(response, stickers).map((part): LittlePMessage => ({
         ...part, id: crypto.randomUUID(), role: 'assistant',
       }));
       persist([...messages, ...reply]);
     } catch (failure) {
+      if (controller.signal.aborted) return;
       console.error('Could not generate Little P reply.', failure);
       setError(failure instanceof Error ? failure.message : '小P 暂时没有连接成功，请重试。');
     } finally {
-      running.current = false;
-      setBusy(false);
+      if (generation.current === controller) {
+        generation.current = null;
+        running.current = false;
+        setBusy(false);
+      }
     }
   };
 
@@ -95,7 +113,7 @@ export const LittlePPanel: React.FC<LittlePPanelProps> = ({ open, onClose, onHid
           </div>
         ) : (
           <div ref={scroll} className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
-            <p className="rounded-2xl bg-white p-3 text-xs leading-relaxed text-slate-500">嗨，我是小P！想找功能、遇到疑问，或者只是想聊聊天，都可以来找我。先发送消息，再点「让小P回复」。AI 使用当前主 API；只携带我们最近 100 条消息，不读取角色聊天或长期记忆，也不会替你操作。</p>
+            <p className="rounded-2xl bg-white p-3 text-xs leading-relaxed text-slate-500">嗨，我是小P！想找功能、遇到疑问，或者只是想聊聊天，都可以来找我。发出消息后，点「让小P回复」就好；还没配置 API 的话，也可以先翻翻功能指南。</p>
             {messages.map((message) => <div key={message.id} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
               <div className={`max-w-[88%] whitespace-pre-wrap break-words rounded-2xl px-3 py-2 text-xs leading-relaxed ${message.role === 'user' ? 'bg-sky-100 text-slate-700' : 'bg-white text-slate-600'}`}>
                 {message.sticker ? <img src={message.sticker.imageUrl} alt={message.sticker.description} className="h-24 w-24 object-contain" /> : message.text}
@@ -115,7 +133,7 @@ export const LittlePPanel: React.FC<LittlePPanelProps> = ({ open, onClose, onHid
             <button type="button" aria-label="小P表情包" disabled={busy} onClick={() => setStickersOpen(!stickersOpen)} className="text-lg text-sky-600">☺</button>
             <input aria-label="给小P的消息" value={draft} onChange={(event) => setDraft(event.target.value)} maxLength={10000} disabled={busy} placeholder="和小P说点什么…" className="min-w-0 flex-1 rounded-xl bg-slate-50 px-3 py-2 text-xs outline-none" />
             <button type="submit" disabled={busy || !draft.trim()} className="text-xs font-semibold text-sky-700 disabled:opacity-40">发送</button>
-            <button type="button" onClick={() => void generate()} disabled={busy} className="rounded-xl bg-sky-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">让小P回复</button>
+            <button type="button" onClick={() => busy ? stopGeneration() : void generate()} className="rounded-xl bg-sky-600 px-3 py-2 text-xs font-semibold text-white">{busy ? '停止生成' : '让小P回复'}</button>
           </form>
         </>}
       </section>

@@ -3,6 +3,8 @@ import { McpSettingsPanel } from '../components/McpSettingsPanel';
 import { ApiModelPicker } from '../components/ApiModelPicker';
 import { ChatApiConnectionTest } from '../components/ChatApiConnectionTest';
 import { apiTemperature } from '../utils/textApiConfig';
+import { normalizeApiEndpoint } from '../utils/apiEndpoint';
+import { bearerApiKey } from '../utils/apiAuthentication';
 import { getActiveApiPreset } from '../utils/aiApi';
 import { ACTIVE_IMAGE_PRESET_KEY, deleteImageGenerationPreset, normalizeImageSettings, readImageGenerationPresets, saveImageGenerationPreset, selectImageGenerationPreset } from '../utils/imageGenerationPresets';
 import {
@@ -68,11 +70,6 @@ interface ApiPreset {
   apiKey: string;
   model?: string;
   temperature?: number;
-}
-
-interface ApiModel {
-  id: string;
-  label: string;
 }
 
 const isApiPresetList = (value: unknown): value is ApiPreset[] =>
@@ -156,8 +153,8 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
   const [apiModel, setApiModel] = useState(() => initialApiPreset?.model ?? 'gpt-4o-mini');
   const [temperature, setTemperature] = useState<number | undefined>(() => apiTemperature(initialApiPreset?.temperature));
   const [showApiKey, setShowApiKey] = useState(false);
-  const [apiModels, setApiModels] = useState<ApiModel[]>([]);
-  const [isLoadingApiModels, setIsLoadingApiModels] = useState(false);
+  const [saveApiAsOpen, setSaveApiAsOpen] = useState(false);
+  const [apiCopyName, setApiCopyName] = useState('');
   const [apiMessage, setApiMessage] = useState('');
   const [apiError, setApiError] = useState('');
   useErrorDialog(apiError, 'API 配置出错了');
@@ -216,31 +213,34 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
     }
   };
 
-  const handleSaveApiPreset = () => {
-    const name = apiName.trim();
+  const handleSaveApiPreset = (asNew = false, copyName = '') => {
+    const name = (asNew ? copyName : apiName).trim();
     if (!name) {
       setApiError('请填写预设名称。');
       setApiMessage('');
       return;
     }
     const preset: ApiPreset = {
-      id: selectedApiPresetId || `api-${Date.now()}`,
+      id: asNew || !selectedApiPresetId ? `api-${crypto.randomUUID()}` : selectedApiPresetId,
       name,
       endpoint: apiEndpoint.trim(),
       apiKey,
       model: apiModel.trim() || 'gpt-4o-mini',
       ...(temperature !== undefined ? { temperature } : {}),
     };
-    const nextPresets = selectedApiPresetId
+    const nextPresets = selectedApiPresetId && !asNew
       ? apiPresets.map((item) => (item.id === selectedApiPresetId ? preset : item))
       : [...apiPresets, preset];
     if (persistApiPresets(nextPresets)) {
       setSelectedApiPresetId(preset.id);
+      setApiName(preset.name);
+      setSaveApiAsOpen(false);
       saveSetting(SETTINGS_KEYS.activeApiPreset, preset.id);
     }
   };
 
   const handleSelectApiPreset = (id: string) => {
+    if (!id) { handleNewApiPreset(); return; }
     const preset = apiPresets.find((item) => item.id === id);
     setSelectedApiPresetId(id);
     setApiName(preset?.name ?? '');
@@ -248,7 +248,7 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
     setApiKey(preset?.apiKey ?? '');
     setApiModel(preset?.model ?? 'gpt-4o-mini');
     setTemperature(apiTemperature(preset?.temperature));
-    setApiModels([]);
+    setSaveApiAsOpen(false);
     if (preset) saveSetting(SETTINGS_KEYS.activeApiPreset, id);
     setApiMessage('');
     setApiError('');
@@ -257,11 +257,7 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
   const handleNewApiPreset = () => {
     setSelectedApiPresetId('');
     setApiName('');
-    setApiEndpoint('');
-    setApiKey('');
-    setApiModel('gpt-4o-mini');
-    setTemperature(undefined);
-    setApiModels([]);
+    setSaveApiAsOpen(false);
     setApiMessage('');
     setApiError('');
   };
@@ -277,112 +273,10 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
     setApiKey(nextPreset?.apiKey ?? '');
     setApiModel(nextPreset?.model ?? 'gpt-4o-mini');
     setTemperature(apiTemperature(nextPreset?.temperature));
+    setSaveApiAsOpen(false);
     if (nextPreset) saveSetting(SETTINGS_KEYS.activeApiPreset, nextPreset.id);
     else removeSetting(SETTINGS_KEYS.activeApiPreset);
     setApiMessage('API 配置预设已删除。');
-  };
-
-  const handleFetchApiModels = async () => {
-    const endpointValue = apiEndpoint.trim();
-    const key = apiKey;
-    if (!endpointValue || !key.trim()) {
-      setApiError('请先填写 API 接入端点和 API Key。');
-      setApiMessage('');
-      return;
-    }
-
-    let modelsUrl: URL;
-    try {
-      modelsUrl = new URL(endpointValue);
-      if (modelsUrl.protocol !== 'http:' && modelsUrl.protocol !== 'https:') {
-        throw new Error('API 接入端点必须使用 HTTP 或 HTTPS。');
-      }
-    } catch (error) {
-      setApiError(error instanceof Error ? error.message : 'API 接入端点格式无效。');
-      setApiMessage('');
-      return;
-    }
-
-    const isGeminiEndpoint =
-      modelsUrl.hostname.includes('generativelanguage.googleapis.com') ||
-      /\/v1beta(?:\/|$)/i.test(modelsUrl.pathname);
-    const path = modelsUrl.pathname.replace(/\/+$/, '');
-    if (isGeminiEndpoint) {
-      modelsUrl.pathname = path
-        .replace(/\/models(?:\/[^/]+)?$/i, '')
-        .replace(/\/[^/]+:generateContent$/i, '');
-      if (!/\/v1beta$/i.test(modelsUrl.pathname)) {
-        modelsUrl.pathname = `${modelsUrl.pathname.replace(/\/+$/, '')}/v1beta`;
-      }
-      modelsUrl.pathname = `${modelsUrl.pathname}/models`;
-      modelsUrl.searchParams.set('key', key);
-    } else {
-      modelsUrl.pathname = path
-        .replace(/\/chat\/completions$/i, '')
-        .replace(/\/completions$/i, '')
-        .replace(/\/models$/i, '');
-      modelsUrl.pathname = `${modelsUrl.pathname.replace(/\/+$/, '')}/models`;
-    }
-    modelsUrl.hash = '';
-
-    setIsLoadingApiModels(true);
-    setApiModels([]);
-    setApiError('');
-    setApiMessage('');
-    try {
-      const response = await fetch(modelsUrl.toString(), {
-        method: 'GET',
-        headers: isGeminiEndpoint
-          ? { 'Content-Type': 'application/json' }
-          : { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-      });
-      if (!response.ok) {
-        const detail = await response.text();
-        throw new Error(`模型拉取失败（HTTP ${response.status}）：${detail || response.statusText}`);
-      }
-
-      const payload: unknown = await response.json();
-      if (!payload || typeof payload !== 'object') {
-        throw new Error('接口返回的数据格式无效。');
-      }
-      const rawModels = Array.isArray((payload as { data?: unknown }).data)
-        ? (payload as { data: unknown[] }).data
-        : Array.isArray((payload as { models?: unknown }).models)
-          ? (payload as { models: unknown[] }).models
-          : [];
-      const models = rawModels.flatMap((item): ApiModel[] => {
-        if (!item || typeof item !== 'object') return [];
-        const record = item as Record<string, unknown>;
-        if (
-          Array.isArray(record.supportedGenerationMethods) &&
-          !record.supportedGenerationMethods.includes('generateContent')
-        ) return [];
-        const rawId = typeof record.id === 'string'
-          ? record.id
-          : typeof record.name === 'string'
-            ? record.name.replace(/^models\//, '')
-            : '';
-        if (!rawId) return [];
-        const label = typeof record.displayName === 'string'
-          ? `${record.displayName} (${rawId})`
-          : rawId;
-        return [{ id: rawId, label }];
-      });
-      if (models.length === 0) {
-        throw new Error('接口已响应，但没有找到可用模型；请确认反代是否开放模型列表接口。');
-      }
-      setApiModels(models);
-      setApiMessage(`连接成功，已拉取 ${models.length} 个模型。`);
-    } catch (error) {
-      console.error('Could not fetch API models.', error);
-      setApiError(
-        error instanceof Error
-          ? `${error.message}${error instanceof TypeError ? '；也可能是反代未允许浏览器跨域请求（CORS）。' : ''}`
-          : '模型拉取失败，请检查反代地址、密钥及网络。'
-      );
-    } finally {
-      setIsLoadingApiModels(false);
-    }
   };
 
   const handleSaveLockSettings = () => {
@@ -616,10 +510,7 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
                 type="text"
                 inputMode="url"
                 value={apiEndpoint}
-                onChange={(event) => {
-                  setApiEndpoint(event.target.value);
-                  setApiModels([]);
-                }}
+                onChange={(event) => setApiEndpoint(event.target.value)}
                 placeholder="反代 Base URL，例如 https://proxy.example.com/v1"
                 className="mt-1 w-full bg-white/70 border border-white rounded-xl px-3 py-2 text-xs font-mono outline-none"
               />
@@ -635,10 +526,7 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
                   autoComplete="off"
                   spellCheck={false}
                   value={apiKey}
-                  onChange={(event) => {
-                    setApiKey(event.target.value);
-                    setApiModels([]);
-                  }}
+                  onChange={(event) => setApiKey(event.target.value)}
                   placeholder="输入 API Key"
                   className="min-w-0 w-full overflow-x-auto bg-white/70 border border-white rounded-xl pl-3 pr-10 py-2 text-xs font-mono outline-none"
                 />
@@ -662,29 +550,9 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
                   className="mt-1 w-full bg-white/70 border border-white rounded-xl px-3 py-2 text-xs font-mono outline-none"
                 />
               </label>
-              <button
-                type="button"
-                onClick={() => void handleFetchApiModels()}
-                disabled={isLoadingApiModels}
-                className="w-full rounded-xl bg-white/80 border border-white py-2 text-xs font-semibold text-[#2C4A5C] disabled:opacity-50"
-              >
-                {isLoadingApiModels ? '正在拉取模型…' : '拉取模型'}
-              </button>
-              {apiModels.length > 0 && (
-                <label className="block text-[10px] font-semibold text-slate-600">
-                  选择模型
-                  <select
-                    value={apiModels.some((model) => model.id === apiModel) ? apiModel : ''}
-                    onChange={(event) => setApiModel(event.target.value)}
-                    className="mt-1 w-full bg-white/70 border border-white rounded-xl px-3 py-2 text-xs outline-none"
-                  >
-                    <option value="">请选择已拉取的模型</option>
-                    {apiModels.map((model) => (
-                      <option key={model.id} value={model.id}>{model.label}</option>
-                    ))}
-                  </select>
-                </label>
-              )}
+              <ApiModelPicker label="主 API" identity={JSON.stringify([normalizeApiEndpoint(apiEndpoint), bearerApiKey(apiKey)])}
+                resolveConnection={() => ({ endpoint: apiEndpoint, apiKey, purpose: 'decision' })}
+                model={apiModel} onSelect={setApiModel} />
             </div>
             <div className="space-y-2 rounded-xl border border-white/80 bg-white/40 p-3">
               <label className="flex items-center justify-between gap-3 text-[11px] font-semibold text-[#2C4A5C]">
@@ -701,11 +569,15 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
             <div className="flex gap-2">
               <button
                 type="button"
-                onClick={handleSaveApiPreset}
+                onClick={() => handleSaveApiPreset()}
                 className="flex-1 rounded-xl settings-primary bg-sky-600 text-white py-2 text-xs font-bold"
               >
                 <Save className="inline w-3.5 h-3.5 mr-1" />保存预设
               </button>
+              {selectedApiPresetId && <button type="button" onClick={() => {
+                setApiCopyName(`${apiName.trim() || 'API'} · ${apiModel.trim() || '新模型'}`.slice(0, 50));
+                setSaveApiAsOpen(true);
+              }} className="flex-1 rounded-xl border border-sky-100 bg-sky-50 py-2 text-xs font-semibold text-sky-700">另存为新预设</button>}
               {selectedApiPresetId && (
                 <button
                   type="button"
@@ -716,6 +588,12 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
                 </button>
               )}
             </div>
+            {saveApiAsOpen && <div className="space-y-2 rounded-2xl border border-sky-100 bg-sky-50/60 p-3">
+              <label className="block text-[11px] font-semibold text-[#2C4A5C]">新预设名称
+                <input autoFocus value={apiCopyName} maxLength={50} onChange={event => setApiCopyName(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); handleSaveApiPreset(true, apiCopyName); } }} className="mt-1 w-full rounded-xl border border-white bg-white/80 px-3 py-2 text-xs outline-none" />
+              </label>
+              <div className="flex gap-2"><button type="button" onClick={() => handleSaveApiPreset(true, apiCopyName)} className="flex-1 rounded-xl bg-sky-600 py-2 text-xs font-semibold text-white">保存为新预设</button><button type="button" onClick={() => setSaveApiAsOpen(false)} className="rounded-xl bg-white px-3 py-2 text-xs text-slate-500">取消</button></div>
+            </div>}
             {apiMessage && <p className="text-[11px] text-emerald-700">{apiMessage}</p>}
             {apiError && <p role="alert" className="text-[11px] text-rose-600">{apiError}</p>}
             <p className="text-[10px] text-slate-400">

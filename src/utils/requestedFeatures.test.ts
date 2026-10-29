@@ -855,54 +855,71 @@ test('beauty export includes only applied appearance, not saved presets or unsav
   const source = readFileSync(resolve('src', 'apps', 'ThemeCustomizerApp.tsx'), 'utf8');
   const handler = source.split('  const handleExport = () => {')[1]?.split('\n  };')[0];
   assert.ok(handler);
-  const currentSettings = {
-    themeId: 'ocean-dawn', wallpaperId: 'dreamy-sky',
-    homeStyle: 'moonlit' as const,
-    wallpapers: { lockScreen: 'applied-lock.png', homeScreen: 'applied-home.png' },
-    appIcons: { wechat: 'applied-icon.png' },
-    homeAppearance: captureHomeAppearance(INITIAL_USER_PROFILE),
-    lockScreenAppearance: { textColor: '#123456', subtitle: '当前锁屏文字' },
-  };
-  for (const presets of [[], [{ id: 'private-preset', name: '不应导出', settings: { ...currentSettings, appIcons: { wechat: 'private-icon.png' } } }]]) {
-    let exported: Blob | undefined;
-    let clicked = false;
-    let revoked = '';
-    let status = '';
-    let error = 'previous error';
-    const anchor = { href: '', download: '', click: () => { clicked = true; } };
-    runInNewContext(`(() => {${handler.replace(': BeautyPreset[]', '')}\n})();`, {
-      currentSettings, presets, normalizeWallpaper,
-      draftSettings: { ...currentSettings, wallpapers: { homeScreen: 'unsaved.png', lockScreen: '' } },
-      Blob, JSON,
-      URL: {
-        createObjectURL: (blob: Blob) => { exported = blob; return 'blob:beauty-test'; },
-        revokeObjectURL: (url: string) => { revoked = url; },
-      },
-      document: { createElement: () => anchor },
-      setStatus: (value: string) => { status = value; },
-      setError: (value: string) => { error = value; },
-    });
-    assert.ok(exported);
-    const payload = JSON.parse(await exported.text());
-    assert.deepEqual(payload, {
-      format: 'yyphone-beauty', version: 1,
-      presets: [{ id: 'current-design', name: '当前搭配', settings: JSON.parse(JSON.stringify(currentSettings)) }],
-    });
-    assert.equal(exported.type, 'application/json');
-    assert.equal(anchor.download, 'yyphone-beauty.json');
-    assert.equal(clicked, true);
-    assert.equal(revoked, 'blob:beauty-test');
-    assert.match(status, /当前已应用/);
-    assert.equal(error, '');
+  for (const homeStyle of ['moonlit', 'halloween'] as const) {
+    const currentSettings = {
+      themeId: 'ocean-dawn', wallpaperId: 'dreamy-sky',
+      homeStyle,
+      wallpapers: { lockScreen: 'applied-lock.png', homeScreen: 'applied-home.png' },
+      appIcons: { wechat: 'applied-icon.png' },
+      homeAppearance: captureHomeAppearance(INITIAL_USER_PROFILE),
+      lockScreenAppearance: { textColor: '#123456', subtitle: '当前锁屏文字' },
+    };
+    for (const presets of [[], [{ id: 'private-preset', name: '不应导出', settings: { ...currentSettings, appIcons: { wechat: 'private-icon.png' } } }]]) {
+      let exported: Blob | undefined;
+      let clicked = false;
+      let revoked = '';
+      let status = '';
+      let error = 'previous error';
+      const anchor = { href: '', download: '', click: () => { clicked = true; } };
+      runInNewContext(`(() => {${handler.replace(': BeautyPreset[]', '')}\n})();`, {
+        currentSettings, presets, normalizeWallpaper,
+        draftSettings: { ...currentSettings, wallpapers: { homeScreen: 'unsaved.png', lockScreen: '' } },
+        Blob, JSON,
+        URL: {
+          createObjectURL: (blob: Blob) => { exported = blob; return 'blob:beauty-test'; },
+          revokeObjectURL: (url: string) => { revoked = url; },
+        },
+        document: { createElement: () => anchor },
+        setStatus: (value: string) => { status = value; },
+        setError: (value: string) => { error = value; },
+      });
+      assert.ok(exported);
+      const payload = JSON.parse(await exported.text());
+      assert.deepEqual(payload, {
+        format: 'yyphone-beauty', version: 1,
+        presets: [{ id: 'current-design', name: '当前搭配', settings: JSON.parse(JSON.stringify(currentSettings)) }],
+      });
+      assert.equal(exported.type, 'application/json');
+      assert.equal(anchor.download, 'yyphone-beauty.json');
+      assert.equal(clicked, true);
+      assert.equal(revoked, 'blob:beauty-test');
+      assert.match(status, /当前已应用/);
+      assert.equal(error, '');
+    }
+    const retired = { ...currentSettings, wallpaperId: 'deep-sea-frost' };
+    const migrated = normalizeWallpaper(retired);
+    assert.notEqual(migrated.wallpaperId, 'deep-sea-frost');
+    assert.deepEqual(migrated.wallpapers, currentSettings.wallpapers);
+    assert.deepEqual(migrated.appIcons, currentSettings.appIcons);
+    assert.deepEqual(migrated.homeAppearance, currentSettings.homeAppearance);
+    assert.deepEqual(migrated.lockScreenAppearance, currentSettings.lockScreenAppearance);
+    assert.equal(retired.wallpaperId, 'deep-sea-frost', 'migration must not mutate the applied settings');
   }
-  const retired = { ...currentSettings, wallpaperId: 'deep-sea-frost' };
-  const migrated = normalizeWallpaper(retired);
-  assert.notEqual(migrated.wallpaperId, 'deep-sea-frost');
-  assert.deepEqual(migrated.wallpapers, currentSettings.wallpapers);
-  assert.deepEqual(migrated.appIcons, currentSettings.appIcons);
-  assert.deepEqual(migrated.homeAppearance, currentSettings.homeAppearance);
-  assert.deepEqual(migrated.lockScreenAppearance, currentSettings.lockScreenAppearance);
-  assert.equal(retired.wallpaperId, 'deep-sea-frost', 'migration must not mutate the applied settings');
+});
+
+test('Halloween home supports custom grid, dock icons and wallpaper without replacing profile information', () => {
+  const render = (custom: boolean) => renderToStaticMarkup(createElement(HomeScreen, {
+    homeStyle: 'halloween', wallpaperUrl: custom ? 'holiday-wallpaper.png' : '',
+    userProfile: { ...INITIAL_USER_PROFILE, name: '夜游玩家', signature: '今晚来讨糖' },
+    apps: [MAIN_GRID_APPS[0]], dockApps: [DOCK_APPS[0]], onOpenApp: () => {}, onSaveUserProfile: () => true,
+    appIcons: custom ? { [MAIN_GRID_APPS[0].id]: 'holiday-grid.png', [DOCK_APPS[0].id]: 'holiday-dock.png' } : {},
+  }));
+  const standard = render(false), custom = render(true);
+  assert.match(standard, /南瓜夜宴桌面/); assert.match(standard, /halloween-home-art/);
+  assert.match(standard, /夜游玩家/); assert.match(standard, /今晚来讨糖/);
+  assert.match(custom, /holiday-wallpaper.png/); assert.doesNotMatch(custom, /halloween-home-art/);
+  assert.match(custom, /holiday-grid.png/); assert.match(custom, /holiday-dock.png/);
+  for (const label of ['编辑资料', '小纸条', '物品', '打开日历', '系统应用']) assert.ok(custom.includes(label));
 });
 
 test('home profile edit sits beside paper notes and custom grid and dock icons replace the whole tile', () => {
