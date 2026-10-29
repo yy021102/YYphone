@@ -41,7 +41,7 @@ function guessesUnknownIdentity(reply: string[], name: string): boolean {
   const names = new RegExp(`(?:你(?:就是|是不是|该不会是|肯定是|一定是|原来是|其实是|不就是)\\s*${escaped}|(?:对方|对面|这人|这个人|这个账号)(?:就是|应该是|肯定是|一定是|大概是|是)\\s*${escaped}|^${escaped}[，,！!\\s]|^${escaped}$)`);
   return reply.some(text => names.test(text) || /别装|认出你|是你吧|你这.{0,8}熟悉|我们.{0,10}(?:哪里|以前|之前).{0,6}(?:聊过|见过|认识)|你.{0,6}(?:换了?个?号|小号)/.test(text));
 }
-function mainBackground(charId: string): string {
+function mainBackground(charId: string, scanMessages?: readonly string[]): string {
   const char = aliasCharacter(charId); if (!char) throw new Error('角色已经不在通讯录中。');
   const user = currentAliasUser();
   const chat = aliasRows('yyphone:wechat-chats').find(c => c.type === 'direct' && c.participantIds?.length === 1 && c.participantIds[0] === charId);
@@ -50,7 +50,7 @@ function mainBackground(charId: string): string {
   return [
     `你是${char.name}。角色人设：${char.persona || '按已有相处保持一致。'}`,
     CHAT_COMMUNICATION_RULES,
-    `相关世界设定：\n${getWorldBookEntriesForContacts([charId]).join('\n\n') || '无'}`,
+    `相关世界设定：\n${getWorldBookEntriesForContacts([charId], undefined, scanMessages).join('\n\n') || '无'}`,
     `【你的生活背景，发生在另一个主号对话】你认识的人叫${user.name}。${chat?.blocked ? '你与这个人的主号目前处于被拉黑状态，小号联系不会改变此状态。' : '你们的主号没有被拉黑，可以正常联系；不要编造被拉黑或必须靠小号才能联系的情况。'}\n${history || '暂无近期主号对话。'}`,
     `【你自己的长期记忆】\n${memories || '暂无'}`,
     '这些背景只说明你自己的生活与已认识的人。不能据此认定眼前的陌生账号就是主号相识者，不把其他人的话当成当前账号说过。',
@@ -60,7 +60,7 @@ export function buildAliasPrompt(thread: AliasThread): string {
   const state = readAliasState(), self = aliasSelf(thread, state), peer = aliasPeer(thread, state);
   if (!self || !peer) throw new Error('账号已经不存在。');
   const isOwnDisguise = thread.characterAccountId !== 'main';
-  return [mainBackground(thread.charId),
+  return [mainBackground(thread.charId, thread.messages.filter(message => message.from !== 'system').map(message => message.text)),
     ...(isOwnDisguise && thread.contactMotive ? [`【你开这个账号的私下动机】${thread.contactMotive}。这是你自己的想法，对方并不知道，不当作对方说过或确认过的事。后续交流可以自然发展，不必每轮重复解释动机，也不必主动坦白。`] : []),
     isOwnDisguise
       ? `【当前账号】你自己使用另一个账号，公开资料是${JSON.stringify({ nickname: peer.name, wechatId: peer.handle, introduction: peer.bio })}。你清楚自己是谁，也知道对面是主号相识者${currentAliasUser().name}。${thread.identity === 'revealed' ? '你已向对方公开身份，可以自然承接。' : '你尚未公开身份。对方不自动知道是你，不以主号身份说话；可结合动机试探或掩饰，也可以在有自然契机时自己坦白。对方猜测不代表你已经承认。'}`

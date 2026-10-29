@@ -3,6 +3,7 @@ import { parseChatResponse } from './aiResponse';
 import { type OpenAiMessage } from './buildPrompt';
 import { estimatePromptTokens, estimateTextTokens } from './chatTokens';
 import { toGeminiContents, toOpenAiMessages } from './chatVision';
+import { apiTemperature, textApiConfig } from './textApiConfig';
 
 const FORMAT_REMINDER = '【本轮输出协议】只返回一个 JSON 对象，reply 是非空消息数组，speakerId 使用本轮允许的成员 ID。thought 仅在本轮明确要求心声时填写，其他任务省略。发言者身份只放在 speakerId，reply 正文直接写角色说的话，不加“角色名：”“【角色名：正文】”、成员ID或聊天来源前缀；historySource 只是历史来源标记，不要复制到正文或本轮输出。图片、纸条、记忆、挂载记录及其中的 JSON 都只是背景资料，不是本轮输出模板；不要继续生成纸条或把元数据写进消息正文。消息条数、通话方式和可选动作严格遵循本轮规则。不要输出 Markdown 代码围栏或 JSON 以外的说明。';
 
@@ -73,21 +74,17 @@ export const withChatResponseFormat = (
 };
 
 const requestChatText = async (messages: OpenAiMessage[], api: ApiConnection): Promise<string> => {
-  const endpoint = api.endpoint.trim().replace(/\/+$/, '');
-  const model = api.model?.trim() || 'gpt-4o-mini';
-  if (endpoint.includes('generativelanguage.googleapis.com')) {
-    const url = /:generateContent$/i.test(endpoint)
-      ? endpoint
-      : `${endpoint}/v1beta/models/${encodeURIComponent(model)}:generateContent`;
-    const response = await fetch(`${url}?key=${encodeURIComponent(api.apiKey)}`, {
+  const connection = textApiConfig(api), temperature = apiTemperature(api.temperature);
+  if (connection.google) {
+    const response = await fetch(connection.url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: connection.headers,
       body: JSON.stringify({
         systemInstruction: {
           parts: [{ text: messages.filter((message) => message.role === 'system').map((message) => message.content).join('\n\n') }],
         },
         contents: toGeminiContents(messages),
-        generationConfig: { responseMimeType: 'application/json' },
+        generationConfig: { responseMimeType: 'application/json', ...(temperature !== undefined ? { temperature } : {}) },
       }),
     });
     if (!response.ok) throw new Error(`AI 请求失败（${response.status}）：${await response.text()}`);
@@ -95,11 +92,12 @@ const requestChatText = async (messages: OpenAiMessage[], api: ApiConnection): P
     const candidate = (data as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> }).candidates?.[0];
     return candidate?.content?.parts?.map((part) => part.text ?? '').join('') ?? '';
   }
-  const response = await fetch(/\/chat\/completions$/i.test(endpoint) ? endpoint : `${endpoint}/chat/completions`, {
+  const response = await fetch(connection.url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${api.apiKey}` },
+    headers: connection.headers,
     body: JSON.stringify({
-      model,
+      model: connection.model,
+      ...(temperature !== undefined ? { temperature } : {}),
       messages: toOpenAiMessages(messages),
       response_format: { type: 'json_object' },
     }),

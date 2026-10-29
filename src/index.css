@@ -9,6 +9,7 @@
 @import "./components/memoryTheater.css";
 @import "./components/coupleRewards.css";
 @import "./components/coupleCorrespondence.css";
+@import "./components/birthday.css";
 
 :root {
   color-scheme: light;
@@ -188,7 +189,7 @@ body {
 .wechat-app.wechat-favorites-open > .glass-nav h1 { font-size: calc(17px * var(--font-scale)); font-weight: 600; }
 
 .yy-chat-surface .yy-chat-message-row { gap: 12px; }
-.yy-chat-history { background-image: var(--yy-chat-wallpaper, none); background-size: cover; background-position: center; background-attachment: local; }
+.yy-chat-history { background-image: var(--yy-chat-wallpaper, none); background-size: cover; background-position: center; background-attachment: scroll; overscroll-behavior-y: contain; }
 .yy-chat-surface .yy-chat-message-content { max-width: calc(100% - var(--yy-chat-avatar-size, 40px) - var(--yy-chat-avatar-size, 40px) - 24px); }
 .yy-chat-surface .yy-chat-message-bubble { color: #111; overflow-wrap: anywhere; }
 .yy-chat-surface .yy-chat-message-bubble.is-plain { position: relative; }
@@ -208,6 +209,9 @@ body {
 .yy-chat-surface .yy-chat-message-bubble.is-payment { width: 244px; max-width: 100%; }
 .yy-chat-surface .yy-chat-voice-message { color: inherit; font-size: inherit; }
 .yy-chat-surface .yy-chat-voice-duration { font-size: calc(12px * var(--font-scale)); }
+.yy-chat-quote { align-self: flex-start; width: max-content; max-width: 100%; margin-top: 5px; padding: 6px 10px; border: 1px solid rgba(225,225,225,.7); border-radius: 4px; background: rgba(245,245,245,.88); color: #888; font-size: calc(12px * var(--font-scale, 1)); line-height: 1.5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.yy-chat-quote.is-user { align-self: flex-end; }
+.wechat-app[data-wechat-theme="dark"] .yy-chat-quote { background: #282828; color: #aaa; border-color: #353535; }
 
 .yy-chat-payment-card {
   --payment-color: #fa9d3b;
@@ -507,7 +511,7 @@ body {
 .channel-skeleton { height: 245px; border: 1px solid #fff; border-radius: 24px; background: linear-gradient(110deg,#ffffff72,#eaf1eb,#ffffff72); background-size: 220% 100%; animation: channel-skeleton 2s ease infinite; }
 @keyframes channel-skeleton { to { background-position: -220% 0; } }
 .channel-toast { position: absolute; z-index: 80; top: calc(env(safe-area-inset-top,0px) + 78px); left: 50%; display: flex; max-width: 86%; width: max-content; align-items: center; gap: 6px; transform: translateX(-50%); padding: 10px 15px; border-radius: 99px; background: #5c746be8; color: #fff; box-shadow: 0 6px 18px #36534620; pointer-events: none; font-size: calc(11px * var(--font-scale)); }
-.channel-nav { position: relative; z-index: 25; display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); flex-shrink: 0; padding: 5px 12px calc(env(safe-area-inset-bottom,0px) + 7px); border-top: 1px solid #ffffffc7; background: #ffffffd9; backdrop-filter: blur(22px); }
+.channel-nav { position: relative; z-index: 25; display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); flex-shrink: 0; padding: 5px 12px max(4px, min(env(safe-area-inset-bottom,0px), 12px)); border-top: 1px solid #ffffffc7; background: #ffffffd9; backdrop-filter: blur(22px); }
 .channel-nav button { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; color: #a8b9af; font-size: calc(9px * var(--font-scale)); }
 .channel-nav button > span { position: relative; display: flex; width: 45px; height: 29px; align-items: center; justify-content: center; border-radius: 13px; }
 .channel-nav button[aria-current="page"] { color: #708f7b; font-weight: 650; }

@@ -1,8 +1,9 @@
 import { readStorageString } from './localStorage';
+import { isWorldBookEntryActive, parseWorldBookActivation, type WorldBookActivation } from './worldBookActivation';
 
 export type WorldBookDepth = 'front' | 'middle' | 'back';
 
-interface StoredWorldBookEntry {
+interface StoredWorldBookEntry extends WorldBookActivation {
   id: string;
   title: string;
   content: string;
@@ -47,7 +48,7 @@ const readStoredWorldBooks = (): StoredWorldBook[] => {
           typeof (entry as StoredWorldBookEntry).title === 'string' &&
           typeof (entry as StoredWorldBookEntry).content === 'string' &&
           isDepth((entry as StoredWorldBookEntry).depth)
-      );
+      ).flatMap((entry: StoredWorldBookEntry) => { try { return [{ ...entry, ...parseWorldBookActivation(entry as unknown as Record<string, unknown>) }]; } catch { return []; } });
       return [{ id: book.id, name: book.name, isGlobal: book.isGlobal === true, entries }];
     });
   } catch (error) {
@@ -57,12 +58,12 @@ const readStoredWorldBooks = (): StoredWorldBook[] => {
 };
 
 // 全局世界书的条目会默认发送给所有需要 AI 生成的功能。
-export const getGlobalWorldBookEntries = (depth: WorldBookDepth): string[] =>
+export const getGlobalWorldBookEntries = (depth: WorldBookDepth, scanMessages: readonly string[] = []): string[] =>
   readStoredWorldBooks()
     .filter((book) => book.isGlobal)
     .flatMap((book) =>
       book.entries
-        .filter((entry) => entry.depth === depth && entry.content.trim())
+        .filter((entry) => entry.depth === depth && entry.content.trim() && isWorldBookEntryActive(entry, scanMessages))
         .map((entry) => `【${book.name} / ${entry.title}】\n${entry.content}`)
     );
 
@@ -103,7 +104,8 @@ export const getAutomaticWorldBookIdsForContacts = (contactIds: string[]): strin
 
 export const getWorldBookEntriesForContacts = (
   contactIds: string[],
-  selectedBookIds?: string[]
+  selectedBookIds?: string[],
+  scanMessages: readonly string[] = readWorldBookScanMessages(contactIds)
 ): string[] => {
   const books = readStoredWorldBooks();
   if (selectedBookIds !== undefined) {
@@ -112,7 +114,7 @@ export const getWorldBookEntriesForContacts = (
       .filter((book) => selected.has(book.id))
       .flatMap((book) =>
         book.entries
-          .filter((entry) => entry.content.trim())
+          .filter((entry) => entry.content.trim() && isWorldBookEntryActive(entry, scanMessages))
           .map((entry) => `【${book.name} / ${entry.title}】\n${entry.content}`)
       );
   }
@@ -142,7 +144,7 @@ export const getWorldBookEntriesForContacts = (
     if (book.isGlobal) {
       for (const entry of book.entries) {
         const key = `${book.id}:${entry.id}`;
-        if (!entry.content.trim() || seen.has(key)) continue;
+        if (!entry.content.trim() || seen.has(key) || !isWorldBookEntryActive(entry, scanMessages)) continue;
         seen.add(key);
         entries.push(`【${book.name} / ${entry.title}】\n${entry.content}`);
       }
@@ -154,7 +156,7 @@ export const getWorldBookEntriesForContacts = (
       if (!book) continue;
       for (const entry of book.entries) {
         const key = `${book.id}:${entry.id}`;
-        if (!entry.content.trim() || (link.entryId && link.entryId !== entry.id) || seen.has(key)) continue;
+        if (!entry.content.trim() || (link.entryId && link.entryId !== entry.id) || seen.has(key) || !isWorldBookEntryActive(entry, scanMessages)) continue;
         seen.add(key);
         entries.push(`【${book.name} / ${entry.title}】\n${entry.content}`);
       }
@@ -166,20 +168,32 @@ export const getWorldBookEntriesForContacts = (
 export const withWorldBooksForContacts = (
   systemPrompt: string,
   contactIds: string[],
-  selectedBookIds?: string[]
+  selectedBookIds?: string[],
+  scanMessages?: readonly string[]
 ): string => {
-  const entries = getWorldBookEntriesForContacts(contactIds, selectedBookIds);
+  const entries = getWorldBookEntriesForContacts(contactIds, selectedBookIds, scanMessages);
   return entries.length > 0
     ? `可参考的世界书（仅用于理解设定与事实，优先遵守本次任务和聊天记录，不要复述无关条目）：\n${entries.join('\n\n')}\n\n${systemPrompt}`
     : systemPrompt;
 };
 
-export const withGlobalWorldBooks = (systemPrompt: string): string => {
-  const front = getGlobalWorldBookEntries('front');
-  const after = [...getGlobalWorldBookEntries('middle'), ...getGlobalWorldBookEntries('back')];
+export const withGlobalWorldBooks = (systemPrompt: string, scanMessages: readonly string[] = []): string => {
+  const front = getGlobalWorldBookEntries('front', scanMessages);
+  const after = [...getGlobalWorldBookEntries('middle', scanMessages), ...getGlobalWorldBookEntries('back', scanMessages)];
   return [
     front.length > 0 ? `全局世界书（前置）：\n${front.join('\n\n')}` : '',
     systemPrompt,
     after.length > 0 ? `全局世界书：\n${after.join('\n\n')}` : '',
   ].filter(Boolean).join('\n\n');
 };
+
+// Auxiliary character features scan only that character's current direct chat,
+// never another person's chat, an inactive archive or stored context summaries.
+function readWorldBookScanMessages(contactIds: string[]): string[] {
+  try {
+    const chats = JSON.parse(readStorageString('yyphone:wechat-chats') || '[]');
+    if (!Array.isArray(chats)) return [];
+    return chats.filter(chat => chat?.type === 'direct' && chat.participantIds?.length === 1 && contactIds.includes(chat.participantIds[0]))
+      .flatMap(chat => Array.isArray(chat.messages) ? chat.messages.filter((message: any) => typeof message?.text === 'string' && message.kind !== 'context-note').slice(-100).map((message: any) => message.text as string) : []);
+  } catch { return []; }
+}

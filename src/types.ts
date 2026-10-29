@@ -86,7 +86,7 @@ export interface CustomWallpapers {
   homeScreen: string;
 }
 
-export type AppIconOverrides = Partial<Record<AppId, string>>;
+export type AppIconOverrides = Partial<Record<AppId | 'little-p', string>>;
 
 export interface WidgetAppearance {
   background: string;

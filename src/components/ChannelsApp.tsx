@@ -246,7 +246,7 @@ export function ChannelsApp({ userName, avatarUrl, contacts: sourceContacts, onB
     '私有上下文按角色ID归属，只供所属角色本人参考，可影响其语气、动机与选择。公开帖子、评论、直播不得泄露私聊和私密记忆；路人和其他角色不能知道、引用或套用这些内容。',
     `相关角色彼此关系：${JSON.stringify(settings?.relationships?.filter((relation) => actors.some((actor) => actor.id === relation.leftId) && actors.some((actor) => actor.id === relation.rightId)) ?? [])}`,
     '陌生人只能知道公开视频号资料与公开互动，不知道玩家的私信、线下秘密。旧内容仅供保持连续性，不把别人的经历移植给当前人物。',
-    `平台世界书：${channelWorldContext(settings) || '无'}`,
+    `平台世界书：${channelWorldContext(settings, [query || draft || selected?.text || '']) || '无'}`,
     ...(privateConversation && actors.length === 1 ? [buildChannelMemory(actors[0].id, false)] : []),
   ].join('\n');
 
@@ -348,7 +348,7 @@ export function ChannelsApp({ userName, avatarUrl, contacts: sourceContacts, onB
           platformSetting: settings?.platformSetting, prompt: `${settings?.prompt || ''}\n平台公开角色设定：${JSON.stringify(channelPlatformPublicContext(settings, sourceContacts))}` },
         posts: current.posts, rooms: current.rooms, messages: current.messages,
         contactNames: [...new Set([...contacts.map(contact => contact.name), ...sourceContacts.flatMap(contact => [contact.name, contact.forumNickname || ''])].filter(Boolean))],
-        worldBook: channelWorldContext(settings),
+        worldBook: channelWorldContext(settings, [...current.posts.slice(-6).map(post => post.text), ...current.rooms.slice(-3).map(room => room.text)]),
       });
       const latest = dataRef.current;
       if (!mounted.current) return;

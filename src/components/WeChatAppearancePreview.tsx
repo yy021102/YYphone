@@ -15,8 +15,10 @@ button,input { font: inherit; } button { border: 0; cursor: default; } p { margi
 .yy-header-title { flex: 1; text-align: center; font-size: 17px; font-weight: 600; }
 .yy-header-back,.yy-header-action button { display: flex; padding: 0; background: transparent; color: inherit; }
 .yy-chat-surface { display: flex; flex: 1; min-height: 0; flex-direction: column; }
-.yy-chat-history { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 12px; background-image: var(--yy-chat-wallpaper,none); background-size: cover; background-position: center; }
+.yy-chat-history { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior-y: contain; padding: 16px 12px; background-image: var(--yy-chat-wallpaper,none); background-size: cover; background-position: center; background-attachment: scroll; }
 .yy-chat-history > * + * { margin-top: 20px; } .yy-chat-timestamp { font-size: 10px; text-align: center; color: #999; }
+.yy-chat-quote { align-self: flex-start; width: max-content; max-width: 100%; margin-top: 5px; padding: 6px 10px; border: 1px solid #e1e1e1b3; border-radius: 4px; background: #f5f5f5e0; color: #888; font-size: 12px; line-height: 1.5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .yy-chat-quote.is-user { align-self: flex-end; }
+.wechat-app[data-wechat-theme="dark"] .yy-chat-quote { background: #282828; color: #aaa; border-color: #353535; }
 .yy-chat-message-row { display: flex; gap: 12px; align-items: flex-start; } .flex-row-reverse { flex-direction: row-reverse; }
 .yy-chat-avatar { display: flex; align-items: center; justify-content: center; width: var(--yy-chat-avatar-size); height: var(--yy-chat-avatar-size); border-radius: 4px; flex-shrink: 0; background: #dce9ef; color: #657c90; overflow: hidden; font-size: 14px; }
 .yy-chat-avatar > span { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; border-radius: inherit; overflow: hidden; } .yy-chat-avatar img { width: 100%; height: 100%; object-fit: cover; }
@@ -48,8 +50,8 @@ export function WeChatAppearancePreview({ appearance, compiledCss, dark, tall = 
   const userColor = dark ? '#20b565' : hexToRgba(appearance.userBubbleColor, appearance.userBubbleOpacity ?? 1);
   const charColor = dark ? '#2c2c2c' : hexToRgba(appearance.characterBubbleColor, appearance.characterBubbleOpacity ?? 1);
   const avatar = (own: boolean) => <span className="yy-chat-avatar" style={avatarFrameWrapStyle(dark ? undefined : own ? appearance.userAvatarFrame : appearance.characterAvatarFrame)}><span>{own && userAvatar ? <img src={userAvatar} alt="" /> : own ? userName.slice(0, 1) : 'TA'}</span></span>;
-  const row = (id: string, own: boolean, content: React.ReactNode, kind = 'is-plain') => <div key={id} className={`yy-chat-message-row flex ${own ? 'flex-row-reverse' : ''}`}>
-    {avatar(own)}<div className="yy-chat-message-content"><div className={`yy-chat-message-bubble ${own ? 'is-user' : 'is-character'} ${kind}`}>{content}</div></div>
+  const row = (id: string, own: boolean, content: React.ReactNode, kind = 'is-plain', quote?: string) => <div key={id} className={`yy-chat-message-row flex ${own ? 'flex-row-reverse' : ''}`}>
+    {avatar(own)}<div className="yy-chat-message-content" style={{ alignItems: own ? 'flex-end' : 'flex-start' }}><div className={`yy-chat-message-bubble ${own ? 'is-user' : 'is-character'} ${kind}`}>{content}</div>{quote && <div className={`yy-chat-quote ${own ? 'is-user' : 'is-character'}`}>{quote}</div>}</div>
   </div>;
   return <div className="wechat-workshop-preview">
     <iframe title="聊天美化实时预览" sandbox="allow-same-origin" srcDoc={DOCUMENT} style={{ height: tall ? 560 : 300 }}
@@ -63,7 +65,7 @@ export function WeChatAppearancePreview({ appearance, compiledCss, dark, tall = 
           <div className="yy-chat-history">
             <p className="yy-chat-timestamp">今天 16:20</p>
             {row('short', false, '今天也想和你说说话')}
-            {row('reply', true, '好呀，慢慢说 🌷')}
+            {row('reply', true, '好呀，慢慢说 🌷', 'is-plain', 'TA：今天也想和你说说话')}
             {row('long', false, '有些好看的风景，想留给你一起看。长一点的消息也要好好换行，留出对面头像的位置。')}
             {row('voice', true, <span className="yy-chat-voice-message"><span className="yy-chat-voice-duration">12″</span><Volume2 size={23} /></span>, 'is-plain is-voice')}
             {row('packet', false, <ChatPaymentCard kind="red-packet" text="把今天的好运分给你" outgoing={false} group={false} onOpen={() => {}} />, 'is-special is-payment')}

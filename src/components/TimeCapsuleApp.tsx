@@ -96,7 +96,7 @@ export function TimeCapsuleApp({ userName, contacts, onCharacterWrite }: Props) 
 
   const selectedMood = (value: string) => moods.find(item => item.label === value) ?? moods[0];
 
-  return <div className="relative min-h-full overflow-hidden bg-[#101b30] text-[#f6f0e8]">
+  return <div className="time-capsule-app relative flex-1 min-h-0 overflow-x-hidden overflow-y-auto overscroll-contain bg-[#101b30] text-[#f6f0e8]">
     <div className="pointer-events-none absolute inset-x-0 top-0 h-[510px] overflow-hidden bg-[radial-gradient(ellipse_at_48%_28%,#405574_0%,#1b2c48_37%,#101b30_77%)]">
       <div className="absolute left-[12%] top-14 h-1 w-1 rounded-full bg-white shadow-[80px_38px_0_0_#ffffff99,210px_18px_0_0_#ffffff66,276px_120px_0_0_#ffffffaa,44px_190px_0_0_#ffffff88,170px_220px_0_0_#ffffff77]" />
       <div className="absolute -right-24 top-20 h-72 w-72 rounded-full border border-[#edcf9a]/10" />

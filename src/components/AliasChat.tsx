@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
+import { isChatSendKey } from '../utils/chatSendKey';
 import { ArrowLeft, Bookmark, ChevronRight, Copy, Heart, Image, MoreHorizontal, Pencil, Plus, Send, ShieldCheck, Smile, Trash2, UserRound, X } from 'lucide-react';
 import { aliasCharacter, aliasMessageContext, aliasPeer, aliasRoundThought, aliasSelf, deleteAliasMessage, editAliasMessage, readAliasState, revealUserAlias, sendAliasMessage, updateAliasThread, writeAliasState, type AliasMessage, type AliasState, type AliasThread } from '../utils/aliasAccounts';
 import { applyWithAlias, generateAliasReply } from '../utils/aliasAi';
@@ -11,7 +12,7 @@ function Avatar({ name, url }: { name: string; url?: string }) {
 }
 const errorText = (error: unknown) => error instanceof Error ? error.message : '操作失败，请重试。';
 
-export function AliasChat({ thread, state, onBack, wallpaper, userColor, characterColor, timeZone }: { thread: AliasThread; state: AliasState; onBack: () => void; wallpaper?: string; userColor: string; characterColor: string; timeZone?: string }) {
+export function AliasChat({ thread, state, onBack, wallpaper, userColor, characterColor, timeZone, autoReplyOnEnter = false }: { thread: AliasThread; state: AliasState; onBack: () => void; wallpaper?: string; userColor: string; characterColor: string; timeZone?: string; autoReplyOnEnter?: boolean }) {
   const [text, setText] = useState(''), [busy, setBusy] = useState(false), [error, setError] = useState('');
   const [menu, setMenu] = useState(false), [extras, setExtras] = useState<'more' | 'emoji' | ''>('');
   const [messageMenu, setMessageMenu] = useState(''), [thought, setThought] = useState<string | null>(null);
@@ -38,7 +39,7 @@ export function AliasChat({ thread, state, onBack, wallpaper, userColor, charact
   };
   const timestamp = (value: string, key: string) => <div key={key} className="yy-chat-timestamp alias-chat-timestamp">{formatChatTimestamp(value, effectiveChatTimeZone(timeZone))}</div>;
   const send = (value = text, kind: 'text' | 'image' = 'text') => {
-    try { sendAliasMessage(thread.id, value, kind); if (kind === 'text') setText(''); else setImageDraft(null); setExtras(''); setError(''); } catch (e) { setError(errorText(e)); }
+    try { sendAliasMessage(thread.id, value, kind); if (kind === 'text') setText(''); else setImageDraft(null); setExtras(''); setError(''); return true; } catch (e) { setError(errorText(e)); return false; }
   };
   if (!peer || !self) return null;
   const backdrop = (close: () => void) => ({ onClick: (event: React.MouseEvent) => { if (event.target === event.currentTarget) close(); } });
@@ -80,7 +81,7 @@ export function AliasChat({ thread, state, onBack, wallpaper, userColor, charact
       {extras === 'emoji' && <div className="alias-emoji-grid">{['😀', '😂', '🥰', '🥺', '🤔', '😡', '😭', '😎', '❤️', '💕', '👍', '🌹'].map(emoji => <button type="button" key={emoji} onClick={() => setText(t => t + emoji)}>{emoji}</button>)}</div>}
       <form className="yy-chat-composer alias-composer" onSubmit={event => { event.preventDefault(); if (!busy) send(); }}>
         <button type="button" className="yy-chat-attachments" aria-label="小号更多功能" onClick={() => setExtras(extras === 'more' ? '' : 'more')}><Plus size={26} /></button>
-        <textarea className="yy-chat-input" aria-label="小号消息输入框" rows={1} maxLength={4000} value={text} disabled={busy} onChange={event => setText(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); if (!busy && text.trim()) send(); } }} />
+        <textarea className="yy-chat-input" aria-label="小号消息输入框" rows={1} maxLength={4000} value={text} disabled={busy} onChange={event => setText(event.target.value)} onKeyDown={event => { if (isChatSendKey(event)) { event.preventDefault(); if (!busy && text.trim() && send() && autoReplyOnEnter) void act(() => generateAliasReply(thread.id)); } }} />
         <button type="button" className="yy-chat-emoji" aria-label="小号表情" onClick={() => setExtras(extras === 'emoji' ? '' : 'emoji')}><Smile size={25} /></button>
         {text.trim() ? <button type="submit" className="yy-chat-send" aria-label="发送小号消息" disabled={busy}><Send size={23} /></button> : <button type="button" className="yy-chat-generate" aria-label="生成小号回复" disabled={busy} onClick={() => void act(() => generateAliasReply(thread.id))}><Heart size={24} /></button>}
       </form>

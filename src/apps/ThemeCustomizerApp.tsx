@@ -7,10 +7,12 @@ import {
   Image as ImageIcon,
   LayoutGrid,
   Palette,
+  Type,
   Upload,
 } from 'lucide-react';
 import { AppHeader } from '../components/AppHeader';
 import { GlobalFontSettings } from '../components/GlobalFontSettings';
+import { BirthdaySettings } from '../components/BirthdaySettings';
 import type { FontSettings } from '../utils/fontSettings';
 import { useErrorDialog } from '../components/ErrorDialog';
 import { ALL_APPS, THEMES, WALLPAPERS } from '../data/mockData';
@@ -58,7 +60,7 @@ const isBeautySettings = (value: unknown): value is BeautySettings => {
     !!settings.appIcons &&
     typeof settings.appIcons === 'object' &&
     Object.entries(settings.appIcons).every(
-      ([id, url]) => ALL_APPS.some((app) => app.id === id) && typeof url === 'string'
+      ([id, url]) => (id === 'little-p' || ALL_APPS.some((app) => app.id === id)) && typeof url === 'string'
     ) &&
     (settings.homeAppearance === undefined || isHomeAppearance(settings.homeAppearance)) &&
     (settings.lockScreenAppearance === undefined || isLockScreenAppearance(settings.lockScreenAppearance))
@@ -437,8 +439,12 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
           </div>
         </details>
 
-        <section className="glass-card rounded-2xl p-3 space-y-3">
-          <h3 className="flex items-center gap-1.5 text-xs font-bold text-[#2C4A5C]"><ImageIcon className="h-3.5 w-3.5 text-sky-500" />自定义壁纸</h3>
+        <BirthdaySettings />
+        <details className="glass-card group rounded-2xl p-3 space-y-3">
+          <summary className="flex cursor-pointer list-none items-center gap-2 text-xs font-bold text-[#2C4A5C]">
+            <ImageIcon className="h-3.5 w-3.5 shrink-0 text-sky-500" /><span className="flex-1">自定义壁纸</span>
+            <ChevronDown size={13} className="shrink-0 text-slate-400 transition-transform group-open:rotate-180" />
+          </summary>
           <p className="text-[10px] leading-relaxed text-slate-500">上传图片或填写链接，分别设置你的锁屏与桌面。</p>
           {wallpaperInput('lockScreen', '锁屏')}
           {wallpaperInput('homeScreen', '桌面')}
@@ -458,9 +464,12 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
           >
             保存壁纸
           </button>
-        </section>
-        <section className="glass-card rounded-2xl p-4 space-y-3">
-          <h3 className="text-xs font-bold text-[#2C4A5C]">锁屏文字</h3>
+        </details>
+        <details className="glass-card group rounded-2xl p-3 space-y-3">
+          <summary className="flex cursor-pointer list-none items-center gap-2 text-xs font-bold text-[#2C4A5C]">
+            <Type className="h-3.5 w-3.5 shrink-0 text-sky-500" /><span className="flex-1">锁屏文字</span>
+            <ChevronDown size={13} className="shrink-0 text-slate-400 transition-transform group-open:rotate-180" />
+          </summary>
           <label className="flex items-center justify-between text-xs text-slate-600">
             锁屏字体颜色
             <input type="color" value={lockAppearanceDraft.textColor}
@@ -491,7 +500,7 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
             <button type="button" onClick={() => setLockAppearanceDraft(DEFAULT_LOCK_APPEARANCE)}
               className="rounded-xl bg-white/70 px-3 py-2 text-xs text-slate-600">恢复默认文字</button>
           </div>
-        </section>
+        </details>
         <GlobalFontSettings fontSettings={fontSettings} onSaveFontSettings={onSaveFontSettings} />
         <details className="glass-card group rounded-2xl p-3">
           <summary className="flex cursor-pointer list-none items-center gap-2 text-xs font-bold text-[#2C4A5C]">
@@ -504,7 +513,7 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
               支持图片链接和本地图片；自定义图片会铺满整个 App 图标，替换默认背景与图案，保留图标圆角；非正方形图片会居中裁切。上传会压缩图片，清除后恢复系统图标。
             </p>
             <div className="space-y-2">
-              {ALL_APPS.map((app) => (
+              {[...ALL_APPS, { id: 'little-p' as const, name: '小P' }].map((app) => (
                 <div key={app.id} className="glass-card rounded-2xl p-3 space-y-2">
                   <label className="block text-[11px] font-semibold text-[#2C4A5C]">
                     {app.name}图标链接

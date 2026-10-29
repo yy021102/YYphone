@@ -1,11 +1,13 @@
 import { readSetting, SETTINGS_KEYS } from './settings';
 import { withGlobalWorldBooks } from './worldBookPrompt';
 import { parseImageReference } from './imageReference';
+import { apiTemperature, textApiConfig } from './textApiConfig';
 
 export interface ApiConnection {
   endpoint: string;
   apiKey: string;
   model?: string;
+  temperature?: number;
 }
 
 interface ApiPreset extends ApiConnection {
@@ -69,25 +71,22 @@ export const requestConfiguredAiText = async (
     signal?: AbortSignal;
   } = {}
 ) => {
-  if (options.includeGlobalWorldBooks !== false) systemPrompt = withGlobalWorldBooks(systemPrompt);
+  if (options.includeGlobalWorldBooks !== false) systemPrompt = withGlobalWorldBooks(systemPrompt, [...(options.history ?? []).map(message => message.content), userPrompt]);
   const preset = options.api ?? getActiveApiPreset();
   if (!preset.endpoint.trim() || !preset.apiKey.trim()) {
     throw new Error('请填写所选 API 的接口地址和密钥。');
   }
-  const endpoint = preset.endpoint.trim().replace(/\/+$/, '');
-  const model = preset.model?.trim() || 'gpt-4o-mini';
+  const connection = textApiConfig(preset);
+  const temperature = options.temperature ?? apiTemperature(preset.temperature);
   let response: Response;
   let responseText = '';
   const images = (options.imageUrls ?? []).filter(url => /^data:image\/(png|jpeg|webp);base64,/i.test(url)).slice(-4);
 
-  if (endpoint.includes('generativelanguage.googleapis.com')) {
-    const responseUrl = /:generateContent$/i.test(endpoint)
-      ? `${endpoint}?key=${encodeURIComponent(preset.apiKey)}`
-      : `${endpoint}/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(preset.apiKey)}`;
-    response = await fetch(responseUrl, {
+  if (connection.google) {
+    response = await fetch(connection.url, {
       method: 'POST',
       signal: options.signal,
-      headers: { 'Content-Type': 'application/json' },
+      headers: connection.headers,
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: systemPrompt }] },
         contents: [
@@ -97,11 +96,11 @@ export const requestConfiguredAiText = async (
           })),
           { role: 'user', parts: [{ text: userPrompt }, ...images.map(url => ({ inlineData: { mimeType: url.slice(5, url.indexOf(';')), data: url.slice(url.indexOf(',') + 1) } }))] },
         ],
-        ...(options.json || options.temperature !== undefined || options.maxTokens !== undefined
+        ...(options.json || temperature !== undefined || options.maxTokens !== undefined
           ? {
               generationConfig: {
                 ...(options.json ? { responseMimeType: 'application/json' } : {}),
-                ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
+                ...(temperature !== undefined ? { temperature } : {}),
                 ...(options.maxTokens !== undefined ? { maxOutputTokens: options.maxTokens } : {}),
               },
             }
@@ -115,25 +114,19 @@ export const requestConfiguredAiText = async (
     }).candidates?.[0];
     responseText = candidate?.content?.parts?.map((part) => part.text ?? '').join('') ?? '';
   } else {
-    const chatEndpoint = /\/chat\/completions$/i.test(endpoint)
-      ? endpoint
-      : `${endpoint}/chat/completions`;
-    response = await fetch(chatEndpoint, {
+    response = await fetch(connection.url, {
       method: 'POST',
       signal: options.signal,
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${preset.apiKey}`,
-      },
+      headers: connection.headers,
       body: JSON.stringify({
-        model,
+        model: connection.model,
         messages: [
           { role: 'system', content: systemPrompt },
           ...(options.history ?? []),
           { role: 'user', content: images.length ? [{ type: 'text', text: userPrompt }, ...images.map(url => ({ type: 'image_url', image_url: { url } }))] : userPrompt },
         ],
         ...(options.json ? { response_format: { type: 'json_object' } } : {}),
-        ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
+        ...(temperature !== undefined ? { temperature } : {}),
         ...(options.maxTokens !== undefined ? { max_tokens: options.maxTokens } : {}),
       }),
     });

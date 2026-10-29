@@ -136,7 +136,7 @@ export function TextAdventureSimulator({ userName, contacts, worldBooks, onAdvan
     setSessions(merged); writeStoredValue(KEY, merged);
   };
   const saveWorlds = (next: CustomWorlds) => { setCustomWorlds(next); writeStoredValue(CUSTOM_WORLDS_KEY, next); };
-  useEffect(() => { rootRef.current?.parentElement?.scrollTo({ top: 0, behavior: 'smooth' }); }, [worldId, session?.turn]);
+  useEffect(() => { rootRef.current?.scrollTo({ top: 0, behavior: 'smooth' }); }, [worldId, session?.turn]);
 
   const enter = (id: WorldId) => {
     const selected = allWorlds.find(item => item.world.id === id);
@@ -238,7 +238,7 @@ export function TextAdventureSimulator({ userName, contacts, worldBooks, onAdvan
     setShareOpen(false);
   };
 
-  return <div ref={rootRef} className="min-h-full bg-[#11171c] text-[#f6f0e7]">
+  return <div ref={rootRef} className="text-adventure-app relative flex-1 min-h-0 overflow-x-hidden overflow-y-auto overscroll-contain bg-[#11171c] text-[#f6f0e7]">
     {!world || !session ? <div className="mx-auto max-w-[520px] px-4 pb-12 pt-7">
       <div className="mb-7"><p className="text-[10px] font-bold tracking-[.3em] text-[#d4b79a]">PORTAL · STORY WORLDS</p><h2 className="mt-3 font-serif text-3xl font-semibold tracking-wide">下一段人生，<br/>从这里开始。</h2><p className="mt-3 text-xs leading-6 text-[#b7b9b8]">选一座世界，或亲手创造一座。你和同行者的决定会留下真实的痕迹。</p></div>
       <label className="mb-5 block rounded-2xl border border-white/10 bg-white/5 p-3 text-xs text-[#c5c8c5]">同行角色 <span className="text-[#8d9692]">· 可选</span><select value={companionId} onChange={event => setCompanionId(event.target.value)} className="mt-2 w-full rounded-lg bg-[#243037] px-3 py-2.5 text-sm text-white outline-none"><option value="">独自踏上旅途</option>{contacts.map(contact => <option key={contact.id} value={contact.id}>{contact.name}</option>)}</select></label>

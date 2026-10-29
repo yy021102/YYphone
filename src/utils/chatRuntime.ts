@@ -5,6 +5,7 @@ export interface ChatRuntimeSettings {
   banners: boolean;
   systemNotifications: boolean;
   allowIncomingCalls: boolean;
+  autoReplyOnEnter: boolean;
 }
 
 export const DEFAULT_CHAT_RUNTIME: ChatRuntimeSettings = {
@@ -12,15 +13,18 @@ export const DEFAULT_CHAT_RUNTIME: ChatRuntimeSettings = {
   banners: false,
   systemNotifications: false,
   allowIncomingCalls: false,
+  autoReplyOnEnter: false,
 };
 
-export const readChatRuntimeSettings = (): ChatRuntimeSettings =>
-  readSetting(SETTINGS_KEYS.chatRuntime, DEFAULT_CHAT_RUNTIME, (value): value is ChatRuntimeSettings =>
+export const readChatRuntimeSettings = (): ChatRuntimeSettings => ({
+  ...DEFAULT_CHAT_RUNTIME,
+  ...readSetting(SETTINGS_KEYS.chatRuntime, DEFAULT_CHAT_RUNTIME, (value): value is ChatRuntimeSettings =>
     !!value && typeof value === 'object' &&
-    Object.keys(DEFAULT_CHAT_RUNTIME).every((key) =>
+    ['keepAlive', 'banners', 'systemNotifications', 'allowIncomingCalls'].every((key) =>
       typeof Reflect.get(value, key) === 'boolean'
-    )
-  );
+    ) && (Reflect.get(value, 'autoReplyOnEnter') === undefined || typeof Reflect.get(value, 'autoReplyOnEnter') === 'boolean')
+  ),
+});
 
 /** Explicit per-chat settings take priority; old chats retain their previous global preference. */
 export const incomingCallsAllowed = (

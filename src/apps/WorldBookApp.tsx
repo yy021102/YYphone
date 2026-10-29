@@ -14,8 +14,11 @@ import {
 import { AppHeader } from '../components/AppHeader';
 import { useErrorDialog } from '../components/ErrorDialog';
 import { readStoredValue, writeStoredValue } from '../utils/localStorage';
+import { parseWorldBookActivation, parseWorldBookKeywords, validWorldBookActivation, type WorldBookActivation } from '../utils/worldBookActivation';
+import { DocumentTextImport } from '../components/DocumentTextImport';
+import { readTextDocument, TEXT_DOCUMENT_ACCEPT } from '../utils/textDocument';
 
-interface WorldBookEntry {
+interface WorldBookEntry extends WorldBookActivation {
   id: string;
   title: string;
   content: string;
@@ -44,7 +47,7 @@ const isWorldBookEntry = (value: unknown): value is WorldBookEntry =>
   typeof (value as WorldBookEntry).id === 'string' &&
   typeof (value as WorldBookEntry).title === 'string' &&
   typeof (value as WorldBookEntry).content === 'string' &&
-  ['front', 'middle', 'back'].includes((value as WorldBookEntry).depth);
+  ['front', 'middle', 'back'].includes((value as WorldBookEntry).depth) && validWorldBookActivation(value as Record<string, unknown>);
 
 const isWorldBookList = (value: unknown): value is WorldBook[] =>
   Array.isArray(value) &&
@@ -74,6 +77,7 @@ export const WorldBookApp: React.FC<WorldBookAppProps> = ({ onBack }) => {
   const [editingMode, setEditingMode] = useState(false);
   const [selectedEntryIds, setSelectedEntryIds] = useState<string[]>([]);
   const [editor, setEditor] = useState<EntryDraft | null>(null);
+  const [keywordDraft, setKeywordDraft] = useState('');
   const [editorBookId, setEditorBookId] = useState('');
   const [newBookName, setNewBookName] = useState('');
   const [showNewBook, setShowNewBook] = useState(false);
@@ -85,6 +89,8 @@ export const WorldBookApp: React.FC<WorldBookAppProps> = ({ onBack }) => {
   const [error, setError] = useState('');
   useErrorDialog(error);
   const importInputRef = useRef<HTMLInputElement>(null);
+  const importRevision = useRef(0);
+  useEffect(() => () => { importRevision.current++; }, []);
 
   const selectedBook = books.find((book) => book.id === selectedBookId);
 
@@ -125,11 +131,14 @@ export const WorldBookApp: React.FC<WorldBookAppProps> = ({ onBack }) => {
       return;
     }
 
+    const keywords = parseWorldBookKeywords(keywordDraft);
+    if (editor.activation === 'keyword' && !keywords.length) { setError('请至少填写一个触发关键词。'); return; }
     const entry: WorldBookEntry = {
       id: editor.id ?? newId(),
       title: editor.title.trim(),
       content: editor.content,
       depth: editor.depth,
+      ...parseWorldBookActivation({ ...editor, keywords }),
     };
     const booksWithoutEditedEntry = editor.id
       ? books.map((book) => ({
@@ -273,7 +282,10 @@ export const WorldBookApp: React.FC<WorldBookAppProps> = ({ onBack }) => {
           uid: index,
           comment: entry.title,
           content: entry.content,
-          key: [],
+          ...parseWorldBookActivation(entry as unknown as Record<string, unknown>),
+          key: entry.keywords ?? [],
+          constant: entry.activation !== 'keyword',
+          disable: entry.activation === 'disabled',
           depth: entry.depth === 'front' ? 0 : entry.depth === 'middle' ? 4 : 8,
           position: entry.depth,
         },
@@ -296,8 +308,20 @@ export const WorldBookApp: React.FC<WorldBookAppProps> = ({ onBack }) => {
 
   const handleImport = async (file?: File) => {
     if (!file) return;
+    const revision = ++importRevision.current;
     try {
-      const parsed: unknown = JSON.parse(await file.text());
+      if (/\.(?:txt|docx|doc)$/i.test(file.name)) {
+        const text = await readTextDocument(file);
+        if (revision !== importRevision.current) return;
+        const title = file.name.replace(/\.[^.]+$/, '');
+        setEditor({ title, content: text, depth: 'middle', activation: 'always', scanDepth: 6 });
+        setKeywordDraft(''); setEditorBookId(selectedBookId);
+        setNewBookName(selectedBookId ? '' : title);
+        setError(''); return;
+      }
+      const contents = await file.text();
+      if (revision !== importRevision.current) return;
+      const parsed: unknown = JSON.parse(contents);
       if (!parsed || typeof parsed !== 'object') throw new Error('文件内容不是有效的世界书。');
 
       const root = parsed as Record<string, unknown>;
@@ -336,7 +360,7 @@ export const WorldBookApp: React.FC<WorldBookAppProps> = ({ onBack }) => {
                 : typeof entry.depth === 'number' && entry.depth >= 8
                   ? 'back'
                   : 'middle';
-          return { id: newId(), title, content: entry.content, depth };
+          return { id: newId(), title, content: entry.content, depth, ...parseWorldBookActivation(entry, true) };
         }
       );
       if (entries.length === 0) throw new Error('该世界书没有可导入的条目。');
@@ -364,7 +388,8 @@ export const WorldBookApp: React.FC<WorldBookAppProps> = ({ onBack }) => {
   };
 
   const openNewEntry = () => {
-    setEditor({ title: '', content: '', depth: 'middle' });
+    setEditor({ title: '', content: '', depth: 'middle', activation: 'always', scanDepth: 6 });
+    setKeywordDraft('');
     setEditorBookId(selectedBookId);
     setNewBookName('');
     setError('');
@@ -448,7 +473,7 @@ export const WorldBookApp: React.FC<WorldBookAppProps> = ({ onBack }) => {
       <input
         ref={importInputRef}
         type="file"
-        accept="application/json,.json"
+        accept={`application/json,.json,${TEXT_DOCUMENT_ACCEPT}`}
         className="hidden"
         onChange={(event) => {
           void handleImport(event.target.files?.[0]);
@@ -577,7 +602,7 @@ export const WorldBookApp: React.FC<WorldBookAppProps> = ({ onBack }) => {
                   );
                   return;
                 }
-                setEditor(entry);
+                setEditor(entry); setKeywordDraft((entry.keywords ?? []).join('，'));
                 setEditorBookId(selectedBook.id);
                 setNewBookName('');
                 setError('');
@@ -588,7 +613,7 @@ export const WorldBookApp: React.FC<WorldBookAppProps> = ({ onBack }) => {
             </button>
             {!editingMode && (
               <span className="shrink-0 text-[10px] font-semibold text-sky-600 bg-sky-50 border border-sky-100 px-2 py-0.5 rounded-full">
-                {DEPTH_LABELS[entry.depth]}
+                {entry.activation === 'keyword' ? '🟢 关键词 · ' : entry.activation === 'disabled' ? '⚪ 已停用 · ' : '🔵 常驻 · '}{DEPTH_LABELS[entry.depth]}
               </span>
             )}
           </div>
@@ -712,6 +737,8 @@ export const WorldBookApp: React.FC<WorldBookAppProps> = ({ onBack }) => {
                     className="w-full rounded-2xl bg-slate-100/80 border border-slate-200 px-3 py-2 text-xs font-bold outline-none focus:border-sky-400"
                   />
                 )}
+                <label className="block text-xs font-bold text-slate-600">触发方式<select aria-label="世界书触发方式" value={editor.activation ?? 'always'} onChange={event => setEditor({ ...editor, activation: event.target.value as WorldBookActivation['activation'] })} className="mt-1 w-full rounded-2xl border border-slate-200 bg-slate-100/80 px-3 py-2 text-xs outline-none"><option value="always">🔵 常驻</option><option value="keyword">🟢 关键词触发</option><option value="disabled">⚪ 停用</option></select></label>
+                {editor.activation === 'keyword' && <div className="space-y-3 rounded-2xl bg-emerald-50/70 p-3"><label className="block text-xs font-bold text-slate-600">触发关键词<textarea aria-label="世界书触发关键词" value={keywordDraft} onChange={event => setKeywordDraft(event.target.value)} rows={2} placeholder="用逗号或换行分隔" className="mt-1 w-full rounded-xl border border-white bg-white/80 px-3 py-2 text-xs font-normal outline-none" /></label><label className="block text-xs font-bold text-slate-600">扫描最近消息条数<input type="number" aria-label="世界书扫描条数" min={0} max={100} value={editor.scanDepth ?? 6} onChange={event => setEditor({ ...editor, scanDepth: Math.max(0, Math.min(100, Math.floor(Number(event.target.value)))) })} className="mt-1 w-full rounded-xl border border-white bg-white/80 px-3 py-2 text-xs outline-none" /></label><p className="text-[10px] font-normal leading-relaxed text-slate-500">任一关键词命中才注入，不区分大小写；0 表示不扫描。</p></div>}
                 <label className="block text-xs font-bold text-slate-600">
                   深度
                   <select
@@ -732,11 +759,13 @@ export const WorldBookApp: React.FC<WorldBookAppProps> = ({ onBack }) => {
                   内容
                   <textarea
                     value={editor.content}
+                    aria-label="内容"
                     onChange={(event) => setEditor({ ...editor, content: event.target.value })}
                     rows={6}
                     className="mt-1 w-full resize-y rounded-2xl bg-slate-100/80 border border-slate-200 px-3 py-2 text-xs leading-relaxed outline-none focus:border-sky-400"
                   />
                 </label>
+                <DocumentTextImport key={editor.id ?? 'new-entry'} label="世界书正文" value={editor.content} onChange={content => setEditor(current => current ? { ...current, content } : current)} />
                 <button
                   onClick={handleSaveEntry}
                   style={{ background: '                  linear-gradient(90deg, #DCEEFD 0%, #FBE1EC 100%)' }}

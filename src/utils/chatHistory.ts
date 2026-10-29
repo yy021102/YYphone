@@ -4,6 +4,15 @@ export const DEFAULT_CHAT_HISTORY_COUNT = 200;
 // Check the source so existing saved entries become silent as well.
 export const isVisibleChatMessage = (message: { source?: string }): boolean => message.source !== 'alias-experience';
 
+/** One-based inclusive numbering, oldest first, excluding silent AI-only records. */
+export function chatRangeMessageIds(messages: Array<{ id: string; source?: string }>, from: string, to: string): string[] {
+  const visible = messages.filter(isVisibleChatMessage), first = Number(from), last = Number(to);
+  if (!/^\d+$/.test(from.trim()) || !/^\d+$/.test(to.trim()) || !Number.isSafeInteger(first) || !Number.isSafeInteger(last) || first < 1 || last < first || last > visible.length) {
+    throw new Error(visible.length ? `请填写 1～${visible.length} 之间的起止条数，结束条数不能小于开始条数。` : '当前没有可删除的聊天记录。');
+  }
+  return visible.slice(first - 1, last).map(message => message.id);
+}
+
 export const resolveChatHistoryCount = (value: unknown, fallback = DEFAULT_CHAT_HISTORY_COUNT): number =>
   typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : fallback;
 

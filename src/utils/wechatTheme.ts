@@ -33,13 +33,14 @@ export const DEFAULT_WECHAT_THEME_CSS = `/* 微信完整聊天主题 · 默认�
 .yy-wechat-header .yy-header-action button { color: inherit; }
 /* .yy-header-back = 返回；.yy-header-action = 右侧设置按钮。仅改变外观和位置。 */
 
-/* 03 消息滚动区域：背景图片可以直接填在这里 */
+/* 03 消息滚动区域：背景图片可以直接填在这里，背景固定在区域中，只有消息滚动 */
 .yy-chat-surface { background-color: var(--yy-theme-background); }
 .yy-chat-history {
   background-color: var(--yy-theme-background);
   /* background-image: url("你的图片链接"); */
   background-size: cover;
   background-position: center;
+  background-attachment: scroll;
   padding: 16px 12px;
 }
 .yy-chat-timestamp { color: #999; font-size: calc(10px * var(--font-scale, 1)); text-align: center; }
@@ -80,6 +81,9 @@ export const DEFAULT_WECHAT_THEME_CSS = `/* 微信完整聊天主题 · 默认�
   transform: rotate(45deg);
 }
 .yy-chat-message-bubble.is-user.is-plain::before { left: auto; right: -5px; }
+
+/* 引用条独立放在消息气泡下方，不影响正文气泡；长内容以省略号收起 */
+.yy-chat-quote { max-width: 100%; margin-top: 5px; padding: 6px 10px; border: 1px solid #e1e1e1b3; border-radius: 4px; background: #f5f5f5e0; color: #888; font-size: calc(12px * var(--font-scale, 1)); line-height: 1.5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* 07 图片、表情包、语音：图片与表情包没有文字气泡底色 */
 .yy-chat-message-bubble.is-media { padding: 0; background: transparent; }

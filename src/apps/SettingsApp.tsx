@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { McpSettingsPanel } from '../components/McpSettingsPanel';
 import { ApiModelPicker } from '../components/ApiModelPicker';
+import { ChatApiConnectionTest } from '../components/ChatApiConnectionTest';
+import { apiTemperature } from '../utils/textApiConfig';
 import { getActiveApiPreset } from '../utils/aiApi';
 import { ACTIVE_IMAGE_PRESET_KEY, deleteImageGenerationPreset, normalizeImageSettings, readImageGenerationPresets, saveImageGenerationPreset, selectImageGenerationPreset } from '../utils/imageGenerationPresets';
 import {
@@ -65,6 +67,7 @@ interface ApiPreset {
   endpoint: string;
   apiKey: string;
   model?: string;
+  temperature?: number;
 }
 
 interface ApiModel {
@@ -151,6 +154,7 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
   const [apiEndpoint, setApiEndpoint] = useState(() => initialApiPreset?.endpoint ?? '');
   const [apiKey, setApiKey] = useState(() => initialApiPreset?.apiKey ?? '');
   const [apiModel, setApiModel] = useState(() => initialApiPreset?.model ?? 'gpt-4o-mini');
+  const [temperature, setTemperature] = useState<number | undefined>(() => apiTemperature(initialApiPreset?.temperature));
   const [showApiKey, setShowApiKey] = useState(false);
   const [apiModels, setApiModels] = useState<ApiModel[]>([]);
   const [isLoadingApiModels, setIsLoadingApiModels] = useState(false);
@@ -225,6 +229,7 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
       endpoint: apiEndpoint.trim(),
       apiKey,
       model: apiModel.trim() || 'gpt-4o-mini',
+      ...(temperature !== undefined ? { temperature } : {}),
     };
     const nextPresets = selectedApiPresetId
       ? apiPresets.map((item) => (item.id === selectedApiPresetId ? preset : item))
@@ -242,6 +247,7 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
     setApiEndpoint(preset?.endpoint ?? '');
     setApiKey(preset?.apiKey ?? '');
     setApiModel(preset?.model ?? 'gpt-4o-mini');
+    setTemperature(apiTemperature(preset?.temperature));
     setApiModels([]);
     if (preset) saveSetting(SETTINGS_KEYS.activeApiPreset, id);
     setApiMessage('');
@@ -254,6 +260,7 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
     setApiEndpoint('');
     setApiKey('');
     setApiModel('gpt-4o-mini');
+    setTemperature(undefined);
     setApiModels([]);
     setApiMessage('');
     setApiError('');
@@ -269,6 +276,7 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
     setApiEndpoint(nextPreset?.endpoint ?? '');
     setApiKey(nextPreset?.apiKey ?? '');
     setApiModel(nextPreset?.model ?? 'gpt-4o-mini');
+    setTemperature(apiTemperature(nextPreset?.temperature));
     if (nextPreset) saveSetting(SETTINGS_KEYS.activeApiPreset, nextPreset.id);
     else removeSetting(SETTINGS_KEYS.activeApiPreset);
     setApiMessage('API 配置预设已删除。');
@@ -660,7 +668,7 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
                 disabled={isLoadingApiModels}
                 className="w-full rounded-xl bg-white/80 border border-white py-2 text-xs font-semibold text-[#2C4A5C] disabled:opacity-50"
               >
-                {isLoadingApiModels ? '正在测试并拉取模型…' : '拉取模型'}
+                {isLoadingApiModels ? '正在拉取模型…' : '拉取模型'}
               </button>
               {apiModels.length > 0 && (
                 <label className="block text-[10px] font-semibold text-slate-600">
@@ -678,6 +686,18 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
                 </label>
               )}
             </div>
+            <div className="space-y-2 rounded-xl border border-white/80 bg-white/40 p-3">
+              <label className="flex items-center justify-between gap-3 text-[11px] font-semibold text-[#2C4A5C]">
+                自定义温度
+                <input type="checkbox" checked={temperature !== undefined} onChange={event => setTemperature(event.target.checked ? 1 : undefined)} />
+              </label>
+              {temperature !== undefined ? <label className="block text-[11px] text-slate-600">
+                温度 · {temperature.toFixed(1)}
+                <input type="range" aria-label="API 温度" min={0} max={2} step={0.1} value={temperature} onChange={event => setTemperature(Number(event.target.value))} className="mt-2 w-full" />
+              </label> : <p className="text-[10px] text-slate-400">使用模型默认温度</p>}
+              <p className="text-[10px] text-slate-400">较低更稳定，较高更多变化。随预设保存。</p>
+            </div>
+            <ChatApiConnectionTest connection={{ endpoint: apiEndpoint, apiKey, model: apiModel, temperature }} />
             <div className="flex gap-2">
               <button
                 type="button"
@@ -958,6 +978,14 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
               </div>
             )}
           </div>
+        </section>
+        <section className="settings-card space-y-3">
+          <h3 className="settings-card-heading"><span className="settings-icon" data-tone="blue"><Sliders size={17} strokeWidth={1.7} /></span>聊天输入</h3>
+          <label className="settings-toggle-row flex items-center justify-between gap-3 text-xs text-slate-600">
+            <span>回车发送后自动回复</span>
+            <input type="checkbox" checked={runtimeSettings.autoReplyOnEnter} disabled={runtimeBusy} onChange={event => void updateRuntime({ autoReplyOnEnter: event.target.checked })} />
+          </label>
+          <p className="text-[11px] leading-relaxed text-slate-500">开启后，微信中按回车发送消息会自动生成角色回复。Shift + 回车换行，点击发送按钮仍只发送消息。</p>
         </section>
         <section className="settings-card space-y-3">
           <h3 className="settings-card-heading"><span className="settings-icon" data-tone="blue"><Bell size={17} strokeWidth={1.7} /></span>后台与消息提醒</h3>

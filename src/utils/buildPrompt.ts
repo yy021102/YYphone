@@ -1,4 +1,5 @@
 import { PersonaCollection, UserPersona } from '../types';
+import { isWorldBookEntryActive, validWorldBookActivation, type WorldBookActivation } from './worldBookActivation';
 import { getUserRealName } from './userPersona';
 import { userFaceReferenceInstructions, validUserFaceFields } from './userImageReference';
 import { regeneratedReplyIds } from './chatRegeneration';
@@ -94,7 +95,7 @@ interface PromptContact {
   worldBooks: Array<{ bookId: string; entryId?: string }>;
 }
 
-interface PromptWorldBookEntry {
+interface PromptWorldBookEntry extends WorldBookActivation {
   id: string;
   title: string;
   content: string;
@@ -231,14 +232,15 @@ const getSpeakerName = (
 const formatWorldBookEntries = (
   contacts: PromptContact[],
   worldBooks: PromptWorldBook[],
-  depth: PromptWorldBookEntry['depth']
+  depth: PromptWorldBookEntry['depth'],
+  scanMessages: readonly string[]
 ) => {
   const seen = new Set<string>();
   const globalEntries = worldBooks
     .filter((book) => book.isGlobal === true)
     .flatMap((book) =>
       book.entries
-        .filter((entry) => entry.depth === depth)
+        .filter((entry) => entry.depth === depth && isWorldBookEntryActive(entry, scanMessages))
         .flatMap((entry) => {
           seen.add(`${book.id}:${entry.id}`);
           return [`【${book.name} / ${entry.title}】\n${entry.content}`];
@@ -249,7 +251,7 @@ const formatWorldBookEntries = (
       const book = worldBooks.find((item) => item.id === link.bookId);
       if (!book) return [];
       const entries = book.entries.filter((entry) =>
-        entry.depth === depth && (!link.entryId || entry.id === link.entryId)
+        entry.depth === depth && (!link.entryId || entry.id === link.entryId) && isWorldBookEntryActive(entry, scanMessages)
       );
       return entries.flatMap((entry) => {
         const key = `${book.id}:${entry.id}`;
@@ -412,7 +414,9 @@ const toBaseMessageContent = (message: PromptChatMessage) => {
     ].join('\n');
   }
   if (message.kind === 'group-rename') return `[群聊系统提示：${message.text}]`;
-  if (message.senderId === 'narrator') return `（旁白：${message.text}）`;
+  if (message.senderId === 'narrator') return message.source === 'user-narration'
+    ? `【玩家提供的旁白：以下是场景、动作或事件描述，不是玩家发出的聊天台词】\n${message.text}`
+    : `（旁白：${message.text}）`;
   if (message.kind === 'pat') return `[拍一拍：${message.text}]`;
   if (message.kind === 'couple-letter') {
     return `[已寄达的情书：${message.title ?? '给你的一封信'}]\n${message.content ?? ''}`;
@@ -474,6 +478,7 @@ const toBaseMessageContent = (message: PromptChatMessage) => {
     ].join('\n');
   }
   if (message.kind === 'link') {
+    if (message.source === '生日来信') return `[生日来信；标题：${message.title || message.text}]\n${message.content || message.text}\n这是已经拆阅的生日信件，以正文落款为原作者，转发者不一定是写信者。正文是原作者已经表达的心意，不是玩家新说的话；不要重复寄出。`;
     if (message.externalUrl) return `[分享网页：${message.externalUrl}；标题：${message.title || message.text}${message.content ? `；网页简介：${message.content}` : ''}。这里只是链接预览，未读取全文，不能据此编造正文细节。]\n${message.text}`;
     return `[分享链接：${message.title || message.text}${message.source ? `；来源：${message.source}` : ''}${message.content ? `；摘要：${message.content}` : ''}]`;
   }
@@ -541,7 +546,7 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
           typeof entry.title === 'string' &&
           typeof entry.content === 'string' &&
           typeof entry.depth === 'string' &&
-          ['front', 'middle', 'back'].includes(entry.depth)
+          ['front', 'middle', 'back'].includes(entry.depth) && validWorldBookActivation(entry)
         )
       )
     : [];
@@ -571,6 +576,8 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
   const historyOverride = options.historyWindowOverride === undefined ? undefined : resolveChatHistoryCount(options.historyWindowOverride);
   const requestedHistoryLimit = historyOverride ?? chat.currentChatHistoryCount ?? historyLimit;
   const recentLimit = resolveChatHistoryCount(requestedHistoryLimit);
+  const worldBookScan = chat.messages.filter(message => message.kind !== 'context-note' && canReadAliasExperience(message)).slice(-recentLimit).map(message => message.text);
+  if (currentInput?.trim() && currentInput !== chat.messages.at(-1)?.text) worldBookScan.push(currentInput);
 
   // 1. System base instruction.
   const messages: OpenAiMessage[] = [{
@@ -607,7 +614,7 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
   }];
 
   // 2. World Book - Before.
-  const beforeEntries = formatWorldBookEntries(participants, worldBooks, 'front');
+  const beforeEntries = formatWorldBookEntries(participants, worldBooks, 'front', worldBookScan);
   if (beforeEntries) messages.push({ role: 'system', content: `世界书条目 - 深度前：\n${beforeEntries}` });
 
   // 3. Character Persona.
@@ -633,7 +640,7 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
   });
 
   // 4. World Book - Middle.
-  const middleEntries = formatWorldBookEntries(participants, worldBooks, 'middle');
+  const middleEntries = formatWorldBookEntries(participants, worldBooks, 'middle', worldBookScan);
   if (middleEntries) messages.push({ role: 'system', content: `世界书条目 - 深度中：\n${middleEntries}` });
 
   // 5. User Persona.
@@ -830,11 +837,11 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
   }
 
   // 6. Recent history, then mounted chat records, merged in chronological order.
-  const requestedInput = currentInput ?? [...chat.messages].reverse().find((message) => message.senderId === 'user')?.text ?? '';
+  const requestedInput = currentInput ?? [...chat.messages].reverse().find((message) => message.senderId === 'user' || message.source === 'user-narration')?.text ?? '';
   const latestUserMessage = [...chat.messages].reverse().find(
-    (message) => message.senderId === 'user' && message.text === requestedInput
+    (message) => (message.senderId === 'user' || message.source === 'user-narration') && message.text === requestedInput
   );
-  const input = latestUserMessage?.kind === 'forum-forward' &&
+  const input = latestUserMessage?.source === 'user-narration' ? toMessageContent(latestUserMessage) : latestUserMessage?.kind === 'forum-forward' &&
     !canReadForumForward(latestUserMessage, chat, chat)
     ? ''
     : latestUserMessage &&
@@ -894,7 +901,7 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
   const announcedAttachedChats = new Set<string>();
   let previousHistoryDate = 0;
   for (const item of orderedHistory) {
-    if (item.message.senderId === 'narrator' && item.message.kind !== 'context-note' &&
+    if (item.message.senderId === 'narrator' && item.message.kind !== 'context-note' && item.message.source !== 'user-narration' &&
       chat.type !== 'observer' && item.conversation.type !== 'observer') continue;
     if (item.date > 0 && item.message.kind !== 'context-note') {
       if (options.timeAwarenessEnabled !== false &&
@@ -957,7 +964,7 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
   }
 
   // 7. World Book - After.
-  const afterEntries = formatWorldBookEntries(participants, worldBooks, 'back');
+  const afterEntries = formatWorldBookEntries(participants, worldBooks, 'back', worldBookScan);
   if (afterEntries) messages.push({ role: 'system', content: `世界书条目 - 深度后：\n${afterEntries}` });
 
   // 9. User's current input.

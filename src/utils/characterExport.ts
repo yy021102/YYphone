@@ -1,8 +1,10 @@
+import { parseWorldBookActivation, type WorldBookActivation } from './worldBookActivation';
+
 export interface PortableWorldBook {
   id: string;
   name: string;
   isGlobal?: boolean;
-  entries: Array<{ id: string; title: string; content: string; depth: 'front' | 'middle' | 'back' }>;
+  entries: Array<WorldBookActivation & { id: string; title: string; content: string; depth: 'front' | 'middle' | 'back' }>;
 }
 
 interface WorldBookLink {
@@ -43,7 +45,7 @@ export const parsePortableWorldBooks = (value: unknown): PortableWorldBook[] => 
           typeof entry.content !== 'string' || (entry.depth !== 'front' && entry.depth !== 'middle' && entry.depth !== 'back')) {
           throw new Error('角色包中的世界书条目格式无效。');
         }
-        return { id: entry.id, title: entry.title, content: entry.content, depth: entry.depth };
+        return { id: entry.id, title: entry.title, content: entry.content, depth: entry.depth, ...parseWorldBookActivation(entry) };
       }),
     };
   });

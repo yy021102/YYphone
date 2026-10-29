@@ -4,8 +4,8 @@ import { getWorldBookEntriesForContacts } from './worldBookPrompt';
 import { readDirectMessages, buildJournalInjection, buildGrowthInjection } from './journalData';
 import { buildMemoryInjection } from './memoryData';
 
-export function channelWorldContext(settings: ChannelSettings): string {
-  return [...new Set([...getWorldBookEntriesForContacts([]), ...getWorldBookEntriesForContacts([], settings.worldBookIds)])].join('\n');
+export function channelWorldContext(settings: ChannelSettings, scanMessages: readonly string[] = []): string {
+  return [...new Set([...getWorldBookEntriesForContacts([], undefined, scanMessages), ...getWorldBookEntriesForContacts([], settings.worldBookIds, scanMessages)])].join('\n');
 }
 /** Always read character settings fresh; optional personal context stays labelled by its owner. */
 export async function buildChannelActorContext(actors: ChannelPerson[], contacts: ChannelPerson[], settings: ChannelSettings, query: string) {
@@ -22,7 +22,7 @@ export async function buildChannelActorContext(actors: ChannelPerson[], contacts
       const memory = role?.injectMemory === true ? [memories?.text, buildJournalInjection([id], 'direct', history[0]?.createdAt), buildGrowthInjection([id], 'direct')]
         .filter(Boolean).join('\n').slice(0, 14000) : undefined;
       return { id, name: person.name, originalPersona: source.persona?.slice(0, 8000) || '',
-        worldBook: getWorldBookEntriesForContacts([id]).join('\n'),
+        worldBook: getWorldBookEntriesForContacts([id], undefined, [...history.map(message => message.text), query]).join('\n'),
         ...(role?.injectChatContext === true ? { privateChatContext: history.map(message => ({ from: message.senderId === 'user' ? '玩家' : person.name, date: message.createdAt, text: message.text })) } : {}),
         ...(role?.injectMemory === true ? { privateMemory: memory || '' } : {}) };
     })()];

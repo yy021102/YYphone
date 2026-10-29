@@ -18,6 +18,7 @@ import { CoupleBellNotice } from './components/CoupleBellNotice';
 import { CoupleLetterRuntime } from './components/CoupleLetterRuntime';
 import { findCouponUse, type CouponGiftTarget } from './utils/coupleRewards';
 import { LockScreen } from './components/LockScreen';
+import { BirthdayRuntime } from './components/BirthdayRuntime';
 import { HomeScreen } from './components/HomeScreen';
 import { CalendarWidget as CalendarApp } from './components/CalendarWidget';
 import { LittlePPanel } from './components/LittlePPanel';
@@ -284,9 +285,10 @@ export default function App() {
   useEffect(() => {
     const fallback = FONT_FAMILIES[fontSettings.family].value;
     document.documentElement.style.setProperty('--app-font-family', fallback);
-    if (!fontSettings.url) return;
+    const source = fontSettings.file?.dataUrl || fontSettings.url;
+    if (!source) return;
     let disposed = false;
-    const face = new FontFace('YYphoneCustom', `url(${JSON.stringify(fontSettings.url)})`);
+    const face = new FontFace('YYphoneCustom', `url(${JSON.stringify(source)})`);
     void face.load().then((loaded) => {
       if (disposed) return;
       document.fonts.add(loaded);
@@ -294,13 +296,13 @@ export default function App() {
     }).catch((error: unknown) => {
       if (disposed) return;
       console.error('Could not load custom font.', error);
-      showYyError('字体加载失败，请检查字体直链、文件格式和跨域权限。已暂用系统字体。');
+      showYyError(fontSettings.file ? '字体文件加载失败，请重新导入。已暂用系统字体。' : '字体加载失败，请检查字体直链、文件格式和跨域权限。已暂用系统字体。');
     });
     return () => {
       disposed = true;
       document.fonts.delete(face);
     };
-  }, [fontSettings.url, fontSettings.family]);
+  }, [fontSettings.url, fontSettings.file?.dataUrl, fontSettings.family]);
 
   useEffect(() => {
     if (!runtimeSettings.keepAlive) {
@@ -613,6 +615,7 @@ export default function App() {
       */}
       <div
         onPointerDown={handleEmergencyTap}
+        data-phone-canvas
         data-home-style={!activeApp && !isLocked ? beautySettings.homeStyle : undefined}
         className={`w-full md:w-[min(412px,calc(93vh*9/19.5))] h-full md:h-[min(850px,93vh)] md:rounded-[44px] overflow-hidden relative flex flex-col shadow-[0_25px_80px_rgba(0,0,0,0.7),0_0_0_1px_rgba(255,255,255,0.14)] transition-all ${
           activeApp || isLocked
@@ -620,13 +623,13 @@ export default function App() {
             : 'pt-[max(env(safe-area-inset-top,0px),0px)] pb-0'
         }`}
         style={
-          !activeApp && !isLocked && beautySettings.homeStyle === 'minimal' ? { background: '#f4f2ee' } : !activeApp && !isLocked && beautySettings.homeStyle === 'moonlit' ? { background: '#ede9f4' } : beautySettings.wallpapers.homeScreen
+          beautySettings.wallpapers.homeScreen
             ? {
                 backgroundImage: `url("${beautySettings.wallpapers.homeScreen}")`,
                 backgroundSize: 'cover',
                 backgroundPosition: 'center',
               }
-            : { background: currentWallpaper.style }
+            : !activeApp && !isLocked && beautySettings.homeStyle === 'minimal' ? { background: '#f4f2ee' } : !activeApp && !isLocked && beautySettings.homeStyle === 'moonlit' ? { background: '#ede9f4' } : { background: currentWallpaper.style }
         }
       >
         {/* Dynamic theme backdrop wash */}
@@ -744,6 +747,7 @@ export default function App() {
             /* Desktop / Home Screen (Strictly fitted within 1 screen, never scrolls, square blocks) */
             <HomeScreen
               homeStyle={beautySettings.homeStyle}
+              wallpaperUrl={beautySettings.wallpapers.homeScreen}
               userProfile={userProfile}
               apps={MAIN_GRID_APPS}
               dockApps={DOCK_APPS}
@@ -772,8 +776,8 @@ export default function App() {
         </div>
         {!isLocked && !activeApp && littlePVisible && (
           <button type="button" onClick={() => setLittlePOpen(true)} aria-label="打开小P"
-            className="absolute bottom-[18%] right-3 z-30 flex h-14 w-14 flex-col items-center justify-center rounded-[22px] border border-white bg-gradient-to-br from-sky-100 to-pink-100 text-sky-700 shadow-lg">
-            <span aria-hidden="true" className="text-xl leading-none">✦</span><span className="mt-1 text-[10px] font-bold">小P</span>
+            className={`absolute bottom-[18%] right-3 z-30 flex h-14 w-14 flex-col items-center justify-center overflow-hidden rounded-[22px] shadow-lg ${beautySettings.appIcons['little-p'] ? '' : 'border border-white bg-gradient-to-br from-sky-100 to-pink-100 text-sky-700'}`}>
+            {beautySettings.appIcons['little-p'] ? <img src={beautySettings.appIcons['little-p']} alt="" className="h-full w-full object-cover" /> : <><span aria-hidden="true" className="text-xl leading-none">✦</span><span className="mt-1 text-[10px] font-bold">小P</span></>}
           </button>
         )}
         <LittlePPanel open={littlePOpen && littlePVisible && !isLocked && !activeApp}
@@ -781,6 +785,7 @@ export default function App() {
         <BlockedContactRuntime enabled={!isLocked} />
         <CoupleBellNotice enabled={!isLocked} />
         <CoupleLetterRuntime />
+        <BirthdayRuntime unlocked={!isLocked} atHome={!isLocked && !activeApp} onOpenChat={openNotifiedChat} />
         {notification && (
           <div className="absolute left-3 right-3 top-[max(env(safe-area-inset-top,0px),12px)] z-[100] flex items-center gap-3 rounded-3xl border border-white bg-white/95 p-3 shadow-xl backdrop-blur-xl" role="status">
             <button type="button" onClick={() => openNotifiedChat(notification.chatId)} className="flex min-w-0 flex-1 items-center gap-3 text-left" aria-label={`查看${notification.name}的新消息`}>
