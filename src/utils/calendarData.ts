@@ -1,4 +1,5 @@
 import { readStoredValue, writeStoredValue } from './localStorage';
+import { isPeriodTracking, type PeriodTracking } from './periodTracking';
 
 export const CALENDAR_STORAGE_KEY = 'yyphone:calendar-data';
 export const CALENDAR_EXPORT_FORMAT = 'yyphone-calendar';
@@ -24,6 +25,7 @@ export interface CharacterSchedule {
 }
 
 export interface CalendarData {
+  periodTracking?: PeriodTracking;
   entries: CalendarEntry[];
   visibleCharacterIds: string[];
   scheduleCharacterIds: string[];
@@ -76,6 +78,7 @@ const isSchedule = (value: unknown): value is CharacterSchedule =>
 
 export const isCalendarData = (value: unknown): value is CalendarData =>
   isRecord(value) &&
+  (value.periodTracking === undefined || isPeriodTracking(value.periodTracking)) &&
   Array.isArray(value.entries) && value.entries.every(isEntry) &&
   isStringList(value.visibleCharacterIds) &&
   isStringList(value.scheduleCharacterIds) &&
@@ -212,10 +215,10 @@ const buildPlayerSection = (data: CalendarData, today: Date): string | null => {
       const end = entry.endDate && entry.endDate >= entry.date ? entry.endDate : entry.date;
       if (entry.date <= todayKey && todayKey <= end) {
         specialLines.push(
-          `- 玩家目前正处于经期（${entry.date}${end !== entry.date ? ` ~ ${end}` : ''}），可结合人设适度、自然地关心（如身体不适、保暖、饮食、休息），不要频繁提及或过度追问。`
+          `- 玩家目前正处于经期（${entry.date}${end !== entry.date ? ` ~ ${end}` : ''}）。这是身体状态背景，不是本轮必须执行的关怀任务；是否提及由眼前话题、玩家实际表达和角色自己的意愿决定。不据此推断她一定疼痛或情绪不稳，也不要在玩梗、调情或认真讨论后机械补上保暖、饮食、休息等提醒。`
         );
       } else if (end === yesterdayKey) {
-        specialLines.push('- 玩家的经期已经结束，不要再把玩家当作处于经期并关心；如情境自然，可简短提一句她恢复了就好。');
+        specialLines.push('- 玩家的经期已经结束，不要再当作仍在经期；这是状态更新，不要求额外发表关怀或恢复祝贺，也不能据此推断她之前有何症状。');
       }
     });
   if (specialLines.length > 0) lines.push('特殊日期：', ...specialLines);
@@ -248,7 +251,7 @@ export const buildCalendarContext = (
     const playerSection = viewers.length > 0 ? buildPlayerSection(data, now) : null;
     if (playerSection) {
       sections.push(
-        `玩家的日程与日期（仅${viewers.join('、')}知道这些信息，聊天中的其他角色并不知道；请在合适的时候自然地提及或关心，不要生硬复述）：\n${playerSection}`
+        `玩家的日程与日期（仅${viewers.join('、')}知道这些信息，聊天中的其他角色并不知道；仅作为理解生活状态的背景，不是必须提及或逐项关心的清单，是否带入由当前话题决定）：\n${playerSection}`
       );
     }
   }

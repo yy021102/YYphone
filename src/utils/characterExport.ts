@@ -52,7 +52,7 @@ export const parsePortableWorldBooks = (value: unknown): PortableWorldBook[] => 
 };
 
 export const buildCharacterExport = (
-  contact: PortableCharacter, selectedIds: string[], books: PortableWorldBook[]
+  contact: PortableCharacter, selectedIds: string[], books: PortableWorldBook[], options: { includeVoice?: boolean } = {}
 ) => {
   const selected = books.filter((book) => selectedIds.includes(book.id));
   if (selected.length !== new Set(selectedIds).size) throw new Error('部分所选世界书已不存在，请重新选择。');
@@ -63,9 +63,7 @@ export const buildCharacterExport = (
       persona: contact.persona, group: contact.group, starred: contact.starred,
       bio: contact.bio, forumNickname: contact.forumNickname, forumHandle: contact.forumHandle,
       stickerCategories: contact.stickerCategories,
-      voiceEnabled: contact.voiceEnabled,
-      voiceId: contact.voiceId,
-      voiceLanguage: contact.voiceLanguage,
+      ...(options.includeVoice !== false ? { voiceEnabled: contact.voiceEnabled, voiceId: contact.voiceId, voiceLanguage: contact.voiceLanguage } : {}),
       worldBooks: contact.worldBooks.filter((link) => selectedIds.includes(link.bookId)),
     }],
     worldBooks: selected,

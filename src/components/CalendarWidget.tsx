@@ -32,6 +32,8 @@ import { useWidgetAppearance } from '../utils/widgetAppearance';
 import { CALENDAR_APPEARANCE_KEY } from '../utils/homeAppearance';
 import { WidgetImagePicker } from './WidgetImagePicker';
 import { CalendarWeather } from './CalendarWeather';
+import { PeriodTracker } from './PeriodTracker';
+import { periodLogs, savePeriodLogs } from '../utils/periodTracking';
 
 interface CalendarContact {
   id: string;
@@ -48,7 +50,7 @@ interface EntryForm {
   time: string;
 }
 
-type PanelTab = 'calendar' | 'characters' | 'appearance' | 'data';
+type PanelTab = 'calendar' | 'period' | 'characters' | 'appearance' | 'data';
 
 const CONTACTS_STORAGE_KEY = 'pocketos:wechat-contacts';
 const WEEKDAY_INITIALS = ['日', '一', '二', '三', '四', '五', '六'];
@@ -133,9 +135,9 @@ export const CalendarWidget: React.FC<{ fullScreen?: boolean; onOpen?: () => voi
   }, [panelOpen]);
 
   const update = (next: CalendarData) => {
+    writeCalendarData(next);
     dataRef.current = next;
     setData(next);
-    writeCalendarData(next);
   };
 
   const today = parseDateKey(todayKey);
@@ -210,7 +212,7 @@ export const CalendarWidget: React.FC<{ fullScreen?: boolean; onOpen?: () => voi
 
   const handleDeleteEntry = (entry: CalendarEntry) => {
     if (!window.confirm(`删除「${entry.title}」？`)) return;
-    update({ ...data, entries: data.entries.filter((item) => item.id !== entry.id) });
+    update(entry.kind === 'period' ? savePeriodLogs(data, periodLogs(data).map(log => log.date >= entry.date && log.date <= (entry.endDate ?? entry.date) ? { ...log, flow: undefined } : log)) : { ...data, entries: data.entries.filter((item) => item.id !== entry.id) });
     setMessage('已删除。');
   };
 
@@ -374,8 +376,8 @@ export const CalendarWidget: React.FC<{ fullScreen?: boolean; onOpen?: () => voi
               </button>
             </div>
 
-            <div className="calendar-app-tabs grid grid-cols-4 gap-1 rounded-2xl bg-slate-100/80 p-1">
-              {([['calendar', '日程'], ['characters', '角色'], ['appearance', '编辑'], ['data', '数据']] as const).map(([id, label]) => (
+            <div className="calendar-app-tabs grid grid-cols-5 gap-1 rounded-2xl bg-slate-100/80 p-1">
+              {([['calendar', '日程'], ['period', '经期'], ['characters', '角色'], ['appearance', '编辑'], ['data', '数据']] as const).map(([id, label]) => (
                 <button
                   key={id}
                   type="button"
@@ -389,6 +391,7 @@ export const CalendarWidget: React.FC<{ fullScreen?: boolean; onOpen?: () => voi
               ))}
             </div>
             <div className="calendar-app-scroll">
+            {tab === 'period' && <PeriodTracker data={data} today={todayKey} selected={selectedDate} onSelect={setSelectedDate} onChange={update}/>}
             {tab === 'calendar' && (
               <div className="space-y-3">
                 <CalendarWeather />
@@ -483,7 +486,7 @@ export const CalendarWidget: React.FC<{ fullScreen?: boolean; onOpen?: () => voi
                         <button
                           key={kind}
                           type="button"
-                          onClick={() => setForm({ ...form, kind })}
+                          onClick={() => { if (kind === 'period') { setSelectedDate(form.date); setForm(null); setTab('period'); } else setForm({ ...form, kind }); }}
                           className={`rounded-lg border py-1 text-[11px] font-bold cursor-pointer ${
                             form.kind === kind ? KIND_BADGE_COLORS[kind] : 'border-slate-200 bg-white text-slate-400'
                           }`}
@@ -587,6 +590,7 @@ export const CalendarWidget: React.FC<{ fullScreen?: boolean; onOpen?: () => voi
                         type="button"
                         aria-label={`编辑 ${entry.title}`}
                         onClick={() => {
+                          if (entry.kind === 'period') { setTab('period'); setForm(null); return; }
                           setForm({
                             id: entry.id,
                             kind: entry.kind,

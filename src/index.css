@@ -1,15 +1,22 @@
 @import "tailwindcss";
 @import "./components/calendar.css";
+@import "./components/periodTracker.css";
+@import "./components/xianyuConversation.css";
 @import "./components/phoneInspection.css";
 @import "./components/greenhouse.css";
 @import "./components/minimalHome.css";
 @import "./components/moonlitHome.css";
 @import "./components/halloweenHome.css";
+@import "./components/desktopAppearance.css";
 @import "./components/littlePLauncher.css";
 @import "./components/pastDiaryHall.css";
 @import "./components/externalLink.css";
 @import "./components/memoryTheater.css";
 @import "./components/coupleRewards.css";
+@import "./components/coupleSpaceLoading.css";
+@import "./components/pomodoroLoading.css";
+@import "./components/appLoadingScenes.css";
+@import "./components/wordEncounter.css";
 @import "./components/coupleCorrespondence.css";
 @import "./components/birthday.css";
 

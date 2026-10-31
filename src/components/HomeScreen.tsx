@@ -101,7 +101,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     >
       <div className="relative">
         <div className={`w-[clamp(44px,12.5vw,62px)] h-[clamp(44px,12.5vw,62px)] rounded-[clamp(14px,3.6vw,20px)] shadow-[0_4px_16px_rgba(180,210,230,0.35)] flex items-center justify-center relative overflow-hidden transition-all group-hover:shadow-[0_8px_24px_rgba(180,210,230,0.5)] ${
-          appIcons[app.id] ? '' : 'bg-white/50 backdrop-blur-xl border border-white/80 group-hover:bg-white/70'
+          appIcons[app.id] ? '' : 'home-default-icon ' + 'bg-white/50 backdrop-blur-xl border border-white/80 group-hover:bg-white/70'
         }`}>
           {appIcons[app.id] ? (
             <img src={appIcons[app.id]} alt="" className="absolute inset-0 h-full w-full object-cover" />
@@ -141,7 +141,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   if (homeStyle === 'halloween') return <><HalloweenHome wallpaperUrl={wallpaperUrl} userProfile={userProfile} apps={apps} dockApps={dockApps} appIcons={appIcons} onOpenApp={onOpenApp} renderIcon={renderAppIcon} onEditProfile={() => setIsProfileEditorOpen(true)} onOpenNotes={() => setPaperNotesOpen(true)}/>{isProfileEditorOpen && <ProfileEditor profile={userProfile} onSave={onSaveUserProfile} onClose={() => setIsProfileEditorOpen(false)}/>}{paperNotesOpen && <PaperNotes onClose={() => setPaperNotesOpen(false)}/>}</>;
   if (homeStyle === 'minimal' || homeStyle === 'moonlit') return <><MinimalHome variant={homeStyle} wallpaperUrl={wallpaperUrl} userProfile={userProfile} apps={apps} dockApps={dockApps} appIcons={appIcons} onOpenApp={onOpenApp} renderIcon={renderAppIcon} onEditProfile={() => setIsProfileEditorOpen(true)} onOpenNotes={() => setPaperNotesOpen(true)} />{isProfileEditorOpen && <ProfileEditor profile={userProfile} onSave={onSaveUserProfile} onClose={() => setIsProfileEditorOpen(false)} />}{paperNotesOpen && <PaperNotes onClose={() => setPaperNotesOpen(false)} />}</>;
   return (
-    <div className="relative w-full h-full flex flex-col justify-between overflow-hidden select-none">
+    <div className="home-desktop classic-home relative w-full h-full flex flex-col justify-between overflow-hidden select-none">
       {/* Upper Content Area (Profile Card + 4 Quadrants Grid) */}
       <div className="w-full flex-1 min-h-0 flex flex-col justify-between px-[clamp(12px,3vw,18px)] pt-1 pb-1.5 overflow-hidden">
         {/* 
@@ -276,7 +276,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     </div>
 
       {/* Floating iOS-style translucent app dock */}
-      <div className="mx-4 mb-1.5 w-auto shrink-0 rounded-[28px] border border-white/75 bg-white/45 px-2 py-2 backdrop-blur-2xl shadow-[0_8px_28px_rgba(108,144,168,0.2),inset_0_1px_0_rgba(255,255,255,0.75)] flex items-center justify-around z-20">
+      <div className="home-dock mx-4 mb-1.5 w-auto shrink-0 rounded-[28px] border border-white/75 bg-white/45 px-2 py-2 backdrop-blur-2xl shadow-[0_8px_28px_rgba(108,144,168,0.2),inset_0_1px_0_rgba(255,255,255,0.75)] flex items-center justify-around z-20">
         {dockApps.map((dockApp) => (
           <button
             key={dockApp.id}
@@ -284,7 +284,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             className="flex flex-col items-center cursor-pointer active:scale-90 transition-transform group py-0.5 px-2"
           >
             <div className={`w-[clamp(44px,11.8vw,54px)] h-[clamp(44px,11.8vw,54px)] rounded-[clamp(13px,3.2vw,17px)] shadow-[0_3px_12px_rgba(180,210,230,0.25)] flex items-center justify-center relative overflow-hidden transition-all group-hover:-translate-y-0.5 ${
-              appIcons[dockApp.id] ? '' : 'bg-white/50 backdrop-blur-xl border border-white/80 group-hover:bg-white/70'
+              appIcons[dockApp.id] ? '' : 'home-default-icon ' + 'bg-white/50 backdrop-blur-xl border border-white/80 group-hover:bg-white/70'
             }`}>
               {appIcons[dockApp.id] ? (
                 <img src={appIcons[dockApp.id]} alt="" className="absolute inset-0 h-full w-full object-cover" />

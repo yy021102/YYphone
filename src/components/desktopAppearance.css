@@ -1,0 +1,18 @@
+/* Home only: backgrounds change without fading their contents or modal dialogs. */
+[data-desktop-icons] .classic-home .home-default-icon,
+[data-desktop-icons] .minimal-home .minimal-app-tile:not(.has-custom-icon),
+[data-desktop-icons] .hw-market-app:not(.has-custom-icon) .hw-market-app-icon { opacity:var(--desktop-icons); }
+[data-desktop-panels] .classic-home > div:first-child > .glass-card,
+[data-desktop-panels] .classic-home > div:first-child > .grid > .glass-card,
+[data-desktop-panels] .classic-home > .home-dock,
+[data-desktop-panels] .minimal-home :is(.minimal-profile,.minimal-music,.minimal-dock),
+[data-desktop-panels] .hw-market :is(.hw-market-pass,.hw-market-cabinet,.hw-market-music) {
+  background-color:rgb(255 255 255 / var(--desktop-panels)) !important;
+  background-image:none !important;
+  border-color:rgb(255 255 255 / var(--desktop-panels));
+  box-shadow:none;
+  backdrop-filter:none;
+}
+[data-desktop-color] .classic-home :is(span,p,h1,h2,strong,small,footer):not([role=dialog] *),
+[data-desktop-color] .minimal-home :is(.minimal-profile-copy,.minimal-profile-copy *, .minimal-day p,.minimal-clock,.minimal-day span,.minimal-app > span:last-child,.minimal-home-header > span,.minimal-section-label,.minimal-section-label small,.minimal-music summary,.minimal-home-caption),
+[data-desktop-color] .hw-market :is(.hw-market-pass h2,.hw-market-pass p,.hw-market-pass small,.hw-market-app > span:last-child,.hw-market-clock,.hw-market-clock *,.hw-market-footer) { color:var(--desktop-text) !important; }

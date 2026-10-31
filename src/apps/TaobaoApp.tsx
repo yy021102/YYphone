@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { parseAiJson } from '../utils/aiResponse';
+import { parseXianyuReply, prepareXianyuReroll, applyXianyuPrice, xianyuReplyInstructions } from '../utils/xianyuConversation';
+import { XianyuConversationPanel } from '../components/XianyuConversationPanel';
 import { setStorageItemsAtomically } from '../utils/dbStorage';
 import { canBuyXianyuItem, isSelfXianyuThread, parseXianyuBuyers, settleXianyuSale } from '../utils/xianyuTrade';
 import { withWorldBooksForContacts } from '../utils/worldBookPrompt';
@@ -19,7 +21,6 @@ import {
   Upload,
   Download,
   X,
-  Send,
   Image as ImageIcon,
   User,
   Palette,
@@ -108,6 +109,8 @@ export interface XianyuChatThread {
     sender: 'me' | 'peer';
     text: string;
     time: string;
+    batchId?: string;
+    priceChange?: { before: number; after: number };
   }[];
 }
 
@@ -201,7 +204,11 @@ const isXianyuThreadList = (value: unknown): value is XianyuChatThread[] =>
       typeof message.id === 'string' &&
       (message.sender === 'me' || message.sender === 'peer') &&
       typeof message.text === 'string' &&
-      typeof message.time === 'string'
+      typeof message.time === 'string' &&
+      (message.batchId === undefined || typeof message.batchId === 'string') &&
+      (message.priceChange === undefined || isRecord(message.priceChange) &&
+        typeof message.priceChange.before === 'number' && Number.isFinite(message.priceChange.before) && message.priceChange.before >= 0 &&
+        typeof message.priceChange.after === 'number' && Number.isFinite(message.priceChange.after) && message.priceChange.after >= 0)
     )
   );
 
@@ -281,6 +288,8 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack, giftCoupon, onCoup
   const [buyerBusyIds, setBuyerBusyIds] = useState<string[]>([]);
   const tradeQueue = useRef<Promise<unknown>>(Promise.resolve());
   const replyRunning = useRef(false);
+  const replyController = useRef<AbortController | null>(null);
+  useEffect(() => () => replyController.current?.abort(), []);
   useEffect(() => () => { buyerRequests.current.forEach(controller => controller.abort()); }, []);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [chatInput, setChatInput] = useState('');
@@ -716,6 +725,14 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack, giftCoupon, onCoup
   // ==================== 9. 结算支付与送礼/通知角色 ====================
   const handleConfirmPurchase = async () => {
     if (!checkoutProduct) return;
+    if (checkoutProduct.type === 'xianyu') {
+      const live = readStoredValue(STORAGE_KEYS.xianyuItems, xianyuItems, isXianyuProductList).find(item => item.id === checkoutProduct.id);
+      if (live && live.price !== checkoutProduct.price) {
+        setCheckoutProduct({ ...checkoutProduct, price: live.price });
+        setPaymentError('卖家已修改价格，请确认最新金额后再付款。');
+        return;
+      }
+    }
     if (checkoutProduct.type === 'xianyu' && !canBuyXianyuItem(readStoredValue(STORAGE_KEYS.xianyuItems, xianyuItems, isXianyuProductList).find(item => item.id === checkoutProduct.id))) {
       setPaymentError('不能购买自己的商品或已售出的商品。');
       return;
@@ -873,11 +890,12 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack, giftCoupon, onCoup
   };
 
   // Serialize settlements: a listing can sell once, and saving the wallet and order is atomic.
-  const commitXianyuResponses = (snapshot: XianyuProduct, responses: Array<{ thread: XianyuChatThread; messages: XianyuChatThread['messages']; buy: boolean; create?: boolean }>) => {
+  const commitXianyuResponses = (snapshot: XianyuProduct, responses: Array<{ thread: XianyuChatThread; messages: XianyuChatThread['messages']; buy: boolean; create?: boolean; baseMessages?: XianyuChatThread['messages']; expectedMessages?: string }>, signal?: AbortSignal) => {
     const task = tradeQueue.current.then(async () => {
+      signal?.throwIfAborted();
       const items = readStoredValue(STORAGE_KEYS.xianyuItems, [], isXianyuProductList);
       const item = items.find(item => item.id === snapshot.id);
-      if (!item || item.title !== snapshot.title || item.desc !== snapshot.desc || item.price !== snapshot.price || !item.isPlayerItem) throw new Error('商品已修改或下架，本次咨询未保存，请刷新买家。');
+      if (!item || item.title !== snapshot.title || item.desc !== snapshot.desc || item.price !== snapshot.price || item.soldToThreadId !== snapshot.soldToThreadId || !item.isPlayerItem) throw new Error('商品已修改、售出或下架，本次咨询未保存，请刷新买家。');
       let threads = readStoredValue(STORAGE_KEYS.xianyuThreads, [], isXianyuThreadList);
       let soldItem = item;
       let finance = readAlipayData();
@@ -886,8 +904,9 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack, giftCoupon, onCoup
       for (const response of responses) {
         const current = threads.find(thread => thread.id === response.thread.id);
         if (!current && !response.create) continue;
+        if (response.expectedMessages !== undefined && JSON.stringify(current?.messages) !== response.expectedMessages) throw new Error('聊天记录已变化，本次回复未保存。');
         if (response.create && threads.some(thread => thread.itemId === item.id && thread.buyerId === response.thread.buyerId)) continue;
-        const thread = { ...(current ?? response.thread), itemTitle: item.title, itemPrice: item.price, messages: [...(current?.messages ?? []), ...response.messages] };
+        const thread = { ...(current ?? response.thread), itemTitle: item.title, itemPrice: item.price, messages: [...(response.baseMessages ?? current?.messages ?? []), ...response.messages] };
         if (response.buy && !soldItem.soldToThreadId) {
           const settled = settleXianyuSale(soldItem, thread, finance);
           soldItem = settled.item; finance = settled.finance; sale = true;
@@ -997,92 +1016,103 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack, giftCoupon, onCoup
   };
 
   const deleteXianyuMessage = (thread: XianyuChatThread, messageId: string) => {
+    if (replyRunning.current) return;
     const remaining = thread.messages.filter((m) => m.id !== messageId);
     setXianyuThreads((prev) => prev.map((t) => (t.id === thread.id ? { ...t, messages: remaining } : t)));
     syncXianyuToChat(thread, remaining);
   };
 
-  const handleSendXianyuMessage = async () => {
-    if (!chatInput.trim() || !activeThreadId || replyRunning.current) return;
-    const thread = xianyuThreads.find((item) => item.id === activeThreadId);
-    if (!thread || isSelfXianyuThread(thread, xianyuItems)) return;
-    const listing = xianyuItems.find(item => item.id === thread.itemId);
-    if (thread.isPlayerItem && !listing) { setAiError('商品已下架，无法继续交易。'); return; }
+  const editXianyuMessage = (thread: XianyuChatThread, id: string, text: string) => {
+    if (replyRunning.current || !text.trim() || text.length > 4000) return;
+    const threads = readStoredValue(STORAGE_KEYS.xianyuThreads, [], isXianyuThreadList);
+    const current = threads.find(t => t.id === thread.id);
+    if (!current) return;
+    const next = { ...current, messages: current.messages.map(m => m.id === id ? { ...m, text: text.trim() } : m) };
+    writeStoredValue(STORAGE_KEYS.xianyuThreads, threads.map(t => t.id === thread.id ? next : t));
+    setXianyuThreads(threads.map(t => t.id === thread.id ? next : t));
+    syncXianyuToChat(next, next.messages);
+  };
+
+  const commitSellerReply = (snapshot: XianyuProduct, thread: XianyuChatThread, baseMessages: XianyuChatThread['messages'], replies: XianyuChatThread['messages'], price: number, signal: AbortSignal) => {
+    const task = tradeQueue.current.then(async () => {
+      signal.throwIfAborted();
+      const items = readStoredValue(STORAGE_KEYS.xianyuItems, [], isXianyuProductList);
+      const threads = readStoredValue(STORAGE_KEYS.xianyuThreads, [], isXianyuThreadList);
+      const item = items.find(i => i.id === snapshot.id), current = threads.find(t => t.id === thread.id);
+      if (!item || item.price !== snapshot.price || item.desc !== snapshot.desc || item.title !== snapshot.title || item.soldToThreadId !== snapshot.soldToThreadId || !current || JSON.stringify(current.messages) !== JSON.stringify(thread.messages)) throw new Error('商品或聊天已变化，本次回复未保存，请重试。');
+      const changed = item.price !== price ? applyXianyuPrice(items, threads, item.id, price) : { items, threads };
+      const next = { ...current, itemPrice: price, messages: [...baseMessages, ...replies] };
+      const nextThreads = changed.threads.map(t => t.id === thread.id ? next : t);
+      await setStorageItemsAtomically({ [STORAGE_KEYS.xianyuItems]: changed.items, [STORAGE_KEYS.xianyuThreads]: nextThreads });
+      setXianyuItems(changed.items); setXianyuThreads(nextThreads);
+      for (const saved of nextThreads.filter(t => t.itemId === item.id)) syncXianyuToChat(saved, saved.messages);
+    });
+    tradeQueue.current = task.catch(() => {});
+    return task;
+  };
+
+  const changeXianyuPrice = async (thread: XianyuChatThread, price: number) => {
+    if (replyRunning.current) throw new Error('请等当前回复完成。');
+    const task = tradeQueue.current.then(async () => {
+      const items = readStoredValue(STORAGE_KEYS.xianyuItems, [], isXianyuProductList);
+      const threads = readStoredValue(STORAGE_KEYS.xianyuThreads, [], isXianyuThreadList);
+      const listing = items.find(i => i.id === thread.itemId), current = threads.find(t => t.id === thread.id);
+      if (!listing?.isPlayerItem || !current?.isPlayerItem) throw new Error('只有卖家可以修改价格。');
+      const changed = applyXianyuPrice(items, threads, listing.id, price);
+      const after = changed.items.find(i => i.id === listing.id)!.price;
+      const next = { ...current, itemPrice: after, messages: [...current.messages, { id: `m-${crypto.randomUUID()}`, sender: 'me' as const, text: '价格已修改', time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), priceChange: { before: listing.price, after } }] };
+      const nextThreads = changed.threads.map(t => t.id === current.id ? next : t);
+      await setStorageItemsAtomically({ [STORAGE_KEYS.xianyuItems]: changed.items, [STORAGE_KEYS.xianyuThreads]: nextThreads });
+      setXianyuItems(changed.items); setXianyuThreads(nextThreads);
+      for (const saved of nextThreads.filter(t => t.itemId === listing.id)) syncXianyuToChat(saved, saved.messages);
+    });
+    tradeQueue.current = task.catch(() => {});
+    return task;
+  };
+
+  const generateXianyuReply = async (mode: 'send' | 'continue' | 'reroll') => {
+    if (replyRunning.current || !activeThreadId || mode === 'send' && !chatInput.trim()) return;
+    const storedThreads = readStoredValue(STORAGE_KEYS.xianyuThreads, [], isXianyuThreadList);
+    let thread = storedThreads.find(t => t.id === activeThreadId);
+    const listing = readStoredValue(STORAGE_KEYS.xianyuItems, [], isXianyuProductList).find(i => i.id === thread?.itemId);
+    if (!thread || !listing || isSelfXianyuThread(thread, xianyuItems)) { setAiError('商品或对话已经不存在。'); return; }
     replyRunning.current = true;
-    const text = chatInput.trim();
-    setChatInput('');
-    const userMessage = { id: `m-${Date.now()}`, sender: 'me' as const, text, time: '刚刚' };
-    writeStoredValue(STORAGE_KEYS.xianyuThreads, xianyuThreads.map(current => current.id === thread.id ? { ...current, messages: [...current.messages, userMessage] } : current));
-    setXianyuThreads((prev) =>
-      prev.map((t) =>
-        t.id === activeThreadId
-          ? {
-              ...t,
-              messages: [...t.messages, userMessage],
-            }
-          : t
-      )
-    );
-    setAiError('');
-    setIsXianyuReplying(true);
-    const linkedCharacter = thread.linkedCharId
-      ? contacts.find((contact) => contact.id === thread.linkedCharId)
-      : undefined;
-    const history = thread.messages
-      .map((message) => `${message.sender === 'me' ? '玩家' : thread.peerName}：${message.text}`)
-      .join('\n');
-    const playerIdContext = `玩家闲鱼 ID：${playerProfile.xianyuId || '未设置'}。`;
+    const controller = new AbortController(); replyController.current = controller;
+    setIsXianyuReplying(true); setAiError('');
     try {
-      syncXianyuToChat(thread, [...thread.messages, userMessage]);
-      const response = await requestConfiguredAiText(withWorldBooksForContacts(
-        (linkedCharacter
-          ? `你正在闲鱼上扮演角色${linkedCharacter.name}${thread.isAltAccount ? '的小号' : ''}，你是${thread.isPlayerItem ? '买家，玩家是卖家' : '卖家，玩家是买家'}。角色人设：${getCharacterPersona(linkedCharacter.id) || '自然、可信地交流'}。回复要像真实闲鱼聊天，简洁有生活感。`
-          : thread.isPlayerItem
-            ? `你是闲鱼用户「${thread.peerName}」，正在作为买家咨询玩家发布的二手商品。请像真实买家一样自然简短回复。`
-            : `你正在扮演闲鱼卖家「${thread.peerName}」，围绕商品自然、简短地回复买家，只返回消息正文。`) +
-          (thread.isPlayerItem ? '\n只返回 {"reply":"买家的回复正文","buy":false}。决定按标价拍下并付款才设 buy:true。询问、议价、拒绝或已售出时 buy:false。不要另造订单或金额，不要替卖家说话。' : '\n只返回回复正文。'),
-        thread.linkedCharId ? [thread.linkedCharId] : [], undefined, [history, text]),
-        `${playerIdContext}\n商品「${listing?.title ?? thread.itemTitle}」（¥${listing?.price ?? thread.itemPrice}）。${listing?.soldToThreadId ? `状态：已售出${listing.soldToThreadId === thread.id ? '给你，已付款' : '给其他买家'}。` : '状态：在售。'}\n此前对话：\n${history || '暂无'}\n玩家最新消息：${text}`,
-        { json: !!thread.isPlayerItem, includeGlobalWorldBooks: false }
-      );
-      let reply = response;
-      let buy = false;
-      if (thread.isPlayerItem) {
-        const parsed = parseAiJson(response);
-        if (!isRecord(parsed) || typeof parsed.reply !== 'string' || !parsed.reply.trim() || typeof parsed.buy !== 'boolean') throw new Error('买家回复格式无效，请重试。');
-        reply = parsed.reply.trim(); buy = parsed.buy;
-        await commitXianyuResponses(listing!, [{ thread, messages: [{ id: `m-${crypto.randomUUID()}`, sender: 'peer', text: reply, time: '刚刚' }], buy }]);
-        return;
+      let baseMessages = thread.messages, basePrice = listing.price;
+      if (mode === 'reroll') { const prepared = prepareXianyuReroll(thread, listing); baseMessages = prepared.messages; basePrice = prepared.price; }
+      if (mode === 'send') {
+        const message = { id: `m-${crypto.randomUUID()}`, sender: 'me' as const, text: chatInput.trim(), time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) };
+        thread = { ...thread, messages: [...thread.messages, message] }; baseMessages = thread.messages;
+        const next = storedThreads.map(t => t.id === thread!.id ? thread! : t);
+        writeStoredValue(STORAGE_KEYS.xianyuThreads, next); setXianyuThreads(next); setChatInput(''); syncXianyuToChat(thread, thread.messages);
       }
-      setXianyuThreads((previous) =>
-        previous.map((item) =>
-          item.id === activeThreadId
-            ? {
-                ...item,
-                messages: [
-                  ...item.messages,
-                  { id: `m-${Date.now()}`, sender: 'peer', text: reply, time: '刚刚' },
-                ],
-              }
-            : item
-        )
-      );
-      syncXianyuToChat(thread, [
-        ...thread.messages,
-        userMessage,
-        { sender: 'peer' as const, text: reply },
-      ]);
+      const character = contacts.find(c => c.id === thread!.linkedCharId);
+      const history = baseMessages.slice(-40).map(m => `${m.sender === 'me' ? '玩家' : thread!.peerName}：${m.text}${m.priceChange ? `（实际改价为¥${m.priceChange.after}）` : ''}`).join('\n');
+      const response = await requestConfiguredAiText(withWorldBooksForContacts([
+        `你正在闲鱼上扮演${character ? `角色${character.name}${thread.isAltAccount ? '的小号' : ''}，人设：${getCharacterPersona(character.id)}` : `用户「${thread.peerName}」`}。你是${thread.isPlayerItem ? '买家，玩家是卖家' : '卖家，玩家是买家'}。像真人二手交易：简短口语、自然承接，围绕成色、使用情况、价格、邮寄等实际问题，不统一客服话术，不替玩家发言。`,
+        xianyuReplyInstructions(!!thread.isPlayerItem),
+      ].join('\n'), thread.linkedCharId ? [thread.linkedCharId] : [], undefined, baseMessages.map(m => m.text)),
+      `玩家闲鱼ID：${playerProfile.xianyuId || '未设置'}。\n商品：${listing.title}\n描述：${listing.desc}\n当前实际总价：¥${basePrice}，${listing.freeShipping ? '包邮' : '不包邮'}。\n状态：${listing.soldToThreadId ? '已售出，不得再次购买或改价' : '在售'}。\n实际对话：\n${history || '暂无'}\n${mode === 'reroll' ? '请重新创作下一轮回复，未展示的旧版本不属于经历。' : baseMessages.at(-1)?.sender === 'me' ? '回应玩家最后的消息。' : '玩家没有新发言，可以自然接着话题说，不虚构玩家刚刚说过话。'}`,
+      { json: true, includeGlobalWorldBooks: false, signal: controller.signal, maxTokens: 2200 });
+      controller.signal.throwIfAborted();
+      const result = parseXianyuReply(parseAiJson(response), !!thread.isPlayerItem);
+      if (listing.soldToThreadId && (result.price !== undefined || result.buy)) throw new Error('已成交的订单不能改价或重复付款。');
+      const batchId = crypto.randomUUID(), price = result.price ?? basePrice;
+      const replies: XianyuChatThread['messages'] = result.reply.map((text, i) => ({ id: `m-${crypto.randomUUID()}`, sender: 'peer', text, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), batchId, ...(i === 0 && result.price !== undefined && price !== basePrice ? { priceChange: { before: basePrice, after: price } } : {}) }));
+      if (thread.isPlayerItem) await commitXianyuResponses(listing, [{ thread, messages: replies, buy: result.buy, baseMessages, expectedMessages: JSON.stringify(thread.messages) }], controller.signal);
+      else await commitSellerReply(listing, thread, baseMessages, replies, price, controller.signal);
     } catch (error) {
-      console.error('Could not generate Xianyu chat reply.', error);
-      setAiError(error instanceof Error ? error.message : '闲鱼 AI 回复失败，请检查 API 配置。');
+      if (!controller.signal.aborted) setAiError(error instanceof Error ? error.message : '回复失败，请重试。');
     } finally {
-      replyRunning.current = false;
-      setIsXianyuReplying(false);
+      if (replyController.current === controller) { replyController.current = null; replyRunning.current = false; setIsXianyuReplying(false); }
     }
   };
 
   const currentMarketProducts = marketProducts.filter((p) => p.category === activeTab);
   const activeThread = xianyuThreads.find((t) => t.id === activeThreadId) || null;
+  const conversationOpen = activeTab === 'xianyu' && xianyuSubTab === 'messages' && !!activeThread;
 
   const handleExportBackup = () => {
     const dataStr = JSON.stringify(
@@ -1119,7 +1149,7 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack, giftCoupon, onCoup
       )}
 
       {/* 顶栏：淘宝 */}
-      <AppHeader
+      {!conversationOpen && <AppHeader
         title="淘宝"
         onBack={onBack}
         rightAction={
@@ -1131,11 +1161,11 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack, giftCoupon, onCoup
             <Menu className="w-4 h-4 stroke-[2]" />
           </button>
         }
-      />
+      />}
       {giftCoupon && <div className="mx-4 mt-2 rounded-2xl border border-white bg-white/75 px-4 py-3 text-[11px] text-slate-500"><Gift size={14} className="mr-2 inline text-pink-300" />{couponUse?.fulfilledAt ? '这张礼物券已经完成' : couponUse?.owner === 'char' ? `为${contacts.find(c => c.id === giftCoupon.charId)?.name ?? '对方'}挑一份礼物` : `收下${contacts.find(c => c.id === giftCoupon.charId)?.name ?? '对方'}送你的心意`}</div>}
 
       {/* 三大主板块切换胶囊：购物 | 饿了么 | 闲鱼 */}
-      <div className="px-4 py-2 z-10 shrink-0">
+      <div className={conversationOpen ? 'hidden' : 'px-4 py-2 z-10 shrink-0'}>
         <div className="grid grid-cols-3 p-1 bg-white/55 backdrop-blur-xl border border-white/85 rounded-2xl shadow-[0_4px_14px_rgba(148,163,184,0.06)]">
           {[
             { key: 'shopping', label: '购物', icon: ShoppingBag },
@@ -1164,7 +1194,7 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack, giftCoupon, onCoup
       </div>
 
       {/* 主内容滚动区 */}
-      <div className="relative z-10 flex-1 min-h-0 overflow-y-auto no-scrollbar px-4 pt-1 space-y-3">
+      <div className={conversationOpen ? 'xy-chat-host relative z-10 flex-1 min-h-0 flex flex-col overflow-hidden' : 'relative z-10 flex-1 min-h-0 overflow-y-auto no-scrollbar px-4 pt-1 space-y-3'}>
         {paymentNotice && (
           <div
             role="status"
@@ -1326,8 +1356,8 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack, giftCoupon, onCoup
 
         {/* ==================== 板块 3：闲鱼 (商品页 + 消息页) ==================== */}
         {activeTab === 'xianyu' && (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between bg-white/55 backdrop-blur-xl border border-white/80 p-1 rounded-2xl">
+          <div className={conversationOpen ? 'xy-xianyu-page' : 'space-y-3'}>
+            <div className={conversationOpen ? 'hidden' : 'flex items-center justify-between bg-white/55 backdrop-blur-xl border border-white/80 p-1 rounded-2xl'}>
               <button
                 onClick={() => {
                   setXianyuSubTab('market');
@@ -1489,8 +1519,8 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack, giftCoupon, onCoup
 
             {/* 闲鱼子页 B：消息列表 + 玩家自己的闲鱼号 */}
             {xianyuSubTab === 'messages' && (
-              <div className="space-y-3">
-                <div
+              <div className={conversationOpen ? 'xy-messages-page' : 'space-y-3'}>
+                {!conversationOpen && <div
                   style={{
                     backgroundColor: currentTheme.cardBg,
                     borderRadius: currentTheme.cardRadius,
@@ -1526,113 +1556,19 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack, giftCoupon, onCoup
                     <Pencil className="w-3 h-3" />
                     <span>编辑</span>
                   </button>
-                </div>
+                </div>}
 
                 {activeThread ? (
-                  <div
-                    style={{
-                      backgroundColor: currentTheme.cardBg,
-                      borderRadius: currentTheme.cardRadius,
-                    }}
-                    className="backdrop-blur-xl border border-white p-4 space-y-3 shadow-2xs"
-                  >
-                    <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-                      <div>
-                        <p className="text-xs font-extrabold flex items-center gap-1.5">
-                          <span>@{activeThread.peerName}</span>
-                          {activeThread.linkedCharId && (
-                            <button
-                              type="button"
-                              onClick={() => toggleXianyuShare(activeThread)}
-                              className={`cursor-pointer rounded-full px-1.5 py-0.5 text-[9px] ${activeThread.shareWithChar === false ? 'bg-slate-100 text-slate-400' : 'bg-pink-50 text-pink-500'}`}
-                            >
-                              {activeThread.shareWithChar === false ? '未连通角色记忆（点击开启）' : '已连通角色记忆（点击关闭）'}
-                            </button>
-                          )}
-                        </p>
-                        <p className="text-[10px] opacity-60">
-                          宝贝：{activeThread.itemTitle} (¥{activeThread.itemPrice})
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          onClick={() => deleteXianyuThread(activeThread)}
-                          aria-label="删除这段对话"
-                          className="text-[11px] text-rose-400 font-bold bg-rose-50 px-2.5 py-1 rounded-full cursor-pointer"
-                        >
-                          删除
-                        </button>
-                        <button
-                          onClick={() => setActiveThreadId(null)}
-                          className="text-[11px] text-sky-500 font-bold bg-sky-50 px-2.5 py-1 rounded-full cursor-pointer"
-                        >
-                          返回
-                        </button>
-                      </div>
-                    </div>
-
-                    {activeThread.isPlayerItem && (() => {
-                      const listing = xianyuItems.find(item => item.id === activeThread.itemId);
-                      return listing?.soldToThreadId ? <p role="status" className="rounded-xl bg-sky-50 px-3 py-2 text-[11px] text-sky-600">{listing.soldToThreadId === activeThread.id ? `已成交 · ¥${Number(listing.price).toFixed(2)} 已存入支付宝余额` : '这件商品已售出给其他买家'}</p> : null;
-                    })()}
-                    <div className="space-y-2 max-h-56 overflow-y-auto py-1">
-                      {activeThread.messages.map((m) => (
-                        <div
-                          key={m.id}
-                          className={`flex flex-col ${
-                            m.sender === 'me' ? 'items-end' : 'items-start'
-                          }`}
-                        >
-                          <div
-                            style={
-                              m.sender === 'me'
-                                ? { background: currentTheme.primaryGradient }
-                                : undefined
-                            }
-                            className={`max-w-[80%] px-3 py-2 rounded-2xl text-xs ${
-                              m.sender === 'me'
-                                ? 'text-white rounded-br-xs'
-                                : 'bg-white border border-slate-100 text-slate-700 rounded-bl-xs'
-                            }`}
-                          >
-                            {m.text}
-                          </div>
-                          <span className="mt-0.5 flex items-center gap-1.5 px-1 text-[9px] opacity-45">
-                            {m.time}
-                            <button
-                              type="button"
-                              aria-label="删除这条消息"
-                              onClick={() => deleteXianyuMessage(activeThread, m.id)}
-                              className="cursor-pointer text-rose-400 opacity-80"
-                            >
-                              删除
-                            </button>
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-
-                    <div className="flex items-center gap-2 pt-1">
-                      <input
-                        type="text"
-                        value={chatInput}
-                        onChange={(e) => setChatInput(e.target.value)}
-                        onKeyDown={(e) => e.key === 'Enter' && handleSendXianyuMessage()}
-                        placeholder="发送消息..."
-                        className="flex-1 px-3 py-2 rounded-2xl bg-white border border-slate-200 text-xs outline-none"
-                      />
-                      <button
-                        onClick={handleSendXianyuMessage}
-                        disabled={isXianyuReplying}
-                        style={{ background: currentTheme.primaryGradient }}
-                        className="p-2 rounded-2xl text-white cursor-pointer active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        {isXianyuReplying
-                          ? <Sparkles className="w-4 h-4 animate-spin" />
-                          : <Send className="w-4 h-4" />}
-                      </button>
-                    </div>
-                  </div>
+                  <XianyuConversationPanel key={activeThread.id} thread={activeThread} listing={xianyuItems.find(item => item.id === activeThread.itemId)} profile={playerProfile} busy={isXianyuReplying}
+                    input={chatInput} setInput={setChatInput} onBack={() => setActiveThreadId(null)}
+                    onDeleteThread={() => deleteXianyuThread(activeThread)} onDeleteMessage={id => deleteXianyuMessage(activeThread, id)}
+                    onEditMessage={(id, text) => editXianyuMessage(activeThread, id, text)} onShare={() => toggleXianyuShare(activeThread)}
+                    onGenerate={mode => void generateXianyuReply(mode)} onStop={() => replyController.current?.abort()}
+                    onPrice={price => changeXianyuPrice(activeThread, price)} onBuy={() => {
+                      const item = xianyuItems.find(item => item.id === activeThread.itemId);
+                      if (!canBuyXianyuItem(item)) return;
+                      setPaymentSelection('balance'); setBuyForWho('self'); setCheckoutProduct({ id: item!.id, title: item!.title, price: item!.price, type: 'xianyu' });
+                    }}/>
                 ) : xianyuThreads.length === 0 ? (
                   <div
                     style={{

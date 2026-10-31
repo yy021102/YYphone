@@ -9,7 +9,7 @@ import { normalizeWallpaper } from '../apps/ThemeCustomizerApp';
 import { clearDbStorage } from './dbStorage';
 import { DEFAULT_FONT_SETTINGS, normalizeFontUrl, readFontSettings } from './fontSettings';
 import { DEFAULT_CHAT_RUNTIME, getRoundThought, isKeepAlivePlaying, isProactiveDue, permittedSticker, preserveRoundThoughts, proactiveInterval, readChatRuntimeSettings, startKeepAlive, stopKeepAlive } from './chatRuntime';
-import { CALENDAR_APPEARANCE_KEY, MUSIC_APPEARANCE_KEY, captureHomeAppearance, isHomeAppearance } from './homeAppearance';
+import { CALENDAR_APPEARANCE_KEY, MUSIC_APPEARANCE_KEY, captureHomeAppearance, isHomeAppearance, portableHomeBeauty } from './homeAppearance';
 import { addMemoryCandidates, buildMemoryInjection, DEFAULT_MEMORY_SETTINGS, exportMemories, importMemories, readEmbeddings, readMemories, readMemorySettings, writeEmbeddings, writeMemories, writeMemorySettings } from './memoryData';
 import { extractMemoryCandidates, requestMemoryAiText } from './memoryAi';
 import { withWorldBooksForContacts } from './worldBookPrompt';
@@ -872,7 +872,7 @@ test('beauty export includes only applied appearance, not saved presets or unsav
       let error = 'previous error';
       const anchor = { href: '', download: '', click: () => { clicked = true; } };
       runInNewContext(`(() => {${handler.replace(': BeautyPreset[]', '')}\n})();`, {
-        currentSettings, presets, normalizeWallpaper,
+        currentSettings, presets, normalizeWallpaper, portableHomeBeauty,
         draftSettings: { ...currentSettings, wallpapers: { homeScreen: 'unsaved.png', lockScreen: '' } },
         Blob, JSON,
         URL: {
@@ -887,7 +887,7 @@ test('beauty export includes only applied appearance, not saved presets or unsav
       const payload = JSON.parse(await exported.text());
       assert.deepEqual(payload, {
         format: 'yyphone-beauty', version: 1,
-        presets: [{ id: 'current-design', name: '当前搭配', settings: JSON.parse(JSON.stringify(currentSettings)) }],
+        presets: [{ id: 'current-design', name: '当前搭配', settings: JSON.parse(JSON.stringify(portableHomeBeauty(currentSettings))) }],
       });
       assert.equal(exported.type, 'application/json');
       assert.equal(anchor.download, 'yyphone-beauty.json');

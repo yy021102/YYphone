@@ -47,4 +47,4 @@
 @media(max-width:350px) { .minimal-home-scroll { padding-left:20px; padding-right:20px; } .minimal-clock { font-size:49px; } .minimal-app-tile { width:46px; height:46px; } .minimal-app-grid { column-gap:9px; } }
 @media(prefers-color-scheme:dark) { :root[data-follow-system-dark=true] .minimal-home { --minimal-paper:#22231f; --minimal-ink:#e1dfd6; --minimal-muted:#929487; --minimal-line:#414237; } :root[data-follow-system-dark=true] .minimal-home :is(.minimal-app-tile,.minimal-profile-avatar) { background:#32332c; border-color:#45463d; } :root[data-follow-system-dark=true] .minimal-home :is(.minimal-app-glyph,.minimal-app) { color:#bfc0b4; } }
 [data-home-style=minimal] > .relative.z-40 { filter:grayscale(1); }
-@media(prefers-color-scheme:dark) { :root[data-follow-system-dark=true] [data-home-style=minimal] { background:#22231f!important; } }
+@media(prefers-color-scheme:dark) { :root[data-follow-system-dark=true] [data-home-style=minimal]:not([data-home-wallpaper]) { background:#22231f!important; } }

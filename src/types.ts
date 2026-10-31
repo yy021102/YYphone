@@ -98,14 +98,21 @@ export interface HomeAppearance {
   calendar: WidgetAppearance;
   music: WidgetAppearance;
   profile: {
-    avatarUrl: string;
+    avatarUrl?: string;
     coverImageUrl: string;
     avatarFrameEnabled: boolean;
     avatarFrame?: AvatarFrameStyle;
   };
 }
 
+export interface DesktopAppearance {
+  textColor?: string;
+  iconOpacity?: number;
+  panelOpacity?: number;
+}
+
 export interface BeautySettings {
+  desktopAppearance?: DesktopAppearance;
   homeStyle?: 'classic' | 'minimal' | 'moonlit' | 'halloween';
   themeId: string;
   wallpaperId: string;

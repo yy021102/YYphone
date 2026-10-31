@@ -22,13 +22,16 @@ import { BirthdayRuntime } from './components/BirthdayRuntime';
 import { HalloweenRuntime } from './components/HalloweenRuntime';
 import { birthdayIsDue, readBirthdaySettings, readBirthdaySeen } from './utils/birthday';
 import { HomeScreen } from './components/HomeScreen';
+import { CoupleSpaceLoading } from './components/CoupleSpaceLoading';
+import { PomodoroLoading } from './components/PomodoroLoading';
+import { WeChatLoading, PhoneExplorerLoading, MemoryLoading } from './components/AppLoadingScenes';
 import { CalendarWidget as CalendarApp } from './components/CalendarWidget';
 import { LittlePPanel } from './components/LittlePPanel';
 import { LittlePLauncher } from './components/LittlePLauncher';
 import { LITTLE_P_VISIBLE_KEY } from './utils/littleP';
 import { processPomodoroDeadline } from './utils/pomodoroRuntime';
 import { ErrorDialogHost, showYyError } from './components/ErrorDialog';
-import { CALENDAR_APPEARANCE_KEY, MUSIC_APPEARANCE_KEY, captureHomeAppearance, isHomeAppearance } from './utils/homeAppearance';
+import { CALENDAR_APPEARANCE_KEY, MUSIC_APPEARANCE_KEY, captureHomeAppearance, isHomeAppearance, isDesktopAppearance } from './utils/homeAppearance';
 import { FONT_FAMILIES, FontSettings, readFontSettings } from './utils/fontSettings';
 import { isLockScreenAppearance } from './utils/lockAppearance';
 import { ChatNotification, ChatRuntimeSettings, isKeepAlivePlaying, readChatRuntimeSettings, startKeepAlive, stopKeepAlive } from './utils/chatRuntime';
@@ -86,6 +89,7 @@ const isBeautySettings = (value: unknown): value is BeautySettings => {
   if (!value || typeof value !== 'object') return false;
   const settings = value as Partial<BeautySettings>;
   return (
+    (settings.desktopAppearance === undefined || isDesktopAppearance(settings.desktopAppearance)) &&
     typeof settings.themeId === 'string' &&
     (settings.homeStyle === undefined || settings.homeStyle === 'classic' || settings.homeStyle === 'minimal' || settings.homeStyle === 'moonlit' || settings.homeStyle === 'halloween') &&
     typeof settings.wallpaperId === 'string' &&
@@ -598,6 +602,10 @@ export default function App() {
       */}
       <div
         data-phone-canvas
+        data-home-wallpaper={beautySettings.wallpapers.homeScreen ? '' : undefined}
+        data-desktop-color={!activeApp && !isLocked && beautySettings.desktopAppearance?.textColor ? '' : undefined}
+        data-desktop-panels={!activeApp && !isLocked && beautySettings.desktopAppearance?.panelOpacity !== undefined ? '' : undefined}
+        data-desktop-icons={!activeApp && !isLocked && beautySettings.desktopAppearance?.iconOpacity !== undefined ? '' : undefined}
         data-home-style={!activeApp && !isLocked ? beautySettings.homeStyle : undefined}
         className={`w-full md:w-[min(412px,calc(93vh*9/19.5))] h-full md:h-[min(850px,93vh)] md:rounded-[44px] overflow-hidden relative flex flex-col shadow-[0_25px_80px_rgba(0,0,0,0.7),0_0_0_1px_rgba(255,255,255,0.14)] transition-all ${
           activeApp || isLocked
@@ -641,7 +649,7 @@ export default function App() {
         )}
 
         {/* Screen View Body (Strict flex-1 & min-h-0, overflow-hidden) */}
-        <div className="flex-1 min-h-0 w-full relative overflow-hidden flex flex-col z-20">
+        <div style={{ '--desktop-text': beautySettings.desktopAppearance?.textColor, '--desktop-icons': beautySettings.desktopAppearance?.iconOpacity, '--desktop-panels': beautySettings.desktopAppearance?.panelOpacity } as React.CSSProperties} className="flex-1 min-h-0 w-full relative overflow-hidden flex flex-col z-20">
           {isLocked ? (
             /* Lock Screen */
             <LockScreen
@@ -657,7 +665,10 @@ export default function App() {
             /* Active Sub-App View: Header is safely padded below the notch, back arrow always clickable */
             <div className="w-full h-full flex flex-col overflow-hidden animate-fadeIn">
               <Suspense
-                fallback={
+                fallback={activeApp === 'couple_space' ? <CoupleSpaceLoading onBack={handleBackToHome}/> :
+                  activeApp === 'pomodoro' ? <PomodoroLoading onBack={handleBackToHome}/> :
+                  activeApp === 'phone_explorer' ? <PhoneExplorerLoading onBack={handleBackToHome}/> :
+                  activeApp === 'memory' ? <MemoryLoading onBack={handleBackToHome}/> :
                   <div className="flex h-full items-center justify-center text-sm text-slate-500">
                     正在打开应用…
                   </div>
@@ -742,7 +753,7 @@ export default function App() {
             className={activeApp === 'wechat' && !isLocked ? 'flex min-h-0 flex-1 flex-col bg-white' : 'hidden'}
             aria-hidden={activeApp !== 'wechat' || isLocked}
           >
-            <Suspense fallback={null}>
+            <Suspense fallback={activeApp === 'wechat' && !isLocked ? <WeChatLoading onBack={handleBackToHome}/> : null}>
               <WeChatApp
                 onBack={handleBackToHome}
                 isVisible={activeApp === 'wechat' && !isLocked}

@@ -11,6 +11,7 @@ import {
   Upload,
 } from 'lucide-react';
 import { AppHeader } from '../components/AppHeader';
+import { DesktopAppearanceSettings } from '../components/DesktopAppearanceSettings';
 import { GlobalFontSettings } from '../components/GlobalFontSettings';
 import { SpecialOpeningSettings } from '../components/SpecialOpeningSettings';
 import { HalloweenThemePreview } from '../components/HalloweenHomeArt';
@@ -26,7 +27,7 @@ import {
 } from '../types';
 import { compressImageFile, compressWallpaper } from '../utils/imageFile';
 import { readSetting, saveSetting, SETTINGS_KEYS } from '../utils/settings';
-import { isHomeAppearance } from '../utils/homeAppearance';
+import { isHomeAppearance, isDesktopAppearance, portableHomeBeauty } from '../utils/homeAppearance';
 import { DEFAULT_LOCK_APPEARANCE, isLockScreenAppearance } from '../utils/lockAppearance';
 
 interface ThemeCustomizerAppProps {
@@ -51,6 +52,7 @@ const isBeautySettings = (value: unknown): value is BeautySettings => {
   if (!value || typeof value !== 'object') return false;
   const settings = value as Partial<BeautySettings>;
   return (
+    (settings.desktopAppearance === undefined || isDesktopAppearance(settings.desktopAppearance)) &&
     typeof settings.themeId === 'string' &&
     (settings.homeStyle === undefined || settings.homeStyle === 'classic' || settings.homeStyle === 'minimal' || settings.homeStyle === 'moonlit' || settings.homeStyle === 'halloween') &&
     THEMES.some((theme) => theme.id === settings.themeId) &&
@@ -277,7 +279,7 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
       {
         id: 'current-design',
         name: '当前搭配',
-        settings: normalizeWallpaper(currentSettings),
+        settings: portableHomeBeauty(normalizeWallpaper(currentSettings)),
       },
     ];
     const content = JSON.stringify(
@@ -447,6 +449,7 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
           </div>
         </details>
 
+        <DesktopAppearanceSettings value={currentSettings.desktopAppearance ?? {}} onChange={desktopAppearance => { if (!onApplyPreset({ ...currentSettings, desktopAppearance })) setError('保存桌面样式失败。'); }}/>
         <SpecialOpeningSettings/>
         <details className="glass-card group rounded-2xl p-3 space-y-3">
           <summary className="flex cursor-pointer list-none items-center gap-2 text-xs font-bold text-[#2C4A5C]">

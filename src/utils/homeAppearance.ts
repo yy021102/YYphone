@@ -27,7 +27,7 @@ const isWidgetAppearance = (value: unknown): value is WidgetAppearance =>
 export const isHomeAppearance = (value: unknown): value is HomeAppearance => {
   if (!isRecord(value) || !isWidgetAppearance(value.calendar) || !isWidgetAppearance(value.music)) return false;
   const profile = value.profile;
-  if (!isRecord(profile) || typeof profile.avatarUrl !== 'string' ||
+  if (!isRecord(profile) || (profile.avatarUrl !== undefined && typeof profile.avatarUrl !== 'string') ||
     typeof profile.coverImageUrl !== 'string' || typeof profile.avatarFrameEnabled !== 'boolean') return false;
   const frame = profile.avatarFrame;
   return frame === undefined || (
@@ -37,3 +37,13 @@ export const isHomeAppearance = (value: unknown): value is HomeAppearance => {
     typeof frame.width === 'number' && Number.isFinite(frame.width) && frame.width >= 0
   );
 };
+
+/** Shared themes never include the player's personal avatar. */
+export const portableHomeBeauty = <T extends import('../types').BeautySettings>(settings: T): T => {
+  if (!settings.homeAppearance) return { ...settings };
+  const { avatarUrl: _avatar, ...profile } = settings.homeAppearance.profile;
+  return { ...settings, homeAppearance: { ...settings.homeAppearance, profile } };
+};
+export const isDesktopAppearance = (value: unknown): value is import('../types').DesktopAppearance =>
+  isRecord(value) && (value.textColor === undefined || typeof value.textColor === 'string' && /^#[0-9a-f]{6}$/i.test(value.textColor)) &&
+  ['iconOpacity', 'panelOpacity'].every(key => value[key] === undefined || typeof value[key] === 'number' && Number.isFinite(value[key]) && value[key] >= 0 && value[key] <= 1);
