@@ -16,6 +16,7 @@ import {
   MemoryCategory,
   MemoryItem,
   MemorySettings,
+  memoryRevisions,
   newMemoryId,
   rankMemories,
   readEmbeddings,
@@ -179,9 +180,13 @@ export const MemoryApp: React.FC<MemoryAppProps> = ({ onBack }) => {
   const saveEditing = () => {
     if (!editing || !editing.content.trim()) return;
     const now = new Date().toISOString();
-    const item: MemoryItem = { ...editing, content: editing.content.trim().slice(0, 300), updatedAt: now };
-    const exists = memories.some((m) => m.id === item.id);
-    const previous = memories.find((m) => m.id === item.id);
+    const previous = memories.find((m) => m.id === editing.id);
+    const content = editing.content.trim().slice(0, 300);
+    const item: MemoryItem = { ...editing, content, updatedAt: now,
+      ...(previous && previous.content !== content ? { manuallyEdited: true,
+        revisions: [...memoryRevisions(previous.revisions), { content: previous.content, updatedAt: previous.updatedAt }].slice(-12) } : {}),
+    };
+    const exists = !!previous;
     if (!persistMemories(exists ? memories.map((m) => (m.id === item.id ? item : m)) : [...memories, item])) return;
     if (previous && previous.content !== item.content) removeEmbeddings([item.id]);
     setEditing(null);
@@ -274,13 +279,13 @@ export const MemoryApp: React.FC<MemoryAppProps> = ({ onBack }) => {
 
   const commitCandidates = async (charId: string, candidates: MemoryCandidate[], cursor: string) => {
     const assertArchive = guardMemoryArchive(charId);
-    const { added, merged } = await addMemoryCandidates(charId, candidates, 'chat', readMemorySettings());
+    const { added, merged, updated } = await addMemoryCandidates(charId, candidates, 'chat', readMemorySettings());
     assertArchive();
     advanceMemoryCursor(charId, cursor);
     setMemories(readMemories());
     setSettings(readMemorySettings());
     refreshEmbedded();
-    flash(`新增 ${added} 条${merged > 0 ? `，合并 ${merged} 条相近记忆` : ''}`);
+    flash(`新增 ${added} 条${updated > 0 ? `，更新 ${updated} 条` : ''}${merged > 0 ? `，合并 ${merged} 条重复记忆` : ''}`);
     const missing = readMemories().filter((m) => m.charId === charId);
     void embedInBackground(missing);
   };
@@ -611,6 +616,7 @@ export const MemoryApp: React.FC<MemoryAppProps> = ({ onBack }) => {
 
         {visible.map((item) => {
           const cat = categoryOf(item.category);
+          const revisions = memoryRevisions(item.revisions);
           return (
             <div key={item.id} className={`${cardClass} p-3.5 ${item.pinned ? 'border-pink-200' : ''}`}>
               <div className="flex items-start gap-2.5">
@@ -625,6 +631,12 @@ export const MemoryApp: React.FC<MemoryAppProps> = ({ onBack }) => {
                     <span title={embeddedIds.has(item.id) ? '已向量化' : '仅关键词'}>{embeddedIds.has(item.id) ? '🟢向量' : '⚪关键词'}</span>
                     {item.source === 'chat' && <span>聊天整理</span>}
                   </p>
+                  {revisions.length > 0 && <details aria-label="记忆更新记录" className="mt-2 border-t border-white/80 pt-2 text-[10px] text-[#9b8fa7]">
+                    <summary className="flex cursor-pointer list-none items-center justify-between gap-2">更新记录<ChevronDown size={12}/></summary>
+                    <div className="mt-2 space-y-2">{revisions.slice().reverse().map((revision, i) => <div key={i} className="rounded-xl bg-white/60 p-2">
+                      <span className="text-[9px] text-slate-400">更新前 · {revision.updatedAt.slice(0, 10)}</span><p className="mt-1 whitespace-pre-wrap break-words text-[11px] leading-relaxed text-slate-500">{revision.content}</p>
+                    </div>)}</div>
+                  </details>}
                 </div>
                 <div className="flex shrink-0 flex-col gap-0.5">
                   <button type="button" aria-label={item.pinned ? '取消置顶' : '置顶'} onClick={() => togglePin(item)} className={`rounded-full p-1.5 hover:bg-white ${item.pinned ? 'text-pink-400' : 'text-slate-300'}`}>
@@ -732,6 +744,9 @@ export const MemoryApp: React.FC<MemoryAppProps> = ({ onBack }) => {
                     }
                   />
                   <div className="min-w-0 flex-1 space-y-1">
+                    {candidate.update && <div className="rounded-xl bg-[#f0eaf5] px-2.5 py-2 text-[10px] text-[#9682a3]">
+                      <span>更新已有记忆</span><p className="mt-1 whitespace-pre-wrap break-words leading-relaxed text-slate-400">之前：{candidate.update.previousContent}</p>
+                    </div>}
                     <textarea
                       className={`${inputClass} h-14 resize-none leading-relaxed`}
                       value={candidate.content}

@@ -158,6 +158,7 @@ import {
 } from '../utils/coupleSpaceData';
 import { applyPlantSeenAfterChat, buildPlantInjection, PlantInjection } from '../utils/plantData';
 import { buildMemoryInjection, markMemoriesRecalled } from '../utils/memoryData';
+import { conversationMemoryQuery } from '../utils/memoryRecall';
 import { activeMemoryArchive, deleteCharacterMemoryArchives, deleteMemoryArchive, invalidateMemoryArchive, prepareMemoryArchiveSwitch } from '../utils/memoryArchives';
 import { maybeAutoExtractMemory } from '../utils/memoryAi';
 import { maybeAutoGrowth, maybeAutoJournal } from '../utils/journalAi';
@@ -2948,12 +2949,9 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         chat.type,
         (id) => contacts.find((item) => item.id === id)?.name
       );
-      const memoryQuery = chat.messages
-        .filter((item) => item.senderId !== 'narrator' && item.kind !== 'pat' && item.text)
-        .slice(-3)
-        .map((item) => item.text)
-        .join('\n')
-        .slice(-400);
+      const memoryQuery = conversationMemoryQuery(chat.messages, {
+        participantIds: chat.participantIds, historyLimit: chat.currentChatHistoryCount, currentInput,
+      });
       const memoryInjection = await buildMemoryInjection(
         chat.participantIds.filter((id) => !id.startsWith('npc:')),
         chat.type,

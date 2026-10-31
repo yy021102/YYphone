@@ -3,6 +3,30 @@
 .soft-app-opening-wechat { --opening-ink:#8da4a6; --opening-muted:#a5b7b5; --opening-dot:#b5ccc2; background:radial-gradient(ellipse at 0 10%,#e2efe9cf,transparent 65%),radial-gradient(ellipse at 100% 85%,#eae4f2bf,transparent 65%),#f5f9f8; }
 .soft-app-opening-phone { --opening-ink:#9a8ea9; --opening-muted:#b7adbf; --opening-dot:#cbbbd8; background:radial-gradient(ellipse at 0 5%,#eee2efcf,transparent 65%),radial-gradient(ellipse at 100% 90%,#e0edf5bf,transparent 65%),#f6f6fb; }
 .soft-app-opening-memory { background:radial-gradient(ellipse at 0 0,#f5e7eecc,transparent 60%),radial-gradient(ellipse at 100% 75%,#e5edf6b3,transparent 65%),#f9f6f9; }
+.soft-app-opening-alipay { --opening-ink:#829bae; --opening-muted:#9cafbd; --opening-dot:#b9cddd; background:radial-gradient(ellipse at 0 10%,#dfeaf5cc,transparent 65%),radial-gradient(ellipse at 100% 85%,#eee8f1bf,transparent 65%),#f6f9fc; }
+.soft-app-opening-taobao { --opening-ink:#ad9381; --opening-muted:#bda898; --opening-dot:#d8c5b4; background:radial-gradient(ellipse at 0 10%,#f3e4d9cc,transparent 65%),radial-gradient(ellipse at 100% 85%,#f0e5eebf,transparent 65%),#fcf8f4; }
+.soft-app-opening-forum { --opening-ink:#a18caa; --opening-muted:#b5a3ba; --opening-dot:#d0bdd6; background:radial-gradient(ellipse at 0 10%,#eee0eecc,transparent 65%),radial-gradient(ellipse at 100% 85%,#e4edf6bf,transparent 65%),#f9f6fb; }
+.soft-app-opening-offline_mode { --opening-ink:#8e9f91; --opening-muted:#a6b1a5; --opening-dot:#c6d1c1; background:radial-gradient(ellipse at 0 10%,#e6ede1cc,transparent 65%),radial-gradient(ellipse at 100% 85%,#f2e7ddbf,transparent 65%),#faf9f4; }
+.soft-app-opening-settings { --opening-ink:#8e9bad; --opening-muted:#a8b0bf; --opening-dot:#c4cddd; background:radial-gradient(ellipse at 0 10%,#e4eaf4cc,transparent 65%),radial-gradient(ellipse at 100% 85%,#eee4f1bf,transparent 65%),#f8f8fc; }
+.soft-app-opening-customizer { --opening-ink:#ac91a5; --opening-muted:#bda7b7; --opening-dot:#d8c0d2; background:radial-gradient(ellipse at 0 10%,#f4e2edcc,transparent 65%),radial-gradient(ellipse at 100% 85%,#e4edf5bf,transparent 65%),#fcf8fb; }
+.soft-app-opening-world_book { --opening-ink:#9787aa; --opening-muted:#b0a1c0; --opening-dot:#cbbbdc; background:radial-gradient(ellipse at 0 10%,#e7e0f1cc,transparent 65%),radial-gradient(ellipse at 100% 85%,#e4eaf4bf,transparent 65%),#f8f6fc; }
+.soft-app-opening-inventory { --opening-ink:#a9958d; --opening-muted:#b9aaa1; --opening-dot:#d5c5bc; background:radial-gradient(ellipse at 0 10%,#f1e5ddcc,transparent 65%),radial-gradient(ellipse at 100% 85%,#e9e2f0bf,transparent 65%),#fcf9f6; }
+.soft-app-opening-calendar { --opening-ink:#a08d9f; --opening-muted:#b6a6b4; --opening-dot:#d5c2d0; background:radial-gradient(ellipse at 0 10%,#f1e3edcc,transparent 65%),radial-gradient(ellipse at 100% 85%,#e5eee8bf,transparent 65%),#faf8fa; }
+.every-opening-art { color:var(--opening-dot); }
+.every-opening-float { animation:soft-opening-float 5.6s ease-in-out infinite; }
+.every-opening-bob { animation:soft-opening-float 4.8s ease-in-out -2s infinite; }
+.every-opening-drift { animation:every-opening-drift 5.6s ease-in-out infinite; }
+.every-opening-glow { animation:soft-opening-glow 4.5s ease-in-out infinite; }
+.every-opening-steam { animation:every-opening-steam 3.5s ease-in-out infinite; }
+.every-opening-gear { transform-origin:161px 130px; animation:every-opening-rotate 35s linear infinite; }
+.every-opening-slider { animation:every-opening-slider 6s ease-in-out infinite; }
+.every-opening-brush { transform-origin:205px 204px; animation:every-opening-brush 5s ease-in-out infinite; }
+@keyframes every-opening-drift { 0%,100% { transform:translate(0,2px); } 50% { transform:translate(4px,-4px); } }
+@keyframes every-opening-steam { 0%,100% { opacity:.2; transform:translateY(2px); } 50% { opacity:.7; transform:translateY(-4px); } }
+@keyframes every-opening-rotate { to { transform:rotate(360deg); } }
+@keyframes every-opening-slider { 0%,100% { transform:translateX(0); } 50% { transform:translateX(34px); } }
+@keyframes every-opening-brush { 0%,100% { transform:rotate(-3deg); } 50% { transform:rotate(3deg); } }
+@media(prefers-reduced-motion:reduce) { .every-opening-art :is(.every-opening-float,.every-opening-bob,.every-opening-drift,.every-opening-glow,.every-opening-steam,.every-opening-gear,.every-opening-slider,.every-opening-brush) { animation:none; } }
 .soft-opening-back { position:absolute; top:calc(env(safe-area-inset-top,0px) + 25px); left:25px; z-index:3; width:35px; height:35px; display:grid; place-items:center; background:#ffffff80; border:1px solid #fff; border-radius:50%; color:var(--opening-muted); cursor:pointer; }
 .soft-opening-back:focus-visible { outline:2px solid var(--opening-dot); outline-offset:3px; }
 .soft-opening-content { display:flex; flex:1; min-height:0; flex-direction:column; align-items:center; justify-content:center; padding:64px 22px 25px; }

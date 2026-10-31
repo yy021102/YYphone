@@ -93,3 +93,50 @@ test('an empty archive does not send an API request or invent a replacement movi
   await assert.rejects(generateTheaterFilm({ ...readTheaterSnapshot('a'), sources: [] }, new AbortController().signal), /还没有/);
   assert.equal(called, false);
 });
+
+test('echo and montage frames use unique originals in source order and cannot display authored or non-chat quotes', () => {
+  const snapshot = readTheaterSnapshot('a');
+  const result = parseTheaterFilm(JSON.stringify({ ...film, openingQuoteId: 'm1', scenes: [
+    { ...film.scenes[0], sourceIds: ['c1', 'c150', 'm1'], shot: 'echo', fragmentIds: ['c150', 'c1', 'c150', 'm1', 'invented'], aside: '我那时只看见自己的着急。' },
+    { ...film.scenes[0], shot: 'echo', fragmentIds: ['c1', 'invented'] },
+    { ...film.scenes[0], shot: 'montage', fragmentIds: ['c150'], aside: '回头看，我也有偏见。' },
+    { ...film.scenes[0], shot: 'letter', aside: '这张多余的纸页应当省掉。' },
+  ] }), snapshot);
+  assert.equal(result.scenes[0].shot, 'echo');
+  assert.deepEqual(result.scenes[0].fragments.map(s => s.id), ['c1', 'c150']);
+  assert.equal(result.scenes[1].shot, 'closeup');
+  assert.equal(result.scenes[1].fragments.length, 0);
+  assert.equal(result.scenes[2].fragments[0].text, '晚安，灯替你留着');
+  assert.equal(result.scenes[3].aside, '');
+  assert.equal(result.openingQuote?.id, 'c150');
+  assert(!JSON.stringify(result).includes('伪造'));
+  const unsupportedOpening = parseTheaterFilm(JSON.stringify({ ...film, openingQuoteId: 'c1' }), snapshot);
+  assert.equal(unsupportedOpening.openingQuote?.id, 'c150');
+});
+
+test('character viewpoint respects linked world-book entries, keeps long persona and makes one read-only request', async () => {
+  const contacts = JSON.parse(readStorageString('pocketos:wechat-contacts')!);
+  contacts[0].persona += '。'.repeat(2700) + '完整人设末尾';
+  contacts[0].worldBooks = [{ bookId: 'ours', entryId: 'one' }];
+  writeStoredValue('pocketos:wechat-contacts', contacts);
+  writeStoredValue('yyphone:world-books', [
+    { id: 'ours', name: '角色背景', entries: [{ id: 'one', title: '价值观', content: '珍惜独立，不擅长承认自己的偏见', depth: 'front' }, { id: 'two', title: '未绑定', content: 'NEVER_UNLINKED_ENTRY', depth: 'front' }] },
+    { id: 'other', name: '别人的背景', entries: [{ id: 'one', title: '别人的设定', content: 'NEVER_OTHER_BOOK', depth: 'front' }] },
+  ]);
+  const before = persisted(); const snapshot = readTheaterSnapshot('a');
+  assert.match(snapshot.persona, /完整人设末尾/);
+  assert.match(snapshot.worldBook!, /珍惜独立/); assert(!snapshot.worldBook!.includes('NEVER_'));
+  let calls = 0;
+  mock.method(globalThis, 'fetch', async (_url: unknown, init?: RequestInit) => {
+    calls++; const body = JSON.parse(String(init?.body)); const system = body.messages[0].content;
+    assert.match(system, /叙述者“我”始终是给定角色/);
+    assert.match(system, /全片围绕这一件事/);
+    assert.match(system, /不能创造过去发生过/);
+    assert.match(system, /echo/);
+    const payload = JSON.parse(body.messages.at(-1).content);
+    assert.equal(payload.worldBook, snapshot.worldBook); assert(!String(init?.body).includes('NEVER_'));
+    return Response.json({ choices: [{ message: { content: JSON.stringify(film) } }] });
+  });
+  await generateTheaterFilm(snapshot, new AbortController().signal);
+  assert.equal(calls, 1); assert.deepEqual(persisted(), before);
+});

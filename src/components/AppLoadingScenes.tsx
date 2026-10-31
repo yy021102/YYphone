@@ -1,14 +1,14 @@
 import type { ReactNode } from 'react';
 import { ArrowLeft } from 'lucide-react';
 
-function LoadingFrame({ kind, title, caption, children, onBack }: { kind: string; title: string; caption: string; children: ReactNode; onBack: () => void }) {
+export function LoadingFrame({ kind, title, caption, eyebrow, footer, children, onBack }: { kind: string; title: string; caption: string; eyebrow?: string; footer?: string; children: ReactNode; onBack: () => void }) {
   return <section className={`soft-app-opening soft-app-opening-${kind}`} role="status" aria-live="polite" aria-label={`正在打开${title}`}>
     <button type="button" className="soft-opening-back" aria-label="返回主屏幕" onClick={onBack}><ArrowLeft size={18}/></button>
     <div className="soft-opening-content">
       <div className="soft-opening-stage" aria-hidden="true"><div className="soft-opening-halo"/>{children}</div>
-      <div className="soft-opening-copy"><span>{kind === 'memory' ? 'THE DAYS WE KEEP' : kind === 'wechat' ? 'A LITTLE HELLO' : 'LITTLE THINGS, LITTLE SECRETS'}</span><h2>{title}</h2><p>{caption}</p><div className="soft-opening-dots" aria-hidden="true"><i/><i/><i/></div></div>
+      <div className="soft-opening-copy"><span>{eyebrow ?? (kind === 'memory' ? 'THE DAYS WE KEEP' : kind === 'wechat' ? 'A LITTLE HELLO' : 'LITTLE THINGS, LITTLE SECRETS')}</span><h2>{title}</h2><p>{caption}</p><div className="soft-opening-dots" aria-hidden="true"><i/><i/><i/></div></div>
     </div>
-    <div className="soft-opening-footer" aria-hidden="true"><i/><span>{kind === 'memory' ? '有些瞬间，会一直发着光' : kind === 'wechat' ? '故事，从一句你好开始' : '平凡日常里，藏着一点在意'}</span><i/></div>
+    <div className="soft-opening-footer" aria-hidden="true"><i/><span>{footer ?? (kind === 'memory' ? '有些瞬间，会一直发着光' : kind === 'wechat' ? '故事，从一句你好开始' : '平凡日常里，藏着一点在意')}</span><i/></div>
   </section>;
 }
 

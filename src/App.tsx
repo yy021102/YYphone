@@ -22,10 +22,7 @@ import { BirthdayRuntime } from './components/BirthdayRuntime';
 import { HalloweenRuntime } from './components/HalloweenRuntime';
 import { birthdayIsDue, readBirthdaySettings, readBirthdaySeen } from './utils/birthday';
 import { HomeScreen } from './components/HomeScreen';
-import { CoupleSpaceLoading } from './components/CoupleSpaceLoading';
-import { PomodoroLoading } from './components/PomodoroLoading';
-import { WeChatLoading, PhoneExplorerLoading, MemoryLoading } from './components/AppLoadingScenes';
-import { CalendarWidget as CalendarApp } from './components/CalendarWidget';
+import { AppLoading } from './components/EveryAppLoading';
 import { LittlePPanel } from './components/LittlePPanel';
 import { LittlePLauncher } from './components/LittlePLauncher';
 import { LITTLE_P_VISIBLE_KEY } from './utils/littleP';
@@ -57,6 +54,7 @@ const ThemeCustomizerApp = lazy(() => import('./apps/ThemeCustomizerApp').then((
 const WorldBookApp = lazy(() => import('./apps/WorldBookApp').then((module) => ({ default: module.WorldBookApp })));
 const MemoryApp = lazy(() => import('./apps/MemoryApp').then((module) => ({ default: module.MemoryApp })));
 const InventoryApp = lazy(() => import('./apps/InventoryApp').then((module) => ({ default: module.InventoryApp })));
+const CalendarApp = lazy(() => import('./components/CalendarPanel').then((module) => ({ default: module.CalendarPanel })));
 
 type LockMode = 'none' | 'lock' | 'password';
 interface LockSettings {
@@ -665,14 +663,7 @@ export default function App() {
             /* Active Sub-App View: Header is safely padded below the notch, back arrow always clickable */
             <div className="w-full h-full flex flex-col overflow-hidden animate-fadeIn">
               <Suspense
-                fallback={activeApp === 'couple_space' ? <CoupleSpaceLoading onBack={handleBackToHome}/> :
-                  activeApp === 'pomodoro' ? <PomodoroLoading onBack={handleBackToHome}/> :
-                  activeApp === 'phone_explorer' ? <PhoneExplorerLoading onBack={handleBackToHome}/> :
-                  activeApp === 'memory' ? <MemoryLoading onBack={handleBackToHome}/> :
-                  <div className="flex h-full items-center justify-center text-sm text-slate-500">
-                    正在打开应用…
-                  </div>
-                }
+                fallback={<AppLoading app={activeApp} onBack={handleBackToHome}/>}
               >
               {activeApp === 'phone_explorer' && (
                 <PhoneExplorerApp onBack={handleBackToHome} />
@@ -730,7 +721,7 @@ export default function App() {
               {activeApp === 'memory' && (
                 <MemoryApp onBack={handleBackToHome} />
               )}
-              {activeApp === 'calendar' && <CalendarApp fullScreen onClose={handleBackToHome} />}
+              {activeApp === 'calendar' && <CalendarApp onClose={handleBackToHome} />}
               {activeApp === 'inventory' && (
                 <InventoryApp onBack={handleBackToHome} />
               )}
@@ -753,7 +744,7 @@ export default function App() {
             className={activeApp === 'wechat' && !isLocked ? 'flex min-h-0 flex-1 flex-col bg-white' : 'hidden'}
             aria-hidden={activeApp !== 'wechat' || isLocked}
           >
-            <Suspense fallback={activeApp === 'wechat' && !isLocked ? <WeChatLoading onBack={handleBackToHome}/> : null}>
+            <Suspense fallback={activeApp === 'wechat' && !isLocked ? <AppLoading app="wechat" onBack={handleBackToHome}/> : null}>
               <WeChatApp
                 onBack={handleBackToHome}
                 isVisible={activeApp === 'wechat' && !isLocked}

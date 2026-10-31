@@ -1,5 +1,6 @@
 import { readStorageString, readStoredValue, writeStoredValue } from './localStorage';
 import { archiveCursorsForWrite, guardMemoryArchive, readArchiveCursors, readArchiveRecords, writeArchiveRecords } from './memoryArchives';
+import { memoryQueryParts, type MemoryRecallQuery } from './memoryRecall';
 
 export const MEMORY_ITEMS_KEY = 'yyphone:memory-items';
 export const MEMORY_EMBEDDINGS_KEY = 'yyphone:memory-embeddings';
@@ -42,7 +43,18 @@ export interface MemoryItem {
   recallCount: number;
   source: 'chat' | 'manual' | 'import';
   gift?: GiftMemoryDetails;
+  revisions?: MemoryRevision[];
+  manuallyEdited?: boolean;
 }
+
+export interface MemoryRevision { content: string; updatedAt: string }
+export const memoryRevisions = (value: unknown): MemoryRevision[] => Array.isArray(value)
+  ? value.filter((v): v is MemoryRevision => !!v && typeof v === 'object' && typeof v.content === 'string' && typeof v.updatedAt === 'string')
+    .slice(-12).map(v => ({ content: v.content.slice(0, 300), updatedAt: v.updatedAt })) : [];
+
+/** Curated identity, manually edited entries and gift ownership are never automatically rewritten. */
+export const canUpdateChatMemory = (item: MemoryItem) => item.source === 'chat' && !item.manuallyEdited && !item.pinned &&
+  item.category !== 'core' && item.category !== 'item';
 
 export interface EmbeddingConfig {
   endpoint: string;
@@ -100,7 +112,7 @@ const isMemoryList = (value: unknown): value is MemoryItem[] =>
 export const readMemories = (): MemoryItem[] => readArchiveRecords(MEMORY_ITEMS_KEY, isMemoryList);
 export const writeMemories = (items: MemoryItem[]) => writeArchiveRecords(MEMORY_ITEMS_KEY, items, isMemoryList);
 
-type EmbeddingStore = Record<string, { m: string; v: number[] }>;
+type EmbeddingStore = Record<string, { m: string; v: number[]; c?: string }>;
 export const readEmbeddings = (): EmbeddingStore =>
   readStoredValue(MEMORY_EMBEDDINGS_KEY, {} as EmbeddingStore, (value): value is EmbeddingStore => isRecord(value));
 export const writeEmbeddings = (store: EmbeddingStore) => writeStoredValue(MEMORY_EMBEDDINGS_KEY, store);
@@ -203,20 +215,19 @@ export const embedMissingMemories = async (
 ): Promise<number> => {
   if (!embeddingConfigured(config)) return 0;
   const store = readEmbeddings();
-  const missing = items.filter((item) => store[item.id]?.m !== config.model);
+  const missing = items.filter((item) => store[item.id]?.m !== config.model || store[item.id]?.c !== undefined && store[item.id].c !== item.content);
   if (missing.length === 0) return 0;
   let done = 0;
   for (let start = 0; start < missing.length; start += 16) {
     const batch = missing.slice(start, start + 16);
     const vectors = await embedTexts(batch.map((item) => item.content), config);
     const latest = readEmbeddings();
-    const existingIds = new Set(readMemories().map((item) => item.id));
+    const current = new Map(readMemories().map((item) => [item.id, item.content]));
     batch.forEach((item, index) => {
-      if (existingIds.has(item.id)) latest[item.id] = { m: config.model, v: vectors[index] };
+      if (current.get(item.id) === item.content) { latest[item.id] = { m: config.model, v: vectors[index], c: item.content }; done++; }
     });
     writeEmbeddings(latest);
-    done += batch.length;
-    onProgress?.(done, missing.length);
+    onProgress?.(Math.min(start + batch.length, missing.length), missing.length);
   }
   return done;
 };
@@ -276,21 +287,22 @@ const queryCache = new Map<string, number[]>();
 /** 对某个角色（及玩家通用记忆）按查询语句排序，不含核心/置顶记忆。 */
 export const rankMemories = async (
   charIds: string[],
-  query: string,
+  query: MemoryRecallQuery,
   settings: MemorySettings,
   options: { signal?: AbortSignal; limit?: number; ignoreThreshold?: boolean; localOnly?: boolean } = {}
 ): Promise<ScoredMemory[]> => {
   const ids = new Set([...charIds, SHARED_MEMORY_ID]);
   const candidates = readMemories().filter((item) => ids.has(item.charId));
-  if (candidates.length === 0 || !query.trim()) return [];
+  const parts = memoryQueryParts(query);
+  if (candidates.length === 0 || !parts.text.trim()) return [];
   const store = readEmbeddings();
   let queryVector: number[] | null = null;
   if (embeddingConfigured(settings.embedding) && !options.localOnly) {
-    const cacheKey = `${settings.embedding.model}|${query}`;
+    const cacheKey = `${settings.embedding.endpoint}|${settings.embedding.model}|${parts.text}`;
     queryVector = queryCache.get(cacheKey) ?? null;
     if (!queryVector) {
       try {
-        queryVector = (await embedTexts([query], settings.embedding, options.signal))[0] ?? null;
+        queryVector = (await embedTexts([parts.text], settings.embedding, options.signal))[0] ?? null;
         if (queryVector) {
           if (queryCache.size > 50) queryCache.clear();
           queryCache.set(cacheKey, queryVector);
@@ -300,24 +312,30 @@ export const rankMemories = async (
       }
     }
   }
-  const queryGrams = bigrams(query);
+  const queryGrams = bigrams(parts.focus);
+  const contextGrams = parts.context.map(bigrams);
   const scored: ScoredMemory[] = [];
   for (const item of candidates) {
     const vector = store[item.id];
     let similarity: number;
     let mode: ScoredMemory['mode'];
     let gate: number;
-    if (queryVector && vector && vector.m === settings.embedding.model) {
+    let relevance: number;
+    if (queryVector && vector && vector.m === settings.embedding.model && (vector.c === undefined || vector.c === item.content)) {
       similarity = cosine(queryVector, vector.v);
+      relevance = similarity;
       mode = 'vector';
       gate = settings.threshold;
     } else {
-      similarity = keywordScore(queryGrams, item.content);
+      const focusScore = keywordScore(queryGrams, item.content);
+      const contextScores = contextGrams.map(grams => keywordScore(grams, item.content));
+      similarity = Math.max(focusScore, ...contextScores);
+      relevance = Math.max(focusScore, ...contextScores.map((score, index) => score * .85 * Math.pow(.92, index)));
       mode = 'keyword';
       gate = 0.4;
     }
     if (!options.ignoreThreshold && similarity < gate) continue;
-    const score = 0.65 * similarity + 0.2 * (item.importance / 5) + 0.15 * recencyScore(item);
+    const score = 0.65 * relevance + 0.2 * (item.importance / 5) + 0.15 * recencyScore(item);
     scored.push({ item, score, similarity, mode });
   }
   scored.sort((a, b) => b.score - a.score);
@@ -336,7 +354,7 @@ const formatMemoryLine = (item: MemoryItem, prefix: string) =>
 export const buildMemoryInjection = async (
   charIds: string[],
   chatType: string,
-  query: string,
+  query: MemoryRecallQuery,
   nameOf: (id: string) => string | undefined,
   options: { localOnly?: boolean } = {}
 ): Promise<MemoryInjection> => {
@@ -401,17 +419,18 @@ export interface MemoryCandidate {
   importance: number;
   pinned: boolean;
   gift?: GiftMemoryDetails;
+  update?: { id: string; previousContent: string; previousUpdatedAt: string };
 }
 
 const normalizeText = (text: string) => text.replace(/\s+/g, '').toLowerCase();
 
-/** 写入候选记忆：与已有记忆高度相似的合并（更新时间/重要度），否则新增。返回新增和合并数量。 */
+/** Updates require an explicit target and unchanged baseline. Similarity alone cannot prove two facts agree. */
 export const addMemoryCandidates = async (
   charId: string,
   candidates: MemoryCandidate[],
   source: MemoryItem['source'],
   settings: MemorySettings
-): Promise<{ added: number; merged: number }> => {
+): Promise<{ added: number; merged: number; updated: number }> => {
   const assertArchive = guardMemoryArchive(charId);
   const sameOwner = (item: MemoryItem) => item.charId === charId;
   const useVectors = embeddingConfigured(settings.embedding);
@@ -429,11 +448,30 @@ export const addMemoryCandidates = async (
   const now = new Date().toISOString();
   let added = 0;
   let merged = 0;
+  let updated = 0;
+  const targets = new Set<string>();
+  for (const candidate of candidates) {
+    if (!candidate.update) continue;
+    const target = items.find(item => sameOwner(item) && item.id === candidate.update!.id);
+    if (!target || !canUpdateChatMemory(target) || target.content !== candidate.update.previousContent || target.updatedAt !== candidate.update.previousUpdatedAt || targets.has(target.id)) {
+      throw new Error('待更新的记忆已变化或不能自动修改，请重新整理；原记忆未改动。');
+    }
+    targets.add(target.id);
+  }
   candidates.forEach((candidate, index) => {
     const content = candidate.content.trim().slice(0, 300);
     if (!content) return;
     const vector = vectors[index];
-    const grams = bigrams(content);
+    if (candidate.update) {
+      const target = items.find(item => sameOwner(item) && item.id === candidate.update!.id)!;
+      if (target.content === content) { merged++; return; }
+      target.revisions = [...memoryRevisions(target.revisions), { content: target.content, updatedAt: target.updatedAt }].slice(-12);
+      target.content = content; target.updatedAt = now;
+      target.importance = Math.max(target.importance, candidate.importance);
+      if (vector) store[target.id] = { m: settings.embedding.model, v: vector, c: content };
+      else delete store[target.id];
+      updated++; return;
+    }
     const duplicate = items.filter(sameOwner).find((item) => {
       if (candidate.category === 'item' || item.category === 'item') {
         return candidate.category === item.category && (
@@ -442,16 +480,7 @@ export const addMemoryCandidates = async (
             candidate.gift.date === item.gift.date && normalizeText(candidate.gift.name) === normalizeText(item.gift.name))
         );
       }
-      if (normalizeText(item.content) === normalizeText(content)) return true;
-      const existing = store[item.id];
-      if (vector && existing && existing.m === settings.embedding.model) return cosine(vector, existing.v) >= 0.88;
-      const other = bigrams(item.content);
-      if (other.size === 0 || grams.size === 0) return false;
-      let shared = 0;
-      grams.forEach((gram) => {
-        if (other.has(gram)) shared += 1;
-      });
-      return shared / Math.min(grams.size, other.size) >= 0.75;
+      return normalizeText(item.content) === normalizeText(content);
     });
     if (duplicate) {
       duplicate.updatedAt = now;
@@ -475,12 +504,12 @@ export const addMemoryCandidates = async (
       ...(candidate.gift ? { gift: candidate.gift } : {}),
     };
     items.push(item);
-    if (vector) store[item.id] = { m: settings.embedding.model, v: vector };
+    if (vector) store[item.id] = { m: settings.embedding.model, v: vector, c: content };
     added += 1;
   });
   writeMemories(items);
   writeEmbeddings(store);
-  return { added, merged };
+  return { added, merged, updated };
 };
 
 // ==================== 导入 / 导出 ====================
@@ -526,6 +555,7 @@ export const importMemories = (
       updatedAt: now,
       recallCount: 0,
       source: 'import',
+      ...(memoryRevisions(raw.revisions).length ? { revisions: memoryRevisions(raw.revisions) } : {}),
       ...(isRecord(raw.gift) &&
         typeof raw.gift.name === 'string' &&
         (raw.gift.direction === 'player-to-character' || raw.gift.direction === 'character-to-player') &&
