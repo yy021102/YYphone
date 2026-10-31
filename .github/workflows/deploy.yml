@@ -28,6 +28,8 @@ jobs:
         run: bun install --frozen-lockfile
       - name: Build
         run: bun run build
+        env:
+          VITE_NETEASE_API_URL: ${{ vars.NETEASE_API_URL }}
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:

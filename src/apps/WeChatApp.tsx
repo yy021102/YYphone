@@ -120,8 +120,9 @@ import { DocumentTextImport } from '../components/DocumentTextImport';
 import { deleteGroupJournal, invalidateGroupJournal, maybeAutoGroupJournal } from '../utils/groupJournal';
 import { GroupJournalPanel } from '../components/GroupJournalPanel';
 import { requestChatReply, withChatResponseFormat } from '../utils/chatReply';
+import type { ChatImageDescription } from '../utils/imageDescriptions';
 import { parseTransferActions, settleOutgoingTransfer } from '../utils/outgoingTransfer';
-import { regeneratedReplyIds } from '../utils/chatRegeneration';
+import { regeneratedReplyIds, regeneratedReplyBatch, regenerationMessages, settledReplyPaymentIds, retainSettledReplyPayment, regenerationPaymentStamp, canGenerateChatPayment, chatPaymentGenerationInstructions } from '../utils/chatRegeneration';
 import { deleteWeChatContact, type FormerParticipant } from '../utils/deleteWeChatContact';
 import { ChatImageViewer } from '../components/ChatImageViewer';
 import { createPacketClaims, luckyPacketWinner, type PacketClaim } from '../utils/groupRedPacket';
@@ -301,6 +302,7 @@ interface ChatMessage {
     orderMode?: 'self' | 'gift';
     forumForwardTargetId?: string;
   imageUrl?: string;
+  imageDescription?: ChatImageDescription;
   title?: string;
   source?: string;
   content?: string;
@@ -2855,9 +2857,14 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
   const generateAiReply = async (regenerate = false, targetChatId = activeChatId, proactive = false, previewOnly = false) => {
     const latestChats = readStoredValue(CHATS_STORAGE_KEY, chats, isChatList);
     const storedChat = latestChats.find((item) => item.id === targetChatId);
-    const replacedIds = regenerate && storedChat ? regeneratedReplyIds(storedChat.messages) : new Set<string>();
+    const regenerationSettlements = regenerate ? readAlipayData().chatSettlements : undefined;
+    const replacedIds = regenerate && storedChat ? regeneratedReplyIds(storedChat.messages, regenerationSettlements) : new Set<string>();
+    const originalBatchIds = new Set(regenerate && storedChat ? regeneratedReplyBatch(storedChat.messages).map(message => message.id) : []);
+    const settledPaymentIds = regenerate && storedChat ? settledReplyPaymentIds(storedChat.messages, regenerationSettlements) : new Set<string>();
+    const settledPaymentCount = settledPaymentIds.size;
+    const originalPaymentStamp = regenerate && storedChat ? regenerationPaymentStamp(storedChat.messages, originalBatchIds, regenerationSettlements) : '';
     if (!storedChat || (!previewOnly && storedChat.blocked) || generationRunning.current || tokenPreviewBusy) return;
-    let chat: ChatConversation = { ...storedChat, messages: storedChat.messages.filter(message => !replacedIds.has(message.id)) };
+    let chat: ChatConversation = { ...storedChat, messages: regenerate ? regenerationMessages(storedChat.messages, regenerationSettlements) : storedChat.messages };
     const latestContacts = readStoredValue(CONTACTS_STORAGE_KEY, contacts, isContactList);
 
     const apiPresets = readSetting(SETTINGS_KEYS.apiPresets, [] as ApiPreset[], isApiPresetList);
@@ -2909,7 +2916,8 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         const updatedChats = readStoredValue(CHATS_STORAGE_KEY, chats, isChatList);
         const updated = updatedChats.find(item => item.id === targetChatId);
         if (!updated || updated.activeArchiveId !== chat.activeArchiveId || updated.blocked) throw new Error('对话状态已变化，请重新生成。');
-        chat = { ...updated, messages: updated.messages.filter(message => !replacedIds.has(message.id)) };
+        if (regenerate && regenerationPaymentStamp(updated.messages, originalBatchIds, readAlipayData().chatSettlements) !== originalPaymentStamp) throw new Error('上一轮款项状态已变化，请重新生成。');
+        chat = { ...updated, messages: regenerate ? regenerationMessages(updated.messages, regenerationSettlements) : updated.messages };
         setChats(updatedChats);
       }
       const currentInput = proactive ? '' : [...chat.messages].reverse().find((message) => message.senderId === 'user')?.text ?? '';
@@ -3009,6 +3017,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
           })))}`,
         ] : []),
         '红包和转账发出后处于待领取/待收款状态，只有玩家确认才存入虚拟余额，玩家可在收款前退回转账。不要声称已经自动到账。',
+        chatPaymentGenerationInstructions(chat.type === 'observer', regenerate, settledPaymentCount),
         ...(chat.type === 'direct' && !contact.id.startsWith('npc:') && !regenerate && !activeCallMode ? [
           `【亲密付】玩家不能自行开卡。你可以结合人设、关系与经济情况主动赠予亲密付，返回可选字段 "intimatePayAction":{"type":"grant","monthlyLimit":正数,"note":"给玩家的留言"${pendingIntimateRequest ? `,"requestId":"${pendingIntimateRequest.id}"` : ''}}。额度由你决定，不必照搬申请额度，最大 1000000 元。${pendingIntimateRequest ? `玩家有待处理申请，申请 ID：${pendingIntimateRequest.id}，希望额度 ¥${pendingIntimateRequest.amount}。请本轮明确同意或拒绝；拒绝返回 "intimatePayAction":{"type":"decline","requestId":"${pendingIntimateRequest.id}"}。` : '没有申请时也可自然地主动赠予；不赠予则省略该字段。'}reply 中自然说明你的决定，不要只口头同意而不返回动作字段。`,
         ] : ['本轮禁止 intimatePayAction。']),
@@ -3037,7 +3046,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         ...(chat.type === 'group' && chat.allowAgentGroupRename ? [
           '【主动修改群昵称】只有当本轮主要角色确实想换自己的群昵称，且符合其人设、关系与当前情境时，才返回 groupNicknames: {"自己的成员ID":"新昵称"}。只能修改顶层 speakerId 对应的本人昵称，不能替其他成员修改；不要为完成任务而频繁改名。新昵称应简短自然，改名后的聊天会出现系统提示。',
         ] : []),
-        `以${chat.type === 'direct' ? `${contact.name}的` : '其中一位角色或 NPC 群成员的'}身份自然回复。只返回 JSON 对象，至少包含 reply、thought、speakerId 字段。${CHAT_THOUGHT_STYLE}reply 必须是${activeCallMode ? '一条完整角色台词组成的数组；视频通话可额外附一条旁白（旁白不计入角色台词）' : '在本轮消息数量范围内的独立消息数组'}；普通消息可写字符串，也可写对象 {"kind":"消息类型","text":"消息/语音转写/图片描述","title":"可选标题","source":"可选来源","content":"可选摘要","amount":"可选金额","quantity":可选红包个数,"stickerId":"可选表情包ID"}。支持类型：text、image（文字描述图片）、voice（语音转写）、sticker、video-call、location、red-packet、transfer、link、pat。pat 表示角色拍了拍玩家（类似微信拍一拍，text 可留空或写简短后缀如“的脑袋”），仅在情境自然时偶尔使用。${chat.narratorEnabled || chat.type === 'observer' ? '本对话已开启旁白：可在 reply 中穿插 {"kind":"narration","text":"旁白内容"} 项，旁白用第三人称简短描述角色此刻的动作、表情、神态、衣着或周围氛围，必须控制在 50 字以内（越短越好），不要包含角色台词，也不要替玩家行动；旁白同样计入 reply 条数，通常每轮最多 1 条，且不要全是旁白。' : ''}链接请提供 title/source/content；红包和转账必须给正数 amount，收款对象只能是玩家 user，群聊红包可提供 quantity。不要编造图片 URL；image 使用文字图卡。【表情包】玩家导入了一批表情包，你可以像真人聊天一样，根据人设、性格和当下情绪，在合适的时候主动发表情包（比如开心、撒娇、无语、委屈、吐槽时），一般可单独作为一条 {"kind":"sticker","stickerId":"表情包ID"}，也可在文字消息后附带一条；偏活泼的人设可以更常用，内敛冷淡的人设就少用，不要每轮都发，也不要连发多个。表情包不只是表达情绪，也可以用来糊弄回复、反讽、玩梗、做社交缓冲（不知道说什么、尴尬、不想认真回答时）；但不要过度解读表情包的含义，也不要给它强加深意。根据当前对话氛围和人设选择性地发，同一个表情包不要反复发（回看历史，近期发过的就换一个或不发）。只能从下列表情包里选（按分类列出，格式 分类：[ID|名称]，请根据名称含义挑选贴切的）：${stickerPromptList}。${allStickers.length === 0 ? '（目前没有表情包，不要发 sticker。）' : ''}请仅在剧情自然、确有必要时使用附件，普通文字聊天优先，不要为了凑数强行发送附件。${regenerate ? '本次是重生成，不得再次发红包、转账或礼物，以免重复入账。' : '角色发给玩家的红包和转账需玩家手动领取或确认收款后才加入支付宝个人余额，不会扣玩家的钱；待收转账可退回。可选 gift 字段仅允许 {"existingProductId":"现有商品ID"} 或 {"title":"新商品名","desc":"描述","price":数字,"category":"shopping或eleme","emoji":"emoji"}，只在剧情自然时由主要角色提供；NPC不使用 gift 字段。'}${chat.type === 'group' && chat.allowAgentGroupRename ? '可选 groupTitle 和 groupNicknames 字段，只在情节自然需要时修改群名或昵称。' : ''}群聊的 speakerId 必须从以下成员 ID 中选择：${chatMembers.map((member) => `${member.id}（${member.name}）`).join(', ')}。${chat.type === 'group' && chat.allowAgentGroupRename ? 'groupNicknames 的键只能使用上方成员 ID。' : ''}${chat.type === 'observer' ? '这是旁观群聊，user不在群里；不得生成发给玩家的红包、转账或礼物；根据角色之间的对话和旁白情境继续由群成员发言。' : ''}`,
+        `以${chat.type === 'direct' ? `${contact.name}的` : '其中一位角色或 NPC 群成员的'}身份自然回复。只返回 JSON 对象，至少包含 reply、thought、speakerId 字段。${CHAT_THOUGHT_STYLE}reply 必须是${activeCallMode ? '一条完整角色台词组成的数组；视频通话可额外附一条旁白（旁白不计入角色台词）' : '在本轮消息数量范围内的独立消息数组'}；普通消息可写字符串，也可写对象 {"kind":"消息类型","text":"消息/语音转写/图片描述","title":"可选标题","source":"可选来源","content":"可选摘要","amount":"可选金额","quantity":可选红包个数,"stickerId":"可选表情包ID"}。支持类型：text、image（文字描述图片）、voice（语音转写）、sticker、video-call、location、red-packet、transfer、link、pat。pat 表示角色拍了拍玩家（类似微信拍一拍，text 可留空或写简短后缀如“的脑袋”），仅在情境自然时偶尔使用。${chat.narratorEnabled || chat.type === 'observer' ? '本对话已开启旁白：可在 reply 中穿插 {"kind":"narration","text":"旁白内容"} 项，旁白用第三人称简短描述角色此刻的动作、表情、神态、衣着或周围氛围，必须控制在 50 字以内（越短越好），不要包含角色台词，也不要替玩家行动；旁白同样计入 reply 条数，通常每轮最多 1 条，且不要全是旁白。' : ''}链接请提供 title/source/content；红包和转账必须给正数 amount，收款对象只能是玩家 user，群聊红包可提供 quantity。不要编造图片 URL；image 使用文字图卡。【表情包】玩家导入了一批表情包，你可以像真人聊天一样，根据人设、性格和当下情绪，在合适的时候主动发表情包（比如开心、撒娇、无语、委屈、吐槽时），一般可单独作为一条 {"kind":"sticker","stickerId":"表情包ID"}，也可在文字消息后附带一条；偏活泼的人设可以更常用，内敛冷淡的人设就少用，不要每轮都发，也不要连发多个。表情包不只是表达情绪，也可以用来糊弄回复、反讽、玩梗、做社交缓冲（不知道说什么、尴尬、不想认真回答时）；但不要过度解读表情包的含义，也不要给它强加深意。根据当前对话氛围和人设选择性地发，同一个表情包不要反复发（回看历史，近期发过的就换一个或不发）。只能从下列表情包里选（按分类列出，格式 分类：[ID|名称]，请根据名称含义挑选贴切的）：${stickerPromptList}。${allStickers.length === 0 ? '（目前没有表情包，不要发 sticker。）' : ''}请仅在剧情自然、确有必要时使用附件，普通文字聊天优先，不要为了凑数强行发送附件。${regenerate ? '本轮不执行 gift 礼物动作；红包和转账遵循上面的收付规则。' : '角色发给玩家的红包和转账需玩家手动领取或确认收款后才加入支付宝个人余额，不会扣玩家的钱；待收转账可退回。可选 gift 字段仅允许 {"existingProductId":"现有商品ID"} 或 {"title":"新商品名","desc":"描述","price":数字,"category":"shopping或eleme","emoji":"emoji"}，只在剧情自然时由主要角色提供；NPC不使用 gift 字段。'}${chat.type === 'group' && chat.allowAgentGroupRename ? '可选 groupTitle 和 groupNicknames 字段，只在情节自然需要时修改群名或昵称。' : ''}群聊的 speakerId 必须从以下成员 ID 中选择：${chatMembers.map((member) => `${member.id}（${member.name}）`).join(', ')}。${chat.type === 'group' && chat.allowAgentGroupRename ? 'groupNicknames 的键只能使用上方成员 ID。' : ''}${chat.type === 'observer' ? '这是旁观群聊，user不在群里；不得生成发给玩家的红包、转账或礼物；根据角色之间的对话和旁白情境继续由群成员发言。' : ''}`,
         ...(activeCallMode === 'video' && callConnectedAt
           ? [`当前为视频通话（已通话 ${Math.floor((Date.now() - callConnectedAt) / 60000)} 分钟）。本轮必须只生成一条完整、连贯的角色台词（reply 数组中唯一的非旁白项），口语自然，可以比普通微信消息稍长；不要拆成多条碎片消息。可以额外生成一条 {"kind":"narration","text":"旁白内容"}，用第三人称描写角色的动作、表情或神态，内容独立于台词，不能混进角色台词，也不要用括号动作文字包裹台词；旁白不计入语音。只允许一条角色台词和最多一条旁白，不要其他消息或附件。`]
           : []),
@@ -3226,8 +3235,8 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
               if (!Number.isFinite(amount) || amount < 0.01 || amount > 1_000_000) {
                 throw new Error('AI 返回的红包或转账金额无效（需至少 0.01 且不超过 1,000,000 元）。');
               }
-              if (regenerate || chat.type === 'observer') {
-                throw new Error('重生成或旁观群聊不能再次产生红包/转账。');
+              if (!canGenerateChatPayment(chat.type === 'observer', regenerate, settledPaymentCount)) {
+                throw new Error(chat.type === 'observer' ? '旁观群聊不能生成发给玩家的红包或转账。' : '本轮已有完成收付或领取的款项，请保留原记录，不重复生成款项。');
               }
               message.amount = amount.toFixed(2);
               message.recipientId = 'user';
@@ -3357,6 +3366,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         return;
       }
       let expectedCouponRevision = liveChat.coupleCouponRevision;
+      if (regenerate && regenerationPaymentStamp(liveChat.messages, originalBatchIds, readAlipayData().chatSettlements) !== originalPaymentStamp) throw new Error('上一轮款项状态已变化，本次未替换回复，请重新生成。');
       const executionSocialContext = { ...socialContext, chat: liveChat };
       if ((regenerate || chat.type === 'observer') && result.paymentActions !== undefined && (!Array.isArray(result.paymentActions) || result.paymentActions.length)) throw new Error('本轮不能处理转账。');
       const paymentActions = parseTransferActions(result.paymentActions, liveChat.messages, speakerId, chat.type === 'direct' ? contact.id : undefined);
@@ -3534,7 +3544,8 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       const replySaved = updateChat(chat.id, (current) => ({
         ...current,
         messages: [
-          ...current.messages.filter((item) => !replacedIds.has(item.id)).map((item) => {
+          ...current.messages.filter((item) => !replacedIds.has(item.id)).map((original) => {
+            const item = retainSettledReplyPayment(original, settledPaymentIds, replyBatchId, regenerationSettlements);
             const paymentAction = paymentActions.find(action => action.messageId === item.id);
             if (paymentAction) return { ...item, paymentStatus: paymentAction.action, paymentSettledAt: new Date().toISOString() };
             if (intimateAction?.requestId === item.id) return {

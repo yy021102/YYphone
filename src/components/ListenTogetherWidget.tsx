@@ -6,6 +6,7 @@ import { readStoredValue } from '../utils/localStorage';
 import { useWidgetAppearance } from '../utils/widgetAppearance';
 import { MUSIC_APPEARANCE_KEY } from '../utils/homeAppearance';
 import { WidgetImagePicker } from './WidgetImagePicker';
+import { NeteaseMusicPanel } from './NeteaseMusicPanel';
 
 interface CompanionOption {
   id: string;
@@ -277,6 +278,8 @@ export const ListenTogetherWidget: React.FC = () => {
               </p>
             </section>
 
+            <NeteaseMusicPanel />
+
             <section className="space-y-2">
               <p className="text-xs font-bold text-[#2C4A5C]">添加音乐</p>
               <div className="flex gap-2">
@@ -354,7 +357,7 @@ export const ListenTogetherWidget: React.FC = () => {
                           <span className="truncate">{item.title}</span>
                         </span>
                         <span className="block truncate pl-[18px] text-[10px] text-slate-400">
-                          {item.source === 'file' ? item.fileName || '本地文件' : item.url}
+                          {item.source === 'netease' ? `${item.artists || '网易云音乐'}` : item.source === 'file' ? item.fileName || '本地文件' : item.url}
                         </span>
                       </button>
                     )}

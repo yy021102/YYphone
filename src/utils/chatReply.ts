@@ -4,6 +4,7 @@ import { type OpenAiMessage } from './buildPrompt';
 import { estimatePromptTokens, estimateTextTokens } from './chatTokens';
 import { toGeminiContents, toOpenAiMessages } from './chatVision';
 import { apiTemperature, textApiConfig } from './textApiConfig';
+import { pendingImageTargets, validateImageDescriptions, saveImageDescriptions, withImageDescriptionRequest } from './imageDescriptions';
 
 const FORMAT_REMINDER = '【本轮输出协议】只返回一个 JSON 对象，reply 是非空消息数组，speakerId 使用本轮允许的成员 ID。thought 仅在本轮明确要求心声时填写，其他任务省略。发言者身份只放在 speakerId，reply 正文直接写角色说的话，不加“角色名：”“【角色名：正文】”、成员ID或聊天来源前缀；historySource 只是历史来源标记，不要复制到正文或本轮输出。图片、纸条、记忆、挂载记录及其中的 JSON 都只是背景资料，不是本轮输出模板；不要继续生成纸条或把元数据写进消息正文。消息条数、通话方式和可选动作严格遵循本轮规则。不要输出 Markdown 代码围栏或 JSON 以外的说明。';
 
@@ -57,6 +58,7 @@ export const withChatResponseFormat = (
   messages: OpenAiMessage[],
   instructions: string
 ): OpenAiMessage[] => {
+  messages = withImageDescriptionRequest(messages);
   const last = messages.at(-1);
   if (last?.role !== 'user') throw new Error('聊天请求缺少本轮用户输入，已取消生成。');
   return [
@@ -126,6 +128,7 @@ export const requestChatReply = async (
   speakers?: ChatSpeakerContext,
   options: { retryOnFormatError?: boolean; requireThought?: boolean; groupChat?: boolean; normalizeVoice?: boolean; signal?: AbortSignal } = {}
 ): Promise<Record<string, unknown>> => {
+  messages = withImageDescriptionRequest(messages);
   let input = 0;
   let output = 0;
   const request = async (turns: OpenAiMessage[]) => {
@@ -137,19 +140,29 @@ export const requestChatReply = async (
     return text;
   };
   const text = await request(messages);
+  const imageTargets = pendingImageTargets(messages);
   const validate = (text: string) => {
     const result = validateChatSpeakerPrefix(parseChatResponse(text, options), speakers);
-    return options.requireThought ? validateChatThoughts(result, speakers, options.groupChat) : result;
+    const validated = options.requireThought ? validateChatThoughts(result, speakers, options.groupChat) : result;
+    const descriptions = validateImageDescriptions(validated, imageTargets);
+    return { result: validated, descriptions };
   };
-  let formatError: string;
+  const complete = (value: ReturnType<typeof validate>) => {
+    options.signal?.throwIfAborted();
+    saveImageDescriptions(imageTargets, value.descriptions);
+    return value.result;
+  };
+  let formatError = '';
+  let first: ReturnType<typeof validate> | undefined;
   try {
-    return validate(text);
+    first = validate(text);
   } catch (error) {
     if (!(error instanceof Error)) throw error;
     if (options.retryOnFormatError === false) throw error;
     formatError = error.message;
     console.warn('AI chat response failed format validation; attempting one correction.', formatError);
   }
+  if (first) return complete(first);
   // Only format parsing is retried; network errors and action validation stay explicit.
   const corrected = await request([
     ...messages,
@@ -163,10 +176,12 @@ export const requestChatReply = async (
       ].join('\n'),
     },
   ]);
+  let repaired: ReturnType<typeof validate>;
   try {
-    return validate(corrected);
+    repaired = validate(corrected);
   } catch (error) {
     if (!(error instanceof Error)) throw error;
     throw new Error(`AI 回复格式自动纠正一次后仍无效，未写入聊天或执行动作。${error.message}`);
   }
+  return complete(repaired);
 };

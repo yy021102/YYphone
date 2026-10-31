@@ -1,4 +1,5 @@
 import { readStoredValue, writeStoredValue } from './localStorage';
+import { imageDescriptionText } from './imageDescriptions';
 import { readWechatChatsRaw } from './memoryData';
 import { archiveCursorsForWrite, readArchiveCursors, readArchiveRecords, writeArchiveRecords } from './memoryArchives';
 import { resolveChatHistoryCount } from './chatHistory';
@@ -139,6 +140,10 @@ export const describeForSummary = (m: Record<string, unknown>, maxLength = 300):
   const detail = clip(m.aiContext, maxLength === Infinity ? Infinity : 320);
   const text = clip(m.text, maxLength);
   switch (m.kind) {
+    case 'image': {
+      const description = imageDescriptionText(m);
+      return description ? `[真实图片内容记录] ${clip(`${description}${text && text !== '拍摄的照片' ? `；附言：${text}` : ''}`, maxLength)}` : text || '[图片]';
+    }
     case 'couple-letter':
       return `[情书「${title || '给你的一封信'}」] ${clip(m.content, maxLength)}`;
     case 'context-note':

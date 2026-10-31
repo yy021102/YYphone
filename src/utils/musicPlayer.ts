@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import { deleteAudioBlob, getAudioBlob, saveAudioBlob } from './audioStorage';
 import { readStoredValue, writeStoredValue } from './localStorage';
+import { musicSongUrl, NETEASE_SESSION_EVENT, readMusicSession, type NeteaseSong } from './neteaseMusic';
 import {
   isMusicSettings,
   isMusicTrackList,
@@ -40,6 +41,9 @@ let audio: HTMLAudioElement | null = null;
 let loadedTrackId = '';
 let objectUrl = '';
 let loadToken = 0;
+let playAttempt = 0;
+let remoteController: AbortController | null = null;
+let remoteLoadedAt = 0;
 let lastSnapshotAt = 0;
 const listeners = new Set<() => void>();
 
@@ -84,6 +88,12 @@ const saveSettings = () => {
 const ensureLoaded = () => {
   if (loaded) return;
   loaded = true;
+  window.addEventListener?.(NETEASE_SESSION_EVENT, () => {
+    if (!readMusicSession() && currentTrack()?.source === 'netease') {
+      stopAndUnload();
+      saveSnapshot();
+    }
+  });
   const tracks = readStoredValue(MUSIC_TRACKS_KEY, [] as MusicTrack[], isMusicTrackList);
   const settings = readStoredValue(
     MUSIC_SETTINGS_KEY,
@@ -141,7 +151,8 @@ const getAudio = () => {
   element.addEventListener('durationchange', syncDuration);
   element.addEventListener('error', () => {
     if (!element.src) return;
-    setState({ isPlaying: false, error: '无法播放该音频，请检查链接或文件。' });
+    loadedTrackId = '';
+    setState({ isPlaying: false, error: currentTrack()?.source === 'netease' ? '这首歌播放失败，可重试或换一首。' : '无法播放该音频，请检查链接或文件。' });
     saveSnapshot();
   });
   audio = element;
@@ -155,8 +166,10 @@ const releaseObjectUrl = () => {
 
 const prepareTrack = async (track: MusicTrack) => {
   const element = getAudio();
-  if (loadedTrackId === track.id) return element;
   const token = ++loadToken;
+  remoteController?.abort();
+  remoteController = null;
+  if (loadedTrackId === track.id && (track.source !== 'netease' || Date.now() - remoteLoadedAt < 10 * 60_000)) return element;
   element.pause();
   let source = track.url ?? '';
   let nextObjectUrl = '';
@@ -165,6 +178,9 @@ const prepareTrack = async (track: MusicTrack) => {
     if (!blob) throw new Error('本地音频文件已丢失，请重新上传。');
     nextObjectUrl = URL.createObjectURL(blob);
     source = nextObjectUrl;
+  } else if (track.source === 'netease') {
+    remoteController = new AbortController();
+    source = await musicSongUrl(track.neteaseId!, remoteController.signal);
   }
   if (token !== loadToken) {
     if (nextObjectUrl) URL.revokeObjectURL(nextObjectUrl);
@@ -174,12 +190,16 @@ const prepareTrack = async (track: MusicTrack) => {
   objectUrl = nextObjectUrl;
   element.src = source;
   loadedTrackId = track.id;
+  remoteLoadedAt = Date.now();
   setState({ currentTime: 0, duration: 0, error: '' });
   return element;
 };
 
 const stopAndUnload = () => {
+  playAttempt += 1;
   loadToken += 1;
+  remoteController?.abort();
+  remoteController = null;
   if (audio) {
     audio.pause();
     audio.removeAttribute('src');
@@ -191,12 +211,16 @@ const stopAndUnload = () => {
 };
 
 const playTrack = async (track: MusicTrack) => {
+  const attempt = ++playAttempt;
+  if (audio && state.currentTrackId !== track.id) audio.pause();
+  setState({ currentTrackId: track.id, error: '' });
+  saveSettings();
   try {
     const element = await prepareTrack(track);
-    setState({ currentTrackId: track.id, error: '' });
-    saveSettings();
+    if (attempt !== playAttempt) return;
     await element.play();
   } catch (error) {
+    if (attempt !== playAttempt) return;
     if (error instanceof Error && error.message === '已切换到其他音乐。') return;
     console.error('Could not play audio.', error);
     setState({
@@ -211,6 +235,20 @@ const deriveTitle = (raw: string) =>
   raw.replace(/\.[a-z0-9]{2,5}$/i, '').trim() || '未命名音乐';
 
 export const musicPlayer = {
+  addNeteaseTracks(songs: NeteaseSong[]) {
+    ensureLoaded();
+    const tracks = [...state.tracks];
+    const result: MusicTrack[] = [];
+    for (const song of songs) {
+      const existing = tracks.find(t => t.source === 'netease' && t.neteaseId === song.id);
+      if (existing) { result.push(existing); continue; }
+      const track: MusicTrack = { id: `netease-${song.id}`, title: song.name, source: 'netease', neteaseId: song.id, artists: song.artists, cover: song.cover, createdAt: Date.now() };
+      tracks.push(track); result.push(track);
+    }
+    saveTracks(tracks);
+    if (!state.currentTrackId && result[0]) { setState({ currentTrackId: result[0].id }); saveSettings(); }
+    return result;
+  },
   selectTrack(id: string) {
     ensureLoaded();
     const track = state.tracks.find((item) => item.id === id);

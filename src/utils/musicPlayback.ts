@@ -7,7 +7,10 @@ export const MUSIC_PLAYBACK_KEY = 'yyphone:music-playback';
 export interface MusicTrack {
   id: string;
   title: string;
-  source: 'url' | 'file';
+  source: 'url' | 'file' | 'netease';
+  neteaseId?: number;
+  artists?: string;
+  cover?: string;
   url?: string;
   fileName?: string;
   createdAt: number;
@@ -41,7 +44,9 @@ export const isMusicTrackList = (value: unknown): value is MusicTrack[] =>
       isRecord(track) &&
       typeof track.id === 'string' &&
       typeof track.title === 'string' &&
-      (track.source === 'url' || track.source === 'file') &&
+      (track.source === 'url' || track.source === 'file' || (track.source === 'netease' && Number.isSafeInteger(track.neteaseId) && Number(track.neteaseId) > 0)) &&
+      (track.artists === undefined || typeof track.artists === 'string') &&
+      (track.cover === undefined || typeof track.cover === 'string') &&
       (track.url === undefined || typeof track.url === 'string') &&
       (track.fileName === undefined || typeof track.fileName === 'string') &&
       typeof track.createdAt === 'number'

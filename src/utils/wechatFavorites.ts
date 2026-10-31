@@ -1,9 +1,12 @@
+import { imageDescriptionText, type ChatImageDescription } from './imageDescriptions';
+
 export const WECHAT_FAVORITES_KEY = 'yyphone:wechat-favorites';
 
 export interface FavoriteMessage {
   kind?: string;
   text: string;
   imageUrl?: string;
+  imageDescription?: ChatImageDescription;
   title?: string;
   content?: string;
   source?: string;
@@ -30,7 +33,8 @@ export function isWeChatFavorites(value: unknown): value is WeChatFavorite[] {
 /** Keep an independent content snapshot; do not copy character thoughts or live payment state. */
 export function snapshotFavoriteMessage(message: FavoriteMessage): FavoriteMessage {
   const { kind, text, imageUrl, title, content, source, amount } = message;
-  return { kind, text, imageUrl, title, content, source, amount };
+  return { kind, text, imageUrl, title, content, source, amount,
+    ...(kind === 'image' && imageDescriptionText(message) ? { imageDescription: message.imageDescription } : {}) };
 }
 
 export function favoritePreview(message: FavoriteMessage): string {
@@ -57,11 +61,13 @@ export function favoriteDate(savedAt: string, now = new Date()): string {
 export function favoriteShareContent(favorite: WeChatFavorite): {
   kind: 'text' | 'image' | 'sticker' | 'voice' | 'link'; text: string;
   imageUrl?: string; title?: string; content?: string; source?: string;
+  imageDescription?: ChatImageDescription;
 } {
   const message = favorite.message;
   if (!message.kind || message.kind === 'text') return { kind: 'text', text: message.text };
   if (message.kind === 'image' || message.kind === 'sticker' || message.kind === 'voice') {
-    return { kind: message.kind, text: message.text, ...(message.imageUrl ? { imageUrl: message.imageUrl } : {}) };
+    return { kind: message.kind, text: message.text, ...(message.imageUrl ? { imageUrl: message.imageUrl } : {}),
+      ...(message.kind === 'image' && imageDescriptionText(message) ? { imageDescription: message.imageDescription } : {}) };
   }
   return { kind: 'link', text: message.title || favoritePreview(message), title: message.title || '收藏内容',
     content: favoritePreview(message), source: `收藏 · ${favorite.sourceChatTitle}` };

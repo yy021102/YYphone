@@ -1,0 +1,13 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "installCommand": "npm ci --omit=dev --ignore-scripts",
+  "buildCommand": "",
+  "outputDirectory": "public",
+  "functions": {
+    "api/index.mjs": { "maxDuration": 30, "includeFiles": "node_modules/**" }
+  },
+  "rewrites": [
+    { "source": "/:path*", "destination": "/api/index?musicPath=:path*" }
+  ]
+}
