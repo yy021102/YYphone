@@ -180,7 +180,7 @@ export default function AstrologyApp({ userName, people, onBack, onInterpret, on
             <label>档案归属<select value={draft.actorId ?? ''} onChange={event => setDraft({ ...draft, actorId: event.target.value || undefined })}><option value="">自己 / 其他手动档案</option>
               {draft.actorId && !people.some(person => person.id === draft.actorId) && <option value={draft.actorId}>原角色已移除（保留快照）</option>}
               {people.map(person => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label>
-            {draft.creative && <section className="stellar-warning"><strong>角色创作设定 · 不是出生时间鉴定</strong><p>{draft.creative.reason}</p><p>以下字段由创作补全，仍可修改：{draft.creative.assumedFields.map(field => ({ date: '生日（含年份）', time: '时间', place: '地点' })[field]).join('、') || '用户已确认具体设定'}。{draft.creative.targetAscendant !== undefined && `最初目标上升：${ZODIAC[draft.creative.targetAscendant][0]}，修改日期或地点后可能改变。`}</p>
+            {draft.creative && <section className="stellar-warning"><strong>角色补设说明</strong><p>{draft.creative.reason}</p><p>以下字段由创作补全，仍可修改：{draft.creative.assumedFields.map(field => ({ date: '生日（含年份）', time: '时间', place: '地点' })[field]).join('、') || '用户已确认具体设定'}。{draft.creative.targetAscendant !== undefined && `最初目标上升：${ZODIAC[draft.creative.targetAscendant][0]}，修改日期或地点后可能改变。`}</p>
               <label className="stellar-checkbox"><input type="checkbox" checked={draft.creative.assumedFields.length === 0} onChange={event => setDraft({ ...draft, creative: draft.creative && { ...draft.creative, assumedFields: event.target.checked ? [] : ['date', 'time', 'place'] } })} /><span>我已核对并采用这些具体设定（仍保留创作来源）</span></label></section>}
             <label>公历出生日期<input type="date" required min="1900-01-01" max="2100-12-31" value={draft.date} onChange={event => setDraft({ ...draft, date: event.target.value })} /></label>
             <label className="stellar-checkbox"><input type="checkbox" checked={!draft.timeKnown} onChange={event => setDraft({ ...draft, timeKnown: !event.target.checked })} /><span>不确定出生时间，使用当地中午 12:00 参考盘</span></label>
@@ -211,7 +211,7 @@ export default function AstrologyApp({ userName, people, onBack, onInterpret, on
       </>}
       {view === 'result' && (record ? <>
         <header className="stellar-heading stellar-result-heading"><span className="stellar-kicker">{record.readingMode === 'question' ? 'ASK THE STARS' : 'A PORTRAIT OF YOUR SKY'}</span><h2>{record.profile.name}的<br /><em>{record.readingMode === 'question' ? '星空问答' : '星空来信'}</em></h2><p>{record.profile.date} · {record.profile.time}{record.chart.noonReference ? ' 当地午间参考' : ' 当地时间'}<br />{record.profile.place.name} · {record.profile.place.timeZone}</p><span className="stellar-method-badge">热带黄道 · 整宫制</span></header>
-        {record.profile.creative && <p className="stellar-warning" role="note">角色创作设定，不是真实出生时间鉴定。{record.profile.creative.reason} 性格联想不能反推真实时间；后续比较盘和每日解读也沿用这套设定。</p>}
+        {record.profile.creative && <details className="stellar-details"><summary>角色补设说明 · 查看档案来源</summary><p>{record.profile.creative.reason}</p><p>补设字段：{record.profile.creative.assumedFields.map(field => ({ date: '生日（含年份）', time: '时间', place: '地点' })[field]).join('、') || '用户已核对采用'}。后续比较盘与每日解读沿用这份档案。</p></details>}
         {record.chart.noonReference && <p className="stellar-warning" role="note">{noonWarning}</p>}
         <NatalWheel chart={record.chart} />
         <div className="stellar-big-three">
@@ -222,7 +222,7 @@ export default function AstrologyApp({ userName, people, onBack, onInterpret, on
         <section className="stellar-paper"><span className="stellar-kicker">A GENTLE START</span><h3>先从这三个角度认识自己</h3>
           {record.chart.planets.slice(0, 2).map((planet, index) => <p key={planet.id}><strong>{PLANETS[index].name} · {ZODIAC[signIndex(planet.longitude)][0]}</strong><br />{PLANETS[index].theme}，可以借「{ZODIAC[signIndex(planet.longitude)][3]}」这些关键词来思考。{planet.possibleSigns.length > 1 && `当天可能跨越${planet.possibleSigns.map(sign => ZODIAC[sign][0]).join(' / ')}，不要只认定午间星座。`}</p>)}
           <p><strong>上升 · {ZODIAC[signIndex(record.chart.ascendant)][0]}</strong><br />{record.chart.noonReference ? '这是午间的地平线位置，不能用来认定你的真实上升或性格。' : `可以从「${ZODIAC[signIndex(record.chart.ascendant)][3]}」的意象，观察自己如何开启一段关系或进入新环境。`}</p>
-          <p className="stellar-help">这些是固定的象征性关键词，不是对你的科学测评。符合你的感受才值得留下，不符合也无需勉强。</p>
+          <p className="stellar-help">把有共鸣的关键词留下，慢慢写成属于自己的星空来信。</p>
         </section>
         <section><div className="stellar-section-heading"><h3>十星体的位置</h3><span>{record.chart.noonReference ? '全部为午间参考' : '地心黄经'}</span></div>
           <div className="stellar-placements">{record.chart.planets.map((planet, index) => <article key={planet.id}><span className="stellar-planet-glyph">{PLANETS[index].glyph}</span><div><strong>{PLANETS[index].name}<small>{planet.retrograde && ' ℞'}</small></strong><p>{zodiacPosition(planet.longitude)} · 第 {planet.house} 宫{record.chart.noonReference && '（参考）'}</p><small>{PLANETS[index].theme}{record.chart.noonReference && ` · 当天采样星座：${planet.possibleSigns.map(sign => ZODIAC[sign][0]).join(' / ')}`}</small></div></article>)}</div>

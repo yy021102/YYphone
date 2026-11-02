@@ -6,6 +6,7 @@ export interface CompressImageOptions {
   maxBytes?: number;
   initialQuality?: number;
   minQuality?: number;
+  preserveTransparency?: boolean;
 }
 
 export async function compressImage(file: File, options: CompressImageOptions = {}): Promise<string> {
@@ -38,11 +39,12 @@ export async function compressImage(file: File, options: CompressImageOptions = 
           context.drawImage(image, 0, 0, canvas.width, canvas.height);
           const minQuality = options.minQuality ?? 0.35;
           let quality = options.initialQuality ?? 0.7;
-          let dataUrl = canvas.toDataURL('image/jpeg', quality);
+          const format = options.preserveTransparency ? 'image/webp' : 'image/jpeg';
+          let dataUrl = canvas.toDataURL(format, quality);
 
           while (dataUrlBytes(dataUrl) > maxBytes && quality > minQuality) {
             quality = Math.max(minQuality, quality - 0.1);
-            dataUrl = canvas.toDataURL('image/jpeg', quality);
+            dataUrl = canvas.toDataURL(format, quality);
           }
 
           if (dataUrlBytes(dataUrl) <= maxBytes) {

@@ -34,7 +34,7 @@ export default function CharacterBirthDraft({ people, profileId, initialActorId,
   };
   return <section className="stellar-paper stellar-character-draft">
     <span className="stellar-kicker">LET THEM WRITE THEIR SKY</span><h3>让角色填写 TA 的星空</h3>
-    <p className="stellar-help">会将角色人设、相关玩家与世界书设定、填写需求发送到你配置的 API，不附带聊天历史。优先沿用明确生日、时间；缺失信息标为创作补全。缺时间时，AI 只建议上升星座，程序再寻找相容的时间。这不是性格推算或校正真实出生时刻。</p>
+    <p className="stellar-help">会将角色人设、相关玩家与世界书设定、填写需求发送到你配置的 API，不附带聊天历史。优先沿用明确生日、时间；缺失信息可按角色补设。缺时间时，AI 建议上升星座，程序再寻找相容的时间，补设字段会留在档案中供你核对。</p>
     <label>填写角色<select value={actorId} disabled={busy} onChange={event => { cancel(); setActorId(event.target.value); }}><option value="">请选择角色</option>{people.map(person => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label>
     <label>补充要求<textarea rows={2} maxLength={500} disabled={busy} value={requirements} onChange={event => setRequirements(event.target.value)} placeholder="例如：沿用设定中的生日，时间按外冷内热的创作印象来。" /></label>
     {error && <p className="stellar-alert" role="alert">{error}</p>}

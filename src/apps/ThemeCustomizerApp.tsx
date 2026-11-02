@@ -29,6 +29,7 @@ import { compressImageFile, compressWallpaper } from '../utils/imageFile';
 import { readSetting, saveSetting, SETTINGS_KEYS } from '../utils/settings';
 import { isHomeAppearance, isDesktopAppearance, portableHomeBeauty } from '../utils/homeAppearance';
 import { DEFAULT_LOCK_APPEARANCE, isLockScreenAppearance } from '../utils/lockAppearance';
+import { isFreeDesktopLayout } from '../utils/freeDesktop';
 
 interface ThemeCustomizerAppProps {
   fontSettings: FontSettings;
@@ -54,7 +55,8 @@ const isBeautySettings = (value: unknown): value is BeautySettings => {
   return (
     (settings.desktopAppearance === undefined || isDesktopAppearance(settings.desktopAppearance)) &&
     typeof settings.themeId === 'string' &&
-    (settings.homeStyle === undefined || settings.homeStyle === 'classic' || settings.homeStyle === 'minimal' || settings.homeStyle === 'moonlit' || settings.homeStyle === 'halloween') &&
+    (settings.homeStyle === undefined || settings.homeStyle === 'classic' || settings.homeStyle === 'minimal' || settings.homeStyle === 'moonlit' || settings.homeStyle === 'halloween' || settings.homeStyle === 'free') &&
+    (settings.freeDesktop === undefined || isFreeDesktopLayout(settings.freeDesktop)) &&
     THEMES.some((theme) => theme.id === settings.themeId) &&
     typeof settings.wallpaperId === 'string' &&
     (WALLPAPERS.some((wallpaper) => wallpaper.id === settings.wallpaperId) || settings.wallpaperId === 'deep-sea-frost') &&
@@ -64,7 +66,7 @@ const isBeautySettings = (value: unknown): value is BeautySettings => {
     !!settings.appIcons &&
     typeof settings.appIcons === 'object' &&
     Object.entries(settings.appIcons).every(
-      ([id, url]) => (id === 'little-p' || ALL_APPS.some((app) => app.id === id)) && typeof url === 'string'
+      ([id, url]) => (id === 'little-p' || id === 'games' || ALL_APPS.some((app) => app.id === id)) && typeof url === 'string'
     ) &&
     (settings.homeAppearance === undefined || isHomeAppearance(settings.homeAppearance)) &&
     (settings.lockScreenAppearance === undefined || isLockScreenAppearance(settings.lockScreenAppearance))
@@ -354,6 +356,14 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
             <ChevronDown size={13} className="shrink-0 text-slate-400 transition-transform group-open:rotate-180" />
           </summary>
           <h3 className="mt-4 px-0.5 text-[11px] font-semibold text-[#2C4A5C]">主页面风格</h3>
+          <p className="mt-2 text-[10px] leading-5 text-slate-400">两页桌面共用风格、壁纸与外观设置，左右滑动或点圆点切换。自由桌面还在完善中，目前可进入试用。内置五款原创造型，换图填字就能用，大小和配色设置可选。可长按编辑、跨页拖动，组件宽高按网格调整，每个组件都可上传独立背景图；资料卡、音乐和日历各至少保留一个。原有四套布局仍可切回，自由布局会保留。图标、自由布局与组件图片随美化一起保存、导入和导出，不包含组件关联的聊天、日历和音乐文件。</p>
+          <button type="button" aria-pressed={currentSettings.homeStyle === 'free'} onClick={() => {
+            if (onApplyPreset({ ...currentSettings, homeStyle: 'free' })) { setStatus('已进入自由桌面试用，还在完善中。长按空白或图标开始布置。'); setError(''); }
+            else setError('自由桌面保存失败。');
+          }} className="mt-3 w-full rounded-xl border border-white bg-white/60 p-3 text-left">
+            <strong className="flex flex-wrap items-center gap-2 text-xs text-slate-600">自由 · 随心布置<span className="rounded-full bg-amber-50 px-2 py-0.5 text-[9px] font-normal text-amber-700">还在完善中</span></strong>
+            <span className="mt-1 block text-[10px] text-slate-400">可进入试用 · 八类组件 · 五款原创造型，换图填字即用</span>
+          </button>
           <div className="mt-3 grid grid-cols-2 gap-2">{([{ id: 'classic', name: '清新 · 轻透', colors: ['#dcecf8', '#f3dce7'], description: '渐变毛玻璃 · 组件桌面' }, { id: 'minimal', name: '素简 · 纸白', colors: ['#f4f2ee', '#55544f'], description: '暖白与石墨 · 简约布局' }, { id: 'moonlit', name: '月光 · 花笺', colors: ['#ede9f4', '#b7a5d0'], description: '月白雾紫 · 花枝信笺' }, ...(halloweenUnlocked ? [{ id: 'halloween' as const, name: '万圣 · 南瓜夜宴', colors: ['#2b263e', '#dfb996'], description: '夜间糖果铺 · 橱窗货架' }] : [])] as const).map(style => <button type="button" key={style.id} aria-pressed={(currentSettings.homeStyle ?? 'classic') === style.id} onClick={() => { if (onApplyPreset({ ...currentSettings, homeStyle: style.id })) { setStatus(`已应用主页面风格「${style.name}」。`); setError(''); } else setError('主页面风格保存失败。'); }} className={`rounded-xl border p-3 text-left ${(currentSettings.homeStyle ?? 'classic') === style.id ? 'border-slate-400 ring-1 ring-slate-300' : 'border-white bg-white/50'}`}>{style.id === 'halloween' ? <HalloweenThemePreview/> : <div className="mb-3 flex h-16 items-center justify-center gap-1 rounded-lg" style={{ background: style.colors[0] }}>{[0, 1, 2, 3].map(i => <span key={i} className="h-5 w-5 rounded-md border border-white/80" style={{ background: style.colors[1], opacity: .4 + i * .15 }} />)}</div>}<strong className="block text-[11px] font-semibold text-slate-600">{style.name}</strong><span className="mt-1 block text-[9px] text-slate-400">{style.description}</span></button>)}</div>
           <h3 className="mt-4 px-0.5 text-[11px] font-semibold text-[#2C4A5C]">系统主题配色</h3>
           <div className="mt-3 grid grid-cols-3 gap-2">

@@ -253,7 +253,7 @@ export function DivinationApp({ userName, people, onInterpret, onShare }: Props)
   return (
     <div className="tarot-root" ref={rootRef}>
       {view === 'lobby' && <>
-        <div className="tarot-lobby-top"><span>NOCTURNE</span><button type="button" onClick={() => go('history')}><History size={14} />我的手记</button></div>
+        <div className="tarot-lobby-top"><span>NOCTURNE</span></div>
         <header className="tarot-lobby-hero"><p className="tarot-eyebrow">A QUIET MOMENT FOR YOURSELF</p><h2>把心事，<br />交给一点<span>星光。</span></h2><p>不必先懂规则，<br />从一张牌、一个小问题开始。</p><CelestialSeal /></header>
         <div className="tarot-content">
           <button type="button" className="tarot-lobby-card" onClick={() => go('setup')}>

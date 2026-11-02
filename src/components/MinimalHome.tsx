@@ -4,7 +4,7 @@ import type { AppIconOverrides, AppId, AppMetadata, UserProfile } from '../types
 import { ListenTogetherWidget } from './ListenTogetherWidget';
 import { frameGradient } from '../utils/avatarFrame';
 
-export function MinimalHome({ userProfile, apps, dockApps, appIcons, onOpenApp, renderIcon, onEditProfile, onOpenNotes, variant = 'minimal', wallpaperUrl }: { variant?: 'minimal' | 'moonlit'; wallpaperUrl?: string; userProfile: UserProfile; apps: AppMetadata[]; dockApps: AppMetadata[]; appIcons: AppIconOverrides; onOpenApp: (id: AppId) => void; renderIcon: (name: string, className?: string) => ReactNode; onEditProfile: () => void; onOpenNotes: () => void }) {
+export function MinimalHome({ userProfile, apps, dockApps, appIcons, onOpenApp, renderIcon, onEditProfile, onOpenNotes, variant = 'minimal', wallpaperUrl, navigation }: { variant?: 'minimal' | 'moonlit'; wallpaperUrl?: string; userProfile: UserProfile; apps: AppMetadata[]; dockApps: AppMetadata[]; appIcons: AppIconOverrides; onOpenApp: (id: AppId) => void; renderIcon: (name: string, className?: string) => ReactNode; onEditProfile: () => void; onOpenNotes: () => void; navigation?: ReactNode }) {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => { const timer = window.setInterval(() => setNow(new Date()), 15000); return () => window.clearInterval(timer); }, []);
   const appButton = (app: AppMetadata) => <button type="button" key={app.id} onClick={() => onOpenApp(app.id)} className="minimal-app"><span className={`minimal-app-tile${appIcons[app.id] ? ' has-custom-icon' : ''}`}>{appIcons[app.id] ? <img src={appIcons[app.id]} alt="" /> : renderIcon(app.iconName, 'minimal-app-glyph')}{!!app.badge && <small className="minimal-app-badge">{app.badge}</small>}</span><span>{app.name}</span></button>;
@@ -20,5 +20,6 @@ export function MinimalHome({ userProfile, apps, dockApps, appIcons, onOpenApp, 
       <footer className="minimal-home-caption"><span>{userProfile.stats.moments} 动态 / {userProfile.stats.notes} 随笔</span><span>慢慢生活</span></footer>
     </div>
     <nav className="minimal-dock" aria-label="系统应用">{dockApps.map(appButton)}</nav>
+    {navigation}
   </main>;
 }

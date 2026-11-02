@@ -12,6 +12,11 @@
 .soft-app-opening-world_book { --opening-ink:#9787aa; --opening-muted:#b0a1c0; --opening-dot:#cbbbdc; background:radial-gradient(ellipse at 0 10%,#e7e0f1cc,transparent 65%),radial-gradient(ellipse at 100% 85%,#e4eaf4bf,transparent 65%),#f8f6fc; }
 .soft-app-opening-inventory { --opening-ink:#a9958d; --opening-muted:#b9aaa1; --opening-dot:#d5c5bc; background:radial-gradient(ellipse at 0 10%,#f1e5ddcc,transparent 65%),radial-gradient(ellipse at 100% 85%,#e9e2f0bf,transparent 65%),#fcf9f6; }
 .soft-app-opening-calendar { --opening-ink:#a08d9f; --opening-muted:#b6a6b4; --opening-dot:#d5c2d0; background:radial-gradient(ellipse at 0 10%,#f1e3edcc,transparent 65%),radial-gradient(ellipse at 100% 85%,#e5eee8bf,transparent 65%),#faf8fa; }
+.soft-app-opening-text-adventure { --opening-ink:#95839f;--opening-muted:#b19bb7;--opening-dot:#c9b5d3;background:radial-gradient(ellipse at 5% 10%,#eadff0cc,transparent 65%),radial-gradient(ellipse at 95% 85%,#f1e8d4bb,transparent 65%),#faf7f5; }
+.soft-app-opening-time-capsule { --opening-ink:#8499b1;--opening-muted:#a5b3c4;--opening-dot:#c2cedd;background:radial-gradient(ellipse at 5% 10%,#e0e9f4dd,transparent 65%),radial-gradient(ellipse at 95% 85%,#eee5d9bb,transparent 65%),#f7f8fc; }
+.soft-app-opening-divination { --opening-ink:#9d89ac;--opening-muted:#b4a1bf;--opening-dot:#cfbedb;background:radial-gradient(ellipse at 5% 10%,#eae0f3dd,transparent 65%),radial-gradient(ellipse at 95% 85%,#f2e7d4bb,transparent 65%),#faf7fc; }
+.soft-app-opening-little-sip { --opening-ink:#8f9e7c;--opening-muted:#abb69d;--opening-dot:#c4d2b4;background:radial-gradient(ellipse at 5% 10%,#e6efd9dd,transparent 65%),radial-gradient(ellipse at 95% 85%,#f2e5d6bb,transparent 65%),#fafbf5; }
+.soft-app-opening-character-perspective { --opening-ink:#a18a9e;--opening-muted:#bba5b6;--opening-dot:#d4bece;background:radial-gradient(ellipse at 5% 10%,#eee1ebdd,transparent 65%),radial-gradient(ellipse at 95% 85%,#e4ede6bb,transparent 65%),#fcf8fa; }
 .every-opening-art { color:var(--opening-dot); }
 .every-opening-float { animation:soft-opening-float 5.6s ease-in-out infinite; }
 .every-opening-bob { animation:soft-opening-float 4.8s ease-in-out -2s infinite; }

@@ -22,6 +22,9 @@ import { BirthdayRuntime } from './components/BirthdayRuntime';
 import { HalloweenRuntime } from './components/HalloweenRuntime';
 import { birthdayIsDue, readBirthdaySettings, readBirthdaySeen } from './utils/birthday';
 import { HomeScreen } from './components/HomeScreen';
+import { isDesktopActivity, type DesktopPage } from './utils/desktopNavigation';
+import { isFreeDesktopLayout } from './utils/freeDesktop';
+import { AppHeader } from './components/AppHeader';
 import { AppLoading } from './components/EveryAppLoading';
 import { LittlePPanel } from './components/LittlePPanel';
 import { LittlePLauncher } from './components/LittlePLauncher';
@@ -89,7 +92,8 @@ const isBeautySettings = (value: unknown): value is BeautySettings => {
   return (
     (settings.desktopAppearance === undefined || isDesktopAppearance(settings.desktopAppearance)) &&
     typeof settings.themeId === 'string' &&
-    (settings.homeStyle === undefined || settings.homeStyle === 'classic' || settings.homeStyle === 'minimal' || settings.homeStyle === 'moonlit' || settings.homeStyle === 'halloween') &&
+    (settings.homeStyle === undefined || settings.homeStyle === 'classic' || settings.homeStyle === 'minimal' || settings.homeStyle === 'moonlit' || settings.homeStyle === 'halloween' || settings.homeStyle === 'free') &&
+    (settings.freeDesktop === undefined || isFreeDesktopLayout(settings.freeDesktop)) &&
     typeof settings.wallpaperId === 'string' &&
     !!settings.wallpapers &&
     typeof settings.wallpapers.lockScreen === 'string' &&
@@ -233,6 +237,9 @@ export default function App() {
   );
   const [isLocked, setIsLocked] = useState(() => lockSettings.mode !== 'none');
   const [activeApp, setActiveApp] = useState<AppId | null>(null);
+  const [desktopPage, setDesktopPage] = useState<DesktopPage>(0);
+  const isActivityOpen = isDesktopActivity(activeApp);
+  const isWeChatSurface = activeApp === 'wechat' || isActivityOpen;
   const [birthdayOpen, setBirthdayOpen] = useState(false);
   const [littlePOpen, setLittlePOpen] = useState(false);
   const [littlePVisible, setLittlePVisible] = useState(() =>
@@ -570,7 +577,7 @@ export default function App() {
         saveSetting(SETTINGS_KEYS.userProfile, nextProfile);
         setUserProfile(nextProfile);
       }
-      return handleSaveBeautySettings(settings);
+      return handleSaveBeautySettings({ ...settings, freeDesktop: settings.freeDesktop ?? beautySettings.freeDesktop });
     } catch (error) {
       console.error('Could not apply the complete home beauty preset.', error);
       return false;
@@ -605,6 +612,7 @@ export default function App() {
         data-desktop-panels={!activeApp && !isLocked && beautySettings.desktopAppearance?.panelOpacity !== undefined ? '' : undefined}
         data-desktop-icons={!activeApp && !isLocked && beautySettings.desktopAppearance?.iconOpacity !== undefined ? '' : undefined}
         data-home-style={!activeApp && !isLocked ? beautySettings.homeStyle : undefined}
+        data-home-page={!activeApp && !isLocked ? desktopPage : undefined}
         className={`w-full md:w-[min(412px,calc(93vh*9/19.5))] h-full md:h-[min(850px,93vh)] md:rounded-[44px] overflow-hidden relative flex flex-col shadow-[0_25px_80px_rgba(0,0,0,0.7),0_0_0_1px_rgba(255,255,255,0.14)] transition-all ${
           activeApp || isLocked
             ? 'p-0'
@@ -659,7 +667,7 @@ export default function App() {
               appearance={beautySettings.lockScreenAppearance}
               password={lockSettings.mode === 'password' ? lockSettings.password : undefined}
             />
-          ) : activeApp === 'wechat' ? null : activeApp ? (
+          ) : isWeChatSurface ? null : activeApp ? (
             /* Active Sub-App View: Header is safely padded below the notch, back arrow always clickable */
             <div className="w-full h-full flex flex-col overflow-hidden animate-fadeIn">
               <Suspense
@@ -725,12 +733,16 @@ export default function App() {
               {activeApp === 'inventory' && (
                 <InventoryApp onBack={handleBackToHome} />
               )}
+              {activeApp === 'kitchen' && <div className="flex h-full flex-col bg-[#faf8f3]"><AppHeader title="下厨房" onBack={handleBackToHome} /><main className="flex-1" aria-label="下厨房" /></div>}
               </Suspense>
             </div>
           ) : (
-            /* Desktop / Home Screen (Strictly fitted within 1 screen, never scrolls, square blocks) */
             <HomeScreen
+              page={desktopPage}
+              onPageChange={setDesktopPage}
               homeStyle={beautySettings.homeStyle}
+              freeDesktop={beautySettings.freeDesktop}
+              onSaveFreeDesktop={layout => handleSaveBeautySettings({ ...beautySettings, freeDesktop: layout })}
               wallpaperUrl={beautySettings.wallpapers.homeScreen}
               userProfile={userProfile}
               apps={MAIN_GRID_APPS}
@@ -741,11 +753,12 @@ export default function App() {
             />
           )}
           <div
-            className={activeApp === 'wechat' && !isLocked ? 'flex min-h-0 flex-1 flex-col bg-white' : 'hidden'}
-            aria-hidden={activeApp !== 'wechat' || isLocked}
+            className={isWeChatSurface && !isLocked ? 'flex min-h-0 flex-1 flex-col bg-white' : 'hidden'}
+            aria-hidden={!isWeChatSurface || isLocked}
           >
-            <Suspense fallback={activeApp === 'wechat' && !isLocked ? <AppLoading app="wechat" onBack={handleBackToHome}/> : null}>
+            <Suspense fallback={isWeChatSurface && !isLocked ? <AppLoading app={activeApp ?? 'wechat'} onBack={handleBackToHome}/> : null}>
               <WeChatApp
+                activityPage={isActivityOpen ? activeApp : undefined}
                 onBack={handleBackToHome}
                 isVisible={activeApp === 'wechat' && !isLocked}
                 followSystemDark={followSystemDark}

@@ -57,7 +57,7 @@ export function characterProfileFromProposal(proposal: CharacterBirthProposal, a
   if (!proposal.evidence.place.includes(proposal.city)) assumedFields.add('place');
   const profile: BirthProfile = { id, actorId: actor.id, name: actor.name, date: proposal.date, time: proposal.time ?? '12:00', timeKnown: true,
     fold: 'reject', place: { ...place }, creative: { generatedAt: new Date().toISOString(), assumedFields: [...assumedFields],
-      reason: `${proposal.reason}\n生日依据：${proposal.evidence.date || '创作补全（含缺失年份）'}；时间依据：${proposal.evidence.time || '按上升目标寻找的虚构时间'}；地点依据：${proposal.evidence.place || '近似城市创作补全，请核对'}。`,
+      reason: `${proposal.reason}\n生日依据：${proposal.evidence.date || '补设（含缺失年份）'}；时间依据：${proposal.evidence.time || '按上升目标匹配的补设时间'}；地点依据：${proposal.evidence.place || '近似城市补设，请核对'}。`,
       ...(proposal.time === null && proposal.targetAscendant !== null ? { targetAscendant: proposal.targetAscendant } : {}) } };
   validateBirthProfile(profile);
   if (proposal.time !== null) { birthInstant(profile); return profile; }

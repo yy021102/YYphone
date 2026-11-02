@@ -80,6 +80,8 @@
 .sip-proposal { margin-top:20px;padding-top:18px;border-top:1px dashed #d8c6c6; }
 .sip-proposal > strong { color:#a57f89;font-size:calc(16px * var(--font-scale,1));font-weight:500; }
 .sip-proposal > p { margin-top:10px;color:#9e9686;white-space:pre-wrap; }
+.sip-proposal .sip-actions { display:grid;grid-template-columns:repeat(2,minmax(0,1fr)); }
+.sip-proposal .sip-actions > .sip-primary { grid-column:1/-1; }
 .sip-app pre { margin:14px 0 0;white-space:pre-wrap;overflow-wrap:anywhere;font-family:inherit;font-size:calc(11px * var(--font-scale,1));line-height:2.1;color:#8e9782; }
 .sip-checkbox { display:flex;align-items:flex-start;gap:9px;margin-top:17px;color:#939e87;font-size:calc(10px * var(--font-scale,1)); }
 .sip-checkbox input { width:15px;height:15px;flex-shrink:0;margin-top:4px;accent-color:#9bb18e; }

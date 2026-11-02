@@ -1,0 +1,44 @@
+.desktop-pager { width:100%;height:100%;min-height:0;display:flex;flex-direction:column;touch-action:pan-y; }
+.desktop-pager :is(.home-desktop,.leisure-scroll,.minimal-home-scroll,.hw-market-scroll) { touch-action:pan-y; }
+[data-home-page="1"] .little-p-launcher-zone .little-p-launcher { top:280px;bottom:auto; }
+.desktop-page-navigation { display:flex;align-items:center;justify-content:center;gap:2px;flex-shrink:0;position:relative;z-index:2;min-height:28px;padding-bottom:max(4px,env(safe-area-inset-bottom,0px));color:#7a8e9b; }
+.desktop-page-navigation button { display:grid;place-items:center;width:26px;height:24px;border-radius:20px;cursor:pointer; }
+.desktop-page-navigation i { width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.3; }
+.desktop-page-navigation button[aria-current] i { opacity:.9; }
+.desktop-page-navigation button:focus-visible { outline:2px solid currentColor;outline-offset:-2px; }
+.leisure-home { --leisure-ink:#5f7c8e;--leisure-muted:#8da2ae;--leisure-panel:rgb(255 255 255 / .4);--leisure-line:rgb(255 255 255 / .8);display:flex;flex-direction:column;width:100%;height:100%;min-height:0;padding:0 16px;color:var(--leisure-ink);isolation:isolate; }
+.leisure-scroll { flex:1;min-height:0;overflow-y:auto;scrollbar-width:none;padding:30px 0 16px; }
+.leisure-app-grid { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));row-gap:22px;column-gap:8px;padding:0 8px; }
+.leisure-app { display:flex;flex-direction:column;align-items:center;gap:7px;min-width:0;cursor:pointer; }
+.leisure-app-icon { position:relative;display:grid;place-items:center;overflow:hidden;width:clamp(46px,14vw,62px);height:clamp(46px,14vw,62px);border:1px solid var(--leisure-line);border-radius:19px;background-color:var(--leisure-panel);box-shadow:0 4px 15px rgb(108 144 168 / .1); }
+.leisure-app-icon img { width:100%;height:100%;object-fit:cover;position:absolute;inset:0; }
+.leisure-app-glyph { width:27px;height:27px;stroke-width:1.6; }
+.leisure-app > span:last-child { font-size:calc(11px * var(--font-scale,1));line-height:1.6;text-align:center;overflow-wrap:anywhere; }
+.leisure-app:active .leisure-app-icon { transform:scale(.94); }
+.leisure-dock { display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;flex-shrink:0;padding:11px 8px 9px;margin-top:3px;border:1px solid var(--leisure-line);border-radius:27px;background:var(--leisure-panel);backdrop-filter:blur(20px); }
+.leisure-dock .leisure-app-icon { width:clamp(39px,11vw,49px);height:clamp(39px,11vw,49px);border-radius:15px; }
+.leisure-dock .leisure-app { gap:3px; }
+.leisure-dock .leisure-app > span:last-child { font-size:calc(10px * var(--font-scale,1)); }
+.leisure-minimal { --leisure-ink:#55544f;--leisure-muted:#9a978e;--leisure-panel:rgb(255 255 255 / .38);--leisure-line:#e4e1d9; }
+.leisure-minimal .leisure-app-icon { border-radius:14px;box-shadow:none; }
+.leisure-minimal .leisure-dock { border-radius:19px; }
+.leisure-moonlit { --leisure-ink:#81738e;--leisure-muted:#aa9bb4;--leisure-panel:rgb(255 252 255 / .5);--leisure-line:rgb(255 253 255 / .85); }
+.leisure-halloween { --leisure-ink:#e1c8b0;--leisure-muted:#b8a0a5;--leisure-panel:rgb(56 45 63 / .65);--leisure-line:#6a5260; }
+.leisure-halloween .leisure-app-icon { background:#473747;border-color:#705363;box-shadow:inset 0 0 0 3px #3a2e3e; }
+.leisure-halloween .desktop-page-navigation { color:var(--leisure-muted); }
+.minimal-home > .desktop-page-navigation { color:var(--minimal-muted); }
+.minimal-home > .minimal-dock { margin-bottom:0; }
+.hw-market > .desktop-page-navigation { color:#b8a0a5; }
+.hw-market-cabinet { display:block; }
+.hw-market-bottom-dock { flex-shrink:0;margin:3px 16px 4px;padding:10px 6px;border:1px solid #6a5260;border-radius:22px;background:#382d3f; }
+.hw-market-bottom-dock.hw-market-tools { display:grid;grid-template-columns:repeat(4,minmax(0,1fr)); }
+.hw-market-bottom-dock .hw-market-app { padding:2px 0;font-size:calc(10px * var(--font-scale,1)); }
+.hw-market-bottom-dock .hw-market-app-icon { width:42px;height:42px; }
+.hw-market-bottom-dock .hw-market-glyph { width:22px;height:22px; }
+[data-desktop-icons] .leisure-app:not(.has-custom-icon) .leisure-app-icon { opacity:var(--desktop-icons); }
+[data-desktop-panels] .leisure-home .leisure-panel { background:rgb(255 255 255 / var(--desktop-panels)) !important;border-color:rgb(255 255 255 / var(--desktop-panels));box-shadow:none;backdrop-filter:none; }
+[data-desktop-panels] .hw-market-bottom-dock { background:rgb(255 255 255 / var(--desktop-panels)) !important;border-color:rgb(255 255 255 / var(--desktop-panels)); }
+[data-desktop-color] :is(.leisure-home,.desktop-page-navigation) { color:var(--desktop-text) !important; }
+@media (max-height:700px) {
+  .leisure-app-grid { row-gap:17px; }
+}

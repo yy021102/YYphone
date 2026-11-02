@@ -1,4 +1,8 @@
+export type DesktopActivityId = 'text-adventure' | 'time-capsule' | 'divination' | 'little-sip' | 'character-perspective';
+
 export type AppId =
+  | DesktopActivityId
+  | 'kitchen'
   | 'wechat'
   | 'phone_explorer'
   | 'alipay'
@@ -86,7 +90,7 @@ export interface CustomWallpapers {
   homeScreen: string;
 }
 
-export type AppIconOverrides = Partial<Record<AppId | 'little-p', string>>;
+export type AppIconOverrides = Partial<Record<AppId | 'little-p' | 'games', string>>;
 
 export interface WidgetAppearance {
   background: string;
@@ -113,7 +117,8 @@ export interface DesktopAppearance {
 
 export interface BeautySettings {
   desktopAppearance?: DesktopAppearance;
-  homeStyle?: 'classic' | 'minimal' | 'moonlit' | 'halloween';
+  homeStyle?: 'classic' | 'minimal' | 'moonlit' | 'halloween' | 'free';
+  freeDesktop?: import('./utils/freeDesktop').FreeDesktopLayout;
   themeId: string;
   wallpaperId: string;
   wallpapers: CustomWallpapers;

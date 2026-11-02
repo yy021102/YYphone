@@ -5,10 +5,11 @@ import { HalloweenTown } from './HalloweenArt';
 import { ListenTogetherWidget } from './ListenTogetherWidget';
 import { frameGradient } from '../utils/avatarFrame';
 
-export function HalloweenHome({ userProfile, apps, dockApps, appIcons, wallpaperUrl, onOpenApp, renderIcon, onEditProfile, onOpenNotes }: {
+export function HalloweenHome({ userProfile, apps, dockApps, appIcons, wallpaperUrl, onOpenApp, renderIcon, onEditProfile, onOpenNotes, navigation }: {
   userProfile: UserProfile; apps: AppMetadata[]; dockApps: AppMetadata[]; appIcons: AppIconOverrides; wallpaperUrl?: string;
   onOpenApp: (id: AppId) => void; renderIcon: (name: string, className?: string) => ReactNode;
   onEditProfile: () => void; onOpenNotes: () => void;
+  navigation?: ReactNode;
 }) {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => { const timer = setInterval(() => setNow(new Date()), 15000); return () => clearInterval(timer); }, []);
@@ -30,11 +31,12 @@ export function HalloweenHome({ userProfile, apps, dockApps, appIcons, wallpaper
       </section>
       <div className="hw-market-section-label"><span>夜间百货</span><i>✦</i><small>随心逛逛</small></div>
       <section className="hw-market-cabinet">
-        <nav className="hw-market-tools" aria-label="系统应用">{dockApps.map(appButton)}</nav>
         <nav className="hw-market-shelves" aria-label="日常应用">{apps.map(appButton)}</nav>
       </section>
       <details className="hw-market-music"><summary><span>♫ 一起听</span><small>掀开音乐盒 <i>＋</i></small></summary><div><ListenTogetherWidget/></div></details>
       <footer className="hw-market-footer"><span>{userProfile.location} · {userProfile.mood}</span><span>{userProfile.stats.moments} 动态 / {userProfile.stats.notes} 随笔</span></footer>
     </div>
+    <nav className="hw-market-tools hw-market-bottom-dock" aria-label="系统应用">{dockApps.map(appButton)}</nav>
+    {navigation}
   </main>;
 }

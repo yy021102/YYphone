@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Link2, Music2, Pause, Pencil, Play, SkipForward, Trash2, Upload, X } from 'lucide-react';
 import { musicPlayer, useMusicPlayer } from '../utils/musicPlayer';
 import { formatMusicTime } from '../utils/musicPlayback';
@@ -24,9 +25,16 @@ const readCompanionOptions = (): CompanionOption[] =>
       : []
   );
 
-export const ListenTogetherWidget: React.FC = () => {
+function MusicPanelLayer({ container, children }: { container?: HTMLElement; children: React.ReactNode }) {
+  return container ? createPortal(children, container) : children;
+}
+
+export const ListenTogetherWidget: React.FC<{
+  modalContainer?: HTMLElement; backgroundImage?: string; variant?: 'vinyl'; artwork?: string; title?: string; note?: string;
+}> = ({ modalContainer, backgroundImage, variant, artwork, title, note }) => {
   const player = useMusicPlayer();
   const { appearance, patch } = useWidgetAppearance(MUSIC_APPEARANCE_KEY);
+  const background = backgroundImage || appearance.background;
   const [panelOpen, setPanelOpen] = useState(false);
   const [companions, setCompanions] = useState<CompanionOption[]>([]);
   const [urlDraft, setUrlDraft] = useState('');
@@ -86,13 +94,34 @@ export const ListenTogetherWidget: React.FC = () => {
     : player.togetherEnabled && companion
       ? `与 ${companion.name} 一起听`
       : '未开启一起听';
+  const togglePlayback = () => {
+    if (hasTracks) void musicPlayer.togglePlay();
+    else openPanel();
+  };
 
   return (
     <>
-      <div
-        style={appearance.background ? { backgroundImage: `url("${appearance.background}")` } : undefined}
+      {variant === 'vinyl' ? <div className="free-vinyl-widget">
+        <span className="free-vinyl-heading"><strong>{title || '慢慢听'}</strong>{note && <small>{note}</small>}</span>
+        <button type="button" className="free-vinyl-sleeve" aria-label="添加或管理音乐" onClick={openPanel}
+          style={background ? { backgroundImage: `url(${JSON.stringify(background)})` } : undefined}>
+          <small>SIDE A · OUR LITTLE PLAYLIST</small><strong>{title || '慢慢听'}</strong><span>{note || '为这一刻留一首歌。'}</span><Music2 size={20}/>
+        </button>
+        <button type="button" className="free-vinyl-disc-button" aria-label="管理唱片音乐" onClick={openPanel}>
+          <span className="free-vinyl-record" data-playing={player.isPlaying} style={{ animationPlayState: player.isPlaying ? 'running' : 'paused' }}>
+            <span className="free-vinyl-label">{artwork || appearance.disc ? <img src={artwork || appearance.disc} alt="唱片中心图片" draggable={false}/> : <Music2 size={22}/>}</span>
+          </span><span className="free-vinyl-arm" aria-hidden="true"/>
+        </button>
+        <div className="free-vinyl-controls">
+          <span className="free-vinyl-track"><strong>{track?.title || title || '还没有添加音乐'}</strong><small>{player.error || subtitle || note || '点唱片添加音乐'}</small></span>
+          <button type="button" onClick={togglePlayback} aria-label={player.isPlaying ? '暂停' : '播放'}>{player.isPlaying ? <Pause size={15}/> : <Play size={15}/>}</button>
+          <button type="button" onClick={() => musicPlayer.next()} disabled={player.tracks.length < 2} aria-label="下一首"><SkipForward size={15}/></button>
+          <input type="range" min={0} max={100} step={0.1} value={progress * 100} disabled={!hasTracks} aria-label="播放进度" onChange={event => musicPlayer.seek(Number(event.target.value) / 100)}/>
+        </div>
+      </div> : <div
+        style={background ? { backgroundImage: `url(${JSON.stringify(background)})` } : undefined}
         className={`rounded-[clamp(20px,4.8vw,28px)] p-[clamp(9px,2.4vw,13px)] aspect-square flex flex-col justify-between overflow-hidden relative shadow-sm bg-cover bg-center ${
-          appearance.background ? 'border border-white/70' : 'glass-card'
+          background ? 'border border-white/70' : 'glass-card'
         }`}
       >
         <div className="flex items-center justify-between z-10 shrink-0">
@@ -180,10 +209,7 @@ export const ListenTogetherWidget: React.FC = () => {
 
             <div className="flex items-center gap-1.5">
               <button
-                onClick={() => {
-                  if (hasTracks) void musicPlayer.togglePlay();
-                  else openPanel();
-                }}
+                onClick={togglePlayback}
                 aria-label={player.isPlaying ? '暂停' : '播放'}
                 className="w-[clamp(22px,6vw,28px)] h-[clamp(22px,6vw,28px)] rounded-full bg-white/80 hover:bg-white text-[#587589] flex items-center justify-center shadow-2xs active:scale-90 transition-all cursor-pointer"
               >
@@ -208,7 +234,7 @@ export const ListenTogetherWidget: React.FC = () => {
             </span>
           </div>
         </div>
-      </div>
+      </div>}
 
       <input
         ref={fileInputRef}
@@ -221,8 +247,12 @@ export const ListenTogetherWidget: React.FC = () => {
         }}
       />
 
-      {panelOpen && (
+      {panelOpen && <MusicPanelLayer container={modalContainer}>
         <div
+          data-no-desktop-swipe
+          role="dialog"
+          aria-modal="true"
+          aria-label="音乐管理"
           className="absolute inset-0 z-50 flex items-center justify-center bg-slate-900/30 backdrop-blur-xs p-4"
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) setPanelOpen(false);
@@ -403,7 +433,7 @@ export const ListenTogetherWidget: React.FC = () => {
             />
           </div>
         </div>
-      )}
+      </MusicPanelLayer>}
     </>
   );
 };

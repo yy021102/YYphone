@@ -4,8 +4,70 @@ import { LoadingFrame, MemoryLoading, PhoneExplorerLoading, WeChatLoading } from
 import { CoupleSpaceLoading } from './CoupleSpaceLoading';
 import { PomodoroLoading } from './PomodoroLoading';
 
-type IllustratedApp = Exclude<AppId, 'wechat' | 'phone_explorer' | 'memory' | 'couple_space' | 'pomodoro'>;
+type IllustratedApp = Exclude<AppId, 'kitchen' | 'wechat' | 'phone_explorer' | 'memory' | 'couple_space' | 'pomodoro'>;
 const scenes: Record<IllustratedApp, { title: string; caption: string; eyebrow: string; footer: string; art: ReactNode }> = {
+  'text-adventure': {
+    title: '文字冒险', caption: '翻开这一页，走进另一种人生。', eyebrow: 'BEYOND THE NEXT CHAPTER', footer: '故事里的下一步，由你决定',
+    art: <>
+      <g className="every-opening-float">
+        <path d="M56 172q49-24 104 0 55-24 104 0v83q-54-21-104 0-51-21-104 0v-83Z" fill="#d2c4dd" stroke="#fff" strokeWidth="2"/>
+        <path d="M65 165q44-19 95 5 51-24 95-5v80q-47-17-95 5-48-22-95-5v-80Z" fill="#fff9ee" stroke="#e5d7d4" strokeWidth="1.5"/>
+        <path d="M160 173v76m-77-59 52 5m-52 9 44 5m58-14 50-6m-50 20 43-6" stroke="#d8c9d6" strokeWidth="2" strokeLinecap="round"/>
+        <path d="M124 170V99a36 36 0 0 1 72 0v71" fill="#dce8e4" stroke="#fff" strokeWidth="3"/>
+        <path d="M139 171V103a21 21 0 0 1 42 0v68" fill="#f3edda"/><path d="m160 119 6 13-6 28-6-28 6-13Z" fill="#c6b6d3"/>
+      </g>
+      <g className="every-opening-drift"><path d="m78 105 22-10-10 23-3-10-9-3Z" fill="#ddc59d" stroke="#fff"/><path d="m225 115 6-13 6 13 13 6-13 6-6 13-6-13-13-6 13-6Z" fill="#d9c9e6" stroke="#fff"/></g>
+    </>,
+  },
+  'time-capsule': {
+    title: '时间胶囊', caption: '把今天的心意，寄往未来。', eyebrow: 'A LETTER, WAITING IN TIME', footer: '约定的那一天，再亲手开启',
+    art: <>
+      <g className="every-opening-float">
+        <rect x="72" y="156" width="172" height="96" rx="8" fill="#e1e6f0" stroke="#fff" strokeWidth="2" transform="rotate(-7 158 204)"/>
+        <path d="m75 157 85 61 80-80" stroke="#bfccde" strokeWidth="1.5"/><circle cx="160" cy="210" r="13" fill="#dcc5b3" stroke="#fff3df" strokeWidth="2"/><path d="m154 210 6-6 6 6-6 6-6-6Z" fill="#fff3df"/>
+        <path d="M118 65h85m-85 90h85" stroke="#b6c8d8" strokeWidth="7" strokeLinecap="round"/>
+        <path d="M125 69c0 25 6 30 24 40-18 10-24 17-24 42h71c0-25-6-32-24-42 18-10 24-15 24-40h-71Z" fill="#f4f8fc" stroke="#c6d6e1" strokeWidth="1.5"/>
+        <path d="M135 82h51c-3 13-9 17-25 24-17-7-23-11-26-24Zm-2 64 28-22 28 22h-56Z" fill="#e7d2ab"/><path d="M161 112v8" stroke="#d6b98b" strokeWidth="2" strokeDasharray="1 3"/>
+      </g>
+      <g className="every-opening-glow" fill="#d5c3a5"><path d="m77 92 3-8 3 8 8 3-8 3-3 8-3-8-8-3 8-3Zm162 38 2-6 2 6 6 2-6 2-2 6-2-6-6-2 6-2Z"/><circle cx="225" cy="77" r="2"/></g>
+    </>,
+  },
+  divination: {
+    title: '占卜', caption: '让星光，照见此刻的心事。', eyebrow: 'A QUIET CONSTELLATION', footer: '牌面与星轨之间，听见自己',
+    art: <>
+      <ellipse cx="161" cy="163" rx="114" ry="56" transform="rotate(-25 161 163)" stroke="#d4c3df" strokeWidth="1" strokeDasharray="3 6"/>
+      <g className="every-opening-float">
+        <rect x="88" y="86" width="106" height="160" rx="9" fill="#e3d8e9" stroke="#fff" strokeWidth="2" transform="rotate(-13 141 166)"/>
+        <rect x="128" y="74" width="106" height="160" rx="9" fill="#faf6ef" stroke="#d7c7b1" strokeWidth="1.5" transform="rotate(10 181 154)"/>
+        <g transform="rotate(10 181 154)"><rect x="137" y="84" width="88" height="140" rx="5" stroke="#e1d4c3"/><circle cx="181" cy="153" r="30" fill="#eee7f2" stroke="#d2bfd9"/><path d="m181 116 9 29 28 8-28 8-9 29-8-29-28-8 28-8 8-29Z" fill="#d8c09c" stroke="#fff9ed"/><circle cx="181" cy="153" r="6" fill="#fff8e7"/><path d="M158 204h46" stroke="#d9c4a6" strokeWidth="2" strokeLinecap="round"/></g>
+      </g>
+      <g className="every-opening-glow" stroke="#bca6ca" strokeWidth="1.5"><path d="M68 119v12m-6-6h12M245 207v10m-5-5h10"/><circle cx="228" cy="62" r="3" fill="#d8c39d"/></g>
+    </>,
+  },
+  'little-sip': {
+    title: '一杯之间', caption: '一点灵感，调成刚好的喜欢。', eyebrow: 'A LITTLE SIP OF JOY', footer: '茶香、果味，还有你的独家配方',
+    art: <>
+      <g className="every-opening-float">
+        <path d="m119 83 21 163m50-165-8 163" stroke="#d4c0ac" strokeWidth="5" strokeLinecap="round"/>
+        <path d="m105 112 18 143h82l18-143H105Z" fill="#f9faf3" stroke="#c9d6bf" strokeWidth="2" strokeLinejoin="round"/>
+        <path d="m116 155 12 95h73l13-95h-98Z" fill="#e9d8bd"/><path d="m121 195 7 55h73l8-55h-88Z" fill="#cad7b3"/>
+        <path d="m126 228 3 21h71l3-21h-77Z" fill="#b9c9a0"/><g fill="#8a927a"><circle cx="143" cy="237" r="4"/><circle cx="160" cy="242" r="4"/><circle cx="179" cy="237" r="4"/><circle cx="190" cy="244" r="3"/></g>
+        <path d="M111 126h106" stroke="#fff" strokeWidth="4" opacity=".8"/><path d="m128 143 7 64" stroke="#fff" strokeWidth="3" strokeLinecap="round" opacity=".55"/>
+      </g>
+      <g className="every-opening-bob"><circle cx="219" cy="102" r="26" fill="#eee0ac" stroke="#fff8da" strokeWidth="3"/><circle cx="219" cy="102" r="18" stroke="#fff7d6"/><path d="m219 84 0 36m-18-18h36m-30-13 25 25m-25 0 25-25" stroke="#fff7d6" strokeWidth="1.5"/><path d="M90 133c-25-1-26-20-20-27 17 2 24 12 20 27Zm-3-7c-8-10-6-26 4-33 10 11 8 24-4 33Z" fill="#b9cba7" stroke="#e8eedc"/></g>
+    </>,
+  },
+  'character-perspective': {
+    title: '侧写', caption: '在字里行间，慢慢读懂 TA。', eyebrow: 'BETWEEN THE LINES OF YOU', footer: '把关于 TA 的细节，轻轻收藏',
+    art: <>
+      <g className="every-opening-float">
+        <rect x="73" y="74" width="158" height="177" rx="8" fill="#fdf9f3" stroke="#e0d1db" strokeWidth="1.5" transform="rotate(-8 152 162)"/>
+        <g transform="rotate(-8 152 162)"><rect x="87" y="88" width="130" height="116" rx="4" fill="#e6dfe9"/><circle cx="152" cy="129" r="21" fill="#c3b0cb"/><path d="M111 192v-9a41 35 0 0 1 82 0v9" fill="#c3b0cb"/><path d="M111 222h83m-65 10h47" stroke="#d6c1cf" strokeWidth="3" strokeLinecap="round"/><path d="M94 111V96h15m86 0h15v15m-116 72v14h15m86 0h15v-14" stroke="#fffaf5" strokeWidth="2"/></g>
+      </g>
+      <g className="every-opening-bob"><path d="m207 218 47-105 9 4-47 105-9-4Z" fill="#b9cbbf" stroke="#f8fcf8" strokeWidth="1.5"/><path d="m207 218 9 4-11 13 2-17Z" fill="#d6bca7"/><path d="m205 235 1-7 3 2-4 5Z" fill="#a0899a"/></g>
+      <g className="every-opening-glow" stroke="#b8a2c2" strokeWidth="1.2"><path d="M66 158v12m-6-6h12M244 77v10m-5-5h10"/><circle cx="240" cy="248" r="2" fill="#d5bfcc"/></g>
+    </>,
+  },
   alipay: {
     title: '支付宝', caption: '把生活里的小确幸，攒起来。', eyebrow: 'A POCKET OF HAPPINESS', footer: '认真生活，也记得奖励自己',
     art: <>
@@ -100,6 +162,7 @@ export function AppLoading({ app, onBack }: { app: AppId; onBack: () => void }) 
   if (app === 'memory') return <MemoryLoading onBack={onBack}/>;
   if (app === 'couple_space') return <CoupleSpaceLoading onBack={onBack}/>;
   if (app === 'pomodoro') return <PomodoroLoading onBack={onBack}/>;
+  if (app === 'kitchen') return <LoadingFrame kind={app} title="下厨房" caption="" onBack={onBack}>{null}</LoadingFrame>;
   const scene = scenes[app];
   return <LoadingFrame kind={app} title={scene.title} caption={scene.caption} eyebrow={scene.eyebrow} footer={scene.footer} onBack={onBack}>
     <svg className="soft-opening-svg every-opening-art" viewBox="0 0 320 320" fill="none">

@@ -5,17 +5,20 @@ import { SIP_CUPS, SIP_GROUPS, SIP_INGREDIENTS, copySipRecipe, createSipDrink, f
   patchSipDrink, recoverSip, sipCategory, sipCup, sipIce, sipIngredient, sipPartsAtStage, sipRecipeText, subscribeSip, updateSip, validateSipRecipe,
   type SipDrink, type SipGroup, type SipRecipe, type SipRequest } from '../utils/littleSip';
 import './littleSip.css';
+import type { SipChatScope, SipRecordRequest, SipResponse } from '../utils/littleSipContext';
 
-type Props = { userName:string; people:{id:string;name:string}[]; onRequest:(r:SipRequest)=>Promise<string>; onServe:(drinkId:string,actorId:string)=>Promise<void> };
+type Props = { userName:string; people:{id:string;name:string}[]; onRequest:(r:SipRequest)=>Promise<SipResponse>; onRecord:(r:SipRecordRequest)=>Promise<SipDrink>; onServe:(drinkId:string,actorId:string)=>Promise<void> };
 const steps=['选杯','小料','饮料','糖冰','装饰','命名'];
 const stepGroup=(step:number):SipGroup=>step===1?'topping':step===4?'garnish':'tea';
 const message=(e:unknown)=>e instanceof Error?e.message:'这次操作没有完成，请手动重试。';
 const groupIcon=(group:SipGroup)=>group==='spirit'||group==='liqueur'||group==='modifier'?Wine:group==='coffee'?Coffee:group==='tea'||group==='fruit'||group==='garnish'?Leaf:group==='milk'?GlassWater:CupSoda;
-export default function LittleSipApp({userName,people,onRequest,onServe}:Props) {
+export default function LittleSipApp({userName,people,onRequest,onRecord,onServe}:Props) {
   const [store,setStore]=useState(loadSip),[view,setView]=useState<'make'|'menu'|'drink'|'history'>('make');
   const [draft,setDraft]=useState(()=>freshSipRecipe(userName)),[step,setStep]=useState(0),[group,setGroup]=useState<SipGroup>('topping');
   const [drinkId,setDrinkId]=useState(''),[actorId,setActorId]=useState(people[0]?.id??''),[requirements,setRequirements]=useState('');
-  const [proposal,setProposal]=useState<SipRecipe|null>(null),[filter,setFilter]=useState('全部'),[pouring,setPouring]=useState('');
+  const [proposal,setProposal]=useState<{recipe:SipRecipe;scope:SipChatScope}|null>(null),[filter,setFilter]=useState('全部'),[pouring,setPouring]=useState('');
+  const [syncCreation,setSyncCreation]=useState(false),[syncTaste,setSyncTaste]=useState(false);
+  const [draftScope,setDraftScope]=useState<SipChatScope|null>(null);
   const [busy,setBusy]=useState(false),[working,setWorking]=useState(false),[consent,setConsent]=useState(false);
   const [error,setError]=useState(''),[notice,setNotice]=useState(''),[deleting,setDeleting]=useState<{kind:'recipe'|'drink';id:string}|null>(null);
   const mounted=useRef(true),operation=useRef(false),root=useRef<HTMLDivElement>(null);
@@ -36,7 +39,7 @@ export default function LittleSipApp({userName,people,onRequest,onServe}:Props) 
   useEffect(()=>{if(error||notice)root.current?.querySelector('[role="alert"],[role="status"]')?.scrollIntoView({block:'center'});},[error,notice]);
   useEffect(()=>{if(!pouring)return;const timer=window.setTimeout(()=>setPouring(''),900);return()=>window.clearTimeout(timer);},[pouring]);
   const disabled=working||busy;
-  const go=(next:typeof view)=>{cancel();setError('');setNotice('');setDeleting(null);setConsent(false);setView(next);};
+  const go=(next:typeof view)=>{cancel();setError('');setNotice('');setDeleting(null);setConsent(false);setSyncCreation(false);setSyncTaste(false);setView(next);};
   const run=async(action:()=>Promise<void>)=>{
     if(operation.current)return;operation.current=true;setWorking(true);setError('');setNotice('');
     try{await action();}catch(e){report(e);}finally{operation.current=false;if(mounted.current)setWorking(false);}
@@ -52,12 +55,14 @@ export default function LittleSipApp({userName,people,onRequest,onServe}:Props) 
   };
   const start=(recipe?:SipRecipe,edit=false)=>{
     setDraft(recipe?{...copySipRecipe(recipe),id:edit?`recipe-${crypto.randomUUID()}`:recipe.id}:freshSipRecipe(userName));
-    setProposal(null);setStep(0);setPouring('');go('make');
+    setDraftScope(null);setProposal(null);setStep(0);setPouring('');go('make');
   };
   const next=()=>{try{if(step>=2)validateSipRecipe({...draft,name:draft.name||'尚未命名'});setStep(Math.min(steps.length-1,step+1));setGroup(stepGroup(step+1));setError('');}catch(e){report(e);}};
   const complete=()=>void run(async()=>{
-    const drink=createSipDrink({...draft,name:draft.name.trim()});await updateSip(s=>({...s,drinks:[drink,...s.drinks]}));
-    if(mounted.current){setDrinkId(drink.id);go('drink');}
+    const recipe={...draft,name:draft.name.trim()};
+    const drink=draftScope?await onRecord({kind:'recipe',recipe,scope:draftScope,syncToChat:syncCreation}):createSipDrink(recipe);
+    if(!draftScope)await updateSip(s=>({...s,drinks:[drink,...s.drinks]}));
+    if(mounted.current){setDrinkId(drink.id);go('drink');if(draftScope)setNotice(syncCreation?'已加入饮品单，调整后的制作记录已同步到私聊。':'已加入饮品单，调整后的配方和成品已保存。');}
   });
   const requestAI=async(kind:'recipe'|'taste',drink?:SipDrink)=>{
     if(request.current||operation.current)return;
@@ -70,16 +75,16 @@ export default function LittleSipApp({userName,people,onRequest,onServe}:Props) 
       if(kind==='taste'&&drink)await patchSipDrink(drink.id,d=>({...d,servings:d.servings.map(s=>s.actorId===actor.id?{...s,tastings:[...s.tastings,
         {id:active.attemptId,createdAt:new Date().toISOString(),status:'pending',text:''}]}:s)}));
       active.controller.signal.throwIfAborted();
-      let result:string;
+      let result:SipResponse;
       if(kind==='recipe')result=await onRequest({kind,actorId:actor.id,requirements,signal:active.controller.signal});
       else if(drink)result=await onRequest({kind,actorId:actor.id,drink,signal:active.controller.signal});
       else throw new Error('这杯饮品已不存在，请从制作足迹重新选择。');
       active.controller.signal.throwIfAborted();
-      if(kind==='recipe')setProposal(parseSipRecipe(result,actor));
+      if(kind==='recipe'){setProposal({recipe:parseSipRecipe(result.text,actor),scope:result.scope});setSyncCreation(false);}
       else if(drink){
-        const text=result.trim();if(!text||text.length>5000)throw new Error('角色的试饮反馈为空或过长，请手动重试。');
-        await patchSipDrink(drink.id,d=>({...d,servings:d.servings.map(s=>s.actorId===actor.id?{...s,tastings:s.tastings.map(t=>
-          t.id===active.attemptId&&!active.controller.signal.aborted?{...t,status:'done',text}:t)}:s)}));
+        const text=result.text.trim();if(!text||text.length>5000)throw new Error('角色的试饮反馈为空或过长，请手动重试。');
+        await onRecord({kind:'taste',drinkId:drink.id,tastingId:active.attemptId,text,scope:result.scope,syncToChat:syncTaste,signal:active.controller.signal});
+        if(mounted.current){setNotice(syncTaste?'试饮已保存，并同步到角色当前存档的私聊。':'试饮已保存，仅留在一杯之间。');setSyncTaste(false);}
       }
     }catch(e){
       if(!active.controller.signal.aborted){
@@ -93,7 +98,7 @@ export default function LittleSipApp({userName,people,onRequest,onServe}:Props) 
   const selectedGroups:readonly SipGroup[]=step===1?['topping','fruit']:step===4?['garnish']:['tea','coffee','milk','juice','water','spirit','liqueur','modifier','syrup'];
   const selectedParts=draft.parts.filter(p=>selectedGroups.includes(sipIngredient(p.id).group));
   const previewVolume=sipPartsAtStage(draft,step).reduce((n,p)=>n+p.amount,0)+(step>=3?sipIce(draft):0);
-  const picker=<label className="sip-role-select">选择角色<select value={actorId} disabled={disabled} onChange={e=>{setActorId(e.target.value);setConsent(false);}}><option value="">请选择角色</option>{people.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></label>;
+  const picker=<label className="sip-role-select">选择角色<select value={actorId} disabled={disabled} onChange={e=>{setActorId(e.target.value);setConsent(false);setSyncTaste(false);}}><option value="">请选择角色</option>{people.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></label>;
   return <div className="sip-app" ref={root}>
     <nav className="sip-nav"><span>LITTLE SIP <i>一杯之间</i></span><div>{(['make','menu','history'] as const).map((v,i)=><button type="button" key={v} disabled={working} aria-label={['调一杯','查看饮品单','查看制作足迹'][i]} aria-pressed={view===v} onClick={()=>go(v)}>{i===0?<CupSoda size={17}/>:i===1?<BookHeart size={17}/>:<History size={17}/>}</button>)}</div></nav>
     <main className="sip-content">
@@ -116,10 +121,17 @@ export default function LittleSipApp({userName,people,onRequest,onServe}:Props) 
           </>}
           {step===3&&<><span className="sip-field-title">想要几分甜？</span><div className="sip-choice-row">{[0,25,50,75,100].map(n=><button type="button" key={n} disabled={disabled} aria-pressed={draft.sweetness===n} onClick={()=>change({...draft,sweetness:n})}>{n===0?'不额外加糖':`${n}%`}</button>)}</div><span className="sip-field-title">清凉的程度</span><div className="sip-choice-row">{(['none','light','regular'] as const).map((ice,i)=><button type="button" key={ice} disabled={disabled} aria-pressed={draft.ice===ice} onClick={()=>change({...draft,ice})}>{['不加冰','少冰','正常冰'][i]}</button>)}</div><p className="sip-help">糖度是偏好标签，不代表实际含糖量；果汁、糖浆和小料本身也可能含糖。冰块也占杯容量，装不下时会提醒你。</p></>}
           {step===5&&<><div className="sip-choice-row">{(['layered','stirred'] as const).map((finish,i)=><button type="button" key={finish} disabled={disabled} aria-pressed={draft.finish===finish} onClick={()=>change({...draft,finish})}>{['保留漂亮分层','轻轻搅拌均匀'][i]}</button>)}</div><label>给这杯取个名字<input maxLength={40} value={draft.name} disabled={disabled} onChange={e=>change({...draft,name:e.target.value})} placeholder="例如：晚风里的一颗桃"/></label><p className="sip-help">{sipCategory(draft)} · {draft.maker.actorId?`${draft.maker.name}的配方${draft.adapted?'，经你调整':''}`:`${draft.maker.name}亲手调配`}</p></>}
+          {step===5&&draftScope&&<label className="sip-checkbox"><input type="checkbox" checked={syncCreation} disabled={disabled} onChange={e=>setSyncCreation(e.target.checked)}/><span>完成后，将调整后的制作记录和配方同步到{draft.maker.name}当前存档的私聊（不写长期记忆）</span></label>}
           <div className="sip-actions">{step>0&&<button type="button" className="sip-secondary" disabled={disabled} onClick={()=>{setStep(step-1);setGroup(stepGroup(step-1));setError('');}}><ArrowLeft size={14}/>上一步</button>}<button type="button" className="sip-primary" disabled={disabled} onClick={step===5?complete:next}>{working?<Loader2 size={15} className="sip-spin"/>:step===5?<Check size={15}/>:<ArrowRight size={15}/>} {step===5?'做好这一杯':'下一步'}</button></div>
         </section>
-        {step===0&&<section className="sip-paper sip-character"><span className="sip-kicker">LET THEM MAKE YOU A DRINK</span><h3>今天，想喝 TA 调的那一杯</h3>{picker}<label>想对调饮师说<textarea rows={2} maxLength={500} disabled={disabled} value={requirements} onChange={e=>setRequirements(e.target.value)} placeholder="例如：想要淡淡桃香、不要奶，也不要酒。"/></label><p className="sip-help">手动请求 1 次 AI，使用角色 / 玩家 / 世界书、相关聊天与本地记忆。角色会从材料柜里配一杯；先预览、再由你采用，不自动保存。</p><button type="button" className="sip-secondary" disabled={disabled||!actorId} onClick={()=>void requestAI('recipe')}><Sparkles size={15}/>让 TA 调一杯 · 1 次 AI</button>
-          {proposal&&<article className="sip-proposal"><strong>{proposal.name}</strong><p>{proposal.maker.note}</p><pre>{sipRecipeText(proposal)}</pre><div className="sip-actions"><button type="button" className="sip-primary" disabled={disabled} onClick={()=>{setDraft(copySipRecipe(proposal));setProposal(null);setStep(0);setNotice('草稿已采用，尚未保存。可以逐步核对、修改后完成。');}}>采用这份草稿</button><button type="button" className="sip-secondary" disabled={disabled} onClick={()=>setProposal(null)}>不采用</button></div></article>}
+        {step===0&&<section className="sip-paper sip-character"><span className="sip-kicker">LET THEM MAKE YOU A DRINK</span><h3>今天，想喝 TA 调的那一杯</h3>{picker}<label>想对调饮师说<textarea rows={2} maxLength={500} disabled={disabled} value={requirements} onChange={e=>setRequirements(e.target.value)} placeholder="例如：想要淡淡桃香、不要奶，也不要酒。"/></label><p className="sip-help">手动请求 1 次 AI，使用角色 / 玩家 / 世界书、相关聊天与本地记忆。先预览；确认收下就直接保存成品和配方，不必重走调配步骤，也可以选择调整配方。</p><button type="button" className="sip-secondary" disabled={disabled||!actorId} onClick={()=>void requestAI('recipe')}><Sparkles size={15}/>让 TA 调一杯 · 1 次 AI</button>
+          {proposal&&<article className="sip-proposal"><strong>{proposal.recipe.name}</strong><p>{proposal.recipe.maker.note}</p><pre>{sipRecipeText(proposal.recipe)}</pre>
+            <label className="sip-checkbox"><input type="checkbox" checked={syncCreation} disabled={disabled} onChange={e=>setSyncCreation(e.target.checked)}/><span>确认后，将这次制作经历和完整配方同步到{proposal.recipe.maker.name}当前存档的私聊</span></label>
+            <p className="sip-help">默认只保存在一杯之间。勾选才会发送记录卡片，不调用额外 AI，也不直接写入长期记忆。</p>
+            <div className="sip-actions"><button type="button" className="sip-primary" disabled={disabled} onClick={()=>void run(async()=>{
+              const made=await onRecord({kind:'recipe',recipe:proposal.recipe,scope:proposal.scope,syncToChat:syncCreation});
+              if(mounted.current){setDrinkId(made.id);setProposal(null);go('drink');setNotice(syncCreation?'已收下并加入饮品单，制作经历也已同步到私聊。':'已收下并加入饮品单，无需再次调配。');}
+            })}>确认收下并加入饮品单</button><button type="button" className="sip-secondary" disabled={disabled} onClick={()=>{setDraft(copySipRecipe(proposal.recipe));setDraftScope(proposal.scope);setProposal(null);setStep(0);setNotice('已进入可选的调整流程，完成后会加入饮品单；同步选项仍由你决定。');}}>调整配方</button><button type="button" className="sip-secondary" disabled={disabled} onClick={()=>setProposal(null)}>不采用</button></div></article>}
         </section>}
       </>}
       {view==='drink'&&drink&&<>
@@ -128,7 +140,9 @@ export default function LittleSipApp({userName,people,onRequest,onServe}:Props) 
         <section className="sip-paper"><h3>这一杯的专属配方</h3><pre className="sip-formula">{sipRecipeText(drink.recipe)}</pre><button type="button" className="sip-primary" disabled={disabled||saved} onClick={()=>void run(async()=>{await updateSip(s=>({...s,recipes:[copySipRecipe(drink.recipe),...s.recipes]}));if(mounted.current)setNotice('已收进饮品单，可以随时照方再做。');})}><BookHeart size={15}/>{saved?'已收进饮品单':'收进饮品单'}</button><div className="sip-actions"><button type="button" className="sip-secondary" disabled={disabled} onClick={()=>start(drink.recipe)}>照配方再做</button><button type="button" className="sip-secondary" disabled={disabled} onClick={()=>start(drink.recipe,true)}>修改后另存</button></div></section>
         <section className="sip-paper"><span className="sip-kicker">A CUP, JUST FOR YOU</span><h3>做给 TA 喝</h3>{picker}<label className="sip-checkbox"><input type="checkbox" checked={consent} disabled={disabled} onChange={e=>setConsent(e.target.checked)}/><span>将完整配方、署名留言和这位角色已完成的试饮反馈送进聊天</span></label>
           <button type="button" className="sip-primary" disabled={disabled||!actorId||!consent} onClick={()=>void run(async()=>{await onServe(drink.id,actorId);if(mounted.current)setNotice('这一杯已送进聊天。再次送出同一杯会更新原卡片，不会自动调用 AI。');})}><Send size={15}/>送给 TA · 不调用 AI</button>
-          <p className="sip-help">先送出，再单独邀请 TA 试饮。反馈保存在这杯的制作记录中；再次送出可更新聊天卡片。角色可以喜欢，也可以诚实地提出调整建议。</p>
+          <p className="sip-help">先送出，再单独邀请 TA 试饮。送出的配方卡在聊天记录挂载范围内时，角色就能读取。试饮反馈默认仅保存在制作记录中，角色可以喜欢，也可以诚实地提出调整建议。</p>
+          <label className="sip-checkbox"><input type="checkbox" checked={syncTaste} disabled={disabled} onChange={e=>setSyncTaste(e.target.checked)}/><span>本次试饮成功后，将反馈和配方同步到所选角色当前存档的私聊</span></label>
+          <p className="sip-help">只同步本次成功反馈，不同步其他角色或失败记录；不直接写长期记忆。未勾选时，仍可再次送出原卡片来更新聊天中的反馈。记录卡片需在聊天挂载范围内才会被读取；后续自动记忆仍按原有设置处理。</p>
           <button type="button" className="sip-secondary" disabled={disabled||!drink.servings.some(s=>s.actorId===actorId)} onClick={()=>void requestAI('taste',drink)}><Sparkles size={15}/>邀请试饮 · 1 次 AI</button>
         </section>
         {drink.servings.map(s=><section className="sip-paper sip-tastings" key={s.actorId}><h3>{s.actorName}的这一口</h3><small>{new Date(s.servedAt).toLocaleString('zh-CN')}</small>{!s.tastings.length&&<p className="sip-help">已经送到，还没有邀请试饮。</p>}{s.tastings.map(t=><article key={t.id}><small>{new Date(t.createdAt).toLocaleString('zh-CN')}</small>{t.status==='done'?<p>{t.text}</p>:t.status==='pending'?<p role="status">TA 正在尝这一杯，离开会取消请求。</p>:<p className="sip-taste-error">{t.error}</p>}</article>)}</section>)}

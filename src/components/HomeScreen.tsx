@@ -16,8 +16,14 @@ import {
   Pencil,
   Package,
   Mail,
+  BookOpenText,
+  Hourglass,
+  Orbit,
+  CupSoda,
+  ScanFace,
+  CookingPot,
 } from 'lucide-react';
-import { AppIconOverrides, AppId, AppMetadata, UserProfile } from '../types';
+import { AppIconOverrides, AppId, AppMetadata, BeautySettings, UserProfile } from '../types';
 import { ProfileEditor } from './ProfileEditor';
 import { ListenTogetherWidget } from './ListenTogetherWidget';
 import { CalendarWidget } from './CalendarWidget';
@@ -25,10 +31,19 @@ import { frameGradient } from '../utils/avatarFrame';
 import { PaperNotes } from './PaperNotes';
 import { MinimalHome } from './MinimalHome';
 import { HalloweenHome } from './HalloweenHome';
+import { DesktopPager, DesktopPageNavigation } from './DesktopPager';
+import { LeisureHome } from './LeisureHome';
+import type { DesktopPage } from '../utils/desktopNavigation';
+import type { FreeDesktopLayout } from '../utils/freeDesktop';
+import { FreeDesktopHome } from './FreeDesktopHome';
 
 interface HomeScreenProps {
+  page: DesktopPage;
+  onPageChange: (page: DesktopPage) => void;
   wallpaperUrl?: string;
-  homeStyle?: 'classic' | 'minimal' | 'moonlit' | 'halloween';
+  homeStyle?: BeautySettings['homeStyle'];
+  freeDesktop?: FreeDesktopLayout;
+  onSaveFreeDesktop?: (layout: FreeDesktopLayout) => boolean;
   userProfile: UserProfile;
   apps: AppMetadata[];
   dockApps: AppMetadata[];
@@ -38,6 +53,8 @@ interface HomeScreenProps {
 }
 
 export const HomeScreen: React.FC<HomeScreenProps> = ({
+  page,
+  onPageChange,
   userProfile,
   apps,
   dockApps,
@@ -46,6 +63,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   appIcons,
   homeStyle,
   wallpaperUrl,
+  freeDesktop,
+  onSaveFreeDesktop,
 }) => {
   const [isProfileEditorOpen, setIsProfileEditorOpen] = useState(false);
   const [paperNotesOpen, setPaperNotesOpen] = useState(false);
@@ -53,7 +72,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   const frameOn = userProfile.avatarFrame ? userProfile.avatarFrame.enabled : !!userProfile.avatarFrameEnabled;
 
 
-  // Top-right 4 apps: 微信, 查手机, 支付宝, 淘宝
+  // Top-right 4 apps: 世界书, 查手机, 支付宝, 淘宝
   const topRightApps = apps.slice(0, 4);
   // Bottom-left 4 apps: 论坛, 番茄钟, 线下, 情侣空间
   const bottomLeftApps = apps.slice(4, 8);
@@ -65,6 +84,18 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     switch (iconName) {
       case 'MessageCircle':
         return <MessageCircle className={className} />;
+      case 'BookOpenText':
+        return <BookOpenText className={className} />;
+      case 'Hourglass':
+        return <Hourglass className={className} />;
+      case 'Orbit':
+        return <Orbit className={className} />;
+      case 'CupSoda':
+        return <CupSoda className={className} />;
+      case 'ScanFace':
+        return <ScanFace className={className} />;
+      case 'CookingPot':
+        return <CookingPot className={className} />;
       case 'Smartphone':
         return <Smartphone className={className} />;
       case 'Coins':
@@ -138,9 +169,17 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     </button>
   );
 
-  if (homeStyle === 'halloween') return <><HalloweenHome wallpaperUrl={wallpaperUrl} userProfile={userProfile} apps={apps} dockApps={dockApps} appIcons={appIcons} onOpenApp={onOpenApp} renderIcon={renderAppIcon} onEditProfile={() => setIsProfileEditorOpen(true)} onOpenNotes={() => setPaperNotesOpen(true)}/>{isProfileEditorOpen && <ProfileEditor profile={userProfile} onSave={onSaveUserProfile} onClose={() => setIsProfileEditorOpen(false)}/>}{paperNotesOpen && <PaperNotes onClose={() => setPaperNotesOpen(false)}/>}</>;
-  if (homeStyle === 'minimal' || homeStyle === 'moonlit') return <><MinimalHome variant={homeStyle} wallpaperUrl={wallpaperUrl} userProfile={userProfile} apps={apps} dockApps={dockApps} appIcons={appIcons} onOpenApp={onOpenApp} renderIcon={renderAppIcon} onEditProfile={() => setIsProfileEditorOpen(true)} onOpenNotes={() => setPaperNotesOpen(true)} />{isProfileEditorOpen && <ProfileEditor profile={userProfile} onSave={onSaveUserProfile} onClose={() => setIsProfileEditorOpen(false)} />}{paperNotesOpen && <PaperNotes onClose={() => setPaperNotesOpen(false)} />}</>;
-  return (
+  const navigation = <DesktopPageNavigation page={page} onChange={onPageChange} />;
+  const wrapDesktop = (desktop: React.ReactNode) => <DesktopPager page={page} onChange={onPageChange}>{desktop}
+    {isProfileEditorOpen && <ProfileEditor profile={userProfile} onSave={onSaveUserProfile} onClose={() => setIsProfileEditorOpen(false)} />}
+    {paperNotesOpen && <PaperNotes onClose={() => setPaperNotesOpen(false)} />}
+  </DesktopPager>;
+  if (homeStyle === 'free') return wrapDesktop(<FreeDesktopHome value={freeDesktop} onSave={onSaveFreeDesktop} page={page} onPageChange={onPageChange}
+    profile={userProfile} appIcons={appIcons} onOpenApp={onOpenApp} onProfile={() => setIsProfileEditorOpen(true)} onNotes={() => setPaperNotesOpen(true)} renderIcon={renderAppIcon}/>);
+  if (page === 1) return wrapDesktop(<LeisureHome homeStyle={homeStyle} appIcons={appIcons} dockApps={dockApps} onOpenApp={onOpenApp} renderIcon={renderAppIcon} navigation={navigation} />);
+  if (homeStyle === 'halloween') return wrapDesktop(<HalloweenHome navigation={navigation} wallpaperUrl={wallpaperUrl} userProfile={userProfile} apps={apps} dockApps={dockApps} appIcons={appIcons} onOpenApp={onOpenApp} renderIcon={renderAppIcon} onEditProfile={() => setIsProfileEditorOpen(true)} onOpenNotes={() => setPaperNotesOpen(true)} />);
+  if (homeStyle === 'minimal' || homeStyle === 'moonlit') return wrapDesktop(<MinimalHome navigation={navigation} variant={homeStyle} wallpaperUrl={wallpaperUrl} userProfile={userProfile} apps={apps} dockApps={dockApps} appIcons={appIcons} onOpenApp={onOpenApp} renderIcon={renderAppIcon} onEditProfile={() => setIsProfileEditorOpen(true)} onOpenNotes={() => setPaperNotesOpen(true)} />);
+  return wrapDesktop(
     <div className="home-desktop classic-home relative w-full h-full flex flex-col justify-between overflow-hidden select-none">
       {/* Upper Content Area (Profile Card + 4 Quadrants Grid) */}
       <div className="w-full flex-1 min-h-0 flex flex-col justify-between px-[clamp(12px,3vw,18px)] pt-1 pb-1.5 overflow-hidden">
@@ -312,17 +351,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           </button>
         ))}
       </div>
-      <footer className="shrink-0 pb-1.5 text-center text-[10px] font-mono font-bold tracking-wide text-[#587589]/70">
-        YYphone
-      </footer>
-      {isProfileEditorOpen && (
-        <ProfileEditor
-          profile={userProfile}
-          onSave={onSaveUserProfile}
-          onClose={() => setIsProfileEditorOpen(false)}
-        />
-      )}
-      {paperNotesOpen && <PaperNotes onClose={() => setPaperNotesOpen(false)} />}
+      {navigation}
     </div>
   );
 };

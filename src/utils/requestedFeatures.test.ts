@@ -5,6 +5,9 @@ import { resolve } from 'node:path';
 import { runInNewContext } from 'node:vm';
 import { DOCK_APPS, INITIAL_USER_PROFILE, MAIN_GRID_APPS } from '../data/mockData';
 import { HomeScreen } from '../components/HomeScreen';
+import { defaultFreeDesktopLayout, DESKTOP_WIDGET_TEMPLATES, newDesktopTemplate, newDesktopWidget, putDesktopWidget, WIDGET_TYPES } from './freeDesktop';
+import { desktopDateDistance, FreeDesktopWidget } from '../components/FreeDesktopWidgets';
+import { DesktopWidgetEditor } from '../components/DesktopWidgetEditor';
 import { normalizeWallpaper } from '../apps/ThemeCustomizerApp';
 import { clearDbStorage } from './dbStorage';
 import { DEFAULT_FONT_SETTINGS, normalizeFontUrl, readFontSettings } from './fontSettings';
@@ -82,6 +85,123 @@ Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: l
 
 beforeEach(async () => { await clearDbStorage(); });
 afterEach(() => { mock.restoreAll(); });
+
+test('free desktop is optional, renders linked widgets and keeps its shared dock on both pages', () => {
+  for (const page of [0, 1] as const) {
+    const markup = renderToStaticMarkup(createElement(HomeScreen, {
+      page, onPageChange: () => {}, homeStyle: 'free', freeDesktop: defaultFreeDesktopLayout(),
+      apps: MAIN_GRID_APPS, dockApps: DOCK_APPS, appIcons: { wechat: 'free-custom-wechat.png' }, userProfile: INITIAL_USER_PROFILE,
+      onOpenApp: () => {}, onSaveUserProfile: () => true, onSaveFreeDesktop: () => true,
+    }));
+    assert.ok(markup.includes('aria-label="自由桌面"'));
+    assert.ok(markup.includes('src="free-custom-wechat.png"'));
+    assert.equal((markup.match(/aria-label="桌面分页"/g) ?? []).length, 1);
+    for (const app of DOCK_APPS) assert.ok(markup.includes(`aria-label="${app.name}"`));
+    if (page === 0) for (const label of ['编辑个人资料', '添加或管理音乐', '打开日历', '小纸条', '物品']) assert.ok(markup.includes(label));
+  }
+});
+test('desktop countdown uses local calendar dates rather than elapsed hours across midnight or DST', () => {
+  assert.equal(desktopDateDistance('', new Date(2026, 10, 3)), null);
+  assert.equal(desktopDateDistance('2026-11-03', new Date(2026, 10, 3, 23, 59)), 0);
+  assert.equal(desktopDateDistance('2026-11-04', new Date(2026, 10, 3, 23, 59)), 1);
+  assert.equal(desktopDateDistance('2026-11-02', new Date(2026, 10, 3, 0, 1)), -1);
+});
+test('desktop polish removes footer branding in every style and only renders occupied dock slots outside editing', () => {
+  for (const homeStyle of ['classic', 'minimal', 'moonlit', 'halloween', 'free'] as const) {
+    for (const page of [0, 1] as const) {
+      const freeDesktop = defaultFreeDesktopLayout();
+      freeDesktop.dock.pop();
+      const markup = renderToStaticMarkup(createElement(HomeScreen, {
+        page, onPageChange: () => {}, homeStyle, freeDesktop, apps: MAIN_GRID_APPS, dockApps: DOCK_APPS,
+        appIcons: {}, userProfile: INITIAL_USER_PROFILE, onOpenApp: () => {}, onSaveUserProfile: () => true,
+      }));
+      assert.doesNotMatch(markup, /YYphone/);
+      if (homeStyle === 'free') assert.equal((markup.match(/class="free-dock-slot/g) ?? []).length, 3);
+    }
+  }
+});
+test('desktop polish exposes background upload on all eight widgets and overrides live backgrounds per instance', () => {
+  const background = 'https://example.test/desktop-background.png';
+  const before = localStorage.getItem(MUSIC_APPEARANCE_KEY);
+  for (const type of WIDGET_TYPES) {
+    const widget = newDesktopWidget(type, `editor:${type}`);
+    widget.settings.backgroundImage = background;
+    const editor = renderToStaticMarkup(createElement(DesktopWidgetEditor, { widget, characters: [], onSave: () => true, onClose: () => {} }));
+    assert.match(editor, /aria-label="上传组件背景图"/);
+    assert.match(editor, /alt="组件背景预览"/);
+    assert.match(editor, /aria-label="移除背景图"/);
+    const view = renderToStaticMarkup(createElement(FreeDesktopWidget, {
+      widget, profile: { ...INITIAL_USER_PROFILE, coverImageUrl: 'https://example.test/old-cover.png' }, characters: [],
+      onCalendar: () => {}, onProfile: () => {}, onNotes: () => {}, onInventory: () => {},
+    }));
+    if (type === 'calendar' || type === 'music') assert.ok(view.includes(background));
+    if (type === 'profile') {
+      assert.doesNotMatch(view, /old-cover.png/);
+      for (const label of ['编辑个人资料', '小纸条', '物品']) assert.ok(view.includes(`aria-label="${label}"`));
+      assert.match(view, /free-profile-identity/);
+    }
+  }
+  assert.equal(localStorage.getItem(MUSIC_APPEARANCE_KEY), before);
+});
+test('desktop templates render five different original shapes, editable fields and linked music without requiring external artwork', () => {
+  const classes = { heart: 'free-heart-widget', bow: 'free-bow-widget', ticket: 'free-ticket-widget', vinyl: 'free-vinyl-widget', cloud: 'free-cloud-widget' };
+  let layout = defaultFreeDesktopLayout();
+  for (const template of DESKTOP_WIDGET_TEMPLATES) {
+    const widget = newDesktopTemplate(template.id, `render:${template.id}`);
+    widget.settings.title = '我自己的标题';
+    widget.settings.text = '我自己的短句';
+    widget.settings.images = ['https://example.test/my-photo.png'];
+    const markup = renderToStaticMarkup(createElement(FreeDesktopWidget, {
+      widget, profile: INITIAL_USER_PROFILE, characters: [], onCalendar: () => {}, onProfile: () => {}, onNotes: () => {}, onInventory: () => {},
+    }));
+    assert.ok(markup.includes(classes[template.id]));
+    assert.ok(markup.includes('我自己的标题'));
+    assert.ok(markup.includes('我自己的短句'));
+    if (template.id !== 'cloud') assert.ok(markup.includes('https://example.test/my-photo.png'));
+    if (template.id === 'vinyl') {
+      for (const label of ['管理唱片音乐', '播放', '下一首', '播放进度']) assert.ok(markup.includes(`aria-label="${label}"`));
+      assert.match(markup, /animation-play-state:paused/);
+    }
+    const editor = renderToStaticMarkup(createElement(DesktopWidgetEditor, { widget, characters: [], onSave: () => true, onClose: () => {} }));
+    assert.match(editor, /组件款式/);
+    assert.match(editor, /上传组件背景图/);
+    if (template.id === 'ticket') { assert.match(editor, /左侧称呼/); assert.match(editor, /右侧称呼/); }
+    if (template.id === 'vinyl') assert.match(editor, /唱片中心图片/);
+    layout = putDesktopWidget(layout, 1, widget);
+  }
+  const home = renderToStaticMarkup(createElement(HomeScreen, {
+    page: 1, onPageChange: () => {}, homeStyle: 'free', freeDesktop: layout, apps: MAIN_GRID_APPS, dockApps: DOCK_APPS,
+    appIcons: {}, userProfile: INITIAL_USER_PROFILE, onOpenApp: () => {}, onSaveUserProfile: () => true,
+  }));
+  for (const template of DESKTOP_WIDGET_TEMPLATES) assert.ok(home.includes(`data-widget-template="${template.id}"`));
+});
+test('desktop templates use unique SVG clip IDs and ticket names can be changed without changing profile or contacts', () => {
+  const heart = newDesktopTemplate('heart', 'clip:first'), cloud = newDesktopTemplate('cloud', 'clip:cloud');
+  const ticket = newDesktopTemplate('ticket', 'ticket:names');
+  ticket.settings.personNames = ['小月', '亲爱的'];
+  ticket.settings.characterIds = ['role:one'];
+  const props = { profile: INITIAL_USER_PROFILE, characters: [{ id: 'role:one', name: '原角色名字', avatarUrl: '' }], onCalendar: () => {}, onProfile: () => {}, onNotes: () => {}, onInventory: () => {} };
+  const markup = renderToStaticMarkup(createElement('div', null, ...[heart, heart, cloud, cloud, ticket].map((widget, index) => createElement(FreeDesktopWidget, { ...props, key: index, widget }))));
+  const ids = [...markup.matchAll(/<clipPath id="([^"]+)"/g)].map(match => match[1]);
+  assert.equal(ids.length, 4);
+  assert.equal(new Set(ids).size, ids.length);
+  assert.match(markup, /小月/); assert.match(markup, /亲爱的/);
+  assert.equal(props.characters[0].name, '原角色名字');
+});
+
+test('all four first-page themes place one pagination control after the entire system dock', () => {
+  for (const homeStyle of ['classic', 'minimal', 'moonlit', 'halloween'] as const) {
+    const markup = renderToStaticMarkup(createElement(HomeScreen, {
+      page: 0, onPageChange: () => {}, homeStyle, apps: MAIN_GRID_APPS, dockApps: DOCK_APPS,
+      appIcons: {}, userProfile: INITIAL_USER_PROFILE, onOpenApp: () => {}, onSaveUserProfile: () => true,
+    }));
+    assert.equal((markup.match(/aria-label="桌面分页"/g) ?? []).length, 1, homeStyle);
+    for (const app of DOCK_APPS) {
+      const labelIndex = markup.lastIndexOf(`>${app.name}</span>`);
+      assert.ok(labelIndex >= 0 && markup.indexOf('aria-label="桌面分页"') > labelIndex, `${homeStyle}: ${app.name}`);
+    }
+  }
+});
 
 test('regeneration excludes the whole replaced image batch and its hidden thought before assembling any chat context', () => {
   saveSetting('pocketos:wechat-contacts', [{ id: 'regen-char', name: '林渡', persona: '', worldBooks: [] }]);
@@ -909,6 +1029,7 @@ test('beauty export includes only applied appearance, not saved presets or unsav
 
 test('Halloween home supports custom grid, dock icons and wallpaper without replacing profile information', () => {
   const render = (custom: boolean) => renderToStaticMarkup(createElement(HomeScreen, {
+    page: 0, onPageChange: () => {},
     homeStyle: 'halloween', wallpaperUrl: custom ? 'holiday-wallpaper.png' : '',
     userProfile: { ...INITIAL_USER_PROFILE, name: '夜游玩家', signature: '今晚来讨糖' },
     apps: [MAIN_GRID_APPS[0]], dockApps: [DOCK_APPS[0]], onOpenApp: () => {}, onSaveUserProfile: () => true,
@@ -924,6 +1045,7 @@ test('Halloween home supports custom grid, dock icons and wallpaper without repl
 
 test('home profile edit sits beside paper notes and custom grid and dock icons replace the whole tile', () => {
   const render = (custom: boolean) => renderToStaticMarkup(createElement(HomeScreen, {
+    page: 0, onPageChange: () => {},
     userProfile: INITIAL_USER_PROFILE,
     apps: [{ ...MAIN_GRID_APPS[0], badge: 3 }],
     dockApps: [DOCK_APPS[0]],
@@ -1825,6 +1947,9 @@ test('real chat photos retain 1280px detail within 400KB while other images keep
     await compressImageFile(new File(['avatar'], 'avatar.png', { type: 'image/png' }));
     assert.equal(canvas.width, 300);
     assert.equal(canvas.height, 225);
+    const transparent = await compressImageFile(new File(['sticker'], 'sticker.png', { type: 'image/png' }), { preserveTransparency: true });
+    assert.match(transparent, /^data:image\/webp;base64,/);
+    assert.equal(canvas.width, 300);
     await assert.rejects(compressChatPhoto(new File(['text'], 'text.txt', { type: 'text/plain' })), /请选择图片文件/);
   } finally {
     for (const [key, descriptor] of descriptors) {

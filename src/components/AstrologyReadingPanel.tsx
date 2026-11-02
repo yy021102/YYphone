@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { Loader2, Send, Sparkles } from 'lucide-react';
-import { astrologyWarnings, type AstrologyRecord } from '../utils/astrology';
+import type { AstrologyRecord } from '../utils/astrology';
 import type { DivinationReader } from '../utils/divination';
 
 export default function AstrologyReadingPanel({ record, people, reading, working, onInterpret, onCancel, onShare }: {
@@ -17,7 +17,6 @@ export default function AstrologyReadingPanel({ record, people, reading, working
     <section className="stellar-paper"><span className="stellar-kicker">A LITTLE CONVERSATION</span><h3>{record.readingMode === 'question' ? '把问题，轻轻说给星空' : '让星图，成为一封信'}</h3>
       <p>{record.question}</p><p className="stellar-help">可选解读，每次由你手动请求 1 次 AI。会将本手记中完整出生资料、星盘或行运与问题发送到你配置的 API。比较盘包含双方资料；角色模式还使用其人设、聊天与本地记忆，不执行聊天动作。</p>
       <label className="stellar-reader">由谁读这片天空<select value={readerId} disabled={disabled} onChange={event => setReaderId(event.target.value)}><option value="oracle">AI 占星师</option>{people.map(person => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label>
-      {!!astrologyWarnings(record).length && <p className="stellar-help">解读者也会收到完整的午间参考、创作设定与不确定性说明。</p>}
       <button type="button" className="stellar-primary" disabled={disabled} onClick={() => {
         setError(''); setNotice('');
         const person = people.find(person => person.id === readerId);

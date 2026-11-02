@@ -22,12 +22,12 @@ export const INITIAL_USER_PROFILE: UserProfile = {
 // Top Screen Grid Apps (8 Apps)
 export const MAIN_GRID_APPS: AppMetadata[] = [
   {
-    id: 'wechat',
-    name: '微信',
-    iconName: 'MessageCircle',
-    category: '通讯',
-    color: 'from-emerald-400/30 to-teal-500/20',
-    textColor: 'text-[#8FD3C4]',
+    id: 'world_book',
+    name: '世界书',
+    iconName: 'BookOpen',
+    category: '设定',
+    color: 'from-violet-400/30 to-purple-600/20',
+    textColor: 'text-[#C2B5F0]',
   },
   {
     id: 'phone_explorer',
@@ -87,7 +87,7 @@ export const MAIN_GRID_APPS: AppMetadata[] = [
   },
 ];
 
-// Bottom Dock Apps (4 Apps: 设置, 美化, 世界书, 记忆)
+// Bottom Dock Apps (4 Apps: 设置, 美化, 记忆, 微信)
 export const DOCK_APPS: AppMetadata[] = [
   {
     id: 'settings',
@@ -106,14 +106,6 @@ export const DOCK_APPS: AppMetadata[] = [
     textColor: 'text-[#E3B3F0]',
   },
   {
-    id: 'world_book',
-    name: '世界书',
-    iconName: 'BookOpen',
-    category: '设定',
-    color: 'from-violet-400/30 to-purple-600/20',
-    textColor: 'text-[#C2B5F0]',
-  },
-  {
     id: 'memory',
     name: '记忆',
     iconName: 'Sparkles',
@@ -121,9 +113,26 @@ export const DOCK_APPS: AppMetadata[] = [
     color: 'from-amber-400/30 to-sky-400/20',
     textColor: 'text-[#F2D494]',
   },
+  {
+    id: 'wechat',
+    name: '微信',
+    iconName: 'MessageCircle',
+    category: '通讯',
+    color: 'from-emerald-400/30 to-teal-500/20',
+    textColor: 'text-[#8FD3C4]',
+  },
 ];
 
-export const ALL_APPS: AppMetadata[] = [...MAIN_GRID_APPS, ...DOCK_APPS];
+export const SECOND_PAGE_APPS: AppMetadata[] = [
+  { id: 'text-adventure', name: '文字冒险', iconName: 'BookOpenText', category: '闲暇', color: 'from-violet-300/40 to-indigo-200/30', textColor: 'text-[#a198c9]' },
+  { id: 'time-capsule', name: '时间胶囊', iconName: 'Hourglass', category: '闲暇', color: 'from-sky-200/50 to-cyan-100/30', textColor: 'text-[#8cb5c8]' },
+  { id: 'divination', name: '占卜', iconName: 'Orbit', category: '闲暇', color: 'from-amber-100/60 to-purple-200/30', textColor: 'text-[#b3a078]' },
+  { id: 'little-sip', name: '一杯之间', iconName: 'CupSoda', category: '闲暇', color: 'from-lime-100/60 to-emerald-200/30', textColor: 'text-[#99ad87]' },
+  { id: 'character-perspective', name: '侧写', iconName: 'ScanFace', category: '角色', color: 'from-rose-200/40 to-violet-100/30', textColor: 'text-[#ad96ba]' },
+  { id: 'kitchen', name: '下厨房', iconName: 'CookingPot', category: '生活', color: 'from-orange-200/40 to-amber-100/40', textColor: 'text-[#c7a17e]' },
+];
+
+export const ALL_APPS: AppMetadata[] = [...MAIN_GRID_APPS, ...SECOND_PAGE_APPS, ...DOCK_APPS];
 
 export const THEMES = [
   {
