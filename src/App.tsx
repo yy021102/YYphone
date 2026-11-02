@@ -590,7 +590,7 @@ export default function App() {
   };
 
   return (
-    <div className="h-full w-full md:h-auto md:static md:w-full md:min-h-full md:bg-[#080D14] flex items-center justify-center p-0 md:p-3 overflow-hidden select-none">
+    <div className="h-[100vh] w-full md:h-auto md:static md:w-full md:min-h-[100vh] md:bg-[#080D14] flex items-center justify-center p-0 md:p-3 overflow-hidden select-none">
       {/* 
         Phone Canvas Container:
         - Exact height: 100dvh (dynamic viewport height) on mobile devices
