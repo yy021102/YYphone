@@ -356,7 +356,7 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
             <ChevronDown size={13} className="shrink-0 text-slate-400 transition-transform group-open:rotate-180" />
           </summary>
           <h3 className="mt-4 px-0.5 text-[11px] font-semibold text-[#2C4A5C]">主页面风格</h3>
-          <p className="mt-2 text-[10px] leading-5 text-slate-400">两页桌面共用风格、壁纸与外观设置，左右滑动或点圆点切换。自由桌面还在完善中，目前可进入试用。内置五款原创造型，换图填字就能用，大小和配色设置可选。可长按编辑、跨页拖动，组件宽高按网格调整，每个组件都可上传独立背景图；资料卡、音乐和日历各至少保留一个。原有四套布局仍可切回，自由布局会保留。图标、自由布局与组件图片随美化一起保存、导入和导出，不包含组件关联的聊天、日历和音乐文件。</p>
+          <p className="mt-2 text-[10px] leading-5 text-slate-400">两页桌面共用风格、壁纸与外观设置，左右滑动或点圆点切换。自由桌面还在完善中，目前可进入试用。内置五款原创造型，换图填字就能用，大小和配色设置可选。唱片造型还可单独设置盘面颜色与不透明度，不影响中心图片和播放按钮。可长按编辑、跨页拖动，组件宽高按网格调整，每个组件都可上传独立背景图；资料卡、音乐和日历各至少保留一个。原有四套布局仍可切回，自由布局会保留。图标、自由布局与组件图片随美化一起保存、导入和导出，不包含组件关联的聊天、日历和音乐文件。</p>
           <button type="button" aria-pressed={currentSettings.homeStyle === 'free'} onClick={() => {
             if (onApplyPreset({ ...currentSettings, homeStyle: 'free' })) { setStatus('已进入自由桌面试用，还在完善中。长按空白或图标开始布置。'); setError(''); }
             else setError('自由桌面保存失败。');

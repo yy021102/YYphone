@@ -115,7 +115,11 @@ test('desktop polish removes footer branding in every style and only renders occ
         page, onPageChange: () => {}, homeStyle, freeDesktop, apps: MAIN_GRID_APPS, dockApps: DOCK_APPS,
         appIcons: {}, userProfile: INITIAL_USER_PROFILE, onOpenApp: () => {}, onSaveUserProfile: () => true,
       }));
-      assert.doesNotMatch(markup, /YYphone/);
+      assert.doesNotMatch(markup, /<footer\b[^>]*>\s*YYphone\s*<\/footer>/);
+      if (homeStyle === 'free' && page === 0) {
+        assert.match(markup, /YYphone/);
+        assert.doesNotMatch(markup, /我的小小世界/);
+      }
       if (homeStyle === 'free') assert.equal((markup.match(/class="free-dock-slot/g) ?? []).length, 3);
     }
   }
@@ -187,6 +191,31 @@ test('desktop templates use unique SVG clip IDs and ticket names can be changed 
   assert.equal(new Set(ids).size, ids.length);
   assert.match(markup, /小月/); assert.match(markup, /亲爱的/);
   assert.equal(props.characters[0].name, '原角色名字');
+});
+test('vinyl appearance renders matching preview controls and keeps the disc surface separate from artwork and controls', () => {
+  const widget = newDesktopTemplate('vinyl', 'vinyl:appearance');
+  widget.settings.vinylColor = '#e8cdda';
+  widget.settings.vinylOpacity = 0;
+  widget.settings.images = ['https://example.test/center.png'];
+  const props = { profile: INITIAL_USER_PROFILE, characters: [], onCalendar: () => {}, onProfile: () => {}, onNotes: () => {}, onInventory: () => {} };
+  const markup = renderToStaticMarkup(createElement(FreeDesktopWidget, { ...props, widget }));
+  assert.match(markup, /--vinyl-color:#e8cdda/);
+  assert.match(markup, /--vinyl-opacity:0/);
+  assert.match(markup, /class="free-vinyl-surface" aria-hidden="true"/);
+  assert.match(markup, /src="https:\/\/example.test\/center.png"/);
+  assert.match(markup, /aria-label="播放"/);
+  assert.match(markup, /animation-play-state:paused/);
+  const editor = renderToStaticMarkup(createElement(DesktopWidgetEditor, { widget, characters: [], onSave: () => true, onClose: () => {} }));
+  assert.match(editor, /aria-label="唱片盘面颜色"/);
+  assert.match(editor, /aria-label="唱片盘面不透明度"/);
+  assert.match(editor, /--vinyl-color:#e8cdda/);
+  assert.match(editor, /--vinyl-opacity:0/);
+  assert.match(editor, /恢复原始盘面/);
+  const layout = putDesktopWidget(defaultFreeDesktopLayout(), 1, widget);
+  const exported = portableHomeBeauty({ themeId: 'ocean-dawn', wallpaperId: 'dreamy-sky', wallpapers: { lockScreen: '', homeScreen: '' }, appIcons: {}, freeDesktop: layout });
+  assert.deepEqual(JSON.parse(JSON.stringify(exported)).freeDesktop, layout);
+  const plainEditor = renderToStaticMarkup(createElement(DesktopWidgetEditor, { widget: newDesktopWidget('music', 'plain:music'), characters: [], onSave: () => true, onClose: () => {} }));
+  assert.doesNotMatch(plainEditor, /aria-label="唱片盘面颜色"/);
 });
 
 test('all four first-page themes place one pagination control after the entire system dock', () => {

@@ -21,6 +21,7 @@ export interface DesktopWidgetSettings {
   title: string; text: string; images: string[]; background: string; color: string;
   radius: number; fontSize: number; date: string; characterIds: string[]; includePlayer?: boolean; interval: number; backgroundImage?: string;
   template?: DesktopWidgetTemplate; personNames?: string[];
+  vinylColor?: string; vinylOpacity?: number;
 }
 interface Cell { x: number; y: number; w: number; h: number }
 export interface DesktopAppItem extends Cell { id: string; kind: 'app'; appId: AppId }
@@ -56,6 +57,8 @@ function isWidgetSettings(value: unknown): value is DesktopWidgetSettings {
     (value.backgroundImage === undefined || value.backgroundImage === '' || isWidgetImage(value.backgroundImage)) &&
     (value.template === undefined || DESKTOP_WIDGET_TEMPLATES.some(template => template.id === value.template)) &&
     (value.personNames === undefined || (Array.isArray(value.personNames) && value.personNames.length <= 2 && value.personNames.every(name => typeof name === 'string' && name.length <= 80))) &&
+    (value.vinylColor === undefined || color(value.vinylColor)) &&
+    (value.vinylOpacity === undefined || integer(value.vinylOpacity, 0, 100)) &&
     color(value.background) && color(value.color) && integer(value.radius, 0, 48) &&
     integer(value.fontSize, 10, 64) && (value.date === '' || dateKey(value.date)) &&
     (value.includePlayer === undefined || typeof value.includePlayer === 'boolean') &&

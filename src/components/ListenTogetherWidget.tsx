@@ -8,6 +8,7 @@ import { useWidgetAppearance } from '../utils/widgetAppearance';
 import { MUSIC_APPEARANCE_KEY } from '../utils/homeAppearance';
 import { WidgetImagePicker } from './WidgetImagePicker';
 import { NeteaseMusicPanel } from './NeteaseMusicPanel';
+import { VinylRecord } from './DesktopTemplateArt';
 
 interface CompanionOption {
   id: string;
@@ -30,8 +31,8 @@ function MusicPanelLayer({ container, children }: { container?: HTMLElement; chi
 }
 
 export const ListenTogetherWidget: React.FC<{
-  modalContainer?: HTMLElement; backgroundImage?: string; variant?: 'vinyl'; artwork?: string; title?: string; note?: string;
-}> = ({ modalContainer, backgroundImage, variant, artwork, title, note }) => {
+  modalContainer?: HTMLElement; backgroundImage?: string; variant?: 'vinyl'; artwork?: string; title?: string; note?: string; vinylColor?: string; vinylOpacity?: number;
+}> = ({ modalContainer, backgroundImage, variant, artwork, title, note, vinylColor, vinylOpacity }) => {
   const player = useMusicPlayer();
   const { appearance, patch } = useWidgetAppearance(MUSIC_APPEARANCE_KEY);
   const background = backgroundImage || appearance.background;
@@ -108,9 +109,7 @@ export const ListenTogetherWidget: React.FC<{
           <small>SIDE A · OUR LITTLE PLAYLIST</small><strong>{title || '慢慢听'}</strong><span>{note || '为这一刻留一首歌。'}</span><Music2 size={20}/>
         </button>
         <button type="button" className="free-vinyl-disc-button" aria-label="管理唱片音乐" onClick={openPanel}>
-          <span className="free-vinyl-record" data-playing={player.isPlaying} style={{ animationPlayState: player.isPlaying ? 'running' : 'paused' }}>
-            <span className="free-vinyl-label">{artwork || appearance.disc ? <img src={artwork || appearance.disc} alt="唱片中心图片" draggable={false}/> : <Music2 size={22}/>}</span>
-          </span><span className="free-vinyl-arm" aria-hidden="true"/>
+          <VinylRecord artwork={artwork || appearance.disc} color={vinylColor} opacity={vinylOpacity} playing={player.isPlaying}/><span className="free-vinyl-arm" aria-hidden="true"/>
         </button>
         <div className="free-vinyl-controls">
           <span className="free-vinyl-track"><strong>{track?.title || title || '还没有添加音乐'}</strong><small>{player.error || subtitle || note || '点唱片添加音乐'}</small></span>

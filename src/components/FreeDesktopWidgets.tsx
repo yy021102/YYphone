@@ -41,11 +41,12 @@ export function FreeDesktopWidget({ widget, profile, characters, onCalendar, onP
   const photo = settings.images.length ? settings.images[photoIndex % settings.images.length] : undefined;
   if (widgetType === 'calendar') return <div className="free-widget-live"><CalendarWidget onOpen={onCalendar} backgroundImage={settings.backgroundImage}/></div>;
   if (widgetType === 'music') return <div className="free-widget-live"><ListenTogetherWidget modalContainer={musicPortal} backgroundImage={settings.backgroundImage}
-    variant={settings.template === 'vinyl' ? 'vinyl' : undefined} artwork={settings.images[0]} title={settings.title} note={settings.text}/></div>;
+    variant={settings.template === 'vinyl' ? 'vinyl' : undefined} artwork={settings.images[0]} title={settings.title} note={settings.text}
+    vinylColor={settings.vinylColor} vinylOpacity={settings.vinylOpacity}/></div>;
   if (widgetType === 'profile') return <div className="free-profile-widget">
     {!settings.backgroundImage && profile.coverImageUrl && <img className="free-profile-cover" src={profile.coverImageUrl} alt="" draggable={false}/>}
     <button type="button" className="free-profile-content" onClick={onProfile} aria-label="编辑个人资料">
-      <span className="free-profile-heading"><small>我的小小世界</small><ArrowUpRight size={14}/></span>
+      <span className="free-profile-heading"><small>YYphone</small><ArrowUpRight size={14}/></span>
       <span className="free-profile-identity"><span className="free-profile-avatar" style={profile.avatarFrame?.enabled ? { background: frameGradient(profile.avatarFrame), padding: profile.avatarFrame.width } : undefined}>
         {avatar(profile.avatarUrl ?? '', profile.name)}
       </span><span className="free-profile-copy"><strong>{profile.name}</strong><small>@{profile.handle.replace(/^@/, '')}</small></span></span>

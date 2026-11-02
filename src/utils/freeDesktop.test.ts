@@ -225,3 +225,34 @@ test('switching a template keeps player content and a vinyl music widget counts 
   assert.throws(() => removeDesktopWidget(layout, vinyl.id), /至少需要保留一个/);
   assertComplete(layout);
 });
+test('vinyl color and opacity are optional, instance-specific and preserved at both opacity boundaries', () => {
+  const original = defaultFreeDesktopLayout();
+  const legacy = newDesktopTemplate('vinyl', 'vinyl:legacy');
+  assert.equal(legacy.settings.vinylColor, undefined);
+  assert.equal(legacy.settings.vinylOpacity, undefined);
+  for (const opacity of [0, 40, 100]) {
+    const widget = newDesktopTemplate('vinyl', `vinyl:${opacity}`);
+    widget.settings.vinylColor = '#e8cdda';
+    widget.settings.vinylOpacity = opacity;
+    const layout = putDesktopWidget(putDesktopWidget(original, 1, legacy), 1, widget);
+    const roundTrip: unknown = JSON.parse(JSON.stringify(layout));
+    assert.ok(isFreeDesktopLayout(roundTrip));
+    assert.deepEqual(roundTrip, layout);
+    const savedLegacy = layout.pages[1].find(item => item.id === legacy.id);
+    assert.ok(savedLegacy?.kind === 'widget');
+    assert.equal(savedLegacy.settings.vinylColor, undefined);
+    assert.equal(savedLegacy.settings.vinylOpacity, undefined);
+  }
+});
+test('vinyl appearance rejects invalid colors and non-integer or out-of-range opacity without changing the saved layout', () => {
+  const layout = defaultFreeDesktopLayout(), before = JSON.stringify(layout);
+  for (const patch of [
+    { vinylColor: '#123' }, { vinylColor: 'red' }, { vinylColor: 1 }, { vinylOpacity: -1 }, { vinylOpacity: 101 },
+    { vinylOpacity: 0.5 }, { vinylOpacity: NaN }, { vinylOpacity: Infinity }, { vinylOpacity: '40' }, { vinylOpacity: null },
+  ]) {
+    const widget = newDesktopTemplate('vinyl', 'vinyl:invalid');
+    Object.assign(widget.settings, patch);
+    assert.throws(() => putDesktopWidget(layout, 1, widget), /无效/);
+  }
+  assert.equal(JSON.stringify(layout), before);
+});

@@ -78,7 +78,7 @@ export function DesktopWidgetEditor({ widget, characters, onSave, onClose }: {
             settings: { ...current.settings, template: template?.id } }));
           setError('');
         }}><option value="">原有样式</option>{templates.map(template => <option key={template.id} value={template.id}>{template.name}</option>)}</select></label>
-        {draft.settings.template && <DesktopTemplateThumbnail template={draft.settings.template}/>}
+        {draft.settings.template && <DesktopTemplateThumbnail template={draft.settings.template} vinylColor={draft.settings.vinylColor} vinylOpacity={draft.settings.vinylOpacity}/>}
         <p className="free-help">换上图片、填好文字就能保存。造型外透明，背景图只显示在造型内部；上传图片会保留透明区域。切回原有样式不会清空图片和文字。</p>
       </fieldset>}
       <details className="free-widget-advanced" open={!draft.settings.template}><summary>大小设置（可选）</summary><div className="free-fields-two">
@@ -87,6 +87,12 @@ export function DesktopWidgetEditor({ widget, characters, onSave, onClose }: {
       </div></details>
       {(!live || vinyl) && draft.widgetType !== 'profile' && <><label>标题<input maxLength={80} value={draft.settings.title} placeholder="取一个喜欢的名字" onChange={event => patch({ title: event.target.value })}/></label>
       <label>文字<textarea maxLength={4000} rows={3} value={draft.settings.text} placeholder="写一点自己的话……" onChange={event => patch({ text: event.target.value })}/></label></>}
+      {vinyl && <fieldset><legend>唱片盘面 · 颜色与透明度</legend>
+        <label>盘面颜色<input aria-label="唱片盘面颜色" type="color" value={draft.settings.vinylColor ?? '#31313d'} onChange={event => patch({ vinylColor: event.target.value })}/></label>
+        <label>盘面不透明度 · {draft.settings.vinylOpacity ?? 100}%<input aria-label="唱片盘面不透明度" type="range" min={0} max={100} value={draft.settings.vinylOpacity ?? 100} onChange={event => patch({ vinylOpacity: Number(event.target.value) })}/></label>
+        <p className="free-help">0% 为完全透明，100% 为不透明；只调整外圈盘面，中心图片、文字和播放按钮不受影响。预览会跟随变化，保存后应用到桌面。</p>
+        <button type="button" className="free-vinyl-reset" onClick={() => patch({ vinylColor: undefined, vinylOpacity: undefined })}>恢复原始盘面</button>
+      </fieldset>}
       {draft.widgetType === 'countdown' && <label>纪念日期<input type="date" required value={draft.settings.date} onChange={event => patch({ date: event.target.value })}/></label>}
       {draft.widgetType === 'character' && <fieldset><legend>{ticket ? '头像来源（可选，也可只上传图片和填写称呼）' : '最多显示两位（含你），也可以只放合照'}</legend>
         <label className="free-character-choice"><input type="checkbox" checked={!!draft.settings.includePlayer} onChange={event => {

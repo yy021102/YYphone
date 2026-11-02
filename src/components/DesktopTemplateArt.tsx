@@ -1,4 +1,4 @@
-import { useId } from 'react';
+import { useId, type CSSProperties } from 'react';
 import { Heart, Music2, Sparkles } from 'lucide-react';
 import type { DesktopWidgetTemplate } from '../utils/freeDesktop';
 
@@ -37,11 +37,21 @@ export function TemplateCloud({ backgroundImage }: { backgroundImage?: string })
   </svg>;
 }
 
-export function DesktopTemplateThumbnail({ template }: { template: DesktopWidgetTemplate }) {
+export function VinylRecord({ artwork, color, opacity, playing = false }: { artwork?: string; color?: string; opacity?: number; playing?: boolean }) {
+  return <span className="free-vinyl-record" data-playing={playing} style={{
+    '--vinyl-color': color, '--vinyl-groove': color ? `color-mix(in srgb, ${color} 85%, #000)` : undefined,
+    '--vinyl-opacity': opacity === undefined ? undefined : opacity / 100, animationPlayState: playing ? 'running' : 'paused',
+  } as CSSProperties}>
+    <span className="free-vinyl-surface" aria-hidden="true"/>
+    <span className="free-vinyl-label">{artwork ? <img src={artwork} alt="唱片中心图片" draggable={false}/> : <Music2 size={22}/>}</span>
+  </span>;
+}
+
+export function DesktopTemplateThumbnail({ template, vinylColor, vinylOpacity }: { template: DesktopWidgetTemplate; vinylColor?: string; vinylOpacity?: number }) {
   return <span className="free-template-thumbnail" data-template={template} aria-hidden="true">
     {template === 'heart' ? <TemplateHeart/> : template === 'bow' ? <><span className="free-thumb-polaroid"><Sparkles size={24}/></span><TemplateBow/></> :
       template === 'ticket' ? <span className="free-thumb-ticket"><i/><Heart size={12}/><i/></span> :
-      template === 'vinyl' ? <span className="free-thumb-record"><Music2 size={20}/></span> :
+      template === 'vinyl' ? <span className="free-thumb-record"><VinylRecord color={vinylColor} opacity={vinylOpacity}/></span> :
       <><TemplateCloud/><span className="free-thumb-clock">10:24</span></>}
   </span>;
 }
