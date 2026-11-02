@@ -1,8 +1,7 @@
-export type DesktopActivityId = 'text-adventure' | 'time-capsule' | 'divination' | 'little-sip' | 'character-perspective';
+export type DesktopActivityId = 'text-adventure' | 'time-capsule' | 'divination' | 'little-sip' | 'character-perspective' | 'kitchen';
 
 export type AppId =
   | DesktopActivityId
-  | 'kitchen'
   | 'wechat'
   | 'phone_explorer'
   | 'alipay'

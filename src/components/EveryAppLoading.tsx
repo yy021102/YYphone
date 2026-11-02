@@ -4,8 +4,21 @@ import { LoadingFrame, MemoryLoading, PhoneExplorerLoading, WeChatLoading } from
 import { CoupleSpaceLoading } from './CoupleSpaceLoading';
 import { PomodoroLoading } from './PomodoroLoading';
 
-type IllustratedApp = Exclude<AppId, 'kitchen' | 'wechat' | 'phone_explorer' | 'memory' | 'couple_space' | 'pomodoro'>;
+type IllustratedApp = Exclude<AppId, 'wechat' | 'phone_explorer' | 'memory' | 'couple_space' | 'pomodoro'>;
 const scenes: Record<IllustratedApp, { title: string; caption: string; eyebrow: string; footer: string; art: ReactNode }> = {
+  kitchen: {
+    title: '下厨房', caption: '把喜欢，慢慢做成一餐。', eyebrow: 'A LITTLE KITCHEN, A LOT OF LOVE', footer: '今天，也有一份为你留的热乎心意',
+    art: <g className="every-opening-float">
+      <ellipse cx="160" cy="248" rx="94" ry="17" fill="#e2d5bf"/>
+      <path d="M75 143q0 101 85 101t85-101Z" fill="#d2dcc5" stroke="#fff9ed" strokeWidth="3"/>
+      <ellipse cx="160" cy="143" rx="85" ry="30" fill="#e9ddbd" stroke="#fff9ed" strokeWidth="4"/>
+      <path d="M82 153H61q-26 0-22 24 3 19 49 17m150-41h21q26 0 22 24-3 19-49 17" stroke="#bbc9aa" strokeWidth="9" strokeLinecap="round"/>
+      <ellipse cx="160" cy="140" rx="70" ry="19" fill="#d4b887"/>
+      <g fill="#e7b292" stroke="#fff3da" strokeWidth="1.5"><ellipse cx="132" cy="138" rx="17" ry="9"/><ellipse cx="188" cy="140" rx="13" ry="8"/></g>
+      <path d="M152 132q-15-23 13-27 21 20-13 27Z" fill="#9caf87"/><path d="M119 97q-14-17 0-32t0-24m40 47q14-17 0-32t0-24m41 63q14-17 0-32t0-21" stroke="#c3b297" strokeWidth="2" strokeLinecap="round"/>
+      <path d="M245 125 270 65" stroke="#cbb499" strokeWidth="7" strokeLinecap="round"/>
+    </g>,
+  },
   'text-adventure': {
     title: '文字冒险', caption: '翻开这一页，走进另一种人生。', eyebrow: 'BEYOND THE NEXT CHAPTER', footer: '故事里的下一步，由你决定',
     art: <>
@@ -162,7 +175,6 @@ export function AppLoading({ app, onBack }: { app: AppId; onBack: () => void }) 
   if (app === 'memory') return <MemoryLoading onBack={onBack}/>;
   if (app === 'couple_space') return <CoupleSpaceLoading onBack={onBack}/>;
   if (app === 'pomodoro') return <PomodoroLoading onBack={onBack}/>;
-  if (app === 'kitchen') return <LoadingFrame kind={app} title="下厨房" caption="" onBack={onBack}>{null}</LoadingFrame>;
   const scene = scenes[app];
   return <LoadingFrame kind={app} title={scene.title} caption={scene.caption} eyebrow={scene.eyebrow} footer={scene.footer} onBack={onBack}>
     <svg className="soft-opening-svg every-opening-art" viewBox="0 0 320 320" fill="none">

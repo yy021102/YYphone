@@ -8,13 +8,13 @@ import { AppLoading } from '../components/EveryAppLoading';
 import { ALL_APPS, DOCK_APPS, INITIAL_USER_PROFILE, MAIN_GRID_APPS, SECOND_PAGE_APPS } from '../data/mockData';
 import { desktopPageAfterSwipe, isDesktopActivity } from './desktopNavigation';
 
-test('desktop identities are unique, place WeChat in the shared dock and distinguish the empty kitchen from existing activities', () => {
+test('desktop identities are unique, place WeChat in the shared dock and route all six second-page activities', () => {
   assert.deepEqual(MAIN_GRID_APPS.map(app => app.id), ['world_book', 'phone_explorer', 'alipay', 'taobao', 'forum', 'pomodoro', 'offline_mode', 'couple_space']);
   assert.deepEqual(DOCK_APPS.map(app => app.id), ['settings', 'customizer', 'memory', 'wechat']);
   assert.deepEqual(SECOND_PAGE_APPS.map(app => app.id), ['text-adventure', 'time-capsule', 'divination', 'little-sip', 'character-perspective', 'kitchen']);
   assert.equal(new Set(ALL_APPS.map(app => app.id)).size, ALL_APPS.length);
   assert.equal(ALL_APPS.length, MAIN_GRID_APPS.length + DOCK_APPS.length + SECOND_PAGE_APPS.length);
-  for (const app of SECOND_PAGE_APPS) assert.equal(isDesktopActivity(app.id), app.id !== 'kitchen');
+  for (const app of SECOND_PAGE_APPS) assert.equal(isDesktopActivity(app.id), true);
   for (const app of [...MAIN_GRID_APPS, ...DOCK_APPS]) assert.equal(isDesktopActivity(app.id), false);
   assert.equal(isDesktopActivity(null), false);
   assert.equal(isDesktopActivity(undefined), false);
@@ -64,7 +64,7 @@ test('all four leisure themes render six apps, a shared dock and replaceable cus
   }
 });
 
-test('the five standalone activities have different illustrated loading scenes rather than a shared placeholder', () => {
+test('all six standalone activities have different illustrated loading scenes rather than a shared placeholder', () => {
   const illustrations = new Set<string>();
   for (const app of SECOND_PAGE_APPS.filter(app => isDesktopActivity(app.id))) {
     const markup = renderToStaticMarkup(createElement(AppLoading, { app: app.id, onBack: () => {} }));
@@ -74,7 +74,7 @@ test('the five standalone activities have different illustrated loading scenes r
     illustrations.add(illustration);
     assert.ok(!markup.includes('留一点时间，给喜欢的事。'));
   }
-  assert.equal(illustrations.size, 5);
+  assert.equal(illustrations.size, 6);
 });
 
 test('every desktop app has a valid lazy-loading scene including all six additions', () => {

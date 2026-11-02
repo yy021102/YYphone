@@ -24,7 +24,6 @@ import { birthdayIsDue, readBirthdaySettings, readBirthdaySeen } from './utils/b
 import { HomeScreen } from './components/HomeScreen';
 import { isDesktopActivity, type DesktopPage } from './utils/desktopNavigation';
 import { isFreeDesktopLayout } from './utils/freeDesktop';
-import { AppHeader } from './components/AppHeader';
 import { AppLoading } from './components/EveryAppLoading';
 import { LittlePPanel } from './components/LittlePPanel';
 import { LittlePLauncher } from './components/LittlePLauncher';
@@ -733,7 +732,6 @@ export default function App() {
               {activeApp === 'inventory' && (
                 <InventoryApp onBack={handleBackToHome} />
               )}
-              {activeApp === 'kitchen' && <div className="flex h-full flex-col bg-[#faf8f3]"><AppHeader title="下厨房" onBack={handleBackToHome} /><main className="flex-1" aria-label="下厨房" /></div>}
               </Suspense>
             </div>
           ) : (
