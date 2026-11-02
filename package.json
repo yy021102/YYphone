@@ -11,9 +11,11 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
+    "@spensercai/qimen-wasm": "0.2.1",
     "@google/genai": "^2.4.0",
     "@tailwindcss/vite": "^4.3.3",
     "@vitejs/plugin-react": "^6.1.1",
+    "astronomy-engine": "^2.1.19",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
     "lucide-react": "^0.546.0",

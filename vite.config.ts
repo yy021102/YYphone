@@ -20,6 +20,7 @@ export default defineConfig(() => {
         manifest: false,
         workbox: {
           importScripts: ['notification-events.js'],
+          globPatterns: ['**/*.{js,css,html,wasm}', 'qimen-engine-license.txt'],
         },
         devOptions: {
           enabled: true,

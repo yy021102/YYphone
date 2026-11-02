@@ -71,7 +71,7 @@ export interface PromptChatMessage {
 
 export interface PromptConversation {
   activeArchiveId?: string;
-  archiveRevision?: number;
+  archiveRevision?: string | number;
   id: string;
   type: 'direct' | 'group' | 'observer';
   participantIds: string[];

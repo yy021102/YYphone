@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { beforeEach, test } from 'node:test';
 import { clearDbStorage } from './dbStorage';
 import { readStorageString, writeStoredValue } from './localStorage';
-import { changeChatArchive } from './chatArchives';
+import { bindChatArchiveContextPreset, changeChatArchive, deleteChatContextPreset, saveChatContextPreset } from './chatArchives';
 import { activeMemoryArchive, chatArchiveKey, deleteMemoryArchive, guardMemoryArchive } from './memoryArchives';
 import { buildMemoryInjection, readEmbeddings, readMemories, readMemorySettings, writeMemories } from './memoryData';
 import { readGrowthNotes, readJournalEntries, readJournalSettings, writeJournalEntries } from './journalData';
@@ -130,4 +130,123 @@ test('switching away and back cancels previous jobs, and the current prompt sees
   assert.match(await prompt(), /BRANCH_SECRET_CORE/);
   await changeChatArchive('chat-a', { mode: 'switch', targetId: 'archive-default' });assert.throws(oldGuard, /存档/);assert.notEqual(chat().archiveRevision, revision);assert(!(await prompt()).includes('BRANCH_SECRET_CORE'));
   await changeChatArchive('chat-a', { mode: 'switch', targetId: branch });assert.match(await prompt(), /BRANCH_SECRET_CORE/);
+});
+
+test('legacy and unbound archives keep the current supplement without implicitly binding a matching preset', async () => {
+  const all = read('yyphone:wechat-chats');all[0].context = 'CUSTOM_UNBOUND_CONTEXT';writeStoredValue('yyphone:wechat-chats', all);
+  await saveChatContextPreset({ ownerId: 'a', name: '相同内容', context: 'CUSTOM_UNBOUND_CONTEXT' });
+  const restart = await changeChatArchive('chat-a', { mode: 'restart' });
+  assert.equal(chat().context, 'CUSTOM_UNBOUND_CONTEXT');assert(chat().archives.every((slot: any) => !slot.contextPresetId));
+  await changeChatArchive('chat-a', { mode: 'switch', targetId: 'archive-default' });
+  assert.equal(chat().context, 'CUSTOM_UNBOUND_CONTEXT');assert.notEqual(chat().activeArchiveId, restart);
+});
+
+test('binding applies only to the active slot and switching uses the latest saved preset in the real AI prompt', async () => {
+  const original = await saveChatContextPreset({ ownerId: 'a', name: '海边', context: 'SEA_CONTEXT_V1' });
+  const other = await saveChatContextPreset({ ownerId: 'a', name: '校园', context: 'SCHOOL_CONTEXT' });
+  await bindChatArchiveContextPreset('chat-a', 'archive-default', original.id, 'archive-default');
+  assert.equal(chat().context, 'SEA_CONTEXT_V1');
+  const restart = await changeChatArchive('chat-a', { mode: 'restart' });
+  await bindChatArchiveContextPreset('chat-a', restart, other.id, restart);
+  await bindChatArchiveContextPreset('chat-a', 'archive-default', original.id, restart);
+  assert.equal(chat().context, 'SCHOOL_CONTEXT');
+  const updated = await saveChatContextPreset({ ...original, ownerId: 'a', name: '海边 · 更新', context: 'SEA_CONTEXT_V2' });
+  assert.equal(updated.id, original.id);assert.equal(read('yyphone:chat-context-presets').length, 2);
+  await changeChatArchive('chat-a', { mode: 'switch', targetId: 'archive-default' });
+  assert.equal(chat().context, 'SEA_CONTEXT_V2');
+  const prompt = JSON.stringify(buildPrompt({ chatId: 'chat-a', timeAwarenessEnabled: false }));
+  assert.match(prompt, /SEA_CONTEXT_V2/);assert.doesNotMatch(prompt, /SEA_CONTEXT_V1|SCHOOL_CONTEXT/);
+  await changeChatArchive('chat-a', { mode: 'switch', targetId: restart });assert.equal(chat().context, 'SCHOOL_CONTEXT');
+  await changeChatArchive('chat-a', { mode: 'switch', targetId: 'archive-default' });assert.equal(chat().context, 'SEA_CONTEXT_V2');
+});
+
+test('save-as-new leaves the original preset and bindings intact; unbinding preserves manual text', async () => {
+  const first = await saveChatContextPreset({ ownerId: 'a', name: '原预设', context: 'ORIGINAL' });
+  await bindChatArchiveContextPreset('chat-a', 'archive-default', first.id, 'archive-default');
+  const second = await saveChatContextPreset({ ownerId: 'a', name: '另存一份', context: 'NEW_COPY' });
+  assert.notEqual(first.id, second.id);assert.equal(read('yyphone:chat-context-presets')[0].context, 'ORIGINAL');
+  assert.equal(chat().archives[0].contextPresetId, first.id);
+  const all = read('yyphone:wechat-chats');all[0].context = 'MANUAL_EDIT';writeStoredValue('yyphone:wechat-chats', all);
+  await bindChatArchiveContextPreset('chat-a', 'archive-default', '', 'archive-default');
+  assert.equal(chat().context, 'MANUAL_EDIT');assert.equal(chat().archives[0].contextPresetId, undefined);
+  const restart = await changeChatArchive('chat-a', { mode: 'restart' });
+  await bindChatArchiveContextPreset('chat-a', restart, second.id, restart);
+  await changeChatArchive('chat-a', { mode: 'switch', targetId: 'archive-default' });
+  assert.equal(chat().context, 'NEW_COPY');
+});
+
+test('branches inherit a binding, restarts do not, and bindings can be replaced without editing either preset', async () => {
+  const one = await saveChatContextPreset({ ownerId: 'a', name: '一', context: 'ONE' });
+  const two = await saveChatContextPreset({ ownerId: 'a', name: '二', context: 'TWO' });
+  await bindChatArchiveContextPreset('chat-a', 'archive-default', one.id, 'archive-default');
+  const branch = await changeChatArchive('chat-a', { mode: 'branch' });
+  assert.equal(chat().archives.find((slot: any) => slot.id === branch).contextPresetId, one.id);assert.equal(chat().context, 'ONE');
+  await bindChatArchiveContextPreset('chat-a', branch, two.id, branch);assert.equal(chat().context, 'TWO');
+  const restart = await changeChatArchive('chat-a', { mode: 'restart' });
+  assert.equal(chat().archives.find((slot: any) => slot.id === restart).contextPresetId, undefined);assert.equal(chat().context, 'TWO');
+  await changeChatArchive('chat-a', { mode: 'switch', targetId: 'archive-default' });assert.equal(chat().context, 'ONE');
+});
+
+test('deleting a preset atomically unbinds all its owner archives while retaining text, other presets and other characters', async () => {
+  const one = await saveChatContextPreset({ ownerId: 'a', name: '删除', context: 'KEEP_TEXT' });
+  const other = await saveChatContextPreset({ ownerId: 'b', name: '其他角色', context: 'OTHER_OWNER' });
+  await bindChatArchiveContextPreset('chat-a', 'archive-default', one.id, 'archive-default');
+  await changeChatArchive('chat-a', { mode: 'branch' });
+  await bindChatArchiveContextPreset('chat-b', 'other', other.id, 'other');
+  const all = read('yyphone:wechat-chats');all.push({ ...structuredClone(all[0]), id: 'chat-a-second' });writeStoredValue('yyphone:wechat-chats', all);
+  await deleteChatContextPreset('a', one.id);
+  assert.deepEqual(read('yyphone:chat-context-presets'), [other]);
+  const after = read('yyphone:wechat-chats');
+  for (const item of after.filter((item: any) => item.participantIds[0] === 'a')) {
+    assert.equal(item.context, 'KEEP_TEXT');assert(item.archives.every((slot: any) => slot.contextPresetId === undefined));
+  }
+  assert.equal(after[1].context, 'OTHER_OWNER');assert.equal(after[1].archives[0].contextPresetId, other.id);
+});
+
+test('invalid, foreign and stale preset actions cannot change chats or presets; missing bindings can be repaired', async () => {
+  const foreign = await saveChatContextPreset({ ownerId: 'b', name: '其他角色', context: 'FORBIDDEN' });
+  const before = readStorageString('yyphone:wechat-chats');
+  await assert.rejects(bindChatArchiveContextPreset('chat-a', 'archive-default', foreign.id, 'archive-default'), /不属于/);
+  await assert.rejects(bindChatArchiveContextPreset('chat-a', 'archive-default', '', 'stale'), /已变化/);
+  await assert.rejects(bindChatArchiveContextPreset('chat-a', 'missing', '', 'archive-default'), /不存在/);
+  await assert.rejects(saveChatContextPreset({ ...foreign, ownerId: 'a', context: 'ATTACK' }), /不属于/);
+  await assert.rejects(deleteChatContextPreset('a', foreign.id), /不属于/);
+  assert.equal(readStorageString('yyphone:wechat-chats'), before);
+  const restart = await changeChatArchive('chat-a', { mode: 'restart' });
+  const all = read('yyphone:wechat-chats');all[0].archives[0].contextPresetId = 'missing';writeStoredValue('yyphone:wechat-chats', all);
+  const unchanged = readStorageString('yyphone:wechat-chats');
+  await assert.rejects(changeChatArchive('chat-a', { mode: 'switch', targetId: 'archive-default' }), /不存在/);
+  assert.equal(readStorageString('yyphone:wechat-chats'), unchanged);
+  await bindChatArchiveContextPreset('chat-a', 'archive-default', '', restart);
+  await changeChatArchive('chat-a', { mode: 'switch', targetId: 'archive-default' });assert.equal(chat().activeArchiveId, 'archive-default');
+  const groups = read('yyphone:wechat-chats');groups.push({ id: 'group', type: 'group', participantIds: ['a', 'b'], messages: [], context: '', updatedAt: stamp(1) });writeStoredValue('yyphone:wechat-chats', groups);
+  await assert.rejects(bindChatArchiveContextPreset('group', 'archive-default', foreign.id, 'archive-default'), /只有角色私聊/);
+});
+
+test('preset binding, update and deletion failures roll back storage and keep the write queue usable', async () => {
+  const preset = await saveChatContextPreset({ ownerId: 'a', name: '预设', context: 'OLD' });
+  const original = readStorageString('yyphone:wechat-chats');failKey = 'yyphone:wechat-chats';
+  await assert.rejects(bindChatArchiveContextPreset('chat-a', 'archive-default', preset.id, 'archive-default'), /QUOTA_TEST/);
+  assert.equal(readStorageString('yyphone:wechat-chats'), original);
+  await bindChatArchiveContextPreset('chat-a', 'archive-default', preset.id, 'archive-default');
+  const keys = ['yyphone:wechat-chats', 'yyphone:chat-context-presets'];
+  const before = keys.map(readStorageString);failKey = 'yyphone:wechat-chats';
+  await assert.rejects(deleteChatContextPreset('a', preset.id), /QUOTA_TEST/);
+  assert.deepEqual(keys.map(readStorageString), before);
+  failKey = 'yyphone:chat-context-presets';
+  await assert.rejects(saveChatContextPreset({ ...preset, ownerId: 'a', context: 'FAILED_UPDATE' }), /QUOTA_TEST/);
+  assert.deepEqual(keys.map(readStorageString), before);
+  const update = saveChatContextPreset({ ...preset, ownerId: 'a', context: 'LATEST' });
+  const branch = changeChatArchive('chat-a', { mode: 'branch' });
+  await update;await branch;assert.equal(chat().context, 'LATEST');
+});
+
+test('malformed presets and invalid name or content fail explicitly without partial updates', async () => {
+  const before = readStorageString('yyphone:wechat-chats');
+  await assert.rejects(saveChatContextPreset({ ownerId: 'a', name: ' ', context: '' }), /名称/);
+  await assert.rejects(saveChatContextPreset({ ownerId: 'a', name: 'x'.repeat(51), context: '' }), /名称/);
+  await assert.rejects(saveChatContextPreset({ ownerId: 'a', name: '合法', context: 'x'.repeat(5001) }), /5000/);
+  writeStoredValue('yyphone:chat-context-presets', [{ id: 'bad', name: '损坏', context: 123 }]);
+  await assert.rejects(bindChatArchiveContextPreset('chat-a', 'archive-default', 'bad', 'archive-default'), /格式异常/);
+  assert.equal(readStorageString('yyphone:wechat-chats'), before);
 });

@@ -1,4 +1,5 @@
 import { readStoredValue, writeStoredValue } from './localStorage';
+import { isDivinationInterpretation, type DivinationInterpretation, type DivinationReader } from './divination';
 
 export type TarotSuit = 'major' | 'wands' | 'cups' | 'swords' | 'pentacles';
 export interface TarotCard {
@@ -129,16 +130,9 @@ export const TAROT_SPREADS = [
   { id: 'insight', name: '深入看看一件事', english: 'A deeper reflection', description: '五张牌，多看看背后的影响，再整理建议与可探索的方向。', positions: ['现状', '阻碍', '背后影响', '建议', '可探索的方向'], question: '关于这件事，还有哪些影响值得留意，我可以怎样尝试？' },
 ] as const;
 export type TarotSpreadId = typeof TAROT_SPREADS[number]['id'];
-export type TarotReader = { mode: 'oracle' } | { mode: 'character'; actorId: string; actorName: string };
+export type TarotReader = DivinationReader;
 export interface TarotDrawnCard { cardId: string; reversed: boolean; position: string }
-export interface TarotInterpretation {
-  id: string;
-  reader: TarotReader;
-  status: 'pending' | 'done' | 'error';
-  text: string;
-  error?: string;
-  createdAt: string;
-}
+export type TarotInterpretation = DivinationInterpretation;
 export interface TarotRecord {
   id: string;
   createdAt: string;
@@ -191,8 +185,6 @@ export function makeTarotDraw(cardId: string, position: string, includeReversed:
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const text = (value: unknown, max: number): value is string => typeof value === 'string' && !!value.trim() && value.length <= max;
 const date = (value: unknown): value is string => typeof value === 'string' && Number.isFinite(Date.parse(value));
-const isReader = (value: unknown): value is TarotReader => object(value) &&
-  (value.mode === 'oracle' || value.mode === 'character' && text(value.actorId, 200) && text(value.actorName, 100));
 export function isTarotRecord(value: unknown): value is TarotRecord {
   if (!object(value) || !text(value.id, 200) || !date(value.createdAt) || !text(value.userName, 100) ||
       !text(value.question, 300) || typeof value.includeReversed !== 'boolean' || !Array.isArray(value.cards) || !Array.isArray(value.interpretations)) return false;
@@ -206,10 +198,7 @@ export function isTarotRecord(value: unknown): value is TarotRecord {
   }
   const attemptIds = new Set<string>();
   return value.interpretations.every(attempt => {
-    if (!object(attempt) || !text(attempt.id, 200) || attemptIds.has(attempt.id) || !isReader(attempt.reader) || !date(attempt.createdAt) ||
-        typeof attempt.text !== 'string' || attempt.text.length > 12000 || !['pending', 'done', 'error'].includes(String(attempt.status)) ||
-        attempt.error !== undefined && (typeof attempt.error !== 'string' || attempt.error.length > 1000) ||
-        attempt.status === 'done' && !attempt.text.trim() || attempt.status === 'error' && !text(attempt.error, 1000)) return false;
+    if (!isDivinationInterpretation(attempt) || attemptIds.has(attempt.id)) return false;
     attemptIds.add(attempt.id);
     return true;
   });

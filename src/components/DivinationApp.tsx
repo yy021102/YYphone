@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import {
   ArrowLeft, ArrowRight, Bird, Check, ChevronRight, CircleDot, Coins, Crown, Eye, Flower2, Heart,
-  History, Infinity, KeyRound, Lamp, Loader2, Moon, Mountain, Orbit, RefreshCw, Scale, Send,
+  History, Infinity, KeyRound, Lamp, Loader2, Moon, Orbit, RefreshCw, Scale, Send,
   Shield, Skull, Sparkles, Star, Sun, Sword, TowerControl, Trash2, WandSparkles, Wine,
 } from 'lucide-react';
 import {
@@ -11,16 +11,21 @@ import {
   type TarotSpreadId, type TarotSuit,
 } from '../utils/tarot';
 import './divination.css';
+import type { AstrologyRecord, CharacterBirthInput, NatalInterpretInput } from '../utils/astrology';
+import type { QimenInterpretInput, QimenRecord } from '../utils/qimen';
+
+const AstrologyApp = lazy(() => import('./AstrologyApp'));
+const QimenApp = lazy(() => import('./QimenApp'));
 
 type Person = { id: string; name: string; avatarUrl?: string };
 type Props = {
   userName: string;
   people: Person[];
-  onInterpret: (input: TarotInterpretInput) => Promise<string>;
-  onShare: (record: TarotRecord, recipients: string[]) => void | Promise<void>;
+  onInterpret: (input: TarotInterpretInput | NatalInterpretInput | CharacterBirthInput | QimenInterpretInput) => Promise<string>;
+  onShare: (record: TarotRecord | AstrologyRecord | QimenRecord, recipients: string[]) => void | Promise<void>;
 };
 type Draft = { spreadId: TarotSpreadId; question: string; includeReversed: boolean; deck: string[]; picked: number[]; draws: TarotDrawnCard[]; recordId?: string };
-type View = 'lobby' | 'setup' | 'draw' | 'result' | 'history';
+type View = 'lobby' | 'setup' | 'draw' | 'result' | 'history' | 'astrology' | 'qimen';
 const motifs = [Bird, WandSparkles, Eye, Flower2, Crown, KeyRound, Heart, Shield, Infinity, Lamp, Orbit, Scale, CircleDot, Skull, Wine, KeyRound, TowerControl, Star, Moon, Sun, Sparkles, Orbit];
 const suitIcons = { wands: WandSparkles, cups: Wine, swords: Sword, pentacles: Coins };
 const tones: Record<TarotSuit, string> = { major: '#d8be83', wands: '#d7a479', cups: '#94bcb9', swords: '#b5add0', pentacles: '#a9bf99' };
@@ -40,17 +45,70 @@ function CelestialSeal() {
   );
 }
 
-function CardBack() {
-  return <div className="tarot-card-back" aria-hidden="true"><div className="tarot-back-frame"><CelestialSeal /><span>ARCANA</span><i>✦</i></div></div>;
+function StellarEntryArt() {
+  return <svg className="divination-entry-art" viewBox="0 0 170 200" fill="none" aria-hidden="true">
+    <circle cx="92" cy="96" r="67" stroke="currentColor" strokeOpacity=".22" />
+    <circle cx="92" cy="96" r="55" stroke="currentColor" strokeOpacity=".42" />
+    <circle cx="92" cy="96" r="39" stroke="currentColor" strokeOpacity=".18" strokeDasharray="1 6" />
+    <ellipse cx="92" cy="96" rx="31" ry="81" transform="rotate(42 92 96)" stroke="currentColor" strokeOpacity=".3" />
+    <ellipse cx="92" cy="96" rx="76" ry="23" transform="rotate(-25 92 96)" stroke="currentColor" strokeOpacity=".24" />
+    {Array.from({ length: 12 }, (_, i) => <path key={i} d="M92 32V39" transform={`rotate(${i * 30} 92 96)`} stroke="currentColor" strokeOpacity=".65" />)}
+    <path d="M92 68L98 89L119 96L98 102L92 123L86 102L65 96L86 89Z" stroke="currentColor" fill="currentColor" fillOpacity=".08" />
+    <path d="M92 79V112M76 96H108" stroke="currentColor" strokeOpacity=".45" />
+    <circle cx="145" cy="57" r="4" fill="currentColor" /><circle cx="41" cy="137" r="2.5" fill="currentColor" />
+    <path d="M25 35H35M30 30V40M136 163H146M141 158V168" stroke="currentColor" strokeOpacity=".7" />
+    <g fill="currentColor"><circle cx="53" cy="17" r="1" /><circle cx="159" cy="119" r="1" /><circle cx="67" cy="178" r="1.5" /><circle cx="18" cy="88" r="1" /></g>
+  </svg>;
+}
+function InkEntryArt() {
+  return <svg className="divination-entry-art" viewBox="0 0 170 200" fill="none" aria-hidden="true">
+    <circle cx="95" cy="74" r="38" stroke="currentColor" strokeOpacity=".16" />
+    <circle cx="95" cy="74" r="29" stroke="currentColor" strokeOpacity=".3" strokeDasharray="1 4" />
+    <path d="M79 58H111V90H79ZM90 58V90M101 58V90M79 69H111M79 80H111" stroke="currentColor" strokeOpacity=".4" />
+    <path d="M7 155L42 117L59 134L88 91L109 118L134 83L170 123V200H7Z" fill="currentColor" fillOpacity=".09" />
+    <path d="M0 173L36 145L63 156L99 122L126 149L153 125L170 142V200H0Z" fill="currentColor" fillOpacity=".14" />
+    <path d="M12 176C45 169 68 182 93 174C120 166 144 168 169 174M32 188C57 182 82 192 115 185" stroke="currentColor" strokeOpacity=".22" />
+    <path d="M22 96Q43 84 60 92M119 110Q143 99 160 105" stroke="currentColor" strokeOpacity=".25" />
+    <path d="M137 35V57H153V35ZM142 40H148M142 46H148M145 39V52" stroke="#a45746" strokeOpacity=".6" />
+    <path d="M31 59Q36 54 41 59Q46 54 51 59" stroke="currentColor" strokeOpacity=".5" />
+  </svg>;
 }
 
-function CardFace({ draw, compact = false }: { draw: TarotDrawnCard; compact?: boolean }) {
+function CardBack() {
+  return <div className="tarot-card-back" aria-hidden="true">
+    <svg className="tarot-back-engraving" viewBox="0 0 140 210" fill="none">
+      <rect x="5" y="5" width="130" height="200" rx="8" stroke="currentColor" strokeOpacity=".7" />
+      <rect x="10" y="10" width="120" height="190" rx="5" stroke="currentColor" strokeOpacity=".24" />
+      <path d="M17 47V17H47M93 17H123V47M17 163V193H47M93 193H123V163" stroke="currentColor" strokeOpacity=".7" />
+      <path d="M70 25L75 35L70 45L65 35ZM70 165L75 175L70 185L65 175Z" stroke="currentColor" strokeOpacity=".65" />
+      <path d="M26 30L28 36L34 38L28 40L26 46L24 40L18 38L24 36ZM114 164L116 170L122 172L116 174L114 180L112 174L106 172L112 170Z" fill="currentColor" fillOpacity=".65" />
+      <path d="M106 37H120M113 30V44M20 173H34M27 166V180" stroke="currentColor" strokeOpacity=".6" />
+      <ellipse cx="70" cy="105" rx="37" ry="69" transform="rotate(32 70 105)" stroke="currentColor" strokeOpacity=".16" />
+      <ellipse cx="70" cy="105" rx="37" ry="69" transform="rotate(-32 70 105)" stroke="currentColor" strokeOpacity=".16" />
+      <circle cx="70" cy="105" r="52" stroke="currentColor" strokeOpacity=".45" />
+      <circle cx="70" cy="105" r="44" stroke="currentColor" strokeOpacity=".25" />
+      <circle cx="70" cy="105" r="32" stroke="currentColor" strokeOpacity=".4" />
+      {Array.from({ length: 48 }, (_, index) => <path key={index} d={`M70 55V${index % 6 === 0 ? 62 : 58}`}
+        transform={`rotate(${index * 7.5} 70 105)`} stroke="currentColor" strokeOpacity={index % 6 === 0 ? '.85' : '.4'} />)}
+      {Array.from({ length: 8 }, (_, index) => <g key={index} transform={`rotate(${index * 45} 70 105)`}>
+        <path d={`M70 ${index % 2 === 0 ? 65 : 77}L77 105L70 113L63 105Z`} stroke="currentColor" strokeWidth=".6" fill="currentColor" fillOpacity=".08" />
+        <path d={`M70 ${index % 2 === 0 ? 65 : 77}V113L63 105Z`} fill="currentColor" fillOpacity={index % 2 === 0 ? '.7' : '.35'} />
+      </g>)}
+      <circle cx="70" cy="105" r="8" fill="#24202f" stroke="currentColor" />
+      <path d="M70 99L72 103L76 105L72 107L70 111L68 107L64 105L68 103Z" fill="currentColor" />
+      <path d="M40 56L42 61L47 63L42 65L40 70L38 65L33 63L38 61ZM100 140L102 145L107 147L102 149L100 154L98 149L93 147L98 145Z" fill="currentColor" fillOpacity=".75" />
+      <g fill="currentColor" fillOpacity=".55"><circle cx="27" cy="76" r="1" /><circle cx="113" cy="134" r="1" /><circle cx="101" cy="51" r="1.5" /><circle cx="39" cy="159" r="1.5" /><circle cx="70" cy="20" r="1" /><circle cx="70" cy="190" r="1" /></g>
+    </svg>
+  </div>;
+}
+
+function CardFace({ draw }: { draw: TarotDrawnCard }) {
   const card = tarotCard(draw.cardId);
   const Icon = card.suit === 'major' ? motifs[card.rank] : suitIcons[card.suit];
   const style: CSSProperties & { '--tarot-tone': string } = { '--tarot-tone': tones[card.suit] };
   const pips = card.suit === 'major' ? 7 : Math.min(card.rank, 10);
   return (
-    <div className={`tarot-card-face${compact ? ' is-compact' : ''}`} style={style} data-reversed={draw.reversed}>
+    <div className="tarot-card-face" style={style} data-reversed={draw.reversed}>
       <span className="tarot-card-number">{card.suit === 'major' ? String(card.rank).padStart(2, '0') : card.rank > 10 ? ['P', 'N', 'Q', 'K'][card.rank - 11] : card.rank}</span>
       <div className="tarot-card-art" aria-hidden="true">
         <svg viewBox="0 0 100 125" fill="none">
@@ -69,6 +127,34 @@ function CardFace({ draw, compact = false }: { draw: TarotDrawnCard; compact?: b
       <small>{card.english}</small>
     </div>
   );
+}
+
+function TarotDeckRibbon({ draft, onPick }: { draft: Draft; onPick: (index: number) => void }) {
+  const ribbonRef = useRef<HTMLDivElement>(null);
+  const browse = (direction: number) => {
+    const ribbon = ribbonRef.current;
+    ribbon?.scrollBy({ left: direction * ribbon.clientWidth * .8,
+      behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' });
+  };
+  return <section className="tarot-deck" aria-label="完整塔罗牌带">
+    <div className="tarot-deck-heading"><span>THE CELESTIAL DECK</span><span>{draft.deck.length} 张 · 完整牌组</span></div>
+    <div className="tarot-deck-ribbon" ref={ribbonRef}>
+      <div className="tarot-deck-fan">{draft.deck.map((id, index) => {
+        const selected = draft.picked.includes(index);
+        const style: CSSProperties & { '--fan-angle': string; '--fan-lift': string } = {
+          '--fan-angle': `${(index % 9 - 4) * 1.2}deg`, '--fan-lift': `${Math.abs(index % 9 - 4) * 2}px`,
+        };
+        return <button type="button" key={id} style={style} disabled={!!draft.recordId || selected}
+          aria-label={`第 ${index + 1} 张牌${selected ? '，已选取' : '，点击抽取'}`} aria-pressed={selected}
+          onClick={() => onPick(index)} className={`tarot-ribbon-card${selected ? ' is-picked' : ''}`}>
+          <CardBack /><span className="tarot-ribbon-number" aria-hidden="true">{String(index + 1).padStart(2, '0')}</span>
+          {selected && <span className="tarot-ribbon-check" aria-hidden="true"><Check size={18} /></span>}
+        </button>;
+      })}</div>
+    </div>
+    <div className="tarot-deck-navigation"><button type="button" aria-label="向前浏览牌组" onClick={() => browse(-1)}><ArrowLeft size={17} /></button>
+      <p>左右滑动，让直觉停在某一张</p><button type="button" aria-label="向后浏览牌组" onClick={() => browse(1)}><ArrowRight size={17} /></button></div>
+  </section>;
 }
 
 function Topbar({ title, onBack, right }: { title: string; onBack: () => void; right?: ReactNode }) {
@@ -112,7 +198,7 @@ export function DivinationApp({ userName, people, onInterpret, onShare }: Props)
   const go = (next: View) => { cancelRequest(); setBusy(false); setError(''); setView(next); };
   const begin = () => {
     try {
-      const next: Draft = { spreadId, question, includeReversed, deck: shuffleTarotDeck().slice(0, 12).map(card => card.id), picked: [], draws: [] };
+      const next: Draft = { spreadId, question, includeReversed, deck: shuffleTarotDeck().map(card => card.id), picked: [], draws: [] };
       draftRef.current = next; setDraft(next); go('draw');
     } catch (caught) { setError(caught instanceof Error ? caught.message : '洗牌失败，请重新尝试。'); }
   };
@@ -157,6 +243,13 @@ export function DivinationApp({ userName, people, onInterpret, onShare }: Props)
   const alert = error && <p role="alert" className="tarot-error">{error}</p>;
   const footer = <p className="tarot-disclaimer">给心事一点新的视角，不替未来下结论。<br />仅供娱乐与自我探索，不替代现实沟通或专业建议。</p>;
 
+  if (view === 'astrology') return <Suspense fallback={<div className="tarot-root"><p className="tarot-disclaimer">正在展开星图…</p></div>}>
+    <AstrologyApp userName={userName} people={people} onBack={() => go('lobby')} onInterpret={onInterpret} onShare={onShare} />
+  </Suspense>;
+  if (view === 'qimen') return <Suspense fallback={<div className="tarot-root"><p className="tarot-disclaimer">正在展开山河手卷…</p></div>}>
+    <QimenApp people={people} onBack={() => go('lobby')} onInterpret={onInterpret} onShare={onShare} />
+  </Suspense>;
+
   return (
     <div className="tarot-root" ref={rootRef}>
       {view === 'lobby' && <>
@@ -167,8 +260,12 @@ export function DivinationApp({ userName, people, onInterpret, onShare }: Props)
             <div><span className="tarot-eyebrow">THE ART OF REFLECTION</span><h3>Arcana</h3><p>塔罗 · 在牌面之间，<br />听见自己</p><span className="tarot-entry-action">开始一段小仪式<ArrowRight size={14} /></span></div>
             <div className="tarot-lobby-deck"><CardBack /><CardBack /><CardBack /></div>
           </button>
-          <div className="tarot-future tarot-future-stars"><Orbit size={29} strokeWidth={1.1} /><div><span>STELLAR NOTES</span><h3>星座 · 星空来信</h3><p>出生星盘与星辰的故事</p></div><small>准备中</small></div>
-          <div className="tarot-future tarot-future-ink"><Mountain size={29} strokeWidth={1.1} /><div><span>山 河 秘 仪</span><h3>古风术数</h3><p>奇门遁甲等玩法，待规则验证后再启程</p></div><small>规划中</small></div>
+          <button type="button" className="tarot-lobby-card tarot-stellar-entry" onClick={() => go('astrology')}>
+            <div><span className="tarot-eyebrow">A LETTER FROM YOUR SKY</span><h3>Stellar</h3><p>星座 · 星空来信<br />在交错的星轨里，读懂彼此</p><span className="tarot-entry-action">展开属于你的星图<ArrowRight size={14} /></span></div><StellarEntryArt />
+          </button>
+          <button type="button" className="tarot-lobby-card tarot-qimen-entry" onClick={() => go('qimen')}>
+            <div><span className="tarot-eyebrow">THE ART OF TIMING</span><h3>山河秘仪</h3><p>奇门遁甲 · 九宫问时<br />借一局清风，安放心事</p><span className="tarot-entry-action">为此刻，起一局<ArrowRight size={14} /></span></div><InkEntryArt />
+          </button>
           {footer}
         </div>
       </>}
@@ -195,17 +292,18 @@ export function DivinationApp({ userName, people, onInterpret, onShare }: Props)
       {view === 'draw' && draft && <>
         <Topbar title="凭直觉，挑一张" onBack={() => go('setup')} />
         <div className="tarot-content">
-          <header className="tarot-intro"><p className="tarot-eyebrow">LET THE CARDS SPEAK SOFTLY</p><h3>{draft.recordId ? '这一组牌，为你展开了。' : tarotSpread(draft.spreadId).positions[draft.draws.length]}</h3><p>78 张牌已洗匀，为你铺开 12 张。<br />{draft.recordId ? '抽牌结果已保存，可以慢慢读。' : '轻触牌背，选一张与你此刻有缘的牌。'}</p></header>
-          <div className="tarot-draw-progress">{tarotSpread(draft.spreadId).positions.map((position, i) => <span key={position} className={draft.draws[i] ? 'is-filled' : ''}>{draft.draws[i] ? <Check size={11} /> : <i>{i + 1}</i>}{position}</span>)}</div>
-          <div className="tarot-table">{draft.deck.map((id, index) => {
-            const drawIndex = draft.picked.indexOf(index), draw = draft.draws[drawIndex];
-            return <button type="button" key={id} disabled={!!draft.recordId || drawIndex !== -1} aria-label={draw
-              ? `${draw.position}：${tarotCard(id).name} · ${draw.reversed ? '逆位' : '正位'}` : `选择第 ${index + 1} 张牌`}
-              aria-pressed={drawIndex !== -1} onClick={() => pick(index)} className={`tarot-table-card${draw ? ' is-revealed' : ''}`}>
-              {draw ? <CardFace draw={draw} compact /> : <CardBack />}
-            </button>;
-          })}</div>
-          {draft.draws.length > 0 && <p className="tarot-draw-selected">{draft.draws.map(draw => `${draw.position} · ${tarotCard(draw.cardId).name}（${draw.reversed ? '逆' : '正'}）`).join(' / ')}</p>}
+          <header className="tarot-intro"><p className="tarot-eyebrow">LET THE CARDS SPEAK SOFTLY</p><h3>{draft.recordId ? '这一组牌，为你展开了。' : tarotSpread(draft.spreadId).positions[draft.draws.length]}</h3><p>完整 {draft.deck.length} 张牌已洗匀，静候你的选择。<br />{draft.recordId ? '抽牌结果已保存，可以慢慢读。' : '滑动星罗牌带，轻触一张与你此刻有缘的牌。'}</p></header>
+          <TarotDeckRibbon draft={draft} onPick={pick} />
+          <p className="tarot-draw-selected" role="status">已选 {draft.draws.length} / {tarotSpread(draft.spreadId).positions.length} 张{!draft.recordId && ` · 下一张：${tarotSpread(draft.spreadId).positions[draft.draws.length]}`}</p>
+          <div className={`tarot-result-cards tarot-draw-slots${tarotSpread(draft.spreadId).positions.length === 1 ? ' is-single' : tarotSpread(draft.spreadId).positions.length === 5 ? ' is-five' : ''}`}>
+            {tarotSpread(draft.spreadId).positions.map((position, index) => {
+              const draw = draft.draws[index];
+              return <div key={position}><span className="tarot-position">{position}</span>{draw
+                ? <div className="tarot-slot-reveal"><CardFace draw={draw} /></div>
+                : <div className="tarot-slot-empty"><Star size={22} strokeWidth={1} /><span>{String(index + 1).padStart(2, '0')}</span></div>}
+                <span className="tarot-orientation">{draw ? draw.reversed ? '逆位 · 另一个视角' : '正位' : '等待翻开'}</span></div>;
+            })}
+          </div>
           {alert}
           <button type="button" className="tarot-primary" disabled={!draft.recordId} onClick={() => { if (draft.recordId) { setRecordId(draft.recordId); go('result'); } }}><Sparkles size={15} />展开这次牌阵</button>
           <p className="tarot-cost">抽满后自动收藏；尚未完成的铺牌不会记入手记。</p>

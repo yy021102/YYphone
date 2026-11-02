@@ -1,0 +1,171 @@
+.astrology-app {
+  --st-ink: #e7effb;
+  --st-muted: #a9bdd4;
+  --st-silver: #c9ddef;
+  --st-line: #88a6cc36;
+  container: stellar / inline-size;
+  min-height: 100%;
+  padding-bottom: calc(26px + env(safe-area-inset-bottom, 0px));
+  color: var(--st-ink);
+  background:
+    radial-gradient(circle at 17% 132px, #dcecffb3 .7px, transparent 1.7px),
+    radial-gradient(circle at 84% 316px, #dcecff99 .6px, transparent 1.7px),
+    radial-gradient(circle at 52% 550px, #dcecff99 .7px, transparent 1.5px),
+    radial-gradient(ellipse at 90% 15%, #3152734a, transparent 40%),
+    radial-gradient(ellipse at 0% 50%, #28395238, transparent 50%), #0e1a2c;
+  background-size: 283px 713px, 319px 887px, 267px 1007px, auto, auto, auto;
+  font-size: calc(12px * var(--font-scale, 1));
+  line-height: 1.85;
+}
+.astrology-app *, .astrology-app *::before, .astrology-app *::after { box-sizing: border-box; }
+.astrology-app :is(h2, h3, p, figure) { margin: 0; }
+.astrology-app :is(h2, h3, p, span, strong, small, em, label, summary) { overflow-wrap: anywhere; }
+.astrology-app :is(button, input, textarea, select) { font-family: inherit; }
+.astrology-app button { cursor: pointer; transition: background .2s, border-color .2s; }
+.astrology-app button:disabled { cursor: default; opacity: .48; }
+.astrology-app :is(button, input, select, textarea, summary):focus-visible { outline: 2px solid #d5e7fc; outline-offset: 3px; }
+.astrology-app svg { flex-shrink: 0; }
+.stellar-content { display: flex; flex-direction: column; gap: 23px; padding: 0 22px 10px; }
+.stellar-nav { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 12px; min-height: 49px; background: #0e1a2cee; border-bottom: 1px solid #88a6cc20; backdrop-filter: blur(15px); }
+.stellar-nav > span { color: var(--st-silver); font: calc(11px * var(--font-scale, 1)) / 1.6 Georgia, serif; letter-spacing: .2em; text-align: center; }
+.stellar-nav button { display: grid; place-items: center; width: 36px; min-height: 36px; color: var(--st-silver); }
+.stellar-kicker { display: block; color: var(--st-silver); font-size: calc(9px * var(--font-scale, 1)); line-height: 1.9; letter-spacing: .14em; }
+.stellar-hero { position: relative; isolation: isolate; overflow: hidden; padding: 34px 0 14px; }
+.stellar-hero h2 { position: relative; max-width: 90%; margin: 26px 0 20px; font-family: 'Songti SC', 'SimSun', serif; font-size: calc(31px * var(--font-scale, 1)); font-weight: 400; line-height: 1.9; letter-spacing: .1em; }
+.stellar-hero h2 span { color: #d3e6fb; }
+.stellar-hero p { position: relative; max-width: 90%; color: var(--st-muted); font-size: calc(12px * var(--font-scale, 1)); line-height: 2.1; }
+.stellar-orbit-art { position: absolute; z-index: -1; width: 238px; height: 238px; right: -66px; top: 12px; color: #b7cce3; opacity: .5; }
+.stellar-orbit-art > div { position: absolute; inset: 20px; border: 1px solid #aec5e358; border-radius: 50%; }
+.stellar-orbit-art > div:nth-child(2) { inset: 32px; border-style: dashed; border-color: #aec5e340; }
+.stellar-orbit-art > div:nth-child(3) { inset: 65px 10px; transform: rotate(-48deg); }
+.stellar-orbit-art > svg { position: absolute; left: 103px; top: 103px; }
+.stellar-orbit-art > i { position: absolute; width: 5px; height: 5px; border-radius: 50%; left: 22px; top: 92px; background: #e0edff; box-shadow: 0 0 15px #e0edff8c; }
+.stellar-orbit-art > i:nth-last-child(2) { left: 182px; top: 50px; width: 3px; height: 3px; }
+.stellar-orbit-art > i:last-child { left: 135px; top: 196px; width: 4px; height: 4px; }
+.stellar-start { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; padding: 24px 20px; border: 1px solid #a6c1df77; border-radius: 17px; color: #e6f0ff; background: linear-gradient(125deg, #274461, #1a2e47); text-align: left; box-shadow: inset 0 1px #ffffff12, 0 14px 40px #00000014; }
+.stellar-start small { display: block; color: #b5cbe4; font-size: calc(8px * var(--font-scale, 1)); letter-spacing: .14em; }
+.stellar-start strong { display: block; margin: 10px 0 7px; font-size: calc(19px * var(--font-scale, 1)); font-family: 'Songti SC', 'SimSun', serif; font-weight: 400; letter-spacing: .06em; }
+.stellar-start em { color: #b7cbe2; font-size: calc(10px * var(--font-scale, 1)); font-style: normal; }
+.stellar-start:hover { border-color: #c6dbf4; background: linear-gradient(125deg, #30506e, #1a2e47); }
+.stellar-paper { padding: 22px 18px; border: 1px solid var(--st-line); border-radius: 15px; background: linear-gradient(145deg, #1d304754, #15243b80); }
+.stellar-paper h3 { margin: 9px 0 14px; font-family: 'Songti SC', 'SimSun', serif; font-size: calc(19px * var(--font-scale, 1)); font-weight: 400; letter-spacing: .03em; }
+.stellar-paper p { color: var(--st-muted); }
+.stellar-paper p + p { margin-top: 15px; }
+.stellar-paper p strong { color: #d6e5f7; font-weight: 500; }
+.stellar-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 13px; }
+.stellar-section-heading h3 { font-size: calc(14px * var(--font-scale, 1)); font-weight: 500; letter-spacing: .06em; }
+.stellar-section-heading > span { color: var(--st-muted); font-size: calc(10px * var(--font-scale, 1)); }
+.stellar-section-heading button { display: flex; align-items: center; gap: 4px; min-height: 30px; color: var(--st-muted); font-size: calc(11px * var(--font-scale, 1)); }
+.stellar-profile-chips { display: flex; flex-wrap: wrap; gap: 9px; }
+.stellar-playways { display: flex; flex-direction: column; gap: 11px; }
+.stellar-playways button { display: flex; align-items: center; gap: 16px; width: 100%; padding: 18px 17px; border: 1px solid var(--st-line); border-radius: 13px; background: linear-gradient(120deg, #20354d88, #15243b77); color: #c9ddef; text-align: left; }
+.stellar-playways button:nth-child(1) { border-color: #b6a7c44d; background: linear-gradient(120deg, #3c324a66, #18294088); }
+.stellar-playways button > span { flex: 1; min-width: 0; }
+.stellar-playways small { display: block; color: #a7bdd7; font-size: calc(8px * var(--font-scale, 1)); letter-spacing: .15em; }
+.stellar-playways strong { display: block; margin: 3px 0; font-size: calc(16px * var(--font-scale, 1)); font-family: 'Songti SC', 'SimSun', serif; font-weight: 400; }
+.stellar-playways em { color: var(--st-muted); font-size: calc(10px * var(--font-scale, 1)); font-style: normal; }
+.stellar-character-draft label { display: block; margin-top: 15px; }
+.stellar-character-draft + .stellar-form .stellar-warning p { margin: 10px 0; white-space: pre-wrap; }
+.natal-wheel-comparison { fill: #e5bdd9; }
+.natal-wheel-comparison .natal-wheel-planet { fill: #e5bdd9; }
+.natal-wheel-comparison .natal-wheel-leader { stroke: #d7accfa0; }
+.stellar-profile-chips button { display: inline-flex; align-items: center; gap: 7px; max-width: 100%; padding: 8px 13px; border: 1px solid var(--st-line); border-radius: 30px; background: #1d31464d; color: var(--st-silver); text-align: left; }
+.stellar-archive-link { display: flex; align-items: center; gap: 13px; width: 100%; padding: 17px 3px; border-top: 1px solid var(--st-line); border-bottom: 1px solid var(--st-line); color: var(--st-silver); text-align: left; }
+.stellar-archive-link > span { flex: 1; min-width: 0; }
+.stellar-archive-link small { display: block; margin-top: 4px; color: var(--st-muted); font-size: calc(10px * var(--font-scale, 1)); }
+.stellar-heading { padding-top: 22px; }
+.stellar-heading h2 { margin: 12px 0; font-family: 'Songti SC', 'SimSun', serif; font-size: calc(25px * var(--font-scale, 1)); font-weight: 400; line-height: 1.8; letter-spacing: .05em; }
+.stellar-heading p { color: var(--st-muted); font-size: calc(11px * var(--font-scale, 1)); }
+.stellar-form fieldset { display: flex; flex-direction: column; gap: 19px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.stellar-form label, .stellar-reader { display: block; min-width: 0; color: #d4e2f5; font-size: calc(12px * var(--font-scale, 1)); }
+.astrology-app :is(input:not([type="checkbox"]), textarea, select) { display: block; width: 100%; min-width: 0; max-width: 100%; min-height: 44px; margin-top: 8px; padding: 10px 12px; border: 1px solid #6c86a45e; border-radius: 9px; color: var(--st-ink); background: #17283e; font-size: calc(13px * var(--font-scale, 1)); color-scheme: dark; }
+.astrology-app textarea { resize: vertical; }
+.astrology-app input::placeholder, .astrology-app textarea::placeholder { color: #839ab7; opacity: 1; }
+.astrology-app input[type="date"], .astrology-app input[type="time"] { appearance: none; }
+.stellar-two-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.stellar-checkbox { display: flex !important; align-items: flex-start; gap: 9px; text-align: left; }
+.stellar-checkbox input { width: 16px; height: 16px; margin-top: 4px; flex-shrink: 0; accent-color: #acc9e7; }
+.stellar-checkbox span { min-width: 0; }
+.stellar-optional { float: right; color: var(--st-muted); font-size: calc(10px * var(--font-scale, 1)); }
+.stellar-help { color: var(--st-muted) !important; font-size: calc(10px * var(--font-scale, 1)); line-height: 1.95; }
+.stellar-primary, .stellar-secondary { display: flex; justify-content: center; align-items: center; gap: 8px; width: 100%; min-height: 45px; padding: 11px 14px; border: 1px solid #97b6d3; border-radius: 10px; color: #13253b; background: #c8dcec; font-size: calc(12px * var(--font-scale, 1)); line-height: 1.8; }
+.stellar-secondary { border-color: #7189a463; background: #1b30464d; color: #c4d7ed; }
+.stellar-paper > :is(.stellar-primary, .stellar-secondary) { margin-top: 17px; }
+.stellar-reader { margin: 19px 0 12px; }
+.stellar-alert, .stellar-warning, .stellar-notice { padding: 13px 15px; border: 1px solid #c4948a70; border-radius: 10px; background: #3a282d; color: #f0c4bd; font-size: calc(11px * var(--font-scale, 1)); }
+.stellar-alert { margin-top: 18px !important; }
+.stellar-notice { margin-top: 18px !important; border-color: #8db4ac60; background: #193733; color: #c3ded4; }
+.stellar-warning { background: #303342; color: #d9d4bd; border-color: #c2b88e55; }
+.stellar-paper .stellar-warning { margin-top: 14px; }
+.stellar-actions { display: flex; gap: 12px; margin-top: 12px; }
+.stellar-actions button { min-height: 36px; padding: 5px 13px; border: 1px solid currentColor; border-radius: 6px; }
+.stellar-empty { padding: 20px 16px; border: 1px dashed var(--st-line); border-radius: 12px; color: var(--st-muted); }
+.stellar-archive-card { display: flex; align-items: stretch; gap: 2px; min-width: 0; padding: 8px; border: 1px solid var(--st-line); border-radius: 12px; background: #1b2c404d; }
+.stellar-record-open { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; padding: 8px 3px; color: #c7d9ee; text-align: left; }
+.stellar-record-open > span { flex: 1; min-width: 0; }
+.stellar-record-open strong { display: block; font-size: calc(13px * var(--font-scale, 1)); font-weight: 500; }
+.stellar-record-open small { display: block; margin-top: 5px; color: var(--st-muted); font-size: calc(10px * var(--font-scale, 1)); }
+.stellar-delete { display: grid; place-items: center; width: 34px; min-height: 40px; color: var(--st-muted); flex-shrink: 0; }
+.stellar-result-heading { text-align: center; }
+.stellar-result-heading h2 { font-size: calc(27px * var(--font-scale, 1)); }
+.stellar-result-heading em { font-style: normal; color: #c2d9f3; }
+.stellar-method-badge { display: inline-block; margin-top: 15px; padding: 4px 11px; border: 1px solid var(--st-line); border-radius: 30px; color: #b5cde5; font-size: calc(9px * var(--font-scale, 1)); letter-spacing: .1em; }
+.natal-wheel { margin: -8px -12px 0 !important; }
+.natal-wheel > svg { display: block; width: 100%; height: auto; overflow: visible; }
+.natal-wheel figcaption { margin-top: 6px; color: var(--st-muted); font-size: calc(8px * var(--font-scale, 1)); text-align: center; letter-spacing: .1em; }
+.natal-wheel-circle { fill: none; stroke: #b9d1ef4d; stroke-width: .8; }
+.natal-wheel-tick { stroke: #c0d8f263; stroke-width: .6; }
+.natal-wheel-zodiac { fill: #ccddf1; font-size: 17px; font-family: Georgia, serif; }
+.natal-wheel-house { stroke: #99b5d340; stroke-width: .6; }
+.natal-wheel-house-label { fill: #9ab0cd; font-size: 10px; font-family: Georgia, serif; }
+.natal-wheel-aspect { stroke: #b4a1bf69; stroke-width: .6; }
+.natal-wheel-aspect-trine, .natal-wheel-aspect-sextile { stroke: #8bbeda63; }
+.natal-wheel-aspect-conjunction { stroke: #d8cfa778; }
+.natal-wheel-leader { fill: none; stroke: #b6d0ec86; stroke-width: .7; }
+.natal-wheel-planet { fill: #e0ecfc; font-size: 17px; font-family: Georgia, serif; }
+.natal-wheel-axis { stroke: #dce8f4; stroke-width: 1.1; }
+.natal-wheel-axis-label { fill: #dae8f7; font-size: 8px; font-family: Georgia, serif; letter-spacing: .02em; }
+.natal-wheel-centre { fill: #c4d8ec; font-size: 7px; font-family: Georgia, serif; letter-spacing: .16em; }
+.stellar-big-three { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 1px solid var(--st-line); border-radius: 12px; overflow: hidden; }
+.stellar-big-three > div { display: flex; align-items: center; flex-direction: column; gap: 7px; min-width: 0; padding: 17px 5px; background: #1d30424d; text-align: center; }
+.stellar-big-three > div + div { border-left: 1px solid var(--st-line); }
+.stellar-big-three svg { color: var(--st-silver); }
+.stellar-big-three small { color: #b3c9e2; font-size: calc(10px * var(--font-scale, 1)); }
+.stellar-big-three strong { font-family: 'Songti SC', 'SimSun', serif; font-size: calc(22px * var(--font-scale, 1)); font-weight: 400; letter-spacing: .05em; }
+.stellar-big-three span { color: var(--st-muted); font-size: calc(9px * var(--font-scale, 1)); }
+.stellar-placements { border-top: 1px solid var(--st-line); }
+.stellar-placements article { display: flex; align-items: flex-start; gap: 13px; padding: 14px 3px; border-bottom: 1px solid #88a6cc24; }
+.stellar-placements article > div { min-width: 0; }
+.stellar-planet-glyph { width: 28px; flex-shrink: 0; color: #c5d9f2; font: 24px / 1.7 Georgia, serif; text-align: center; }
+.stellar-placements strong { font-size: calc(12px * var(--font-scale, 1)); font-weight: 500; }
+.stellar-placements p { margin: 3px 0; color: #c4d7ec; font-size: calc(11px * var(--font-scale, 1)); }
+.stellar-placements small { color: var(--st-muted); font-size: calc(10px * var(--font-scale, 1)); }
+.stellar-details { padding: 15px 16px; border: 1px solid var(--st-line); border-radius: 11px; background: #182b3c40; }
+.stellar-details summary { color: #c7daf1; cursor: pointer; }
+.stellar-details > p, .stellar-details > article { margin-top: 15px; color: var(--st-muted); font-size: calc(11px * var(--font-scale, 1)); }
+.stellar-details article { padding-top: 12px; border-top: 1px solid var(--st-line); }
+.stellar-details strong { color: #d5e4f6; font-weight: 500; }
+.stellar-details a { color: #c3defa; text-decoration: underline; text-underline-offset: 3px; }
+.stellar-reading { margin-top: 23px; padding-top: 18px; border-top: 1px solid var(--st-line); }
+.stellar-reading > div { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+.stellar-reading strong { color: #d2e3f6; font-weight: 500; }
+.stellar-reading small { color: var(--st-muted); font-size: calc(9px * var(--font-scale, 1)); }
+.stellar-reading p { white-space: pre-wrap; }
+.stellar-reading-error { color: #edbfb4 !important; }
+.stellar-share-people { display: flex; flex-direction: column; gap: 12px; max-height: 240px; overflow-y: auto; margin: 18px 0; padding: 10px 0; }
+.stellar-footer { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 5px; margin-top: 8px; padding-top: 10px; color: var(--st-muted); font-size: calc(9px * var(--font-scale, 1)); text-align: center; }
+.stellar-footer span { width: 100%; margin-top: 6px; color: #8ea6c2; line-height: 2; }
+.stellar-spin { animation: stellar-spin 1.2s linear infinite; }
+@keyframes stellar-spin { to { transform: rotate(360deg); } }
+@container stellar (max-width: 335px) {
+  .stellar-content { padding-right: 16px; padding-left: 16px; gap: 20px; }
+  .stellar-paper { padding: 19px 15px; }
+  .stellar-hero h2 { font-size: calc(27px * var(--font-scale, 1)); }
+  .stellar-two-fields { gap: 8px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .astrology-app *, .astrology-app *::before, .astrology-app *::after { animation: none !important; transition: none !important; }
+}
+.wechat-app[data-wechat-divination="true"]:has(.astrology-app) { background: #0e1a2c; }
+:root .wechat-app[data-wechat-divination="true"]:has(.astrology-app) > .yy-wechat-header { background: #0e1a2c !important; color: #d9e8f9 !important; border-color: #88a6cc36 !important; }
+:root .wechat-app[data-wechat-divination="true"]:has(.astrology-app) > .yy-wechat-header :is(button, h1, h2, span, svg) { color: #d9e8f9 !important; }

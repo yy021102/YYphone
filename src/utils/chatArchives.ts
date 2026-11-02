@@ -5,14 +5,23 @@ import { forkGroupJournalState, GROUP_JOURNAL_KEY, invalidateGroupJournal } from
 import { ALIAS_ACCOUNTS_KEY, ALIAS_EVENT, readAliasState } from './aliasAccounts';
 import { PAPER_NOTES_KEY, readPaperNotes } from './paperNotes';
 import { restorePhoneInspectionHistory } from './phoneInspection';
+import { SETTINGS_KEYS } from './settings';
 
 type Row = Record<string, any>;
 export interface ChatArchiveSlot<M = Row> {
   id: string; name: string; messages: M[]; updatedAt: string;
   origin?: 'branch' | 'restart'; parentArchiveId?: string; parentArchiveName?: string;
   forkedAt?: string; forkMessageId?: string;
+  contextPresetId?: string;
 }
-type ArchiveChat = Row & { id: string; type: string; participantIds: string[]; messages: Row[]; activeArchiveId?: string; archives?: ChatArchiveSlot[] };
+type ArchiveChat = Row & { id: string; type: string; participantIds: string[]; messages: Row[]; context: string; updatedAt: string; activeArchiveId?: string; archives?: ChatArchiveSlot[] };
+export interface ChatContextPreset {
+  id: string; name: string; context: string; ownerId?: string;
+}
+export const isChatContextPresetList = (value: unknown): value is ChatContextPreset[] =>
+  Array.isArray(value) && value.every(preset => record(preset) && typeof preset.id === 'string' &&
+    typeof preset.name === 'string' && typeof preset.context === 'string' &&
+    (preset.ownerId === undefined || typeof preset.ownerId === 'string'));
 const CHATS_KEY = 'yyphone:wechat-chats';
 const RECORD_KEYS = ['yyphone:memory-items', 'yyphone:memory-journal', 'yyphone:memory-growth'] as const;
 const CURSORS = [['yyphone:memory-settings', 'cursors'], ['yyphone:memory-journal-settings', 'journalCursors']] as const;
@@ -97,17 +106,84 @@ function copyCharacterMemory(charId: string, fromId: string, toId: string, branc
 }
 
 let archiveWrites: Promise<unknown> = Promise.resolve();
+function archiveWrite<T>(operation: () => Promise<T>): Promise<T> {
+  const run = archiveWrites.then(async () => { await initializeDbStorage(); return operation(); });
+  archiveWrites = run.catch(() => {});
+  return run;
+}
+function readContextPresets(): ChatContextPreset[] {
+  const value = stored(SETTINGS_KEYS.chatContextPresets, []);
+  if (!isChatContextPresetList(value) || new Set(value.map(preset => preset.id)).size !== value.length)
+    throw new Error('对话补充预设格式异常，未改动原数据。');
+  return value;
+}
+function readArchiveState(chatId: string) {
+  const allChats = rows(CHATS_KEY), chat = allChats.find(item => item.id === chatId) as ArchiveChat | undefined;
+  if (!chat || !Array.isArray(chat.messages) || !chat.messages.every(record) || !Array.isArray(chat.participantIds))
+    throw new Error('聊天已经变化，请重新打开存档。');
+  const { activeId, archives } = chatArchiveSlots(chat);
+  if (new Set(archives.map(slot => slot.id)).size !== archives.length || !archives.every(slot =>
+    record(slot) && typeof slot.id === 'string' && typeof slot.name === 'string' &&
+    (slot.contextPresetId === undefined || typeof slot.contextPresetId === 'string') &&
+    (slot.messages === undefined || Array.isArray(slot.messages) && slot.messages.every(record))))
+    throw new Error('聊天存档格式异常，未改动原存档。');
+  return { allChats, chat, activeId, archives };
+}
+function ownedContextPreset(chat: ArchiveChat, presetId: string): ChatContextPreset {
+  const preset = readContextPresets().find(item => item.id === presetId && item.ownerId === chat.participantIds[0]);
+  if (chat.type !== 'direct' || chat.participantIds.length !== 1 || !preset)
+    throw new Error('绑定的补充预设已不存在或不属于此角色，请重新绑定或取消绑定。');
+  return preset;
+}
+export function saveChatContextPreset(input: { id?: string; ownerId: string; name: string; context: string }): Promise<ChatContextPreset> {
+  return archiveWrite(async () => {
+    const name = input.name.trim();
+    if (!name || name.length > 50) throw new Error('预设名称请输入 1 到 50 字。');
+    if (!input.ownerId || input.context.length > 5000) throw new Error('角色或补充内容无效，补充内容最多 5000 字。');
+    const presets = readContextPresets();
+    const existing = presets.find(preset => preset.id === input.id && preset.ownerId === input.ownerId);
+    if (input.id && !existing) throw new Error('所选预设已不存在或不属于此角色，请重新选择。');
+    const preset = { ...existing, ...input, id: existing?.id ?? `context-${crypto.randomUUID()}`, name };
+    await setStorageItemsAtomically({ [SETTINGS_KEYS.chatContextPresets]: existing
+      ? presets.map(item => item.id === existing.id ? preset : item) : [...presets, preset] });
+    return preset;
+  });
+}
+export function deleteChatContextPreset(ownerId: string, presetId: string): Promise<void> {
+  return archiveWrite(async () => {
+    const presets = readContextPresets();
+    if (!presets.some(preset => preset.id === presetId && preset.ownerId === ownerId))
+      throw new Error('所选预设已不存在或不属于此角色，请重新选择。');
+    const chats = rows(CHATS_KEY).map(chat => {
+      if (chat.type !== 'direct' || chat.participantIds?.length !== 1 || chat.participantIds[0] !== ownerId || chat.archives === undefined) return chat;
+      if (!Array.isArray(chat.archives) || !chat.archives.every(record)) throw new Error('聊天存档格式异常，未删除预设。');
+      return { ...chat, archives: chat.archives.map(slot => slot.contextPresetId === presetId ? { ...slot, contextPresetId: undefined } : slot) };
+    });
+    await setStorageItemsAtomically({
+      [SETTINGS_KEYS.chatContextPresets]: presets.filter(preset => preset.id !== presetId), [CHATS_KEY]: chats,
+    });
+  });
+}
+export function bindChatArchiveContextPreset(chatId: string, archiveId: string, presetId: string, expectedArchiveId: string): Promise<void> {
+  return archiveWrite(async () => {
+    const { allChats, chat, activeId, archives } = readArchiveState(chatId);
+    if (activeId !== expectedArchiveId) throw new Error('当前存档已变化，请重新选择。');
+    if (chat.type !== 'direct' || chat.participantIds.length !== 1) throw new Error('只有角色私聊支持绑定补充预设。');
+    if (!archives.some(slot => slot.id === archiveId)) throw new Error('目标存档已不存在。');
+    const preset = presetId ? ownedContextPreset(chat, presetId) : undefined;
+    await setStorageItemsAtomically({ [CHATS_KEY]: allChats.map(item => item.id === chatId ? {
+      ...item, archives: archives.map(slot => slot.id === archiveId ? { ...slot, contextPresetId: preset?.id } : slot),
+      ...(archiveId === activeId ? { context: preset ? preset.context : chat.context, archiveRevision: crypto.randomUUID() } : {}),
+    } : item) });
+  });
+}
 export type ArchiveChoice = { mode: 'branch' | 'restart'; name?: string } | { mode: 'switch'; targetId: string };
 /** Commit the saved source, destination and its memory in the same storage transaction. */
 export function changeChatArchive(chatId: string, choice: ArchiveChoice, expectedArchiveId?: string): Promise<string> {
-  const run = archiveWrites.then(async () => {
-    await initializeDbStorage();
+  return archiveWrite(async () => {
     await restorePhoneInspectionHistory(chatId);
-    const allChats = rows(CHATS_KEY), chat = allChats.find(item => item.id === chatId) as ArchiveChat | undefined;
-    if (!chat || !Array.isArray(chat.messages) || !chat.messages.every(record) || !Array.isArray(chat.participantIds)) throw new Error('聊天已经变化，请重新打开存档。');
-    const { activeId, archives } = chatArchiveSlots(chat as ArchiveChat & { updatedAt: string });
+    const { allChats, chat, activeId, archives } = readArchiveState(chatId);
     if (expectedArchiveId !== undefined && activeId !== expectedArchiveId) throw new Error('当前存档已变化，请重新选择。');
-    if (new Set(archives.map(slot => slot.id)).size !== archives.length || !archives.every(slot => record(slot) && typeof slot.id === 'string' && typeof slot.name === 'string' && (slot.messages === undefined || Array.isArray(slot.messages) && slot.messages.every(record)))) throw new Error('聊天存档格式异常，未改动原存档。');
     if (choice.mode === 'switch' && choice.targetId === activeId) return activeId;
     const current = archives.find(slot => slot.id === activeId)!;
     const now = new Date().toISOString(), creating = choice.mode !== 'switch';
@@ -122,6 +198,7 @@ export function changeChatArchive(chatId: string, choice: ArchiveChoice, expecte
       if (!suppliedName) { const base = name; let suffix = 2; while (nextArchives.some(slot => slot.name === name)) name = `${base} ${suffix++}`; }
       nextMessages = branch ? structuredClone(chat.messages) : [];
       nextArchives.push({ id: nextId, name, messages: structuredClone(nextMessages), updatedAt: now, origin: branch ? 'branch' : 'restart',
+        ...(branch && chat.type === 'direct' ? { contextPresetId: current.contextPresetId } : {}),
         ...(branch ? { parentArchiveId: activeId, parentArchiveName: current.name, forkedAt: now, forkMessageId: chat.messages.at(-1)?.id } : {}) });
     } else {
       const target = nextArchives.find(slot => slot.id === nextId);
@@ -130,6 +207,8 @@ export function changeChatArchive(chatId: string, choice: ArchiveChoice, expecte
     }
     const changes: Record<string, unknown> = {};
     const charId = chat.type === 'direct' && chat.participantIds.length === 1 ? chat.participantIds[0] : '';
+    const presetId = nextArchives.find(slot => slot.id === nextId)?.contextPresetId;
+    const context = charId && presetId ? ownedContextPreset(chat, presetId).context : chat.context;
     // Cancel older background summaries before taking the memory snapshot.
     if (charId) invalidateMemoryArchive(charId); else invalidateGroupJournal(chatId);
     if (charId) Object.assign(changes, copyCharacterMemory(charId, activeId, nextId, branch));
@@ -137,12 +216,10 @@ export function changeChatArchive(chatId: string, choice: ArchiveChoice, expecte
       const group = forkGroupJournalState(chat.id, activeId, nextId);
       if (group) changes[GROUP_JOURNAL_KEY] = group;
     }
-    changes[CHATS_KEY] = allChats.map(item => item.id === chatId ? { ...item, archives: nextArchives, activeArchiveId: nextId, archiveRevision: crypto.randomUUID(), messages: nextMessages, updatedAt: now } : item);
+    changes[CHATS_KEY] = allChats.map(item => item.id === chatId ? { ...item, context, archives: nextArchives, activeArchiveId: nextId, archiveRevision: crypto.randomUUID(), messages: nextMessages, updatedAt: now } : item);
     await setStorageItemsAtomically(changes);
     if (charId) invalidateMemoryArchive(charId); else invalidateGroupJournal(chatId);
     if (typeof window.dispatchEvent === 'function') window.dispatchEvent(new Event(ALIAS_EVENT));
     return nextId;
   });
-  archiveWrites = run.catch(() => {});
-  return run;
 }

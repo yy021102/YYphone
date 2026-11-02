@@ -8,10 +8,10 @@ export interface ImageDescriptionTarget {
   messageId: string;
   sourceKey: string;
   archiveId: string;
-  archiveRevision: number;
+  archiveRevision: string | number;
 }
 interface PhotoMessage { id: string; senderId: string; kind?: string; imageUrl?: string; imageDescription?: unknown }
-interface PhotoConversation { id: string; activeArchiveId?: string; archiveRevision?: number }
+interface PhotoConversation { id: string; activeArchiveId?: string; archiveRevision?: string | number }
 const CHATS_KEY = 'yyphone:wechat-chats';
 const fingerprints = new Map<string, string>();
 const record = (v: unknown): v is Record<string, any> => !!v && typeof v === 'object' && !Array.isArray(v);
