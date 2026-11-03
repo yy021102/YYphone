@@ -256,3 +256,38 @@ test('vinyl appearance rejects invalid colors and non-integer or out-of-range op
   }
   assert.equal(JSON.stringify(layout), before);
 });
+
+test('every widget and template preserves opacity with uploaded images through save and beauty export, including legacy defaults', () => {
+  const original = defaultFreeDesktopLayout();
+  const widgets = [
+    ...WIDGET_TYPES.map(type => newDesktopWidget(type, `opacity:${type}`)),
+    ...DESKTOP_WIDGET_TEMPLATES.map(template => newDesktopTemplate(template.id, `opacity:${template.id}`)),
+  ];
+  for (const widget of widgets) {
+    assert.equal(widget.settings.opacity, undefined);
+    widget.settings.backgroundImage = 'data:image/png;base64,AAAA';
+    widget.settings.images = ['https://example.test/photo.png'];
+    for (const opacity of [0, 35, 100]) {
+      const layout = putDesktopWidget(original, 1, { ...widget, settings: { ...widget.settings, opacity } });
+      const portable = portableHomeBeauty({ themeId: 'test', wallpaperId: 'test', wallpapers: { lockScreen: '', homeScreen: '' }, appIcons: {}, freeDesktop: layout });
+      const imported = JSON.parse(JSON.stringify(portable)).freeDesktop;
+      assert.ok(isFreeDesktopLayout(imported));
+      const saved = imported.pages[1].find(item => item.id === widget.id);
+      assert.ok(saved?.kind === 'widget');
+      assert.equal(saved.settings.opacity, opacity);
+      assert.equal(saved.settings.backgroundImage, widget.settings.backgroundImage);
+      assert.deepEqual(saved.settings.images, widget.settings.images);
+      assert.equal(original.pages[0].find(item => item.kind === 'widget')?.settings.opacity, undefined);
+    }
+  }
+});
+
+test('invalid widget opacity is rejected without changing the stored layout', () => {
+  const layout = defaultFreeDesktopLayout(), before = JSON.stringify(layout);
+  for (const opacity of [-1, 101, .5, NaN, Infinity, '50', null]) {
+    const widget = newDesktopWidget('photo', 'opacity:invalid');
+    Object.assign(widget.settings, { opacity });
+    assert.throws(() => putDesktopWidget(layout, 1, widget), /无效/);
+  }
+  assert.equal(JSON.stringify(layout), before);
+});

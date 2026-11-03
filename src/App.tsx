@@ -701,7 +701,7 @@ export default function App() {
         )}
 
         {/* Screen View Body (Strict flex-1 & min-h-0, overflow-hidden) */}
-        <div style={{ '--desktop-text': beautySettings.desktopAppearance?.textColor, '--desktop-icons': beautySettings.desktopAppearance?.iconOpacity, '--desktop-panels': beautySettings.desktopAppearance?.panelOpacity } as React.CSSProperties} className="flex-1 min-h-0 w-full relative overflow-hidden flex flex-col z-20">
+        <div style={{ '--desktop-text': beautySettings.desktopAppearance?.textColor, '--desktop-icons': beautySettings.desktopAppearance?.iconOpacity, '--desktop-panels': beautySettings.desktopAppearance?.panelOpacity, '--desktop-widgets': beautySettings.desktopAppearance?.widgetOpacity } as React.CSSProperties} className="flex-1 min-h-0 w-full relative overflow-hidden flex flex-col z-20">
           {isLocked ? (
             /* Lock Screen */
             <LockScreen

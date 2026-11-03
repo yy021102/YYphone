@@ -70,6 +70,11 @@ export function DesktopWidgetEditor({ widget, characters, onSave, onClose }: {
       else setError('组件未能保存，请检查设置或存储空间后重试；关闭面板可查看桌面详细提示。');
     }}>
       <p className="free-help">{draft.settings.template ? '造型已经搭好，换图片、填文字即可保存。大小和配色都可以先不动。' : '宽高按网格自由组合；占用的位置会自动让开，不会覆盖其他内容。'}</p>
+      <fieldset><legend>组件透明度</legend>
+        <label>整体不透明度 · {draft.settings.opacity ?? 100}%<input aria-label="组件整体不透明度" type="range" min={0} max={100} value={draft.settings.opacity ?? 100} onChange={event => patch({ opacity: Number(event.target.value) })}/></label>
+        <p className="free-help">0% 为完全透明，100% 为不透明；背景、上传的图片、文字和按钮会一起变化，保存后应用到这一个组件。完全透明后仍可长按桌面，进入编辑模式找回。</p>
+        <button type="button" className="free-vinyl-reset" onClick={() => patch({ opacity: undefined })}>恢复默认不透明度</button>
+      </fieldset>
       {!!templates.length && <fieldset><legend>内置造型 · 不用写代码</legend>
         <label>组件款式<select value={draft.settings.template ?? ''} onChange={event => {
           const template = templates.find(template => template.id === event.target.value);

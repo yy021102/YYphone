@@ -102,7 +102,7 @@ export const ListenTogetherWidget: React.FC<{
 
   return (
     <>
-      {variant === 'vinyl' ? <div className="free-vinyl-widget">
+      {variant === 'vinyl' ? <div className="free-vinyl-widget" data-desktop-widget>
         <span className="free-vinyl-heading"><strong>{title || '慢慢听'}</strong>{note && <small>{note}</small>}</span>
         <button type="button" className="free-vinyl-sleeve" aria-label="添加或管理音乐" onClick={openPanel}
           style={background ? { backgroundImage: `url(${JSON.stringify(background)})` } : undefined}>
@@ -118,6 +118,7 @@ export const ListenTogetherWidget: React.FC<{
           <input type="range" min={0} max={100} step={0.1} value={progress * 100} disabled={!hasTracks} aria-label="播放进度" onChange={event => musicPlayer.seek(Number(event.target.value) / 100)}/>
         </div>
       </div> : <div
+        data-desktop-widget
         style={background ? { backgroundImage: `url(${JSON.stringify(background)})` } : undefined}
         className={`rounded-[clamp(20px,4.8vw,28px)] p-[clamp(9px,2.4vw,13px)] aspect-square flex flex-col justify-between overflow-hidden relative shadow-sm bg-cover bg-center ${
           background ? 'border border-white/70' : 'glass-card'

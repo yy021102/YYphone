@@ -112,6 +112,7 @@ export interface DesktopAppearance {
   textColor?: string;
   iconOpacity?: number;
   panelOpacity?: number;
+  widgetOpacity?: number;
 }
 
 export interface BeautySettings {

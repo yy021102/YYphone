@@ -24,6 +24,7 @@ export const CalendarWidget: React.FC<{ fullScreen?: boolean; onOpen?: () => voi
   const close = () => { if (onClose) onClose(); else setPanelOpen(false); };
   return <>
     {!fullScreen && <div
+      data-desktop-widget
       role="button"
       tabIndex={0}
       onClick={open}

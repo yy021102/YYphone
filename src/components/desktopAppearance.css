@@ -1,4 +1,7 @@
-/* Home only: backgrounds change without fading their contents or modal dialogs. */
+/* Fade only widget tiles; their sibling/portaled dialogs and edit controls stay opaque. */
+[data-desktop-widget],.minimal-home :is(.minimal-profile,.minimal-day),.hw-market :is(.hw-market-pass,.hw-market-clock) { opacity:var(--desktop-widgets,1); }
+.free-widget-body [data-desktop-widget] { opacity:1; }
+/* The separate card-background setting keeps text and controls opaque. */
 [data-desktop-icons] .classic-home .home-default-icon,
 [data-desktop-icons] .minimal-home .minimal-app-tile:not(.has-custom-icon),
 [data-desktop-icons] .hw-market-app:not(.has-custom-icon) .hw-market-app-icon { opacity:var(--desktop-icons); }

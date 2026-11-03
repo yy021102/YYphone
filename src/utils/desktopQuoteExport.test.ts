@@ -29,6 +29,19 @@ test('portable home themes omit personal avatar, remain valid, and leave the ori
   assert.equal(isDesktopAppearance({ textColor: 'url(evil)' }), false);
 });
 
+test('desktop widget opacity survives export and accepts only finite values within its range', () => {
+  assert.equal(isDesktopAppearance({}), true);
+  for (const widgetOpacity of [0, .35, 1]) {
+    const settings = { themeId: 'test', wallpaperId: 'test', wallpapers: { lockScreen: '', homeScreen: '' }, appIcons: {}, desktopAppearance: { widgetOpacity } };
+    const imported = JSON.parse(JSON.stringify(portableHomeBeauty(settings)));
+    assert.equal(isDesktopAppearance(imported.desktopAppearance), true);
+    assert.equal(imported.desktopAppearance.widgetOpacity, widgetOpacity);
+  }
+  for (const widgetOpacity of [-.01, 1.01, NaN, Infinity, '0.5', null]) {
+    assert.equal(isDesktopAppearance({ widgetOpacity }), false);
+  }
+});
+
 test('voice exclusion removes all voice configuration without altering character or world books', () => {
   const char = { id: 'a', name: '角色', avatarUrl: 'avatar', persona: '人设', group: '', starred: false, worldBooks: [], voiceEnabled: true, voiceId: 'private-voice', voiceLanguage: 'zh' };
   const exported = buildCharacterExport(char, [], [], { includeVoice: false }).contacts[0];

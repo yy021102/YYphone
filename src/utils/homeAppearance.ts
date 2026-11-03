@@ -46,4 +46,4 @@ export const portableHomeBeauty = <T extends import('../types').BeautySettings>(
 };
 export const isDesktopAppearance = (value: unknown): value is import('../types').DesktopAppearance =>
   isRecord(value) && (value.textColor === undefined || typeof value.textColor === 'string' && /^#[0-9a-f]{6}$/i.test(value.textColor)) &&
-  ['iconOpacity', 'panelOpacity'].every(key => value[key] === undefined || typeof value[key] === 'number' && Number.isFinite(value[key]) && value[key] >= 0 && value[key] <= 1);
+  ['iconOpacity', 'panelOpacity', 'widgetOpacity'].every(key => value[key] === undefined || typeof value[key] === 'number' && Number.isFinite(value[key]) && value[key] >= 0 && value[key] <= 1);

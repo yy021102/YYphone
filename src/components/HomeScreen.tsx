@@ -188,7 +188,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         - Generous & spacious height with banner, avatar, mood pill, bio, and stats
         - Flexible card that does not shrink into a tiny ribbon
       */}
-      <div className="w-full shrink-0 glass-card rounded-[clamp(20px,4.5vw,28px)] overflow-hidden transition-all shadow-sm flex flex-col">
+      <div data-desktop-widget className="w-full shrink-0 glass-card rounded-[clamp(20px,4.5vw,28px)] overflow-hidden transition-all shadow-sm flex flex-col">
         {/* Cover Art Banner */}
         <div
           className="h-[clamp(44px,7.5vh,58px)] w-full bg-gradient-to-r from-sky-200 via-blue-100 to-pink-100 relative overflow-hidden flex items-center justify-end px-3.5 shrink-0 bg-cover bg-center"
