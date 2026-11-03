@@ -450,7 +450,7 @@ test('phone generates all eight scopes with one request and includes world, play
     icity: { diaries: [{ content: '今天和小雨去看海' }] },
     shopping: { items: [1, 2, 3].map(i => ({ name: `旅行用品${i}`, category: '旅行', price: 20 + i, variant: '便携款', note: '下次出门可以用' })) },
     agent: { doubaoTurns: [{ role: 'char', content: '明天天气？' }], claudeTurns: [{ role: 'ai', content: '说说你的心事' }] },
-    wallet: { balance: 800, records: [{ title: '车票', amount: -20 }] },
+    wallet: { balance: 800, records: Array.from({ length: 6 }, (_, index) => ({ title: `旅行支出${index + 1}`, amount: -20, timeStr: '10月16日 12:30' })) },
     health: { sleepHours: 7, sleepNote: '睡得很好', steps: 1000, screenTimeMinutes: 30 },
     douban: { items: [
       { type: '书籍', title: '海边的钟表', creator: '作者甲', rating: 4.5, review: '读到钟表匠时想起了今天的海风。', date: '2026年10月21日' },
@@ -472,6 +472,7 @@ test('phone generates all eight scopes with one request and includes world, play
   assert.doesNotMatch(body, /不应出现的世界书秘密/);
   for (const key of ['npcThreads', 'photos', 'browserHistory', 'notes', 'icityDiaries', 'agentSession', 'wallet', 'health', 'ratings', 'shoppingCart']) assert.ok(key in result, key);
   assert.equal(result.ratings?.length, 3);
+  assert.equal(result.wallet?.records.length, 6);
   assert.match(body, /至少 3 条/);
   assert.match(body, /评分必须与短评的态度和结论严格一致/);
   assert.match(body, /失望作品或烂片/);

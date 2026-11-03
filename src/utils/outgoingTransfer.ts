@@ -3,6 +3,7 @@ import { type AlipayData } from './alipayData';
 export interface OutgoingTransfer {
   id: string; senderId: string; kind?: string; recipientId?: string; amount?: string;
   payerId?: string; createdAt: string; paymentStatus?: 'pending' | 'received' | 'returned';
+  intimatePayReceiptId?: string;
 }
 export type TransferAction = { messageId: string; action: 'received' | 'returned' };
 
@@ -38,5 +39,10 @@ export function settleOutgoingTransfer(data: AlipayData, payment: OutgoingTransf
     intimateCards: refund && payment.payerId && sameMonth ? data.intimateCards.map(card => card.charId === payment.payerId
       ? { ...card, usedAmount: Math.round(Math.max(0, card.usedAmount - amount) * 100) / 100 } : card) : data.intimateCards,
     chatSettlements: { ...data.chatSettlements, [payment.id]: action },
+    ...(refund && payment.payerId && payment.intimatePayReceiptId ? {
+      intimatePayReceipts: data.intimatePayReceipts?.map(receipt =>
+        receipt.id === payment.intimatePayReceiptId && receipt.charId === payment.payerId
+          ? { ...receipt, refundedAt: now.toISOString() } : receipt),
+    } : {}),
   };
 }

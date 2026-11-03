@@ -5,7 +5,7 @@ import { userFaceReferenceInstructions, validUserFaceFields } from './userImageR
 import { regenerationMessages } from './chatRegeneration';
 import type { FormerParticipant } from './deleteWeChatContact';
 import { COUPLE_PRODUCTS, coupleRewardContext, couponUseInstructions } from './coupleRewards';
-import { readAlipayData } from './alipayData';
+import { intimatePayAwareness, readAlipayData } from './alipayData';
 import { readSetting, SETTINGS_KEYS } from './settings';
 import { CharacterNpc, getNpcByParticipantId, readCharacterNpcs } from './characterNpcs';
 import { readStorageString } from './localStorage';
@@ -330,6 +330,7 @@ const formatClock = (date: Date, timeZone?: string) => {
   if (timeZone) {
     return new Intl.DateTimeFormat('zh-CN', {
       timeZone,
+      year: 'numeric',
       month: 'numeric',
       day: 'numeric',
       weekday: 'short',
@@ -339,7 +340,7 @@ const formatClock = (date: Date, timeZone?: string) => {
     }).format(date);
   }
   const pad = (n: number) => String(n).padStart(2, '0');
-  return `${date.getMonth() + 1}月${date.getDate()}日 ${['周日', '周一', '周二', '周三', '周四', '周五', '周六'][date.getDay()]} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日 ${['周日', '周一', '周二', '周三', '周四', '周五', '周六'][date.getDay()]} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 };
 
 const getClockHour = (date: Date, timeZone?: string) => {
@@ -355,8 +356,6 @@ const timeOfDayLabel = (hour: number) =>
 
 export const toMessageContent = (message: PromptChatMessage) => {
   let content = toBaseMessageContent(message);
-  const translation = messageTranslation(message);
-  if (translation) content += `（简体中文译文：${translation.text}）`;
   if (message.replyTo) {
     content = `（引用了${message.replyTo.senderName}的消息「${message.replyTo.text}」）${content}`;
   }
@@ -368,6 +367,11 @@ export const toMessageContent = (message: PromptChatMessage) => {
 
 const toBaseMessageContent = (message: PromptChatMessage) => {
   if (message.kind === 'context-note') {
+    if (message.source === 'phone-proxy-send') return [
+      '【玩家使用角色手机代发消息 · 已发生的记录】',
+      '这是玩家操作记录中角色的手机账号发出的消息，不是手机主人本人主动说的话或承诺，也不是玩家刚发来的台词。手机主人已通过记录知情；其他角色不能把它认作自己的经历。对面是否察觉以实际回复为准。已在聊天中回应过就不必反复追问，之后按人设延续这段经历。',
+      message.aiContext || message.text,
+    ].join('\n');
     if (message.source === 'couple-unbind') return [
       '【情侣空间解绑 · 当时实际发生的关系事件】',
       '这是玩家解除情侣空间绑定的系统记录，不是玩家刚发来的台词，也不等于分手、拉黑或删除好友。依照人设与真实关系自然回应，不预设争吵、不强迫复绑。记录描述的是当时的状态；如果后来重新开通，以后续实际邀请和同意为准。',
@@ -602,7 +606,7 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
       '【贴合人设】每句话都要符合该角色的说话方式、口头禅、性格底色与和玩家的关系，不要变成通用的客服式温柔；像真人一样有情绪、有小脾气、有自己的生活，可以不接话、转移话题或主动聊起自己的事。',
       CHAT_COMMUNICATION_RULES,
       CHINESE_OUTPUT_RULES,
-      '【避免重复】已经说过、送过、问过的事不要再反复提起；礼物、食物、称呼、口头禅等只在剧情真正相关时偶尔带过，优先回应玩家最新一句话。',
+      '【避免机械重复】不要反复追问已回答的事、重提已完成的关心或把旧话题当新进展；称呼与口头禅不为展示人设而硬塞。这不禁止语境贴切的接梗或选择性镜像：沿用玩家的少量措辞时，要表达你自己的反应、立场或关系中的意味，而不是整句照搬、逐句翻译或总结。优先回应玩家此刻真正的意图。',
       [
         '[Humanlike Interaction Guidelines]',
         '1. Do not sound like customer support. You are a person on the other side of the screen, not a machine for correct answers. You have your own values, reasoning, preferences, and point of view; you may disagree.',
@@ -614,7 +618,7 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
         '7. Acknowledge the passage of time. You can grow and let the relationship evolve gradually; do not remain frozen by the initial character description.',
         '8. Do not force a profound meaning onto simple remarks or overinterpret them. If the other person says something simple, understand it simply.',
         '9. Do not announce the time. Both of you know time passes; show care and continue the conversation naturally without saying what hour it is.',
-        '10. You need not quote or repeat the player. Once you understand the point, respond with your own thought. Ask for clarification only when you genuinely did not understand, not to perform confusion.',
+        '10. Do not mechanically paraphrase the player. A small, context-sensitive echo or playful variation can express shared humor or closeness; use it selectively, in character, not as a routine. Ask for clarification only when you genuinely did not understand, not to perform confusion about familiar teasing.',
       ].join('\n'),
       [
         '【关系边界】禁止物化玩家；禁止猎人与猎物之类的比喻；禁止油腻霸总式模板台词；语气与关系地位遵守上面的【交流语气与关系】，不能把关心或亲密当作控制对方的理由。禁止长期陷入极端情绪（崩溃、偏执、病态依赖等可以短暂出现，但要自然回落）。你和玩家之间以相互理解、情感共鸣、立场差异为叙事动力，可以有分歧和冲突。',
@@ -821,6 +825,10 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
     });
   }
 
+  if (chat.type === 'direct' && chat.participantIds.length === 1) {
+    const awareness = intimatePayAwareness(alipayData, chat.participantIds[0]);
+    if (awareness) messages.push({ role: 'system', content: awareness });
+  }
   const allowedViewers = new Set(alipayData.allowedViewers);
   const canSeeLedger = chat.participantIds.length > 0 &&
     chat.participantIds.every((participantId) => allowedViewers.has(participantId));
@@ -912,18 +920,25 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
 
   const announcedAttachedChats = new Set<string>();
   let previousHistoryDate = 0;
+  let lastLocalHistoryDate = 0;
   for (const item of orderedHistory) {
     if (item.message.senderId === 'narrator' && item.message.kind !== 'context-note' && item.message.source !== 'user-narration' &&
       chat.type !== 'observer' && item.conversation.type !== 'observer') continue;
     if (item.date > 0 && item.message.kind !== 'context-note') {
       if (options.timeAwarenessEnabled !== false &&
-        previousHistoryDate > 0 && item.date - previousHistoryDate >= 60 * 60 * 1000) {
+        (previousHistoryDate === 0 || Math.floor(item.date / 60000) !== Math.floor(previousHistoryDate / 60000))) {
         messages.push({
           role: 'system',
-          content: `（时间流逝：距上一条消息过去了${formatDuration(item.date - previousHistoryDate)}，此时是${formatClock(new Date(item.date), options.timeZone)}）`,
+          content: [
+            `【消息发送时间】${formatClock(new Date(item.date), options.timeZone)}。此标记适用于接下来同一分钟内的消息，直到下一个时间标记；这是原始发送时间，不是现在收到的新消息。`,
+            previousHistoryDate > 0 && item.date - previousHistoryDate >= 60 * 60 * 1000
+              ? `（时间流逝：距上一条消息过去了${formatDuration(item.date - previousHistoryDate)}，此时是${formatClock(new Date(item.date), options.timeZone)}）`
+              : '',
+          ].filter(Boolean).join('\n'),
         });
       }
       previousHistoryDate = item.date;
+      if (item.conversation.id === chat.id) lastLocalHistoryDate = item.date;
     }
     if (
       item.conversation.id !== chat.id &&
@@ -968,7 +983,6 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
             ...(prefix ? { historySource: prefix } : {}),
             reply: [messageTranslation(item.message) ? {
               kind: item.message.kind || 'text', text: item.message.text,
-              translation: messageTranslation(item.message)!.text,
               ...(item.message.replyTo ? { quote: item.message.replyTo.text, quoteSender: item.message.replyTo.senderName } : {}),
               ...(item.message.reactions?.length ? { reactions: item.message.reactions } : {}),
             } : item.message.kind === 'voice' ? { kind: 'voice', text: item.message.text } : toMessageContent(item.message)],
@@ -995,21 +1009,24 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
   }
   if (options.timeAwarenessEnabled !== false) {
     const nowDate = new Date();
-    const lastBefore = [...orderedHistory].reverse().find(
-      (item) => item.date > 0 && item.conversation.id === chat.id && item.message.kind !== 'context-note'
-    );
-    const gapMs = lastBefore ? nowDate.getTime() - lastBefore.date : 0;
+    const inputDate = latestUserMessage ? Date.parse(latestUserMessage.createdAt) : NaN;
+    const lastMessageDate = Math.max(lastLocalHistoryDate, Number.isFinite(inputDate) ? inputDate : 0);
+    const gapMs = lastMessageDate > 0 ? nowDate.getTime() - lastMessageDate : 0;
     const hour = getClockHour(nowDate, options.timeZone);
     messages.push({
       role: 'system',
       content: [
         `【当前时间】现在是${formatClock(nowDate, options.timeZone)}，${timeOfDayLabel(hour)}。`,
-        lastBefore && gapMs >= 30 * 60 * 1000
+        Number.isFinite(inputDate)
+          ? `【末尾玩家消息的原始发送时间】${formatClock(new Date(inputDate), options.timeZone)}${nowDate.getTime() - inputDate >= 60000 ? `，距现在${formatDuration(nowDate.getTime() - inputDate)}` : ''}。提示词末尾单独列出的玩家消息仍是这条原消息，不是在点击生成回复时重新发送。`
+          : '',
+        lastMessageDate > 0 && gapMs >= 30 * 60 * 1000
           ? `距离上一条聊天消息已过去${formatDuration(gapMs)}。这段时间里大家并不是静止的，而是各自在正常生活：你可能已经做了一些事情（吃饭、工作、外出、休息、处理杂事等，结合人设与当前行程），玩家也一样。请自然体现时间的流逝，可以顺带提一句自己这段时间做了什么、或好奇玩家做了什么；久未联系可以提到“好久没说话”，不要把过了很久的事当成刚刚发生，也不要生硬报时。`
           : '请结合现在的时间段（早晨、饭点、深夜等）自然体现角色的状态，不要生硬报时。',
         '关于作息：不要催促玩家睡觉或早起。夜深时最多轻轻关心一次，玩家没有表示要睡就不要再提；禁止反复、连续地催睡、劝睡或“该睡了”式的叮嘱。',
-        '聊天记录中的“（时间流逝…）”是系统标注的时间间隔，不是任何人说的话。',
-      ].join('\n'),
+        '【按发送时间理解留言】玩家可能在不同时间连续留言而你一直尚未回复，不能因为现在一起生成回复，就把这些话都当成刚刚发送。较早消息中的“刚刚”“现在”“等会儿”应结合那条消息的发送时间理解；发言时间也不等于其中提到的事件发生时间。结合较新的消息判断情况是否已有变化，不擅自认定旧安排仍未发生或问题仍未解决。可以自然回应不同时段的留言，不必逐条报时；没有回复记录时，不要假装早已回复过，也不要把自己未回复的间隔说成玩家不理你。',
+        '聊天记录中的发送时间标记和“（时间流逝…）”都是系统提供的元信息，不是任何人说的话；当前时间是本次生成回复的时间，与各条消息的发送时间不同。不要把时间标记当作台词复述。',
+      ].filter(Boolean).join('\n'),
     });
   }
   messages.push({

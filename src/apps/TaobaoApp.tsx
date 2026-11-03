@@ -769,7 +769,7 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack, giftCoupon, onCoup
         Number(checkoutProduct.price),
         `${checkoutProduct.type === 'eleme' ? '饿了么' : checkoutProduct.type === 'xianyu' ? '闲鱼' : '淘宝'} · ${checkoutProduct.title} [${targetNote}]`,
         source,
-        { recordLedger: false, notifyIntimatePayer: false }
+        { recordLedger: false }
       );
       setFinanceData(purchaseResult.data);
       setPaymentError('');

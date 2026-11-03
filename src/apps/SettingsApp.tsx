@@ -45,6 +45,8 @@ import {
   replaceDbStorage,
 } from '../utils/dbStorage';
 import { compressUploadedImages } from '../utils/bulkImageCompression';
+import { OPENING_STYLES, openingMedia, type OpeningStyle } from '../utils/phoneOpening';
+import { CreamWordmark } from '../components/CreamOpeningScene';
 import {
   getVoiceProviderDefaults,
   readVoiceModelSettings,
@@ -98,6 +100,8 @@ interface SettingsAppProps {
   onToggleFollowSystemDark: () => boolean;
   openingEnabled: boolean;
   onSaveOpening: (enabled: boolean) => Promise<boolean>;
+  openingStyle: OpeningStyle;
+  onSaveOpeningStyle: (style: OpeningStyle) => Promise<boolean>;
   onPreviewOpening: () => void;
   onLockScreen: () => void;
   lockSettings: { mode: 'none' | 'lock' | 'password'; password: string };
@@ -120,6 +124,8 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
   onToggleFollowSystemDark,
   openingEnabled,
   onSaveOpening,
+  openingStyle,
+  onSaveOpeningStyle,
   onPreviewOpening,
   onLockScreen,
   lockSettings,
@@ -138,6 +144,13 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
   const [openingBusy, setOpeningBusy] = useState(false);
   const [openingError, setOpeningError] = useState('');
   useErrorDialog(openingError);
+  const updateOpeningStyle = async (style: OpeningStyle) => {
+    setOpeningBusy(true); setOpeningError('');
+    try {
+      const saved = await onSaveOpeningStyle(style);
+      if (!saved) setOpeningError('开场样式保存失败，请检查浏览器本地存储空间。');
+    } finally { setOpeningBusy(false); }
+  };
   const [lockMode, setLockMode] = useState(lockSettings.mode);
   const [passwordDraft, setPasswordDraft] = useState(lockSettings.password);
   const [lockSettingsSaved, setLockSettingsSaved] = useState(false);
@@ -852,7 +865,6 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="text-xs font-bold text-[#2C4A5C]">开机动画</p>
-                  <span className="text-[10px] text-slate-400">珍珠极光与双 Y 玻璃标志</span>
                 </div>
                 <input type="checkbox" aria-label="开机动画" checked={openingEnabled} disabled={openingBusy} onChange={async event => {
                   const enabled = event.target.checked;
@@ -866,8 +878,23 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
                   }
                 }} />
               </div>
-              <p className="text-[10px] leading-relaxed text-slate-400">仅在打开或刷新小手机时播放，切换 App 不会重复。支持跳过，并跟随系统「减少动态效果」；关闭后直接进入主屏或原有锁屏。</p>
-              <button type="button" onClick={onPreviewOpening} className="rounded-xl border border-slate-200/70 bg-white/80 px-3 py-2 text-[11px] font-semibold text-[#657187]">
+              <fieldset disabled={openingBusy}>
+                <legend className="sr-only">开场样式</legend>
+                <div className="grid grid-cols-2 gap-2">
+                  {OPENING_STYLES.map(style => <button key={style.id} type="button" aria-pressed={openingStyle === style.id}
+                    onClick={() => void updateOpeningStyle(style.id)}
+                    className={`yy-opening-choice ${openingStyle === style.id ? 'is-selected' : ''}`}>
+                    <span className={`yy-opening-choice-art is-${style.id}`} aria-hidden="true">
+                      {style.id === 'rain' ? <img src={openingMedia().poster} alt="" /> :
+                        style.id === 'cream' ? <CreamWordmark /> :
+                        style.id === 'across' ? <span className="yy-opening-choice-glass" /> : 'YY'}
+                    </span>
+                    <strong>{style.name}</strong><span>{style.description}</span>
+                  </button>)}
+                </div>
+              </fieldset>
+              {openingStyle === 'rain' && <p className="text-[10px] leading-relaxed text-slate-400">视频素材来源：小红书@蓝莓大王</p>}
+              <button type="button" disabled={openingBusy} onClick={onPreviewOpening} className="rounded-xl border border-slate-200/70 bg-white/80 px-3 py-2 text-[11px] font-semibold text-[#657187] disabled:opacity-50">
                 预览开机动画
               </button>
               {openingError && <p role="alert" className="text-[11px] text-rose-600">{openingError}</p>}

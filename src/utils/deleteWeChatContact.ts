@@ -3,6 +3,7 @@ import { readStoredValue } from './localStorage';
 import { CHARACTER_NPCS_STORAGE_KEY, npcParticipantId, readCharacterNpcs } from './characterNpcs';
 import { ALIAS_ACCOUNTS_KEY, aliasStateWithoutCharacter, readAliasState } from './aliasAccounts';
 import { PERSPECTIVE_SHELF_KEY } from './perspectiveShelf';
+import { PHONE_PROXY_EVENTS_KEY } from './phoneProxy';
 
 type Row = Record<string, any>;
 const rows = (key: string): Row[] => {
@@ -49,6 +50,7 @@ export async function deleteWeChatContact(contactId: string) {
   });
   await setStorageItemsAtomically({ 'pocketos:wechat-contacts': nextContacts, 'yyphone:wechat-chats': nextChats, [CHARACTER_NPCS_STORAGE_KEY]: nextNpcs,
     [PERSPECTIVE_SHELF_KEY]: rows(PERSPECTIVE_SHELF_KEY).filter(item => item.identity?.charId !== contactId),
+    [PHONE_PROXY_EVENTS_KEY]: rows(PHONE_PROXY_EVENTS_KEY).filter(item => item.charId !== contactId),
     [ALIAS_ACCOUNTS_KEY]: aliasStateWithoutCharacter(readAliasState(), contactId) });
   if (typeof window.dispatchEvent === 'function') window.dispatchEvent(new Event('yyphone:alias-accounts'));
 }

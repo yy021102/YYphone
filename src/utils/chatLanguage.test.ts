@@ -12,6 +12,7 @@ import { describeForSummary, readDirectMessages } from './journalData';
 import { changeChatArchive } from './chatArchives';
 import { regenerationMessages } from './chatRegeneration';
 import { buildSocialInstructions, parseSocialActions, type SocialContext } from './chatSocial';
+import { normalizeCallReplyParts } from './callReply';
 import {
   CHAT_LANGUAGES, CHINESE_OUTPUT_RULES, chatLanguageInstructions, effectiveChatLanguage,
   isChatLanguage, isChatTranslation, messageTranslation, validateChatLanguage,
@@ -141,12 +142,12 @@ test('a same-response translation can be expanded after disabling mode, and stal
   assert.deepEqual(messageTranslation(disabled.messages[0]), translation);
 });
 
-test('memory and journal inputs use the paired Chinese meaning, without changing original chat or accepting stale translations', () => {
-  assert.equal(describeForSummary({ ...message }), '我会陪你练习');
-  assert.equal(readDirectMessages('a')[0].text, '我会陪你练习');
+test('memory and journal inputs use original speech without reinjecting display translations', () => {
+  assert.equal(describeForSummary({ ...message }), translation.sourceText);
+  assert.equal(readDirectMessages('a')[0].text, translation.sourceText);
   assert.equal(describeForSummary({ ...message, text: 'An edited message' }), 'An edited message');
   assert.equal(readChats()[0].messages[0].text, translation.sourceText);
-  assert.match(toMessageContent(message), /I will practice with you（简体中文译文：我会陪你练习）/);
+  assert.equal(toMessageContent(message), translation.sourceText);
 });
 
 test('both background and structured chat prompts default to Chinese despite foreign persona or chat settings', () => {
@@ -155,12 +156,13 @@ test('both background and structured chat prompts default to Chinese despite for
     assert(prompt.some(turn => turn.role === 'system' && turn.content.includes(CHINESE_OUTPUT_RULES)));
     assert(!prompt.some(turn => turn.content.includes('【仅本轮微信正文语言】')));
     const saved = prompt.find(turn => turn.role === 'assistant')!;
-    if (structuredHistory) assert.deepEqual(JSON.parse(saved.content).reply[0], { kind: 'text', text: translation.sourceText, translation: translation.text });
-    else assert.match(saved.content, /简体中文译文：我会陪你练习/);
+    if (structuredHistory) assert.deepEqual(JSON.parse(saved.content).reply[0], { kind: 'text', text: translation.sourceText });
+    else assert.match(saved.content, /I will practice with you/);
+    assert(!prompt.some(turn => turn.content.includes(translation.text)));
   }
 });
 
-test('foreign structured history retains quotes and reactions alongside paired translation', () => {
+test('foreign structured history retains original quotes and reactions without display translation', () => {
   const all = readChats();
   all[0].messages[0] = { ...message, replyTo: { id: 'user-before', senderName: '玩家', text: '陪我练习吧' }, reactions: [{ by: 'user', emoji: '❤️' }] };
   writeStoredValue(key, all);
@@ -169,7 +171,54 @@ test('foreign structured history retains quotes and reactions alongside paired t
   assert.equal(part.quote, '陪我练习吧');
   assert.equal(part.quoteSender, '玩家');
   assert.deepEqual(part.reactions, [{ by: 'user', emoji: '❤️' }]);
-  assert.equal(part.translation, translation.text);
+  assert.equal(part.translation, undefined);
+});
+
+test('voice and mounted histories keep original language without returning display translations to AI', () => {
+  const all = readChats();
+  all[0].messages = [{ ...message, kind: 'voice' }];
+  all[1] = { ...all[1], attachHistory: true, attachedHistoryChatIds: ['a-chat'] };
+  writeStoredValue(key, all);
+  for (const structuredHistory of [false, true]) {
+    const direct = buildPrompt({ chatId: 'a-chat', structuredHistory, currentInput: '继续' });
+    const mounted = buildPrompt({ chatId: 'b-chat', structuredHistory, currentInput: '继续' });
+    for (const prompt of [direct, mounted]) {
+      const text = prompt.map(item => item.content).join('\n');
+      assert(text.includes(translation.sourceText));
+      assert(!text.includes(translation.text));
+    }
+  }
+  assert.equal(readChats()[0].messages[0].chatTranslation?.text, translation.text, 'display translation remains saved');
+});
+
+test('OpenAI and Gemini foreign call voice aliases retain translations and pass standard correction retry', async () => {
+  mock.method(console, 'warn', () => {});
+  for (const google of [false, true]) for (const mode of ['voice', 'video'] as const) {
+    let calls = 0;
+    mock.method(globalThis, 'fetch', async (_: unknown, init?: RequestInit) => {
+      calls++;
+      const body = JSON.parse(String(init?.body));
+      const instructions = google ? body.systemInstruction.parts[0].text : body.messages.filter((m: { role: string }) => m.role === 'system').map((m: { content: string }) => m.content).join('\n');
+      assert.match(instructions, /语音通话和视频通话台词同样沿用所选语言/);
+      assert.match(instructions, /已接通的/);
+      const reply = [{ type: 'audio', transcript: 'Can you hear me?', ...(calls > 1 ? { translation: '能听见我吗？' } : {}) },
+        ...(mode === 'video' ? [{ kind: 'narration', text: '他看向屏幕，轻轻挥手。' }] : [])];
+      return respond({ reply, speakerId: 'a' }, google);
+    });
+    const result = await requestChatReply(buildPrompt({ chatId: 'a-chat', callMode: mode, currentInput: '你好' }),
+      { ...api, ...(google ? { endpoint: 'https://generativelanguage.googleapis.com' } : {}) }, () => {}, undefined,
+      { normalizeVoice: true, chatLanguage: 'en', chineseThoughts: true });
+    assert.equal(calls, 2);
+    assert(Array.isArray(result.reply));
+    const paired = result.reply.map(part => ({
+      text: part.text, kind: part.kind,
+      ...(part.translation ? { chatTranslation: { language: 'en' as const, text: part.translation, sourceText: part.text } } : {}),
+    }));
+    const lines = normalizeCallReplyParts(paired, mode, 'en');
+    assert.equal(lines[0].text, 'Can you hear me?');
+    assert.equal(messageTranslation(lines[0])?.text, '能听见我吗？');
+    assert.equal(lines.length, mode === 'video' ? 2 : 1);
+  }
 });
 
 test('archive branch, switching and JSON export/import retain exact paired translations independently', async () => {

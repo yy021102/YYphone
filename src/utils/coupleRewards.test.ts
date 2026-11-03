@@ -222,9 +222,25 @@ test('a gift purchase pays once, delivers to the requesting character, completes
   const orders=chat().messages.filter((m:any)=>m.kind==='order');assert.equal(orders.length,1);assert.equal(orders[0].recipientId,'a');assert.equal(orders[0].senderId,'user');assert(findCouponUse('a','request')?.fulfilledAt);
   assert.equal(read('yyphone:inventory'),null);assert(read('yyphone:memory-items').some((m:any)=>m.gift?.sourceKey===orders[0].id));
 });
+test('gift coupon intimate payment records the actual payer once without a fabricated payment chat',async()=>{
+  await used('gift'); await catalog();
+  const account=read('yyphone:alipay-data');
+  account.intimateCards=[{id:'card',charId:'b',charName:'时予',monthlyLimit:100,usedAmount:0,note:''}];
+  await setStorageItemsAtomically({'yyphone:alipay-data':account});
+  const request={charId:'a',useId:'request'};
+  await fulfillCoupleGift(request,'p1',{type:'intimate',charId:'b'});
+  await fulfillCoupleGift(request,'p1',{type:'intimate',charId:'b'});
+  const paid=read('yyphone:alipay-data');
+  assert.equal(paid.balance,100); assert.equal(paid.intimateCards[0].usedAmount,25.5);
+  assert.equal(paid.intimatePayReceipts.length,1); assert.equal(paid.intimatePayReceipts[0].charId,'b');
+  assert.equal(paid.intimatePayReceipts[0].amount,25.5);
+  assert.match(paid.intimatePayReceipts[0].title,/窗边的小花灯/);
+  assert.equal(read('yyphone:wechat-chats')[1].messages.length,1);
+});
 test('a gift claimed by the player is delivered by the character without charging the player and is put into their box',async()=>{
   await used('gift','user');await catalog(0);await fulfillCoupleGift({charId:'a',useId:'request'},'p1');
   assert.equal(read('yyphone:alipay-data').balance,0);assert.equal(chat().messages.at(-1).senderId,'a');assert.equal(chat().messages.at(-1).recipientId,'user');assert.equal(read('yyphone:inventory').items.length,1);
+  assert.equal(read('yyphone:alipay-data').intimatePayReceipts,undefined);
   assert.equal(read('yyphone:inventory').items[0].fromCharId,'a');assert(findCouponUse('a','request')?.fulfilledAt);assert.equal(readInventory().length,1);assert.equal(readInventory().length,1);
 });
 test('insufficient funds, stale prices and stale archives never complete the gift voucher or charge money',async()=>{
@@ -236,4 +252,15 @@ test('a checkout storage failure rolls back payment, delivery, memory and vouche
   await used('gift');await catalog();const keys=['yyphone:alipay-data','yyphone:wechat-chats','yyphone:memory-items',COUPLE_REWARDS_KEY],before=keys.map(readStorageString);
   mock.method(window.localStorage,'setItem',(key:string,value:string)=>{if(key==='yyphone:memory-items')throw new Error('quota');values.set(key,value);});
   await assert.rejects(fulfillCoupleGift({charId:'a',useId:'request'},'p1'),/quota/);assert.deepEqual(keys.map(readStorageString),before);
+});
+test('a failed intimate gift checkout rolls back both the debit and private spending receipt',async()=>{
+  await used('gift');await catalog();
+  const account=read('yyphone:alipay-data');
+  account.intimateCards=[{id:'card',charId:'b',charName:'时予',monthlyLimit:100,usedAmount:0,note:''}];
+  await setStorageItemsAtomically({'yyphone:alipay-data':account});
+  const keys=['yyphone:alipay-data','yyphone:wechat-chats','yyphone:memory-items',COUPLE_REWARDS_KEY],before=keys.map(readStorageString);
+  mock.method(window.localStorage,'setItem',(key:string,value:string)=>{if(key==='yyphone:memory-items')throw new Error('quota');values.set(key,value);});
+  await assert.rejects(fulfillCoupleGift({charId:'a',useId:'request'},'p1',{type:'intimate',charId:'b'}),/quota/);
+  assert.deepEqual(keys.map(readStorageString),before);
+  assert.equal(read('yyphone:alipay-data').intimatePayReceipts,undefined);
 });

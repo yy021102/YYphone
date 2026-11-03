@@ -5,6 +5,7 @@ import { extractFirstZipEntry, generateImage, imageDimensions, isImageGeneration
 import { buildMinimaxUrl, buildSpeechUrl, getVoiceLanguageCodes, hexToBytes, isVoiceModelSettings, synthesizeVoice, DEFAULT_VOICE_MODEL_SETTINGS } from './voiceModel';
 import { isImageReference } from './imageReference';
 import { selectChatImageReferences } from './userImageReference';
+import { CHAT_LANGUAGES } from './chatLanguage';
 
 const buildZip = (name: string, content: Uint8Array, method: 0 | 8) => {
   const data = method === 8 ? new Uint8Array(deflateRawSync(content)) : content;
@@ -55,6 +56,35 @@ test('voice helpers build provider URLs and decode MiniMax hex audio', () => {
   assert.deepEqual([...hexToBytes('49443303')], [0x49, 0x44, 0x33, 0x03]);
   assert.throws(() => hexToBytes('abc'), /格式无效/);
   assert.deepEqual(getVoiceLanguageCodes('粤语'), { iso: 'yue', minimax: 'Chinese,Yue' });
+});
+
+test('every selectable chat language maps its ID and label to the same explicit TTS language', () => {
+  for (const language of CHAT_LANGUAGES) {
+    const byId = getVoiceLanguageCodes(language.id);
+    assert.deepEqual(byId, getVoiceLanguageCodes(language.label));
+    assert.notEqual(byId.minimax, 'auto');
+  }
+  assert.deepEqual(getVoiceLanguageCodes('en'), { iso: 'en', minimax: 'English' });
+  assert.deepEqual(getVoiceLanguageCodes('zh-TW'), { iso: 'zh', minimax: 'Chinese' });
+});
+
+test('foreign speech sends only original utterances with the selected language to every TTS provider', async (t) => {
+  const calls: Array<Record<string, unknown>> = [];
+  t.mock.method(globalThis, 'fetch', async (_: unknown, init: RequestInit) => {
+    calls.push(JSON.parse(String(init.body)));
+    return calls.at(-1)?.language_boost
+      ? Response.json({ base_resp: { status_code: 0 }, data: { audio: '49443303' } })
+      : new Response(new Uint8Array([0x49, 0x44, 0x33, 0x03]), { headers: { 'content-type': 'audio/mpeg' } });
+  });
+  for (const provider of ['openai', 'minimax', 'moss'] as const) {
+    await synthesizeVoice('Can you hear me?', 'test-voice', 'en', {
+      settings: { ...DEFAULT_VOICE_MODEL_SETTINGS, provider, key: 'fixture', domesticEndpoint: 'http://127.0.0.1:39123/v1' },
+    });
+  }
+  assert.equal(calls[0].input, 'Can you hear me?'); assert.equal(calls[0].language, 'en');
+  assert.equal(calls[1].text, 'Can you hear me?'); assert.equal(calls[1].language_boost, 'English');
+  assert.equal(calls[2].input, 'Can you hear me?'); assert.equal(calls[2].language, 'en');
+  assert(calls.every(call => !JSON.stringify(call).includes('能听见我吗')));
 });
 
 test('image generation routes Gemini and Imagen requests to Google endpoints', async (t) => {

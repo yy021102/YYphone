@@ -42,6 +42,8 @@ import {
 import { readStorageString, writeStorageString } from '../utils/localStorage';
 import { readDirectMessages } from '../utils/journalData';
 import { applyPhoneGeneratedPatch, collectPastDiaries } from '../utils/phoneDiaryArchive';
+import { activeMemoryArchive } from '../utils/memoryArchives';
+import { pendingPhoneProxyMessage, replyToPhoneProxyMessage, sendPhoneProxyMessage } from '../utils/phoneProxy';
 
 interface CheckPhoneAppProps {
   onBack: () => void;
@@ -66,6 +68,9 @@ export interface PhoneWeChatMsg {
   senderName: string;
   text: string;
   time: string;
+  byPlayer?: boolean;
+  proxyArchiveKey?: string;
+  replyToProxyId?: string;
 }
 
 export interface PhoneWeChatThread {
@@ -324,6 +329,51 @@ export const CheckPhoneApp: React.FC<CheckPhoneAppProps> = ({ onBack }) => {
 
   const allWeChatThreads = [pinnedUserThread, ...currentPhone.npcThreads];
   const activeWeChatThread = allWeChatThreads.find((t) => t.id === selectedWeChatThreadId);
+  const [proxyDraft, setProxyDraft] = useState('');
+  const [proxyBusy, setProxyBusy] = useState(false);
+  const [proxyNotice, setProxyNotice] = useState('');
+  const proxyController = useRef<AbortController | null>(null);
+  const phoneChatScroll = useRef<HTMLDivElement>(null);
+  const proxyComposerActive = activeSubApp === 'wechat' && !!activeWeChatThread && !activeWeChatThread.isPinnedUser;
+  const pendingProxy = activeWeChatThread ? pendingPhoneProxyMessage(activeWeChatThread) : undefined;
+  useEffect(() => () => { proxyController.current?.abort(); }, []);
+  useEffect(() => { setProxyDraft(''); setProxyNotice(''); }, [selectedCharId, selectedWeChatThreadId]);
+  useEffect(() => {
+    if (phoneChatScroll.current && activeWeChatThread) phoneChatScroll.current.scrollTop = phoneChatScroll.current.scrollHeight;
+  }, [selectedWeChatThreadId, activeWeChatThread?.messages.length]);
+  const handleProxySend = async (retry = false) => {
+    if (generatingRef.current || !activeWeChatThread || activeWeChatThread.isPinnedUser) return;
+    const text = proxyDraft.trim();
+    if (!retry && !text) { setProxyNotice('请先写下想代发的内容。'); return; }
+    if (retry && !pendingProxy) { setProxyNotice('这条消息已经收到回复，无需重试。'); return; }
+    const charId = selectedCharId, threadId = activeWeChatThread.id;
+    const controller = new AbortController();
+    proxyController.current = controller;
+    generatingRef.current = true; setProxyBusy(true); setProxyNotice('');
+    let sent = retry;
+    const updateThread = (thread: PhoneWeChatThread) => {
+      setPhonesMap(previous => ({ ...previous, [charId]: { ...previous[charId], npcThreads: previous[charId].npcThreads.map(item => item.id === threadId ? thread : item) } }));
+    };
+    try {
+      const operation = retry ? { messageId: pendingProxy!.id, archiveKey: pendingProxy!.proxyArchiveKey ?? activeMemoryArchive(charId) }
+        : await sendPhoneProxyMessage(charId, threadId, text, userName);
+      if ('thread' in operation) { updateThread(operation.thread); setProxyDraft(''); sent = true; }
+      controller.signal.throwIfAborted();
+      const thread = await replyToPhoneProxyMessage(charId, threadId, operation.messageId, operation.archiveKey, controller.signal);
+      updateThread(thread); setProxyNotice('对方已回复。手机主人也会从记录里发现这次代发。');
+    } catch (error) {
+      if (controller.signal.aborted) {
+        console.info('Stopped phone proxy reply generation.');
+        setProxyNotice(sent ? '消息已代发，对方回复已停止；可以重试回复，不会重复发送。' : '已停止代发。');
+      } else {
+        console.error('Could not complete phone proxy conversation.', error);
+        setProxyNotice(`${sent ? '消息已代发，但对方回复未完成，可重试回复。' : '代发未完成，内容仍保留在输入框。'}${error instanceof Error ? error.message : String(error)}`);
+      }
+    } finally {
+      if (proxyController.current === controller) proxyController.current = null;
+      generatingRef.current = false; setProxyBusy(false);
+    }
+  };
 
   // 同一角色同一天的屏幕使用时间固定，不会每次渲染乱跳
   const screenTimeText = (() => {
@@ -497,7 +547,7 @@ export const CheckPhoneApp: React.FC<CheckPhoneAppProps> = ({ onBack }) => {
         }
         setShareDraft(content);
       }}
-      className="absolute bottom-5 right-4 z-30 rounded-full border border-white bg-gradient-to-r from-pink-100 to-sky-100 px-3.5 py-2 text-[11px] font-bold text-[#6F7F8E] shadow-[0_6px_16px_rgba(148,163,184,0.25)] active:scale-95"
+      className={`${proxyComposerActive ? 'shrink-0' : 'absolute bottom-5 right-4 z-30'} rounded-full border border-white bg-gradient-to-r from-pink-100 to-sky-100 px-3.5 py-2 text-[11px] font-bold text-[#6F7F8E] shadow-[0_6px_16px_rgba(148,163,184,0.25)] active:scale-95`}
     >
       📤 转发给TA
     </button>
@@ -543,6 +593,7 @@ export const CheckPhoneApp: React.FC<CheckPhoneAppProps> = ({ onBack }) => {
     >
       <div className="z-20 px-4 pt-[max(env(safe-area-inset-top,0px),10px)] pb-2 flex items-center justify-between bg-white/55 backdrop-blur-xl border-b border-white/80 shrink-0">
         <button
+          disabled={proxyBusy}
           onClick={() => {
             if (selectedWeChatThreadId) {
               setSelectedWeChatThreadId(null);
@@ -566,6 +617,7 @@ export const CheckPhoneApp: React.FC<CheckPhoneAppProps> = ({ onBack }) => {
 
         <div className="flex items-center gap-1.5">
           <select
+            disabled={proxyBusy}
             value={selectedCharId}
             onChange={(e) => {
               setSelectedCharId(e.target.value);
@@ -589,7 +641,7 @@ export const CheckPhoneApp: React.FC<CheckPhoneAppProps> = ({ onBack }) => {
         <div className="flex items-center gap-1.5">
           {activeSubApp !== 'past' && <button
             onClick={() => void handleTriggerGenerate(scopeForApp(activeSubApp))}
-            disabled={isGenerating}
+            disabled={isGenerating || proxyBusy}
             className="w-7 h-7 rounded-full bg-white/80 hover:bg-white border border-white text-[#7C7489] flex items-center justify-center text-sm font-bold shadow-2xs cursor-pointer active:scale-95 transition-all"
             title={activeSubApp === 'home' ? '✦ 一键生成全机内容' : '✦ 重新生成当前 App 内容'}
           >
@@ -597,6 +649,7 @@ export const CheckPhoneApp: React.FC<CheckPhoneAppProps> = ({ onBack }) => {
           </button>}
 
           <button
+            disabled={proxyBusy}
             onClick={() => setShowTopMenu(true)}
             className="w-7 h-7 rounded-full bg-white/80 hover:bg-white border border-white text-slate-500 flex items-center justify-center shadow-2xs cursor-pointer active:scale-95"
             title="壁纸与数据管理"
@@ -740,7 +793,8 @@ export const CheckPhoneApp: React.FC<CheckPhoneAppProps> = ({ onBack }) => {
       )}
 
       {activeSubApp === 'wechat' && (
-        <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar p-4 space-y-2.5">
+        <div className="flex-1 min-h-0 flex flex-col">
+        <div ref={phoneChatScroll} className="flex-1 min-h-0 overflow-y-auto no-scrollbar p-4 space-y-2.5">
           {!activeWeChatThread ? (
             <>
               <div className="flex items-center justify-between px-1 pb-1">
@@ -809,6 +863,7 @@ export const CheckPhoneApp: React.FC<CheckPhoneAppProps> = ({ onBack }) => {
                   >
                     <span className="text-[9px] text-slate-400 mb-1 px-1">
                       {m.senderName} · {m.time}
+                      {m.byPlayer && <span className="ml-1.5 text-[#967489]">你悄悄代发</span>}
                     </span>
                     <div
                       className={`max-w-[82%] px-3.5 py-2.5 rounded-2xl text-xs leading-relaxed border ${
@@ -824,6 +879,26 @@ export const CheckPhoneApp: React.FC<CheckPhoneAppProps> = ({ onBack }) => {
               })}
             </div>
           )}
+        </div>
+        {proxyComposerActive && <form className="shrink-0 border-t border-white/80 bg-white/80 px-4 pt-3 pb-[max(12px,env(safe-area-inset-bottom))]"
+          onSubmit={event => { event.preventDefault(); void handleProxySend(); }}>
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <p className="text-[10px] leading-relaxed text-[#816c7d]">用{currentChar.name}的账号悄悄发一句<br />对方未必察觉，但手机主人之后一定会知道。</p>
+            {shareButton}
+          </div>
+          <div className="flex items-end gap-2">
+            <textarea aria-label="代角色发送消息" placeholder={`以${currentChar.name}的身份发给${activeWeChatThread?.name}…`}
+              maxLength={500} rows={2} disabled={proxyBusy || isGenerating} value={proxyDraft} onChange={event => setProxyDraft(event.target.value)}
+              className="min-w-0 flex-1 resize-none rounded-2xl border border-[#e5dce7] bg-[#fcf8fb] px-3 py-2 text-xs leading-relaxed outline-none focus:border-[#b49aba] disabled:opacity-50" />
+            {proxyBusy ? <button type="button" onClick={() => proxyController.current?.abort()}
+              className="shrink-0 rounded-xl bg-[#eee6ee] px-3 py-2 text-xs text-[#745f78]">停止回复</button>
+              : <button type="submit" disabled={isGenerating || !proxyDraft.trim()} className="shrink-0 rounded-xl bg-[#dce8e0] px-3 py-2 text-xs font-semibold text-[#3b624b] disabled:opacity-40">悄悄发送</button>}
+          </div>
+          {proxyBusy && <p role="status" className="mt-2 text-[10px] text-slate-500">消息发送后，正在等对方回复…</p>}
+          {proxyNotice && <p role="status" className="mt-2 text-[10px] leading-relaxed text-[#816c7d]">{proxyNotice}</p>}
+          {pendingProxy && !proxyBusy && <button type="button" disabled={isGenerating} onClick={() => void handleProxySend(true)}
+            className="mt-2 rounded-full bg-[#f3edf6] px-3 py-1.5 text-[10px] font-semibold text-[#81688d]">重试对方回复（不重复代发）</button>}
+        </form>}
         </div>
       )}
 
@@ -1196,7 +1271,7 @@ export const CheckPhoneApp: React.FC<CheckPhoneAppProps> = ({ onBack }) => {
         </div>
       )}
 
-      {shareButton}
+      {!proxyComposerActive && shareButton}
       {shareNotice && (
         <div className="pointer-events-none absolute bottom-20 left-1/2 z-40 -translate-x-1/2 rounded-full bg-slate-700/80 px-4 py-2 text-[11px] text-white">
           {shareNotice}

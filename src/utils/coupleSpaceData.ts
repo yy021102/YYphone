@@ -120,7 +120,7 @@ export const readCharacterBrief = (charId: string, options: { configuredHistory?
 };
 
 // ==================== 微信单聊里的邀请卡片 ====================
-const findOrCreateDirectChat = (chats: Array<Record<string, unknown>>, charId: string) => {
+export const findOrCreateDirectChat = (chats: Array<Record<string, unknown>>, charId: string) => {
   let chat = chats.find(
     (item) =>
       item.type === 'direct' &&

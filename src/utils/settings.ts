@@ -10,6 +10,7 @@ export const SETTINGS_KEYS = {
   statusBarVisible: 'yyphone:show-status-bar',
   followSystemDark: 'yyphone:follow-system-dark',
   openingAnimation: 'yyphone:opening-animation',
+  openingStyle: 'yyphone:opening-style',
   voiceModel: 'yyphone:voice-model',
   imageGeneration: 'yyphone:image-generation',
   apiPresets: 'yyphone:api-presets',

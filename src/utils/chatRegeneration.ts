@@ -1,5 +1,6 @@
 interface ReplyMessage {
   id: string; senderId: string; kind?: string; replyBatchId?: string; thought?: string;
+  phoneProxyAcknowledgedIds?: string[];
   amount?: string; paymentStatus?: string;
   packetClaims?: Array<{ recipientId: string; amount: string; claimed: boolean }>;
 }
@@ -30,12 +31,12 @@ export function regenerationMessages<T extends ReplyMessage>(messages: readonly 
   const excluded = regeneratedReplyIds(messages, settlements);
   const protectedIds = settledReplyPaymentIds(messages, settlements);
   return messages.filter(message => !excluded.has(message.id)).map(message => protectedIds.has(message.id)
-    ? { ...message, thought: undefined, paymentStatus: settlements[message.id] ?? message.paymentStatus } : message);
+    ? { ...message, thought: undefined, phoneProxyAcknowledgedIds: undefined, paymentStatus: settlements[message.id] ?? message.paymentStatus } : message);
 }
 
 /** Join retained cards to the replacement turn so repeated rerolls keep the same settlement protection. */
 export function retainSettledReplyPayment<T extends ReplyMessage>(message: T, protectedIds: ReadonlySet<string>, replyBatchId: string, settlements: Settlements = {}): T {
-  return protectedIds.has(message.id) ? { ...message, replyBatchId, thought: undefined, paymentStatus: settlements[message.id] ?? message.paymentStatus } : message;
+  return protectedIds.has(message.id) ? { ...message, replyBatchId, thought: undefined, phoneProxyAcknowledgedIds: undefined, paymentStatus: settlements[message.id] ?? message.paymentStatus } : message;
 }
 
 /** Recheck before replacing a pending card: another tab may have received it while the model was running. */

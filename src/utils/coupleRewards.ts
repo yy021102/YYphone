@@ -1,7 +1,7 @@
 import type { CharacterCoupleSpace } from '../apps/CoupleSpaceApp';
 import { readStorageString, readStoredValue } from './localStorage';
 import { setStorageItemsAtomically } from './dbStorage';
-import { ALIPAY_STORAGE_KEY, readAlipayData, type PaymentSource } from './alipayData';
+import { ALIPAY_STORAGE_KEY, readAlipayData, withIntimatePayReceipt, type PaymentSource } from './alipayData';
 import { activeMemoryArchive } from './memoryArchives';
 import { giftDateToday, giftMemoryContent } from './giftMemory';
 
@@ -267,8 +267,9 @@ export const fulfillCoupleGift = (request: CouponGiftTarget, productId: string, 
     const card = payment.type === 'intimate' ? account.intimateCards.find(c => c.charId === payment.charId) : undefined;
     if (payment.type === 'intimate' && !card) throw new Error('所选亲密付不可用，未支付。');
     if (card ? cents > Math.round((card.monthlyLimit - card.usedAmount) * 100) : cents > Math.round(account.balance * 100)) throw new Error(card ? '亲密付额度不足，礼物券尚未完成。' : '余额不足，礼物券尚未完成。');
-    values[ALIPAY_STORAGE_KEY] = { ...account, balance: card ? account.balance : (Math.round(account.balance * 100) - cents) / 100,
+    const paid = { ...account, balance: card ? account.balance : (Math.round(account.balance * 100) - cents) / 100,
       intimateCards: card ? account.intimateCards.map(c => c.id === card.id ? { ...c, usedAmount: (Math.round(c.usedAmount * 100) + cents) / 100 } : c) : account.intimateCards };
+    values[ALIPAY_STORAGE_KEY] = card ? withIntimatePayReceipt(paid, card.charId, `淘宝 · ${product.title} [情侣空间礼物券]`, amount) : paid;
   } else {
     const inventory = readStoredValue('yyphone:inventory', { items: [], backfilled: false }, (v): v is { items: Row[]; backfilled: boolean } => record(v) && Array.isArray(v.items));
     values['yyphone:inventory'] = { ...inventory, items: [...inventory.items, { id: `inv-msg-${message.id}`, kind: 'gift', recipientId: 'user', title: product.title,

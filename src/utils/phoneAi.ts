@@ -110,7 +110,7 @@ const scopeSpec = (scope: PhoneGenScope, ctx: PhoneGenContext, prevWallet: Phone
       return `${prev}
 与玩家「${ctx.userName}」之间发生过的转账、红包、礼物/订单（务必据实体现在收支里，方向和金额要对；若没有则不要编造）：
 ${money || '（暂无）'}
-另外请生成一些符合人设的日常收支（工资、餐饮、交通、数码、请客、给家人转账等）。新增 5~8 条，金额为数字，收入为正、支出为负。
+本次总共新增恰好 6 条收支，真实事件与日常收支合计也是 6 条，不是各生成 6 条。优先延续近期真实事件，其余可补充符合人设的日常收支（工资、餐饮、交通、数码、请客、给家人转账等），不要重复入账已有记录。金额为数字，收入为正、支出为负。
 返回 JSON：{"balance":总资产数字,"records":[{"title":"名目","amount":数字,"timeStr":"如 10月16日 12:30","note":"可选备注"}]}`;
     }
     case 'health':
@@ -270,15 +270,21 @@ const parsePhoneScope = (
       };
     }
     case 'wallet': {
-      const newRecords = list(result.records).slice(0, 12).map((r) => ({
+      if (!Array.isArray(result.records) || result.records.length !== 6 || !result.records.every(r =>
+        isRecord(r) && typeof r.title === 'string' && r.title.trim() && typeof r.amount === 'number' &&
+        Number.isSafeInteger(Math.round(r.amount * 100)) && Math.round(r.amount * 100) !== 0 &&
+        typeof r.timeStr === 'string' && r.timeStr.trim())) {
+        throw new Error('钱包每次需要恰好 6 条有效收支，AI 返回的条数或内容不符合要求；原钱包未改动，请重试。');
+      }
+      const newRecords = list(result.records).map((r) => ({
         id: uid('w'),
         title: str(r.title, 30),
         amount: Math.round(num(r.amount, 0) * 100) / 100,
         timeStr: str(r.timeStr, 20),
         ...(str(r.note, 40) ? { note: str(r.note, 40) } : {}),
-      })).filter((r) => r.title && r.amount !== 0);
+      }));
       const balance = num(result.balance, NaN);
-      if (!Number.isFinite(balance) || newRecords.length === 0) throw new Error('AI 没有生成有效的钱包数据，请重试。');
+      if (!Number.isSafeInteger(Math.round(balance * 100))) throw new Error('AI 没有生成有效的钱包余额，原钱包未改动，请重试。');
       return {
         wallet: {
           balance: Math.max(0, Math.round(balance * 100) / 100),

@@ -1,8 +1,8 @@
 export const DEFAULT_CHAT_HISTORY_COUNT = 200;
 
-// Alias continuity remains in chronological AI history, without appearing as a chat message.
+// Silent continuity records remain in chronological AI history, not in the visible chat.
 // Check the source so existing saved entries become silent as well.
-export const isVisibleChatMessage = (message: { source?: string }): boolean => message.source !== 'alias-experience';
+export const isVisibleChatMessage = (message: { source?: string }): boolean => message.source !== 'alias-experience' && message.source !== 'phone-proxy-send';
 
 /** One-based inclusive numbering, oldest first, excluding silent AI-only records. */
 export function chatRangeMessageIds(messages: Array<{ id: string; source?: string }>, from: string, to: string): string[] {

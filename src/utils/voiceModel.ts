@@ -1,4 +1,5 @@
 import { readSetting, SETTINGS_KEYS } from './settings';
+import { CHAT_LANGUAGES, type ChatLanguage } from './chatLanguage';
 
 export type VoiceProvider = 'openai' | 'minimax' | 'moss';
 
@@ -58,19 +59,30 @@ export const isVoiceModelSettings = (value: unknown): value is VoiceModelSetting
 export const readVoiceModelSettings = () =>
   readSetting(SETTINGS_KEYS.voiceModel, DEFAULT_VOICE_MODEL_SETTINGS, isVoiceModelSettings);
 
-const LANGUAGE_CODES: Record<string, { iso: string; minimax: string }> = {
-  中文: { iso: 'zh', minimax: 'Chinese' },
-  粤语: { iso: 'yue', minimax: 'Chinese,Yue' },
-  英语: { iso: 'en', minimax: 'English' },
-  日语: { iso: 'ja', minimax: 'Japanese' },
-  韩语: { iso: 'ko', minimax: 'Korean' },
-  法语: { iso: 'fr', minimax: 'French' },
-  德语: { iso: 'de', minimax: 'German' },
-  西班牙语: { iso: 'es', minimax: 'Spanish' },
+const LANGUAGE_CODES: Record<ChatLanguage | 'zh', { iso: string; minimax: string }> = {
+  zh: { iso: 'zh', minimax: 'Chinese' },
+  yue: { iso: 'yue', minimax: 'Chinese,Yue' },
+  en: { iso: 'en', minimax: 'English' },
+  ja: { iso: 'ja', minimax: 'Japanese' },
+  ko: { iso: 'ko', minimax: 'Korean' },
+  fr: { iso: 'fr', minimax: 'French' },
+  de: { iso: 'de', minimax: 'German' },
+  es: { iso: 'es', minimax: 'Spanish' },
+  it: { iso: 'it', minimax: 'Italian' },
+  pt: { iso: 'pt', minimax: 'Portuguese' },
+  ru: { iso: 'ru', minimax: 'Russian' },
+  ar: { iso: 'ar', minimax: 'Arabic' },
+  th: { iso: 'th', minimax: 'Thai' },
+  vi: { iso: 'vi', minimax: 'Vietnamese' },
+  'zh-TW': { iso: 'zh', minimax: 'Chinese' },
 };
 
-export const getVoiceLanguageCodes = (language: string) =>
-  LANGUAGE_CODES[language.trim()] ?? { iso: language.trim() || 'zh', minimax: 'auto' };
+export const getVoiceLanguageCodes = (language: string) => {
+  const value = language.trim();
+  const aliases: Record<string, ChatLanguage | 'zh'> = { 中文: 'zh', 简体中文: 'zh', 粤语: 'yue', 'zh-CN': 'zh', zh: 'zh' };
+  const id = CHAT_LANGUAGES.find(item => item.id === value || item.label === value)?.id ?? aliases[value];
+  return id ? LANGUAGE_CODES[id] : { iso: value || 'zh', minimax: 'auto' };
+};
 
 const parseHttpUrl = (value: string, label: string) => {
   let url: URL;

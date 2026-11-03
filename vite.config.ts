@@ -21,6 +21,15 @@ export default defineConfig(() => {
         workbox: {
           importScripts: ['notification-events.js'],
           globPatterns: ['**/*.{js,css,html,wasm}', 'qimen-engine-license.txt'],
+          runtimeCaching: [{
+            urlPattern: ({ url, sameOrigin }) => sameOrigin && /\/openings\/rain-window(?:\.mp4|-poster\.webp)$/.test(url.pathname),
+            handler: 'StaleWhileRevalidate',
+            options: {
+              cacheName: 'yyphone-opening-media-v1',
+              cacheableResponse: { statuses: [200] },
+              expiration: { maxEntries: 4, maxAgeSeconds: 365 * 24 * 60 * 60 },
+            },
+          }],
         },
         devOptions: {
           enabled: true,

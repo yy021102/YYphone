@@ -1,6 +1,9 @@
 import { useEffect, useId, useRef, useState, type CSSProperties } from 'react';
+import type { OpeningStyle } from '../utils/phoneOpening';
+import { RainOpeningScene } from './RainOpeningScene';
+import { CreamOpeningScene } from './CreamOpeningScene';
 
-export const OPENING_TIMING = { intro: 2450, reducedIntro: 550, exit: 600, shortExit: 160 } as const;
+export const OPENING_TIMING = { intro: 2450, rainIntro: 4000, acrossIntro: 4500, creamIntro: 4700, staticIntro: 900, reducedIntro: 550, exit: 600, shortExit: 160 } as const;
 
 export function YYphoneMark() {
   const id = useId();
@@ -30,12 +33,15 @@ export function YYphoneMark() {
   );
 }
 
-export function PhoneOpening({ ready, onComplete }: { ready: boolean; onComplete: () => void }) {
+export function PhoneOpening({ ready, onComplete, openingStyle = 'pearl' }: { ready: boolean; onComplete: () => void; openingStyle?: OpeningStyle }) {
   const titleId = useId();
+  const hintId = useId();
   const overlayRef = useRef<HTMLDivElement>(null);
-  const skipRef = useRef<HTMLButtonElement>(null);
+  const enterRef = useRef<HTMLButtonElement>(null);
   const [reducedMotion, setReducedMotion] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   const [introDone, setIntroDone] = useState(false);
+  const [sceneStatus, setSceneStatus] = useState<'loading' | 'playing' | 'static'>(openingStyle === 'rain' ? 'loading' : 'static');
+  const sceneReady = openingStyle !== 'rain' || sceneStatus !== 'loading';
   const [exit, setExit] = useState<'automatic' | 'skip' | null>(null);
   const leaving = exit !== null || introDone && ready;
   const shortExit = reducedMotion || exit === 'skip';
@@ -54,9 +60,14 @@ export function PhoneOpening({ ready, onComplete }: { ready: boolean; onComplete
   }, []);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setIntroDone(true), reducedMotion ? OPENING_TIMING.reducedIntro : OPENING_TIMING.intro);
+    if (!sceneReady) return;
+    const duration = reducedMotion ? OPENING_TIMING.reducedIntro : openingStyle === 'pearl' ? OPENING_TIMING.intro :
+      openingStyle === 'across' ? OPENING_TIMING.acrossIntro :
+      openingStyle === 'cream' ? OPENING_TIMING.creamIntro :
+      sceneStatus === 'playing' ? OPENING_TIMING.rainIntro : OPENING_TIMING.staticIntro;
+    const timer = window.setTimeout(() => setIntroDone(true), duration);
     return () => window.clearTimeout(timer);
-  }, [reducedMotion]);
+  }, [reducedMotion, openingStyle, sceneStatus, sceneReady]);
 
   useEffect(() => {
     if (!leaving) return;
@@ -70,27 +81,65 @@ export function PhoneOpening({ ready, onComplete }: { ready: boolean; onComplete
       role="dialog"
       aria-modal="true"
       aria-labelledby={titleId}
+      aria-describedby={hintId}
       tabIndex={-1}
       className="yy-phone-opening"
+      data-style={openingStyle}
+      data-scene-mode={sceneStatus}
+      data-intro-ready={sceneReady || undefined}
       data-leaving={leaving || undefined}
       data-reduced-motion={reducedMotion || undefined}
       data-waiting={introDone && !ready || undefined}
       style={{ '--opening-exit': `${shortExit ? OPENING_TIMING.shortExit : OPENING_TIMING.exit}ms` } as CSSProperties}
       onKeyDown={event => {
-        if (event.key === 'Escape' && ready) { event.preventDefault(); setExit('skip'); }
+        if (['Escape', 'Enter', ' '].includes(event.key) && ready) { event.preventDefault(); setExit('skip'); }
         if (event.key === 'Tab') {
           event.preventDefault();
-          (ready ? skipRef.current : overlayRef.current)?.focus({ preventScroll: true });
+          (ready ? enterRef.current : overlayRef.current)?.focus({ preventScroll: true });
         }
       }}
     >
+      <p id={hintId} className="sr-only">轻点画面或按回车键进入，开场也会自动结束。</p>
+      {openingStyle === 'rain' ? <>
+        <RainOpeningScene reducedMotion={reducedMotion} leaving={leaving} onReady={setSceneStatus} onEnded={() => setIntroDone(true)} />
+        <div className="yy-rain-copy">
+          <h1 id={titleId} aria-label="Rain outside. You are here.">
+            <span className="yy-rain-line">
+              <span className="yy-rain-word" style={{ '--word-delay': '550ms' } as CSSProperties}>Rain</span>{' '}
+              <span className="yy-rain-word" style={{ '--word-delay': '800ms' } as CSSProperties}>outside.</span>
+            </span>
+            <span className="yy-rain-line">
+              <span className="yy-rain-word" style={{ '--word-delay': '1250ms' } as CSSProperties}>You</span>{' '}
+              <span className="yy-rain-word" style={{ '--word-delay': '1450ms' } as CSSProperties}>are</span>{' '}
+              <span className="yy-rain-word" style={{ '--word-delay': '1650ms' } as CSSProperties}>here.</span>
+            </span>
+          </h1>
+        </div>
+        <div className="yy-rain-brand" aria-hidden="true"><span>YYphone</span><span>歪歪机</span></div>
+      </> : openingStyle === 'across' ? <>
+        <div className="yy-across-atmosphere" aria-hidden="true" />
+        <div className="yy-across-scene" aria-hidden="true">
+          <div className="yy-across-horizon" />
+          <div className="yy-across-orb yy-across-orb-far" />
+          <div className="yy-across-glass"><span /><span /></div>
+          <div className="yy-across-orb yy-across-orb-near" />
+          <div className="yy-across-contact" />
+          <div className="yy-across-ripple" />
+          <div className="yy-across-ripple yy-across-ripple-late" />
+          <div className="yy-across-dust"><i /><i /><i /><i /><i /></div>
+        </div>
+        <div className="yy-across-copy">
+          <h1 id={titleId} aria-label="A screen between us. Still, I reach for you.">
+            <span>A screen between us.</span>
+            <span>Still, I reach for you.</span>
+          </h1>
+        </div>
+        <div className="yy-across-brand" aria-hidden="true"><span>YYphone</span><span>歪歪机</span></div>
+      </> : openingStyle === 'cream' ? <CreamOpeningScene titleId={titleId} /> : <>
       <div className="yy-opening-aurora yy-opening-aurora-blue" aria-hidden="true" />
       <div className="yy-opening-aurora yy-opening-aurora-rose" aria-hidden="true" />
       <div className="yy-opening-grid" aria-hidden="true" />
       <div className="yy-opening-beam" aria-hidden="true" />
-      <button ref={skipRef} type="button" className="yy-opening-skip" disabled={!ready || leaving} onClick={() => setExit('skip')} aria-label="跳过开机动画">
-        跳过 <span aria-hidden="true">↗</span>
-      </button>
       <div className="yy-opening-composition">
         <div className="yy-opening-sculpture" aria-hidden="true">
           <div className="yy-opening-orbit yy-opening-orbit-outer" />
@@ -111,6 +160,8 @@ export function PhoneOpening({ ready, onComplete }: { ready: boolean; onComplete
         <span className="yy-opening-signature-line" />
         <p>A WORLD OF YOUR OWN</p>
       </div>
+      </>}
+      <button ref={enterRef} type="button" className="yy-opening-enter" disabled={!ready || leaving} onClick={() => setExit('skip')} aria-label="进入YYphone" />
     </div>
   );
 }

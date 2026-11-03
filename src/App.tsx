@@ -15,6 +15,7 @@ import {
 import { readSetting, saveSetting, SETTINGS_KEYS } from './utils/settings';
 import { StatusBar } from './components/StatusBar';
 import { PhoneOpening } from './components/PhoneOpening';
+import { readOpeningStyle, type OpeningStyle } from './utils/phoneOpening';
 import { setStorageItemsAtomically } from './utils/dbStorage';
 import { CoupleBellNotice } from './components/CoupleBellNotice';
 import { CoupleLetterRuntime } from './components/CoupleLetterRuntime';
@@ -241,6 +242,7 @@ export default function App() {
     readSetting(SETTINGS_KEYS.openingAnimation, true, (value): value is boolean => typeof value === 'boolean')
   );
   const [openingVisible, setOpeningVisible] = useState(openingEnabled);
+  const [openingStyle, setOpeningStyle] = useState(readOpeningStyle);
   const openingReturnFocus = useRef<HTMLElement | null>(null);
   const [phoneReady, setPhoneReady] = useState(false);
   useEffect(() => {
@@ -266,6 +268,16 @@ export default function App() {
       return true;
     } catch (error) {
       console.error('Could not save phone opening preference.', error);
+      return false;
+    }
+  };
+  const handleSaveOpeningStyle = async (style: OpeningStyle): Promise<boolean> => {
+    try {
+      await setStorageItemsAtomically({ [SETTINGS_KEYS.openingStyle]: style });
+      setOpeningStyle(style);
+      return true;
+    } catch (error) {
+      console.error('Could not save phone opening style.', error);
       return false;
     }
   };
@@ -737,6 +749,8 @@ export default function App() {
                   onToggleFollowSystemDark={handleToggleFollowSystemDark}
                   openingEnabled={openingEnabled}
                   onSaveOpening={handleSaveOpening}
+                  openingStyle={openingStyle}
+                  onSaveOpeningStyle={handleSaveOpeningStyle}
                   onPreviewOpening={handlePreviewOpening}
                   onLockScreen={handleLock}
                   lockSettings={lockSettings}
@@ -834,7 +848,7 @@ export default function App() {
         )}
 
         </div>
-        {openingVisible && <PhoneOpening ready={phoneReady} onComplete={() => setOpeningVisible(false)} />}
+        {openingVisible && <PhoneOpening key={openingStyle} ready={phoneReady} openingStyle={openingStyle} onComplete={() => setOpeningVisible(false)} />}
         <ErrorDialogHost />
       </div>
     </div>

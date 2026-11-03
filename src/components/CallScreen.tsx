@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Mic, MicOff, Phone, PhoneOff, Send, Sparkles, Video, VideoOff, Volume2, VolumeX } from 'lucide-react';
+import type { ChatTranslation } from '../utils/chatLanguage';
 
 export interface CallLine {
   id: string;
@@ -7,6 +8,7 @@ export interface CallLine {
   name: string;
   text: string;
   narration?: boolean;
+  translation?: ChatTranslation;
 }
 
 interface CallScreenProps {
@@ -65,6 +67,7 @@ export const CallScreen: React.FC<CallScreenProps> = ({
   const [muted, setMuted] = useState(false);
   const [speakerOn, setSpeakerOn] = useState(true);
   const [cameraOff, setCameraOff] = useState(false);
+  const [expandedTranslations, setExpandedTranslations] = useState<string[]>([]);
   const missedHandler = useRef(onMissed);
   const linesContainerRef = useRef<HTMLDivElement>(null);
   useEffect(() => { missedHandler.current = onMissed; }, [onMissed]);
@@ -162,7 +165,7 @@ export const CallScreen: React.FC<CallScreenProps> = ({
       <div ref={linesContainerRef} className="relative z-10 max-h-[30%] space-y-1.5 overflow-y-auto px-4 pb-2">
         {lines.map((line) => (
           <div key={line.id} className={`flex flex-col gap-1 ${line.mine ? 'items-end' : line.narration ? 'items-center' : 'items-start'}`}>
-            <p className={`max-w-[82%] rounded-2xl px-3 py-1.5 text-xs leading-relaxed backdrop-blur-md ${
+            <p lang={line.translation?.language} dir="auto" className={`max-w-[82%] whitespace-pre-wrap break-words rounded-2xl px-3 py-1.5 text-xs leading-relaxed backdrop-blur-md ${
               line.narration
                 ? `bg-white/25 text-center italic ${video ? 'text-white/80' : 'text-slate-500'}`
                 : line.mine
@@ -172,13 +175,27 @@ export const CallScreen: React.FC<CallScreenProps> = ({
               {line.narration && <span className="mr-1 font-semibold not-italic">【旁白】</span>}
               {line.text}
             </p>
-            {!line.mine && !line.narration && connected && (
+            {!line.mine && !line.narration && connected && <div className="flex flex-wrap gap-1">
               <button type="button" onClick={() => onPlayLine(line.id)}
                 aria-label={playingLineId === line.id || loadingLineId === line.id ? '停止角色语音' : '播放角色语音'}
                 className={`flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] ${video ? 'bg-black/35 text-white' : 'bg-white/70 text-slate-600'}`}>
                 <Volume2 className="h-3.5 w-3.5" />
                 {loadingLineId === line.id ? '合成中…' : playingLineId === line.id ? '停止' : '点击播放'}
               </button>
+              {line.translation && <button type="button"
+                aria-label={expandedTranslations.includes(line.id) ? '收起中文翻译' : '展开中文翻译'}
+                aria-expanded={expandedTranslations.includes(line.id)}
+                aria-controls={`call-translation-${line.id}`}
+                onClick={() => setExpandedTranslations(ids => ids.includes(line.id) ? ids.filter(id => id !== line.id) : [...ids, line.id])}
+                className={`rounded-full px-2.5 py-1 text-[10px] ${video ? 'bg-black/35 text-white' : 'bg-white/70 text-slate-600'}`}>
+                {expandedTranslations.includes(line.id) ? '收起翻译' : '中文翻译'}
+              </button>}
+            </div>}
+            {!line.mine && !line.narration && line.translation && expandedTranslations.includes(line.id) && (
+              <p id={`call-translation-${line.id}`} lang="zh-CN"
+                className={`max-w-[82%] whitespace-pre-wrap break-words rounded-2xl px-3 py-1.5 text-xs leading-relaxed backdrop-blur-md ${video ? 'bg-black/30 text-white' : 'bg-white/75 text-slate-600'}`}>
+                {line.translation.text}
+              </p>
             )}
           </div>
         ))}
