@@ -96,6 +96,9 @@ interface SettingsAppProps {
   onToggleStatusBar: () => boolean;
   followSystemDark: boolean;
   onToggleFollowSystemDark: () => boolean;
+  openingEnabled: boolean;
+  onSaveOpening: (enabled: boolean) => Promise<boolean>;
+  onPreviewOpening: () => void;
   onLockScreen: () => void;
   lockSettings: { mode: 'none' | 'lock' | 'password'; password: string };
   onSaveLockSettings: (settings: {
@@ -115,6 +118,9 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
   onToggleStatusBar,
   followSystemDark,
   onToggleFollowSystemDark,
+  openingEnabled,
+  onSaveOpening,
+  onPreviewOpening,
   onLockScreen,
   lockSettings,
   onSaveLockSettings,
@@ -129,6 +135,9 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
     readSetting(SETTINGS_KEYS.imageConfigExpanded, true, (value): value is boolean => typeof value === 'boolean')
   );
   const [runtimeBusy, setRuntimeBusy] = useState(false);
+  const [openingBusy, setOpeningBusy] = useState(false);
+  const [openingError, setOpeningError] = useState('');
+  useErrorDialog(openingError);
   const [lockMode, setLockMode] = useState(lockSettings.mode);
   const [passwordDraft, setPasswordDraft] = useState(lockSettings.password);
   const [lockSettingsSaved, setLockSettingsSaved] = useState(false);
@@ -838,6 +847,30 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
                   const saved = onToggleFollowSystemDark();
                   setStatusBarError(saved ? '' : '深色模式偏好保存失败，请检查浏览器本地存储空间。');
               }} aria-label="跟随系统深色模式" />
+            </div>
+            <div className="p-3.5 space-y-2.5">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-bold text-[#2C4A5C]">开机动画</p>
+                  <span className="text-[10px] text-slate-400">珍珠极光与双 Y 玻璃标志</span>
+                </div>
+                <input type="checkbox" aria-label="开机动画" checked={openingEnabled} disabled={openingBusy} onChange={async event => {
+                  const enabled = event.target.checked;
+                  setOpeningBusy(true);
+                  setOpeningError('');
+                  try {
+                    const saved = await onSaveOpening(enabled);
+                    setOpeningError(saved ? '' : '开机动画设置保存失败，请检查浏览器本地存储空间。');
+                  } finally {
+                    setOpeningBusy(false);
+                  }
+                }} />
+              </div>
+              <p className="text-[10px] leading-relaxed text-slate-400">仅在打开或刷新小手机时播放，切换 App 不会重复。支持跳过，并跟随系统「减少动态效果」；关闭后直接进入主屏或原有锁屏。</p>
+              <button type="button" onClick={onPreviewOpening} className="rounded-xl border border-slate-200/70 bg-white/80 px-3 py-2 text-[11px] font-semibold text-[#657187]">
+                预览开机动画
+              </button>
+              {openingError && <p role="alert" className="text-[11px] text-rose-600">{openingError}</p>}
             </div>
             {statusBarError && <p role="alert" className="px-3.5 pb-2 text-[11px] text-rose-600">{statusBarError}</p>}
 

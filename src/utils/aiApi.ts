@@ -2,6 +2,7 @@ import { readSetting, SETTINGS_KEYS } from './settings';
 import { withGlobalWorldBooks } from './worldBookPrompt';
 import { parseImageReference } from './imageReference';
 import { apiTemperature, textApiConfig } from './textApiConfig';
+import { CHINESE_OUTPUT_RULES } from './chatLanguage';
 
 export interface ApiConnection {
   endpoint: string;
@@ -73,6 +74,7 @@ export const requestConfiguredAiText = async (
 ) => {
   options.signal?.throwIfAborted();
   if (options.includeGlobalWorldBooks !== false) systemPrompt = withGlobalWorldBooks(systemPrompt, [...(options.history ?? []).map(message => message.content), userPrompt]);
+  systemPrompt = `${systemPrompt}\n${CHINESE_OUTPUT_RULES}`;
   const preset = options.api ?? getActiveApiPreset();
   if (!preset.endpoint.trim() || !preset.apiKey.trim()) {
     throw new Error('请填写所选 API 的接口地址和密钥。');

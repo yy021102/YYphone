@@ -1,4 +1,5 @@
 import { chatReplyPacing, CHAT_THOUGHT_STYLE } from '../utils/chatReplyPacing';
+import { CHAT_LANGUAGES, effectiveChatLanguage, isChatLanguage, isChatTranslation, messageTranslation, chatLanguageInstructions, type ChatLanguage, type ChatTranslation } from '../utils/chatLanguage';
 import { readMessageQuote, findQuotedMessage } from '../utils/messageQuote';
 import { shouldShowTimestamp, effectiveChatTimeZone, formatChatTimestamp } from '../utils/chatTimestamp';
 import { syncAliasExperiences } from '../utils/aliasExperiences';
@@ -291,6 +292,7 @@ interface PomodoroCardDetails {
 
 
 interface ChatMessage {
+  chatTranslation?: ChatTranslation;
   wordEncounter?: EncounterResult;
   aliasExperience?: { threadKey: string; userProfileId: string };
   couponUseId?: string;
@@ -337,6 +339,7 @@ interface ChatMessage {
 const MESSAGE_REACTIONS = ['🥰', '😋', '🥺', '❤️', '😔', '😡', '🤣', '😥'] as const;
 
 interface GeneratedAiMessage {
+  chatTranslation?: ChatTranslation;
   imageSubject?: ImageSubject;
   speakerId?: string;
   thought?: string;
@@ -394,6 +397,8 @@ interface ApiPreset {
 type ChatArchive = ChatArchiveSlot<ChatMessage>;
 
 interface ChatConversation {
+  foreignLanguageEnabled?: boolean;
+  chatLanguage?: ChatLanguage;
   id: string;
   coupleCouponRevision?: string;
   archives?: ChatArchive[];
@@ -636,7 +641,8 @@ export const isStrictChatList = (value: unknown): value is ChatConversation[] =>
             typeof claim.recipientId === 'string' && typeof claim.amount === 'string' && typeof claim.claimed === 'boolean'))) &&
           (message.recipientId === undefined || typeof message.recipientId === 'string') &&
           (message.payerId === undefined || typeof message.payerId === 'string') &&
-          (message.thought === undefined || typeof message.thought === 'string')
+          (message.thought === undefined || typeof message.thought === 'string') &&
+          (message.chatTranslation === undefined || (isChatTranslation(message.chatTranslation) && message.chatTranslation.sourceText === message.text))
       ) &&
       (chat.groupTitle === undefined || typeof chat.groupTitle === 'string') &&
       (chat.groupNicknames === undefined ||
@@ -655,6 +661,8 @@ export const isStrictChatList = (value: unknown): value is ChatConversation[] =>
       (chat.replyMessageMin === undefined || typeof chat.replyMessageMin === 'number') &&
       (chat.replyMessageMax === undefined || typeof chat.replyMessageMax === 'number') &&
       (chat.includeLatestThought === undefined || typeof chat.includeLatestThought === 'boolean') &&
+      (chat.foreignLanguageEnabled === undefined || typeof chat.foreignLanguageEnabled === 'boolean') &&
+      (chat.chatLanguage === undefined || isChatLanguage(chat.chatLanguage)) &&
       (chat.allowGroupPrivate === undefined || typeof chat.allowGroupPrivate === 'boolean') &&
       (chat.allowAutoMoments === undefined || typeof chat.allowAutoMoments === 'boolean') &&
       (chat.allowAutoCouple === undefined || typeof chat.allowAutoCouple === 'boolean') &&
@@ -798,6 +806,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
   const [callConnectedAt, setCallConnectedAt] = useState<number | null>(null);
   const [incomingCallMessageId, setIncomingCallMessageId] = useState('');
   const [expandedVoiceIds, setExpandedVoiceIds] = useState<string[]>([]);
+  const [expandedTranslationIds, setExpandedTranslationIds] = useState<string[]>([]);
   const [callChoiceOpen, setCallChoiceOpen] = useState(false);
   const [isProcessingAvatar, setIsProcessingAvatar] = useState(false);
   const [personaPhotoBusy, setPersonaPhotoBusy] = useState(false);
@@ -927,7 +936,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
   const [chatSettingsDraft, setChatSettingsDraft] = useState<ChatConversation | null>(null);
   const [imageReferenceBusy, setImageReferenceBusy] = useState(false);
   const [previewImageId, setPreviewImageId] = useState('');
-  useEffect(() => { setPreviewImageId(''); }, [activeChatId, isVisible]);
+  useEffect(() => { setPreviewImageId(''); setExpandedTranslationIds([]); }, [activeChatId, isVisible, chats.find(chat => chat.id === activeChatId)?.activeArchiveId]);
   const [tokenPreview, setTokenPreview] = useState<{ chatId: string; input: number } | null>(null);
   const [tokenPreviewBusy, setTokenPreviewBusy] = useState(false);
   const [tokenPreviewError, setTokenPreviewError] = useState('');
@@ -989,7 +998,6 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
   const [stickerNotice, setStickerNotice] = useState('');
   const stickerUploadRef = useRef<HTMLInputElement>(null);
   const [isGeneratingReply, setIsGeneratingReply] = useState(false);
-  const [selectedMessageId, setSelectedMessageId] = useState('');
   const [reactionMenuId, setReactionMenuId] = useState('');
   const [voicePlaybackMessageId, setVoicePlaybackMessageId] = useState('');
   const [voiceLoadingMessageId, setVoiceLoadingMessageId] = useState('');
@@ -1829,7 +1837,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       const nextName = latest.find(item => item.id === chat.id)?.archives?.find(slot => slot.id === nextId)?.name;
       if (nextName) setFavoriteNotice(`已进入「${nextName}」`);
       setVisibleMessageCount(HISTORY_PAGE_SIZE);
-      setSelectedMessageId('');
+      setReactionMenuId('');
       setReplyingTo(null); setEditingMessage(null); setActiveThought(null); setHiddenMessageIds([]);
       setArchiveNameDraft('');
       setArchiveOpen(false);
@@ -1910,6 +1918,8 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       replyMessageMin: range.min,
       replyMessageMax: range.max,
       includeLatestThought: chat.includeLatestThought ?? false,
+      foreignLanguageEnabled: chat.foreignLanguageEnabled ?? false,
+      chatLanguage: chat.chatLanguage ?? 'en',
       timeAwarenessEnabled: chat.timeAwarenessEnabled ?? true,
       timeZone: chat.timeZone || 'Asia/Shanghai',
       imageGenerationEnabled: chat.imageGenerationEnabled ?? false,
@@ -1929,6 +1939,10 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
 
   const saveChatSettings = () => {
     if (!chatSettingsDraft || imageReferenceBusy || contextPresetBusy) return;
+    if (chatSettingsDraft.foreignLanguageEnabled && !isChatLanguage(chatSettingsDraft.chatLanguage)) {
+      setChatError('请为本对话选择一种聊天语言。');
+      return;
+    }
     if (chatSettingsDraft.type === 'direct' && chatSettingsDraft.blocked && coupleBlockProtection(chatSettingsDraft.participantIds[0])) {
       setChatError('和好摇铃今天正在生效，明天才能再次拉黑。'); return;
     }
@@ -2158,9 +2172,9 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
     setSelectedIds((ids) => (ids.includes(messageId) ? ids.filter((id) => id !== messageId) : [...ids, messageId]));
 
   const openMessageMenu = (messageId: string) => {
+    if (selectMode) return;
     suppressMessageClickRef.current = true;
     setReactionMenuId(messageId);
-    setSelectedMessageId('');
   };
 
   const copyChatMessage = async (message: ChatMessage) => {
@@ -2271,8 +2285,14 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
   };
 
   const messagePress = (messageId: string) => ({
+    onClickCapture: (event: React.MouseEvent<HTMLElement>) => {
+      if (!suppressMessageClickRef.current) return;
+      suppressMessageClickRef.current = false;
+      event.preventDefault();
+      event.stopPropagation();
+    },
     onPointerDown: (event: React.PointerEvent<HTMLElement>) => {
-      if (event.button !== 0) return;
+      if (event.button !== 0 || selectMode) return;
       if (messagePressTimerRef.current) clearTimeout(messagePressTimerRef.current);
       const element = event.currentTarget;
       const pointerId = event.pointerId;
@@ -2304,9 +2324,14 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       toggleSelectedMessage(messageId);
       return;
     }
+    setReactionMenuId('');
+    const translated = activeChat?.messages.find(message => message.id === messageId && message.senderId !== 'user' && messageTranslation(message));
+    if (translated) {
+      setExpandedTranslationIds(ids => ids.includes(messageId) ? ids.filter(id => id !== messageId) : [...ids, messageId]);
+      return;
+    }
     const image = activeChat?.messages.find(message => message.id === messageId && message.kind === 'image' && message.imageUrl);
-    if (image) { setPreviewImageId(image.id); setSelectedMessageId(''); setReactionMenuId(''); return; }
-    setSelectedMessageId(selectedMessageId === messageId ? '' : messageId);
+    if (image) setPreviewImageId(image.id);
   };
 
   useEffect(() => () => {
@@ -2439,7 +2464,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
     if (updateChat(chat.id, (current) => ({
       ...current,
       messages: current.messages.filter((item) => item.id !== messageId),
-    }))) setSelectedMessageId('');
+    }))) setReactionMenuId('');
   };
 
   const saveEditedMessage = () => {
@@ -2448,10 +2473,14 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
     if (!chat || !editingMessage || !text) return;
     if (updateChat(chat.id, (current) => ({
       ...current,
-      messages: current.messages.map((item) => (item.id === editingMessage.id ? { ...item, text } : item)),
+      messages: current.messages.map((item) => (item.id === editingMessage.id ? { ...item, text, ...(item.text !== text ? { chatTranslation: undefined } : {}) } : item)),
     }))) {
+      if (chat.messages.some(item => item.id === editingMessage.id && item.text !== text && item.chatTranslation)) {
+        setFavoriteNotice('正文已修改，旧译文不再对应，已清除。');
+        setExpandedTranslationIds(ids => ids.filter(id => id !== editingMessage.id));
+      }
       setEditingMessage(null);
-      setSelectedMessageId('');
+      setReactionMenuId('');
     }
   };
 
@@ -3037,7 +3066,10 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       const allowedStickers = allStickers.filter((sticker) =>
         chatMembers.some((member) => permittedSticker('stickerCategories' in member ? member.stickerCategories : undefined, sticker))
       );
-      const socialContext: SocialContext = { chat, actors: chatContacts, regenerate, now: new Date() };
+      const privateChatLanguages = Object.fromEntries(chatContacts.map(actor => [
+        actor.id, effectiveChatLanguage(latestChats.find(item => item.type === 'direct' && item.participantIds.length === 1 && item.participantIds[0] === actor.id) ?? {}),
+      ]));
+      const socialContext: SocialContext = { chat, actors: chatContacts, regenerate, now: new Date(), privateChatLanguages };
       const socialInstructions = buildSocialInstructions(socialContext);
       const allowIncomingCall = incomingCallsAllowed(chat, runtimeSettings) && !activeCallMode && !regenerate;
       const pendingIntimateRequest = chat.messages.find((item) => item.kind === 'intimate-pay' &&
@@ -3124,6 +3156,8 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         if (mcp.status && mcp.status !== 'MCP：本轮无需查询。') setMcpStatus({ chatId: chat.id, text: mcp.status });
       }
       const requestMessages = withChatResponseFormat(withChatAvatarContext(promptMessages,chat,avatarContext), responseInstructions);
+      const replyLanguage = activeCallMode ? undefined : effectiveChatLanguage(chat);
+      requestMessages.splice(requestMessages.length - 1, 0, { role: 'system', content: chatLanguageInstructions(replyLanguage) });
       controller.signal.throwIfAborted();
       if (!activeCallMode) requestMessages.splice(requestMessages.length - 1, 0, { role: 'system', content: [
         '【微信聊天心声必填】本轮每位实际发言角色都要有独立 thought，不能省略或留空。主要角色写在顶层，群聊其他发言者写在各自至少一条消息的 thought。心声仅供玩家点头像查看，不放进台词，角色彼此无法读到。',
@@ -3155,7 +3189,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         namesById: Object.fromEntries(chatMembers.map((member) => [
           member.id, [member.name, chat.groupNicknames?.[member.id] ?? ''],
         ])),
-      }, { requireThought: !activeCallMode, groupChat: chat.type !== 'direct', normalizeVoice: !activeCallMode, signal: controller.signal });
+      }, { requireThought: !activeCallMode, groupChat: chat.type !== 'direct', normalizeVoice: !activeCallMode, signal: controller.signal, chatLanguage: replyLanguage, chineseThoughts: true });
       controller.signal.throwIfAborted();
       let reply = '';
       let replyParts: GeneratedAiMessage[] = [];
@@ -3244,6 +3278,9 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
               ? stripVoiceMessagePrefix(text) : null;
             if (voiceText) { kind = 'voice'; text = voiceText; }
             const message: GeneratedAiMessage = { text, ...(kind ? { kind } : {}) };
+            if (replyLanguage && (!kind || kind === 'text' || kind === 'voice') && typeof part.translation === 'string' && part.translation.trim()) {
+              message.chatTranslation = { language: replyLanguage, text: part.translation.trim(), sourceText: text };
+            }
             if (kind === 'image') message.imageSubject = parseImageSubject(part.imageSubject);
             if (chat.type !== 'direct' && kind !== 'narration') {
               const partSpeakerId = typeof part.speakerId === 'string' ? part.speakerId : '';
@@ -3403,6 +3440,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       controller.signal.throwIfAborted();
       const liveChat = readStoredValue(CHATS_STORAGE_KEY, chats, isChatList).find((item) => item.id === chat.id);
       if (!liveChat || liveChat.blocked || liveChat.activeArchiveId !== chat.activeArchiveId || liveChat.archiveRevision !== chat.archiveRevision ||
+        effectiveChatLanguage(liveChat) !== effectiveChatLanguage(chat) ||
         liveChat.participantIds.length !== chat.participantIds.length || !chat.participantIds.every(id => liveChat.participantIds.includes(id)) ||
         liveChat.coupleCouponRevision !== chat.coupleCouponRevision ||
         (proactive && (!liveChat.proactiveEnabled || liveChat.updatedAt !== chat.updatedAt))) {
@@ -3425,6 +3463,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         const direct = readStoredValue(CHATS_STORAGE_KEY, chats, isChatList).find((item) => item.type === 'direct' &&
           item.participantIds.length === 1 && item.participantIds[0] === speakerId);
         if (direct?.blocked) throw new Error('该角色已被拉黑，不能从群聊发送私信。');
+        if (effectiveChatLanguage(direct ?? {}) !== privateChatLanguages[speakerId]) throw new Error('目标私聊的语言设置已改变，请重新生成。');
       }
       if (replyParts.some((part) => part.kind === 'video-call') && !incomingCallsAllowed(liveChat, delivery.current.runtimeSettings)) {
         throw new Error('角色主动来电已关闭，已取消本次回复。');
@@ -3512,7 +3551,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
             try {
               recordGiftMemory(speakerId, {
                 name: deliveredTitle, direction: 'character-to-player', date: giftDateToday(),
-                scene: `角色在微信聊天中送出并送达。${replyParts.filter((part) => part.kind === 'text').map((part) => part.text).join(' ').slice(0, 120) || (typeof deliveredCard?.desc === 'string' ? deliveredCard.desc.slice(0, 120) : '')}`,
+                scene: `角色在微信聊天中送出并送达。${replyParts.filter((part) => part.kind === 'text').map((part) => messageTranslation(part)?.text ?? part.text).join(' ').slice(0, 120) || (typeof deliveredCard?.desc === 'string' ? deliveredCard.desc.slice(0, 120) : '')}`,
                 sourceKey: `character-gift:${Date.now()}:${speakerId}:${String(deliveredCard?.id ?? deliveredTitle)}`,
               });
             } catch (error) {
@@ -3639,6 +3678,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         }
         const privateMessages: ChatMessage[] = socialActions.privateMessage.texts.map((text, index) => ({
           id: `private-${crypto.randomUUID()}`, replyBatchId, senderId: speakerId, kind: 'text',
+          ...(socialActions.privateMessage?.translations?.[index] ? { chatTranslation: socialActions.privateMessage.translations[index] } : {}),
           text, createdAt: new Date(Date.now() + index).toISOString(),
         }));
         const privateContext = buildGroupPrivateContext(
@@ -3674,6 +3714,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         controller.signal.throwIfAborted();
         const live = readStoredValue(CHATS_STORAGE_KEY, chats, isChatList).find(item => item.id === chat.id);
         if (!live || live.blocked || live.activeArchiveId !== chat.activeArchiveId || live.archiveRevision !== chat.archiveRevision || live.coupleCouponRevision !== expectedCouponRevision ||
+          effectiveChatLanguage(live) !== effectiveChatLanguage(chat) ||
           live.participantIds.length !== chat.participantIds.length || !chat.participantIds.every(id => live.participantIds.includes(id))) return;
         updateChat(chat.id, (current) => ({
           ...current,
@@ -3884,7 +3925,8 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
             typeof message.id === 'string' &&
             typeof message.senderId === 'string' &&
             typeof message.text === 'string' &&
-            typeof message.createdAt === 'string'
+            typeof message.createdAt === 'string' &&
+            (message.chatTranslation === undefined || (isChatTranslation(message.chatTranslation) && message.chatTranslation.sourceText === message.text))
         )
       ) {
         throw new Error('聊天记录内容无效。');
@@ -4151,7 +4193,6 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
               onClick={(event) => {
                 const target = event.target as HTMLElement;
                 if (target.closest('.yy-chat-message-bubble') || target.closest('button') || target.closest('[role="button"]')) return;
-                setSelectedMessageId('');
                 setReactionMenuId('');
                 setActiveChatMenuId('');
                 setComposerOpen(false);
@@ -4193,21 +4234,10 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                     <span>{recipientId === 'user' ? '你' : getChatParticipantName(activeChat, recipientId)}领取了{senderId === 'user' ? '你' : getChatParticipantName(activeChat, senderId)}的<button type="button" className="text-[#e8a14a]" onClick={() => setActivePaymentId(message.paymentReceiptId ?? '')}>红包</button></span>
                   </div>;
                 }
-                const messageActions = selectedMessageId === message.id && (
-                  <div className={`mt-1 flex gap-1.5 text-[10px] ${message.senderId === 'user' ? 'justify-end' : ''} ${message.senderId === 'narrator' || message.kind === 'pat' ? 'justify-center' : ''}`}>
-                    {message.kind !== 'pat' && !['image', 'sticker', 'red-packet', 'transfer', 'forum-forward', 'pomodoro-share'].includes(message.kind ?? '') && (
-                      <button type="button" onClick={() => setEditingMessage({ id: message.id, text: message.text })} className="rounded-full bg-white/80 px-2.5 py-0.5 text-sky-600 shadow-sm">编辑</button>
-                    )}
-                    <button type="button" onClick={() => deleteChatMessage(message.id)} className="rounded-full bg-white/80 px-2.5 py-0.5 text-rose-500 shadow-sm">删除</button>
-                    {message.senderId !== 'user' && message.senderId !== 'narrator' && activeChat.type !== 'observer' && (
-                      <button type="button" onClick={() => { sendPat(message.senderId); setSelectedMessageId(''); }} className="rounded-full bg-white/80 px-2.5 py-0.5 text-violet-500 shadow-sm">拍一拍</button>
-                    )}
-                  </div>
-                );
                 const richMenu = reactionMenuId === message.id && (
                   <div className={`mb-1 flex flex-col gap-1 ${message.senderId === 'user' ? 'items-end' : 'items-start'}`}>
                     {message.senderId !== 'narrator' && message.kind !== 'pat' && (
-                      <div className="flex items-center gap-0.5 rounded-full border border-white/80 bg-white/85 px-1.5 py-1 shadow-[0_6px_18px_rgba(125,150,185,0.22)] backdrop-blur-xl">
+                      <div className="flex max-w-full flex-wrap items-center gap-0.5 rounded-2xl border border-white/80 bg-white/85 px-1.5 py-1 shadow-[0_6px_18px_rgba(125,150,185,0.22)] backdrop-blur-xl">
                         {MESSAGE_REACTIONS.map((emoji) => (
                           <button
                             key={emoji}
@@ -4223,7 +4253,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                         ))}
                       </div>
                     )}
-                    <div className="flex items-center gap-1 text-[10px]">
+                    <div className="flex max-w-full flex-wrap items-center gap-1 text-[10px]">
                       {message.senderId !== 'narrator' && message.kind !== 'pat' && activeChat.type !== 'observer' && (
                         <button
                           type="button"
@@ -4248,6 +4278,12 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                         复制消息
                       </button>
                       <button type="button" onClick={() => addMessageFavorite(message)} className="rounded-full bg-white/85 px-2.5 py-1 text-slate-500 shadow-sm">收藏</button>
+                      {message.kind !== 'pat' && !['image', 'sticker', 'red-packet', 'transfer', 'forum-forward', 'pomodoro-share'].includes(message.kind ?? '') && (
+                        <button type="button" onClick={() => { setEditingMessage({ id: message.id, text: message.text }); setReactionMenuId(''); }}
+                          className="rounded-full bg-white/85 px-2.5 py-1 text-slate-500 shadow-sm">编辑</button>
+                      )}
+                      <button type="button" onClick={() => deleteChatMessage(message.id)}
+                        className="rounded-full bg-white/85 px-2.5 py-1 text-rose-500 shadow-sm">删除</button>
                     </div>
                   </div>
                 );
@@ -4273,7 +4309,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                       {richMenu}
                       <button type="button" onClick={() => handleMessageTap(message.id)} {...messagePress(message.id)}
                         className="max-w-[88%] px-2 text-[10px] leading-relaxed text-slate-400">角色查看了你的手机</button>
-                      {messageActions}
+                      {editor}
                     </div>
                   );
                   return (
@@ -4302,7 +4338,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                           <span className="mt-1 block line-clamp-3 text-[10px] leading-relaxed text-slate-400">{message.content}</span>
                         )}
                       </button>
-                      {messageActions}
+                      {editor}
                     </div>
                   );
                 }
@@ -4320,7 +4356,6 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                         {message.text}
                       </button>
                       {editor}
-                      {messageActions}
                     </div>
                   );
                 }
@@ -4336,11 +4371,13 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                       >
                         {message.text}
                       </button>
-                      {messageActions}
+                      {editor}
                     </div>
                   );
                 }
                 const isUserMessage = message.senderId === 'user';
+                const translation = !isUserMessage ? messageTranslation(message) : undefined;
+                const translationOpen = expandedTranslationIds.includes(message.id);
                 const sender = contacts.find((contact) => contact.id === message.senderId) ??
                   getNpcByParticipantId(characterNpcs, message.senderId) ?? activeChat.formerParticipants?.[message.senderId];
                 const isShareCard = message.kind === 'forum-forward' || message.kind === 'pomodoro-share';
@@ -4410,6 +4447,16 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                     <div
                       onClick={() => { if (!message.paymentReceiptId) handleMessageTap(message.id); }}
                       {...(message.paymentReceiptId ? {} : messagePress(message.id))}
+                      role={translation && message.kind !== 'voice' ? 'button' : undefined}
+                      tabIndex={translation && message.kind !== 'voice' && !selectMode ? 0 : undefined}
+                      aria-label={translation && message.kind !== 'voice' ? (translationOpen ? '收起中文翻译' : '展开中文翻译') : undefined}
+                      aria-expanded={translation && message.kind !== 'voice' ? translationOpen : undefined}
+                      aria-controls={translation && message.kind !== 'voice' && translationOpen ? `chat-translation-${message.id}` : undefined}
+                      onKeyDown={translation && message.kind !== 'voice' ? event => {
+                        if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); handleMessageTap(message.id); }
+                      } : undefined}
+                      lang={translation?.language}
+                      dir={translation ? 'auto' : undefined}
                       style={activeChat.fontSize ? { fontSize: `calc(${activeChat.fontSize}px * var(--font-scale, 1))` } : undefined}
                       className={`yy-chat-message-bubble ${isSpecialBubble ? 'is-special' : ['image', 'sticker'].includes(message.kind ?? '') ? 'is-special is-media' : 'is-plain'} ${['red-packet', 'transfer'].includes(message.kind ?? '') ? 'is-payment' : ''} ${message.kind === 'voice' ? 'is-voice' : ''} ${isUserMessage ? 'is-user' : 'is-character'} rounded-[4px] px-3 py-2 text-[16px] leading-[1.5]`}
                     >
@@ -4603,6 +4650,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                                   onClick={(event) => {
                                     if (selectMode) return;
                                     event.stopPropagation();
+                                    if (translation) handleMessageTap(message.id);
                                     if (!toggleCharacterVoice(message)) toggleText();
                                   }}
                                   className={`yy-chat-voice-message flex items-center gap-2 ${isUserMessage ? 'flex-row-reverse' : ''}`}
@@ -4649,11 +4697,22 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                       </div>
                     )}
                     </div>
+                    {translation && translationOpen && <div className="relative mt-1 max-w-full">
+                      <div id={`chat-translation-${message.id}`} lang="zh-CN"
+                        role="button" tabIndex={selectMode ? -1 : 0} aria-label="收起中文翻译" aria-expanded="true"
+                        onClick={() => handleMessageTap(message.id)} {...messagePress(message.id)}
+                        onKeyDown={event => {
+                          if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); handleMessageTap(message.id); }
+                        }}
+                        style={activeChat.fontSize ? { fontSize: `calc(${activeChat.fontSize}px * var(--font-scale, 1))` } : undefined}
+                        className="yy-chat-message-bubble yy-chat-translation is-plain is-character rounded-[4px] px-3 py-2 text-[16px] leading-[1.5]">
+                        {translation.text}
+                      </div>
+                    </div>}
                     {message.replyTo && <div className={`yy-chat-quote ${isUserMessage ? 'is-user' : 'is-character'}`} title={`${message.replyTo.senderName}：${message.replyTo.text}`}>
                       {message.replyTo.senderName}：{message.replyTo.text}
                     </div>}
                     {editor}
-                    {messageActions}
                     </div>
                   </div>
                 );
@@ -6567,6 +6626,24 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                 <X className="h-4 w-4" />
               </button>
             </header>
+            <section style={{ order: 6 }} className="space-y-2 rounded-2xl border border-sky-100 bg-gradient-to-br from-sky-50/80 to-pink-50/60 p-3">
+              <label className="flex items-center justify-between gap-3 text-xs font-semibold text-[#2C4A5C]">
+                本对话使用其他语言
+                <input type="checkbox" aria-label="本对话使用其他语言" checked={chatSettingsDraft.foreignLanguageEnabled === true}
+                  onChange={event => setChatSettingsDraft({ ...chatSettingsDraft, foreignLanguageEnabled: event.target.checked })} />
+              </label>
+              {chatSettingsDraft.foreignLanguageEnabled && <label className="block space-y-1 text-[11px] text-slate-600">
+                <span>角色聊天语言</span>
+                <select aria-label="角色聊天语言" value={chatSettingsDraft.chatLanguage ?? 'en'}
+                  onChange={event => {
+                    if (isChatLanguage(event.target.value)) setChatSettingsDraft({ ...chatSettingsDraft, chatLanguage: event.target.value });
+                  }} className="w-full rounded-xl border border-sky-100 bg-white px-3 py-2 text-xs">
+                  {CHAT_LANGUAGES.map(language => <option key={language.id} value={language.id}>{language.label}</option>)}
+                </select>
+              </label>}
+              <p className="text-[10px] leading-relaxed text-slate-500">默认使用简体中文，与角色国籍无关。开启后只改变本对话的文字和语音消息，轻点新消息气泡可展开中文翻译，译文跟随气泡美化且不显示提示文字。长按气泡可编辑、删除、复制或引用，双击头像拍一拍。心声、旁白、记忆、通话、游戏和其他应用仍用中文。</p>
+              <p className="text-[10px] leading-relaxed text-slate-400">译文随回复一同生成并保存在聊天存档中，不额外调用翻译。关闭后不删除旧消息；已有旧消息不会自动补译。</p>
+            </section>
             {chatSettingsDraft.type !== 'direct' && (
               <section style={{ order: 6 }} className="space-y-2 rounded-2xl border border-sky-100 bg-gradient-to-br from-[#9BD2FC]/15 to-[#F7B9D2]/20 p-3">
                 <p className="text-[11px] font-semibold text-[#2C4A5C]">群成员（角色与关联 NPC）</p>

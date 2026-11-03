@@ -9,6 +9,7 @@ export const SETTINGS_KEYS = {
   lock: 'yyphone:lock-settings',
   statusBarVisible: 'yyphone:show-status-bar',
   followSystemDark: 'yyphone:follow-system-dark',
+  openingAnimation: 'yyphone:opening-animation',
   voiceModel: 'yyphone:voice-model',
   imageGeneration: 'yyphone:image-generation',
   apiPresets: 'yyphone:api-presets',

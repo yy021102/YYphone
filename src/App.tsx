@@ -14,6 +14,8 @@ import {
 } from './data/mockData';
 import { readSetting, saveSetting, SETTINGS_KEYS } from './utils/settings';
 import { StatusBar } from './components/StatusBar';
+import { PhoneOpening } from './components/PhoneOpening';
+import { setStorageItemsAtomically } from './utils/dbStorage';
 import { CoupleBellNotice } from './components/CoupleBellNotice';
 import { CoupleLetterRuntime } from './components/CoupleLetterRuntime';
 import { findCouponUse, type CouponGiftTarget } from './utils/coupleRewards';
@@ -235,6 +237,38 @@ export default function App() {
     readSetting(SETTINGS_KEYS.lock, DEFAULT_LOCK_SETTINGS, isLockSettings)
   );
   const [isLocked, setIsLocked] = useState(() => lockSettings.mode !== 'none');
+  const [openingEnabled, setOpeningEnabled] = useState(() =>
+    readSetting(SETTINGS_KEYS.openingAnimation, true, (value): value is boolean => typeof value === 'boolean')
+  );
+  const [openingVisible, setOpeningVisible] = useState(openingEnabled);
+  const openingReturnFocus = useRef<HTMLElement | null>(null);
+  const [phoneReady, setPhoneReady] = useState(false);
+  useEffect(() => {
+    if (!openingVisible) {
+      if (openingReturnFocus.current?.isConnected) openingReturnFocus.current.focus({ preventScroll: true });
+      openingReturnFocus.current = null;
+    }
+  }, [openingVisible]);
+  const handlePreviewOpening = () => {
+    openingReturnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setOpeningVisible(true);
+  };
+  useEffect(() => {
+    let frame = window.requestAnimationFrame(() => {
+      frame = window.requestAnimationFrame(() => setPhoneReady(true));
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
+  const handleSaveOpening = async (enabled: boolean): Promise<boolean> => {
+    try {
+      await setStorageItemsAtomically({ [SETTINGS_KEYS.openingAnimation]: enabled });
+      setOpeningEnabled(enabled);
+      return true;
+    } catch (error) {
+      console.error('Could not save phone opening preference.', error);
+      return false;
+    }
+  };
   const [activeApp, setActiveApp] = useState<AppId | null>(null);
   const [desktopPage, setDesktopPage] = useState<DesktopPage>(0);
   const isActivityOpen = isDesktopActivity(activeApp);
@@ -627,6 +661,7 @@ export default function App() {
             : !activeApp && !isLocked && beautySettings.homeStyle === 'halloween' ? { background: '#2b263e' } : !activeApp && !isLocked && beautySettings.homeStyle === 'minimal' ? { background: '#f4f2ee' } : !activeApp && !isLocked && beautySettings.homeStyle === 'moonlit' ? { background: '#ede9f4' } : { background: currentWallpaper.style }
         }
       >
+        <div className="contents" inert={openingVisible} aria-hidden={openingVisible || undefined}>
         {/* Dynamic theme backdrop wash */}
         {!beautySettings.wallpapers.homeScreen && (activeApp || isLocked || !['minimal', 'moonlit', 'halloween'].includes(beautySettings.homeStyle ?? 'classic')) && (
           <div
@@ -700,6 +735,9 @@ export default function App() {
                   onToggleStatusBar={handleToggleStatusBar}
                   followSystemDark={followSystemDark}
                   onToggleFollowSystemDark={handleToggleFollowSystemDark}
+                  openingEnabled={openingEnabled}
+                  onSaveOpening={handleSaveOpening}
+                  onPreviewOpening={handlePreviewOpening}
                   onLockScreen={handleLock}
                   lockSettings={lockSettings}
                   onSaveLockSettings={handleSaveLockSettings}
@@ -777,8 +815,8 @@ export default function App() {
         <BlockedContactRuntime enabled={!isLocked} />
         <CoupleBellNotice enabled={!isLocked} />
         <CoupleLetterRuntime />
-        <BirthdayRuntime unlocked={!isLocked} atHome={!isLocked && !activeApp} onOpenChat={openNotifiedChat} onOpenChange={setBirthdayOpen} />
-        <HalloweenRuntime unlocked={!isLocked} atHome={!isLocked && !activeApp} onOpenBeauty={() => handleOpenApp('customizer')}
+        <BirthdayRuntime unlocked={!isLocked && !openingVisible} atHome={!isLocked && !activeApp && !openingVisible} onOpenChat={openNotifiedChat} onOpenChange={setBirthdayOpen} />
+        <HalloweenRuntime unlocked={!isLocked && !openingVisible} atHome={!isLocked && !activeApp && !openingVisible} onOpenBeauty={() => handleOpenApp('customizer')}
           blocked={birthdayOpen || !activeApp && birthdayIsDue(readBirthdaySettings(), readBirthdaySeen())} />
         {notification && (
           <div className="absolute left-3 right-3 top-[max(env(safe-area-inset-top,0px),12px)] z-[100] flex items-center gap-3 rounded-3xl border border-white bg-white/95 p-3 shadow-xl backdrop-blur-xl" role="status">
@@ -795,6 +833,8 @@ export default function App() {
           </div>
         )}
 
+        </div>
+        {openingVisible && <PhoneOpening ready={phoneReady} onComplete={() => setOpeningVisible(false)} />}
         <ErrorDialogHost />
       </div>
     </div>

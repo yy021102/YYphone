@@ -74,6 +74,9 @@ export const parseChatResponse = (text: string, options: { normalizeVoice?: bool
       if (['text', 'content', 'title', 'kind'].some((key) => part[key] !== undefined && typeof part[key] !== 'string')) {
         throw new Error('AI 回复的消息类型和正文必须是字符串。');
       }
+      if (part.translation !== undefined && (typeof part.translation !== 'string' || !part.translation.trim())) {
+        throw new Error('AI 回复的 translation 译文必须是非空字符串。');
+      }
       const hasBody = [part.text, part.content, part.kind === 'link' ? part.title : undefined]
         .some((value) => typeof value === 'string' && value.trim());
       const hasSticker = typeof part.stickerId === 'string' && !!part.stickerId.trim();

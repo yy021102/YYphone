@@ -1,4 +1,5 @@
 import { createMomentId, readMoments, updateMoments } from './momentsData';
+import { CHAT_LANGUAGES, validateChatLanguage, type ChatLanguage, type ChatTranslation } from './chatLanguage';
 
 export interface SocialChat {
   id: string;
@@ -17,6 +18,7 @@ export interface SocialActor {
 }
 
 export interface SocialContext {
+  privateChatLanguages?: Record<string, ChatLanguage | undefined>;
   chat: SocialChat;
   actors: SocialActor[];
   regenerate: boolean;
@@ -33,7 +35,7 @@ interface CoupleAction {
 }
 
 export interface SocialActions {
-  privateMessage?: { texts: string[]; reason: string };
+  privateMessage?: { texts: string[]; reason: string; translations?: Array<ChatTranslation | undefined> };
   moment?: { content: string };
   couple?: CoupleAction;
 }
@@ -58,6 +60,8 @@ export const buildSocialInstructions = (ctx: SocialContext): string => {
   ];
   if (chat.type === 'group' && chat.allowGroupPrivate !== false && ctx.actors.length) {
     lines.push('【群聊触发私聊】你可以因为群聊里确实不适合公开说的关心、提醒、悄悄话等，私下给玩家发微信。可选 privateMessage:{"texts":["私聊消息"],"reason":"基于当前群聊与人设的私发动机"}。只能由本轮主要角色 speakerId 发送给 user，不允许 NPC、非群成员或旁观群聊触发；不要为了私聊而私聊，不要在群里泄露私聊正文。私聊不是电话。');
+    lines.push('【群转私语言隔离】privateMessage.texts 不沿用当前群聊的语言，按 speakerId 对应的目标私聊设置生成。目标私聊未开启其他语言时用简体中文字符串；开启时每条改用 {"text":"目标语言原文，不超过1000字","translation":"逐条对应的简体中文翻译"}。reason 始终使用简体中文。目标私聊语言：' +
+      ctx.actors.map(actor => `${actor.id}：${CHAT_LANGUAGES.find(item => item.id === ctx.privateChatLanguages?.[actor.id])?.label ?? '简体中文（未开启）'}`).join('；'));
   } else lines.push('本轮禁止 privateMessage。');
   if (chat.allowAutoMoments !== false && ctx.actors.length) {
     lines.push('【主动朋友圈】可选 momentPost:{"content":"朋友圈正文"}。只在角色确有值得分享的生活、想法或情绪时发，符合其分享欲和人设，低频自然，不为了回应玩家而每轮发圈，不重复、不刷屏，不泄露群聊中他人隐私。不设次数任务，不需要向玩家汇报每次发圈。');
@@ -80,9 +84,15 @@ export const parseSocialActions = (record: Record<string, unknown>, ctx: SocialC
     const raw = record.privateMessage;
     if (ctx.chat.type !== 'group' || ctx.chat.allowGroupPrivate === false || !isRecord(raw) ||
       !Array.isArray(raw.texts) || !raw.texts.length) throw new Error('群聊私发格式或权限无效。');
+    const language = ctx.privateChatLanguages?.[actorId];
+    if (language) validateChatLanguage({ reply: raw.texts.map(value => isRecord(value)
+      ? { kind: 'text', text: value.text, translation: value.translation } : value) }, language);
     result.privateMessage = {
-      texts: raw.texts.map((value) => text(value, '私聊正文', 2000)),
+      texts: raw.texts.map(value => text(language && isRecord(value) ? value.text : value, '私聊正文', 2000)),
       reason: text(raw.reason, '私发动机', 500),
+      ...(language ? { translations: raw.texts.map(value => isRecord(value) && typeof value.translation === 'string' && value.translation.trim() ? {
+        language, text: value.translation.trim(), sourceText: text(value.text, '私聊正文', 1000),
+      } : undefined) } : {}),
     };
   }
   if (record.momentPost !== undefined) {

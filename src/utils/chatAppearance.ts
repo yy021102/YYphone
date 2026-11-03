@@ -31,7 +31,7 @@ export interface ChatAppearance {
 
 export const DEFAULT_BUBBLE_CSS = `/* 独立气泡 · 仅浅色模式生效
  * .is-user 是我的消息，.is-character 是角色消息。
- * 本框只改变文字与语音气泡，不改变页面和按钮功能。
+ * 本框只改变文字、语音与展开的翻译气泡，不改变页面和按钮功能。
  * 颜色跟随下方色盘；也可以把 background 改成颜色、渐变或 url("图片链接")。
  * 页面原有气泡及其装饰会暂时停用；选择“跟随页面”即可恢复。
  */

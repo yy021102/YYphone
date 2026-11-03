@@ -3,6 +3,7 @@ import { imageDescriptionText } from './imageDescriptions';
 import { readWechatChatsRaw } from './memoryData';
 import { archiveCursorsForWrite, readArchiveCursors, readArchiveRecords, writeArchiveRecords } from './memoryArchives';
 import { resolveChatHistoryCount } from './chatHistory';
+import { isChatTranslation } from './chatLanguage';
 
 export const JOURNAL_ENTRIES_KEY = 'yyphone:memory-journal';
 export const GROWTH_NOTES_KEY = 'yyphone:memory-growth';
@@ -138,7 +139,10 @@ const clip = (value: unknown, max: number) => (typeof value === 'string' ? value
 export const describeForSummary = (m: Record<string, unknown>, maxLength = 300): string => {
   const title = clip(m.title, 60);
   const detail = clip(m.aiContext, maxLength === Infinity ? Infinity : 320);
-  const text = clip(m.text, maxLength);
+  const translation = m.chatTranslation;
+  const translated = (!m.kind || m.kind === 'text' || m.kind === 'voice') &&
+    isChatTranslation(translation) && translation.sourceText === m.text;
+  const text = clip(translated ? translation.text : m.text, maxLength);
   switch (m.kind) {
     case 'image': {
       const description = imageDescriptionText(m);
