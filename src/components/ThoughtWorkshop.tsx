@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown, ArrowUp, Check, Copy, Heart, Plus, Save, Trash2, X } from 'lucide-react';
-import { BUILTIN_THOUGHT_PRESETS, isThoughtPresetList, makeThoughtSnapshot, validateThoughtTemplate, type ThoughtField, type ThoughtPreset } from '../utils/thoughtPresets';
+import { BUILTIN_THOUGHT_PRESETS, builtinThoughtLayout, isThoughtPresetList, makeThoughtSnapshot, validateThoughtTemplate, type ThoughtField, type ThoughtPreset } from '../utils/thoughtPresets';
 import { ThoughtCard } from './ThoughtCard';
 import './thoughtWorkshop.css';
 
@@ -147,8 +147,9 @@ export function ThoughtWorkshop({ presets, selectedId, characterName, onSaveLibr
           <div className="yy-thought-tokens">{draft.fields.map(field => <code key={field.key}>{`{{${field.key}}}`}</code>)}</div>
           <label>HTML 展示模板<textarea className="is-code" aria-label="心声HTML模板" rows={7} maxLength={16000} spellCheck={false} value={draft.html} onChange={event => change({ html: event.target.value })} /></label>
           <label>CSS 样式<textarea className="is-code" aria-label="心声CSS样式" rows={9} maxLength={16000} spellCheck={false} value={draft.css} onChange={event => change({ css: event.target.value })} /></label>
-          <label>卡片高度（160—700px）<input type="number" aria-label="心声卡片高度" min={160} max={700} value={draft.height} onChange={event => change({ height: Number(event.target.value) })} /></label>
-          <p className="yy-thought-help">仅支持展示用 HTML 与 CSS，不运行 JavaScript、表单或外部链接；图片仅支持 data 格式，不加载外部字体或网络资源。内容超出高度时可在卡片内滚动。</p>
+          {builtinThoughtLayout(draft) ? <p className="yy-thought-help">内置版式随内容自动撑开，不使用固定高度；仅在内容超过屏幕时滚动整个展示区域。修改 HTML 或 CSS 后，可为自定义模板设置高度。</p> :
+            <label>自定义模板高度（160—700px）<input type="number" aria-label="心声卡片高度" min={160} max={700} value={draft.height} onChange={event => change({ height: Number(event.target.value) })} /></label>}
+          <p className="yy-thought-help">展示时直接呈现模板本身，不再套外层卡片或重复标题。仅支持展示用 HTML 与 CSS，不运行 JavaScript、表单或外部链接；图片仅支持 data 格式，不加载外部字体或网络资源。自定义模板内容超出设定高度时可在模板内滚动。</p>
         </>}
         {tab === 'preview' && <><p className="yy-thought-help">下面是示例数据，不会调用 AI，不会写入聊天。</p>
           {preview.snapshot ? <ThoughtCard snapshot={preview.snapshot} /> : <p role="alert" className="yy-thought-error">{preview.error}</p>}</>}

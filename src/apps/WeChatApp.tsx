@@ -5024,7 +5024,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                   >
                     <div className="grid min-h-[132px] grid-cols-4 content-start gap-y-4">
                     {([
-                      { page: 0, title: '心声工坊', icon: Heart, run: () => {
+                      { page: 1, title: '心声工坊', icon: Heart, run: () => {
                         setComposerOpen(false); setThoughtPresets(readThoughtPresets()); setThoughtWorkshopOpen(true);
                       } },
                       { page: 0, title: '照片', icon: ImagePlus, run: () => openAttachment('photo') },
@@ -5086,7 +5086,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
               ref={attachmentInputRef}
               type="file"
               accept="image/*"
-              capture={attachmentMode === 'camera' ? 'environment' : undefined}
+              aria-label="选择或拍摄照片"
               className="hidden"
               onChange={(event) => {
                 void handleAttachmentImage(event.target.files?.[0]);
@@ -8237,17 +8237,27 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         </div>
       )}
       {activeThought && (
-        <div className="absolute inset-0 z-[80] flex items-center justify-center bg-black/40 p-5 backdrop-blur-sm" onClick={event => { if (event.target === event.currentTarget) setActiveThought(null); }}>
-          <section role="dialog" aria-modal="true" aria-labelledby="thought-title" className="max-h-[85%] w-full max-w-sm space-y-3 overflow-y-auto rounded-3xl bg-white p-5 shadow-2xl">
+        <div className="yy-thought-overlay absolute inset-0 z-[80] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={event => { if (event.target === event.currentTarget) setActiveThought(null); }}>
+          {activeThought.snapshot ? (
+            <section role="dialog" aria-modal="true" aria-label={`${activeThought.name}的心声`} className="flex max-h-full w-full max-w-sm flex-col">
+              <div className="flex shrink-0 justify-end pb-2">
+                <button type="button" aria-label="关闭心声" onClick={() => setActiveThought(null)} className="flex h-11 w-11 items-center justify-center rounded-full bg-white/90 text-slate-500 shadow-sm hover:bg-white">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <div className="min-h-0 overflow-y-auto overscroll-contain">
+                <ThoughtCard snapshot={activeThought.snapshot} />
+              </div>
+            </section>
+          ) : <section role="dialog" aria-modal="true" aria-labelledby="thought-title" className="max-h-full w-full max-w-sm space-y-3 overflow-y-auto rounded-3xl bg-white p-5 shadow-2xl">
             <header className="flex items-center justify-between">
               <h2 id="thought-title" className="text-base font-bold text-[#2C4A5C]">{activeThought.name}的心声</h2>
               <button type="button" aria-label="关闭" onClick={() => setActiveThought(null)} className="flex h-8 w-8 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100">
                 <X className="h-4 w-4" />
               </button>
             </header>
-            {activeThought.snapshot ? <ThoughtCard snapshot={activeThought.snapshot} /> :
-              <p className="whitespace-pre-wrap rounded-2xl bg-slate-50 p-4 text-sm leading-relaxed text-slate-700">{activeThought.thought}</p>}
-          </section>
+            <p className="whitespace-pre-wrap rounded-2xl bg-slate-50 p-4 text-sm leading-relaxed text-slate-700">{activeThought.thought}</p>
+          </section>}
         </div>
       )}
       {thoughtWorkshopOpen && activeChat && <ThoughtWorkshop key={activeChat.id} presets={thoughtPresets}

@@ -30,6 +30,10 @@ export const BUILTIN_THOUGHT_PRESETS: ThoughtPreset[] = [
   ], prompt: '这是虚构角色的生活手帐，不能读取玩家真实信息，不代表其他 App 已发生相同事件。', html: DEFAULT_HTML,
     css: DEFAULT_CSS + '\nbody{background:#fbf5e9}.thought-card{background:repeating-linear-gradient(#fffdf5,#fffdf5 29px,#eadfcc55 30px);border-color:#e4d6c1}.thought-label{color:#8e6e47}.thought-field{background:#fffaf0b8;border-color:#eaddc7}', height: 460 },
 ];
+export function builtinThoughtLayout(preset: Pick<ThoughtPreset, 'html' | 'css'>): 'soft' | 'diary' | undefined {
+  const builtin = BUILTIN_THOUGHT_PRESETS.find(item => item.html === preset.html && item.css === preset.css);
+  return builtin ? builtin.id === 'diary' ? 'diary' : 'soft' : undefined;
+}
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const text = (value: unknown, max: number): value is string => typeof value === 'string' && value.length <= max;
 const RESERVED = new Set(['characterName', 'time', 'fields', '__proto__', 'constructor', 'prototype']);

@@ -2,10 +2,10 @@
 .yy-thought-workshop button,.yy-thought-workshop input,.yy-thought-workshop textarea{font:inherit}
 .yy-thought-workshop button{cursor:pointer}.yy-thought-workshop button:disabled{opacity:.45;cursor:default}
 .yy-thought-workshop button:focus-visible{outline:2px solid #b49bb9;outline-offset:2px}
-.yy-thought-workshop-header{display:flex;align-items:center;gap:12px;padding:20px 18px 15px;border-bottom:1px solid #e8dee970}
+.yy-thought-workshop-header{display:flex;flex-shrink:0;align-items:center;gap:12px;padding:calc(var(--safe-top,0px) + 16px) max(18px,var(--safe-right,0px)) 15px max(18px,var(--safe-left,0px));border-bottom:1px solid #e8dee970}
 .yy-thought-workshop-header h2{margin:0;font-size:18px;font-weight:600;letter-spacing:.08em}
 .yy-thought-workshop-header p{margin:5px 0 0;font-size:10px;color:#806d88}
-.yy-thought-workshop-header>button{margin-left:auto;border:0;background:transparent;color:#9e90a3}
+.yy-thought-workshop-header>button{display:grid;place-items:center;flex-shrink:0;width:44px;height:44px;margin-left:auto;border:0;background:transparent;color:#9e90a3}
 .yy-thought-workshop-mark{display:grid;place-items:center;width:42px;height:42px;border:1px solid #fff;border-radius:16px;background:linear-gradient(145deg,#f9e3ed,#dfedf7);color:#b392aa;box-shadow:0 6px 15px #b6a4c218}
 .yy-thought-workshop-scroll{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;padding:16px 18px 24px}
 .yy-thought-help{font-size:10px;line-height:1.9;color:#806d88;margin:0 0 13px}
@@ -34,3 +34,14 @@
 .yy-thought-error{font-size:11px;line-height:1.8;color:#a34b67;white-space:pre-wrap}
 .yy-thought-confirm{padding:12px;margin-bottom:12px;border:1px solid #e8ccd7;border-radius:14px;background:#fff3f7;font-size:11px;line-height:1.8}
 .yy-thought-confirm button{padding:4px 10px;margin-right:8px;border:1px solid #e1c4d2;border-radius:8px;background:#fff;color:#b18199}
+.yy-thought-overlay{padding:calc(var(--safe-top,0px) + 16px) max(16px,var(--safe-right,0px)) calc(var(--safe-bottom,0px) + 16px) max(16px,var(--safe-left,0px))}
+.yy-thought-native{min-width:0;padding:22px;border:1px solid #e8dce3;border-radius:24px;background:linear-gradient(145deg,#fff8fb,#f4faff);box-shadow:0 10px 30px #aab4ca12;color:#625b69;font-family:"PingFang SC","Microsoft YaHei",sans-serif;overflow-wrap:anywhere}
+.yy-thought-native-time{font-size:10px;letter-spacing:.15em;color:#806f88}
+.yy-thought-native h2{font-size:19px;font-weight:600;line-height:1.5;margin:10px 0 22px}
+.yy-thought-native-fields{display:grid;gap:12px}
+.yy-thought-native-field{min-width:0;padding:13px 15px;border:1px solid #fff;border-radius:16px;background:#ffffffb8}
+.yy-thought-native-label{font-size:11px;color:#80677c;margin-bottom:7px}
+.yy-thought-native-value{font-size:13px;line-height:1.9;white-space:pre-wrap;overflow-wrap:anywhere}
+.yy-thought-native[data-layout=diary]{background:repeating-linear-gradient(#fffdf5,#fffdf5 29px,#eadfcc55 30px);border-color:#e4d6c1}
+.yy-thought-native[data-layout=diary] .yy-thought-native-label{color:#8e6e47}
+.yy-thought-native[data-layout=diary] .yy-thought-native-field{background:#fffaf0b8;border-color:#eaddc7}
