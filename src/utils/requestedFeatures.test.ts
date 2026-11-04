@@ -28,6 +28,7 @@ import { emptyAlipayData, grantIntimatePay, readAlipayContacts, readAlipayData, 
 import { parseAiJson, parseChatResponse, parseForumPost } from './aiResponse';
 import { readStoredValue, readStorageString } from './localStorage';
 import { estimateConversationTokens, estimatePromptTokens, estimateTextTokens } from './chatTokens';
+import { withImageDescriptionRequest } from './imageDescriptions';
 import { normalizeForumHandle, readGeneratedForumHandles, resolveForumHandle } from './forumIdentity';
 import { BUILTIN_STICKERS, CHAT_STICKERS_STORAGE_KEY, readAvailableChatStickers } from './chatStickers';
 import { LITTLE_P_MESSAGES_KEY, LITTLE_P_VISIBLE_KEY, littlePHistory, littlePSystemPrompt, parseLittlePReply, readLittlePMessages, writeLittlePMessages, type LittlePMessage } from './littleP';
@@ -2165,6 +2166,33 @@ test('full input estimator includes every assembled message role and system cont
   for (let index = 0; index < messages.length; index += 1) {
     assert.ok(estimatePromptTokens(messages) > estimatePromptTokens(messages.filter((_, i) => i !== index)));
   }
+});
+
+test('single-generation token preview uses the saved 400-message window instead of all 1001 records', () => {
+  paperFixture();
+  const chats = JSON.parse(readStorageString(WECHAT_CHATS_STORAGE_KEY)!);
+  const messages = Array.from({ length: 1001 }, (_, index) => ({
+    id: `token-window-${index}`, senderId: index % 2 ? 'paper-a' : 'user', kind: 'text',
+    text: index < 600 ? `UNMOUNTED_${index}_` + '不应计入本次输入的旧记录'.repeat(30) : `MOUNTED_${index}_END`,
+    createdAt: new Date(Date.UTC(2026, 9, 20, 0, index)).toISOString(),
+  }));
+  chats[0] = { ...chats[0], messages, currentChatHistoryCount: 400, attachHistory: false };
+  saveSetting(WECHAT_CHATS_STORAGE_KEY, chats);
+  const prompt = () => withImageDescriptionRequest(buildPrompt({
+    chatId: chats[0].id, historyLimit: 400, structuredHistory: true, timeAwarenessEnabled: false,
+  }));
+  const assembled = prompt();
+  const content = assembled.map(message => message.content).join('\n');
+  assert.doesNotMatch(content, /UNMOUNTED_/);
+  assert.equal((content.match(/MOUNTED_\d+_END/g) ?? []).length, 401, '400 historical messages plus the current player message');
+  const estimate = estimatePromptTokens(assembled);
+  chats[0].messages = messages.slice(-401);
+  saveSetting(WECHAT_CHATS_STORAGE_KEY, chats);
+  assert.equal(estimatePromptTokens(prompt()), estimate, 'unmounted old messages must not affect the next request estimate');
+  const source = readFileSync(resolve('src', 'apps', 'WeChatApp.tsx'), 'utf8');
+  assert.match(source, /单次生成 Token 预估/);
+  assert.match(source, /estimatePromptTokens\(withImageDescriptionRequest\(requestMessages\)\)/);
+  assert.doesNotMatch(source, /estimateConversationTokens|聊天记录约/);
 });
 
 test('memory preview includes core and related memories without embedding requests or recall writes', async () => {

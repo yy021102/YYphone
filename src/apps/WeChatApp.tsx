@@ -122,7 +122,7 @@ import { DocumentTextImport } from '../components/DocumentTextImport';
 import { deleteGroupJournal, invalidateGroupJournal, maybeAutoGroupJournal } from '../utils/groupJournal';
 import { GroupJournalPanel } from '../components/GroupJournalPanel';
 import { requestChatReply, withChatResponseFormat } from '../utils/chatReply';
-import type { ChatImageDescription } from '../utils/imageDescriptions';
+import { withImageDescriptionRequest, type ChatImageDescription } from '../utils/imageDescriptions';
 import { parseTransferActions, settleOutgoingTransfer } from '../utils/outgoingTransfer';
 import { regeneratedReplyIds, regeneratedReplyBatch, regenerationMessages, settledReplyPaymentIds, retainSettledReplyPayment, regenerationPaymentStamp, canGenerateChatPayment, chatPaymentGenerationInstructions } from '../utils/chatRegeneration';
 import { deleteWeChatContact, type FormerParticipant } from '../utils/deleteWeChatContact';
@@ -135,7 +135,7 @@ import { ChatImageReference } from '../components/ChatImageReference';
 import { showYyError, useErrorDialog } from '../components/ErrorDialog';
 import { CallScreen } from '../components/CallScreen';
 import { normalizeForumHandle, readGeneratedForumHandles } from '../utils/forumIdentity';
-import { estimateConversationTokens, estimatePromptTokens } from '../utils/chatTokens';
+import { estimatePromptTokens } from '../utils/chatTokens';
 import { buildCharacterExport, parsePortableWorldBooks, remapImportedWorldBooks } from '../utils/characterExport';
 import { applySocialWrites, buildSocialInstructions, parseSocialActions, type SocialContext } from '../utils/chatSocial';
 import { chatAvatarInstructions, prepareChatAvatar, resolveChatAvatar, withChatAvatarContext } from '../utils/chatAvatar';
@@ -1916,6 +1916,8 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
   };
 
   const openChatSettings = (chat: ChatConversation) => {
+    setTokenPreview(null);
+    setTokenPreviewError('');
     setRangeDeleteFrom('1'); setRangeDeleteTo(String(Math.max(1, Math.min(100, chat.messages.filter(isVisibleChatMessage).length)))); setRangeDeleteNotice('');
     setImageReferenceBusy(false);
     const range = getReplyMessageRange(chat);
@@ -2935,6 +2937,10 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
     const settledPaymentCount = settledPaymentIds.size;
     const originalPaymentStamp = regenerate && storedChat ? regenerationPaymentStamp(storedChat.messages, originalBatchIds, regenerationSettlements) : '';
     if (!storedChat || (!previewOnly && storedChat.blocked) || generationRunning.current || tokenPreviewBusy) return;
+    if (previewOnly) {
+      setTokenPreview(null);
+      setTokenPreviewError('');
+    }
     let chat: ChatConversation = { ...storedChat, messages: regenerate ? regenerationMessages(storedChat.messages, regenerationSettlements) : storedChat.messages };
     const latestContacts = readStoredValue(CONTACTS_STORAGE_KEY, contacts, isContactList);
 
@@ -2974,7 +2980,6 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
     generationRunning.current = true;
     if (previewOnly) {
       setTokenPreviewBusy(true);
-      setTokenPreviewError('');
     } else {
       setIsGeneratingReply(true);
       setChatError('');
@@ -3169,7 +3174,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       ].join('\n') });
       else requestMessages.splice(requestMessages.length - 1, 0, { role: 'system', content: '【通话专用】本轮只需台词及视频允许的简短旁白，不生成独立 thought 心声。' });
       if (proxyEvents.length) requestMessages.splice(requestMessages.length - 1, 0, { role: 'system', content: phoneProxyInstructions(proxyEvents) });
-      const estimatedInput = estimatePromptTokens(requestMessages);
+      const estimatedInput = estimatePromptTokens(withImageDescriptionRequest(requestMessages));
       if (previewOnly) {
         setTokenPreview({ chatId: chat.id, input: estimatedInput });
         return;
@@ -7245,22 +7250,18 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                 <p className="text-[10px] text-slate-500">情侣空间不再自动写入，请在情侣空间内手动生成或编辑。</p>
               </section>
             )}
-            {(() => {
-              const messages = chats.find((chat) => chat.id === chatSettingsDraft.id)?.messages ?? chatSettingsDraft.messages;
-              return (
-                <section aria-label="对话 Token 估算" style={{ order: 14 }} className="space-y-1.5 rounded-2xl border border-sky-100 bg-sky-50/60 p-3">
-                  <p className="text-xs font-semibold text-[#2C4A5C]">生成用量估算</p>
-                  <button type="button" disabled={tokenPreviewBusy || isGeneratingReply}
-                    onClick={() => void generateAiReply(false, chatSettingsDraft.id, false, true)}
-                    className="rounded-xl bg-sky-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">
-                    {tokenPreviewBusy ? '正在计算…' : '估算下一次完整输入'}
-                  </button>
-                  {tokenPreview?.chatId === chatSettingsDraft.id && <p className="text-xs font-semibold text-sky-700">下次完整输入约 {tokenPreview.input.toLocaleString()} Tokens</p>}
-                  {tokenPreviewError && <p role="alert" className="text-[11px] text-rose-600">{tokenPreviewError}</p>}
-                  <p className="text-xs font-semibold text-sky-700">聊天记录约 {estimateConversationTokens(messages).toLocaleString()} Tokens · 共 {messages.length} 条消息</p>
-                </section>
-              );
-            })()}
+            <section aria-label="单次生成 Token 预估" style={{ order: 14 }} className="space-y-1.5 rounded-2xl border border-sky-100 bg-sky-50/60 p-3">
+              <p className="text-xs font-semibold text-[#2C4A5C]">单次生成 Token 预估</p>
+              <p className="text-[11px] leading-relaxed text-slate-500">按已保存的挂载范围、人设、世界书、记忆及系统提示词计算，不统计未挂载的旧消息。修改设置后请先保存，再重新估算。</p>
+              <button type="button" disabled={tokenPreviewBusy || isGeneratingReply}
+                onClick={() => void generateAiReply(false, chatSettingsDraft.id, false, true)}
+                className="rounded-xl bg-sky-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">
+                {tokenPreviewBusy ? '正在计算…' : '预估下一次生成'}
+              </button>
+              <p aria-live="polite" className="text-xs font-semibold text-sky-700">{tokenPreview?.chatId === chatSettingsDraft.id ? `下一次生成预计输入约 ${tokenPreview.input.toLocaleString()} Tokens` : '点击按钮，预估下一次生成的输入用量。'}</p>
+              {tokenPreviewError && <p role="alert" className="text-[11px] text-rose-600">{tokenPreviewError}</p>}
+              <p className="text-[11px] leading-relaxed text-slate-500">本地粗估，仅计输入；图片梗概按文字计入。不含回复输出、首次识图的视觉用量及额外工具调用或重试消耗。</p>
+            </section>
             <div style={{ order: 15 }} className="grid grid-cols-2 gap-2">
               <button onClick={() => exportChatHistory(chatSettingsDraft)} className="rounded-xl bg-slate-100 py-2 text-[11px] font-semibold text-slate-700">
                 <Download className="mr-1 inline h-3.5 w-3.5" />导出聊天记录

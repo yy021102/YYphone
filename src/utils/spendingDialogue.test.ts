@@ -119,3 +119,33 @@ test('dialogue guidance allows contextual mirroring without requiring it or eras
   for (const rule of [/选择性镜像/, /不是每轮都镜像/, /不固定反义词配对/, /若是数量、工作信息或严肃求助，就照实际意思理解/, /已经讲完整件事/, /没有确立的关系不能/, /不用接梗打断/, /不临时编造创伤/]) assert.match(prompt, rule);
   assert.doesNotMatch(prompt, /禁止复述玩家的任何措辞/);
 });
+test('ordinary sharing carries grounded jealousy guidance in direct chats, groups and calls', () => {
+  for (const chatId of ['chat-a', 'group']) {
+    for (const callMode of [undefined, 'voice', 'video'] as const) {
+      const input = '我刚买了无人机，准备周末去拍风景。';
+      const prompt = buildPrompt({ chatId, currentInput: input, callMode, timeAwarenessEnabled: false });
+      const system = prompt.filter(message => message.role === 'system').map(message => message.content).join('\n');
+      assert.ok(system.includes(CHAT_COMMUNICATION_RULES));
+      for (const rule of [/吃醋要有事实依据/, /角色确实知晓/, /不能凭空预设有人追求玩家/, /不是编造触发事件的许可/,
+        /提到朋友、同事或异性不自动等于情敌/, /不通过假设、反问、威胁或“开个玩笑”绕过事实依据/,
+        /同样约束 reply 和 thought/, /不在心声里另演一场无依据的争抢/]) assert.match(system, rule);
+      assert.ok(prompt.at(-1)?.content.includes(input));
+    }
+  }
+});
+test('grounded jealousy guidance preserves explicit personality and events without making jealousy mandatory', () => {
+  const contacts = get('pocketos:wechat-contacts');
+  contacts[0].persona = '容易吃醋，但通常克制，会先弄清事实。';
+  writeStoredValue('pocketos:wechat-contacts', contacts);
+  const chats = get('yyphone:wechat-chats');
+  chats[0].context = '昨晚玩家明确告诉林渡：前任提出复合，玩家已经拒绝。';
+  writeStoredValue('yyphone:wechat-chats', chats);
+  const prompt = buildPrompt({ chatId: 'chat-a', currentInput: '我已经拒绝了，不想再联系。', timeAwarenessEnabled: false })
+    .map(message => message.content).join('\n');
+  assert.ok(prompt.includes(contacts[0].persona));
+  assert.ok(prompt.includes(chats[0].context));
+  assert.match(prompt, /具体事件、关系或明确触发条件/);
+  assert.match(prompt, /确有触发也不必每次吃醋/);
+  assert.match(prompt, /反应轻重取决于人设、实际关系和当前情境/);
+  assert.match(prompt, /已否认、澄清或解决的事，不反复拿来试探/);
+});
