@@ -55,6 +55,9 @@ export const buildSocialInstructions = (ctx: SocialContext): string => {
   if (ctx.regenerate || chat.type === 'observer') {
     return '本轮禁止 privateMessage、momentPost、coupleWrite；重生成和旁观群聊不触发新的跨应用主动行为。';
   }
+  if (!ctx.actors.length || (chat.allowAutoMoments === false && (chat.type !== 'group' || chat.allowGroupPrivate === false))) {
+    return '本轮禁止 privateMessage、momentPost、coupleWrite；当前没有可用的跨应用主动行为。';
+  }
   const lines = [
     '【主动行为】以下可选字段只在有真实动机、符合发言角色人设与当前情境时使用，通常省略。不要为了使用功能而使用，不要每轮重复同一种行为。动作仅代表本轮 speakerId 本人，NPC 不允许。关闭的行为不得声称已完成。只有返回有效动作字段并写入成功才算真的做过；不要仅在 reply 中口头说已发布、已记录。',
   ];

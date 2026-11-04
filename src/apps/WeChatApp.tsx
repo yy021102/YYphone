@@ -1,4 +1,5 @@
 import { chatReplyPacing, CHAT_THOUGHT_STYLE } from '../utils/chatReplyPacing';
+import { chatFeatureInstructions, chatPendingTransferInstructions } from '../utils/chatFeaturePrompt';
 import { CHAT_LANGUAGES, effectiveChatLanguage, isChatLanguage, isChatTranslation, messageTranslation, chatLanguageInstructions, type ChatLanguage, type ChatTranslation } from '../utils/chatLanguage';
 import { readMessageQuote, findQuotedMessage } from '../utils/messageQuote';
 import { shouldShowTimestamp, effectiveChatTimeZone, formatChatTimestamp } from '../utils/chatTimestamp';
@@ -135,7 +136,7 @@ import { ChatImageReference } from '../components/ChatImageReference';
 import { showYyError, useErrorDialog } from '../components/ErrorDialog';
 import { CallScreen } from '../components/CallScreen';
 import { normalizeForumHandle, readGeneratedForumHandles } from '../utils/forumIdentity';
-import { estimatePromptTokens } from '../utils/chatTokens';
+import { estimatePromptTokenBreakdown, PROMPT_TOKEN_CATEGORIES, type PromptTokenEstimate } from '../utils/chatTokens';
 import { buildCharacterExport, parsePortableWorldBooks, remapImportedWorldBooks } from '../utils/characterExport';
 import { applySocialWrites, buildSocialInstructions, parseSocialActions, type SocialContext } from '../utils/chatSocial';
 import { chatAvatarInstructions, prepareChatAvatar, resolveChatAvatar, withChatAvatarContext } from '../utils/chatAvatar';
@@ -946,7 +947,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
   const [imageReferenceBusy, setImageReferenceBusy] = useState(false);
   const [previewImageId, setPreviewImageId] = useState('');
   useEffect(() => { setPreviewImageId(''); setExpandedTranslationIds([]); }, [activeChatId, isVisible, chats.find(chat => chat.id === activeChatId)?.activeArchiveId]);
-  const [tokenPreview, setTokenPreview] = useState<{ chatId: string; input: number } | null>(null);
+  const [tokenPreview, setTokenPreview] = useState<({ chatId: string } & PromptTokenEstimate) | null>(null);
   const [tokenPreviewBusy, setTokenPreviewBusy] = useState(false);
   const [tokenPreviewError, setTokenPreviewError] = useState('');
   const [chatMessageDraft, setChatMessageDraft] = useState('');
@@ -3068,8 +3069,8 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         imageGenerationEnabled: chat.imageGenerationEnabled === true,
         imageGenerationPrompt: chat.imageGenerationPrompt,
       });
-      if (aliasFollowup?.text) promptMessages.splice(Math.max(0, promptMessages.length - 1), 0, { role: 'system', content: aliasFollowup.text });
-      const allowedStickers = allStickers.filter((sticker) =>
+      if (aliasFollowup?.text) promptMessages.splice(Math.max(0, promptMessages.length - 1), 0, { role: 'system', tokenCategory: 'other', content: aliasFollowup.text });
+      const allowedStickers = activeCallMode ? [] : allStickers.filter((sticker) =>
         chatMembers.some((member) => permittedSticker('stickerCategories' in member ? member.stickerCategories : undefined, sticker))
       );
       const privateChatLanguages = Object.fromEntries(chatContacts.map(actor => [
@@ -3080,6 +3081,9 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       const allowIncomingCall = incomingCallsAllowed(chat, runtimeSettings) && !activeCallMode && !regenerate;
       const pendingIntimateRequest = chat.messages.find((item) => item.kind === 'intimate-pay' &&
         item.senderId === 'user' && item.intimateStatus === 'pending');
+      const pendingTransfers = chat.messages.slice(-resolveChatHistoryCount(chat.currentChatHistoryCount))
+        .filter(message => message.kind === 'transfer' && message.senderId === 'user' && (!message.paymentStatus || message.paymentStatus === 'pending'))
+        .map(message => ({ messageId: message.id, recipientId: message.recipientId ?? (chat.type === 'direct' ? contact.id : ''), amount: message.amount, note: message.text }));
       const stickerPromptList = Array.from(new Set(allowedStickers.map((item) => item.category || DEFAULT_STICKER_CATEGORY)))
         .map((category) => `${category}：${allowedStickers
           .filter((item) => (item.category || DEFAULT_STICKER_CATEGORY) === category)
@@ -3098,22 +3102,21 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
               .map((message) => ({ text: message.text, at: message.createdAt })) ?? [],
           })))}`,
         ] : []),
-        '红包和转账发出后处于待领取/待收款状态，只有玩家确认才存入虚拟余额，玩家可在收款前退回转账。不要声称已经自动到账。',
-        chatPaymentGenerationInstructions(chat.type === 'observer', regenerate, settledPaymentCount),
+        ...(!activeCallMode ? [chatPaymentGenerationInstructions(chat.type === 'observer', regenerate, settledPaymentCount)] : []),
         ...(chat.type === 'direct' && !contact.id.startsWith('npc:') && !regenerate && !activeCallMode ? [
           `【亲密付】玩家不能自行开卡。你可以结合人设、关系与经济情况主动赠予亲密付，返回可选字段 "intimatePayAction":{"type":"grant","monthlyLimit":正数,"note":"给玩家的留言"${pendingIntimateRequest ? `,"requestId":"${pendingIntimateRequest.id}"` : ''}}。额度由你决定，不必照搬申请额度，最大 1000000 元。${pendingIntimateRequest ? `玩家有待处理申请，申请 ID：${pendingIntimateRequest.id}，希望额度 ¥${pendingIntimateRequest.amount}。请本轮明确同意或拒绝；拒绝返回 "intimatePayAction":{"type":"decline","requestId":"${pendingIntimateRequest.id}"}。` : '没有申请时也可自然地主动赠予；不赠予则省略该字段。'}reply 中自然说明你的决定，不要只口头同意而不返回动作字段。`,
         ] : ['本轮禁止 intimatePayAction。']),
-        regenerate || chat.type === 'observer' ? '本轮禁止 paymentActions。' : [
-          '【处理玩家转账】可以按人设收取、退还或暂不处理玩家发给你的待收转账。决定收取或退还时，必须返回顶层 paymentActions:[{"messageId":"原转账ID","action":"received 或 returned"}]，action 只能写 received（收取）或 returned（退还）。仅顶层 speakerId 本人可操作；不要另发一笔 transfer 模拟退还。退还会原路退回余额或亲密付额度，并显示转账回执。',
-          `可处理的转账：${JSON.stringify(chat.messages.slice(-resolveChatHistoryCount(chat.currentChatHistoryCount)).filter(message => message.kind === 'transfer' && message.senderId === 'user' && (!message.paymentStatus || message.paymentStatus === 'pending')).map(message => ({ messageId: message.id, recipientId: message.recipientId ?? (chat.type === 'direct' ? contact.id : ''), amount: message.amount, note: message.text })))}`,
-        ].join('\n'),
-        `表情包分类权限（必须遵守，每位角色只能从获准分类选择）：${chatMembers.map((member) =>
-          `${member.id}：${'stickerCategories' in member && member.stickerCategories !== undefined ? member.stickerCategories.join('、') || '禁止使用表情包' : '全部分类'}`
-        ).join('；')}。${allowedStickers.length === 0 ? '本轮禁止返回 sticker。' : ''}`,
-        allowIncomingCall
-          ? '允许在合适时机主动发起一次视频来电：返回一条 {"kind":"video-call","text":"视频来电"}，用户必须自行接通。不要描述为已接听或正在通话。'
-          : '本轮禁止返回 video-call，不得主动拨打电话。',
-        '如果角色选择发送语音条，reply 中对应消息必须是 {"kind":"voice","text":"完整的语音转写文字"}；不要把语音写成普通字符串，也不要只在正文前加“【语音】”却省略 kind。语音正文保留正常标点。',
+        chatPendingTransferInstructions(pendingTransfers, !regenerate && chat.type !== 'observer'),
+        chatFeatureInstructions({
+          type: chat.type, callMode: activeCallMode, regenerate,
+          hasCharacter: chatContacts.some(member => !member.id.startsWith('npc:')),
+          allowIncomingCall, narratorEnabled: chat.narratorEnabled,
+          canSendPayments: canGenerateChatPayment(chat.type === 'observer', regenerate, settledPaymentCount),
+          stickerCatalog: stickerPromptList,
+          stickerPermissions: chatMembers.map(member =>
+            `${member.id}：${'stickerCategories' in member && member.stickerCategories !== undefined ? member.stickerCategories.join('、') || '禁止使用表情包' : '全部分类'}`
+          ).join('；'),
+        }),
         ...(!activeCallMode ? [chatReplyPacing(replyRange, chat.type !== 'direct')] : []),
         ...(chat.type !== 'direct' ? [
           `【多人群聊，优先于下方通用回复格式】上方消息数量范围用于全群合计，并非每位成员各自的条数。每条非旁白消息必须是含 speakerId、text 的对象，speakerId 从成员 ID 中选，按消息发生顺序排列。让在场成员根据关系和话题自然接话、互相回应，通常在不同成员间交替；同一人可以偶尔连发短句，但不要让一人包揽整轮。若某人因人设或剧情离开、沉默，可以暂不发言，不必机械平均。每条可写 thought，且只属于该条发言角色；顶层 speakerId 和 thought 只代表本轮主要角色及其额外动作。成员：${chatMembers.map((member) => `${member.id}（${member.name}）`).join('、')}。`,
@@ -3128,7 +3131,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         ...(chat.type === 'group' && chat.allowAgentGroupRename ? [
           '【主动修改群昵称】只有当本轮主要角色确实想换自己的群昵称，且符合其人设、关系与当前情境时，才返回 groupNicknames: {"自己的成员ID":"新昵称"}。只能修改顶层 speakerId 对应的本人昵称，不能替其他成员修改；不要为完成任务而频繁改名。新昵称应简短自然，改名后的聊天会出现系统提示。',
         ] : []),
-        `以${chat.type === 'direct' ? `${contact.name}的` : '其中一位角色或 NPC 群成员的'}身份自然回复。只返回 JSON 对象，至少包含 reply、thought、speakerId 字段。${CHAT_THOUGHT_STYLE}reply 必须是${activeCallMode ? '一条完整角色台词组成的数组；视频通话可额外附一条旁白（旁白不计入角色台词）' : '在本轮消息数量范围内的独立消息数组'}；普通消息可写字符串，也可写对象 {"kind":"消息类型","text":"消息/语音转写/图片描述","title":"可选标题","source":"可选来源","content":"可选摘要","amount":"可选金额","quantity":可选红包个数,"stickerId":"可选表情包ID"}。支持类型：text、image（文字描述图片）、voice（语音转写）、sticker、video-call、location、red-packet、transfer、link、pat。pat 表示角色拍了拍玩家（类似微信拍一拍，text 可留空或写简短后缀如“的脑袋”），仅在情境自然时偶尔使用。${chat.narratorEnabled || chat.type === 'observer' ? '本对话已开启旁白：可在 reply 中穿插 {"kind":"narration","text":"旁白内容"} 项，旁白用第三人称简短描述角色此刻的动作、表情、神态、衣着或周围氛围，必须控制在 50 字以内（越短越好），不要包含角色台词，也不要替玩家行动；旁白同样计入 reply 条数，通常每轮最多 1 条，且不要全是旁白。' : ''}链接请提供 title/source/content；红包和转账必须给正数 amount，收款对象只能是玩家 user，群聊红包可提供 quantity。不要编造图片 URL；image 使用文字图卡。【表情包】玩家导入了一批表情包，你可以像真人聊天一样，根据人设、性格和当下情绪，在合适的时候主动发表情包（比如开心、撒娇、无语、委屈、吐槽时），一般可单独作为一条 {"kind":"sticker","stickerId":"表情包ID"}，也可在文字消息后附带一条；偏活泼的人设可以更常用，内敛冷淡的人设就少用，不要每轮都发，也不要连发多个。表情包不只是表达情绪，也可以用来糊弄回复、反讽、玩梗、做社交缓冲（不知道说什么、尴尬、不想认真回答时）；但不要过度解读表情包的含义，也不要给它强加深意。根据当前对话氛围和人设选择性地发，同一个表情包不要反复发（回看历史，近期发过的就换一个或不发）。只能从下列表情包里选（按分类列出，格式 分类：[ID|名称]，请根据名称含义挑选贴切的）：${stickerPromptList}。${allStickers.length === 0 ? '（目前没有表情包，不要发 sticker。）' : ''}请仅在剧情自然、确有必要时使用附件，普通文字聊天优先，不要为了凑数强行发送附件。${regenerate ? '本轮不执行 gift 礼物动作；红包和转账遵循上面的收付规则。' : '角色发给玩家的红包和转账需玩家手动领取或确认收款后才加入支付宝个人余额，不会扣玩家的钱；待收转账可退回。可选 gift 字段仅允许 {"existingProductId":"现有商品ID"} 或 {"title":"新商品名","desc":"描述","price":数字,"category":"shopping或eleme","emoji":"emoji"}，只在剧情自然时由主要角色提供；NPC不使用 gift 字段。'}${chat.type === 'group' && chat.allowAgentGroupRename ? '可选 groupTitle 和 groupNicknames 字段，只在情节自然需要时修改群名或昵称。' : ''}群聊的 speakerId 必须从以下成员 ID 中选择：${chatMembers.map((member) => `${member.id}（${member.name}）`).join(', ')}。${chat.type === 'group' && chat.allowAgentGroupRename ? 'groupNicknames 的键只能使用上方成员 ID。' : ''}${chat.type === 'observer' ? '这是旁观群聊，user不在群里；不得生成发给玩家的红包、转账或礼物；根据角色之间的对话和旁白情境继续由群成员发言。' : ''}`,
+        `以${chat.type === 'direct' ? `${contact.name}的` : '其中一位角色或 NPC 群成员的'}身份自然回复。只返回 JSON 对象，至少包含 reply、speakerId${activeCallMode ? '' : '、thought'} 字段。${activeCallMode ? '' : CHAT_THOUGHT_STYLE}reply 必须是${activeCallMode === 'video' ? '一条完整角色台词组成的数组；可额外附一条旁白（旁白不计入角色台词）' : activeCallMode ? '一条完整角色台词组成的数组' : '在本轮消息数量范围内的独立消息数组'}。${chat.type === 'group' && chat.allowAgentGroupRename ? '可选 groupTitle 和 groupNicknames 字段，只在情节自然需要时修改群名或昵称；groupNicknames 的键只能使用本轮成员 ID。' : ''}speakerId 必须从以下成员 ID 中选择：${chatMembers.map(member => `${member.id}（${member.name}）`).join(', ')}。${chat.type === 'observer' ? '这是旁观群聊，user不在群里；根据角色之间的对话和旁白情境继续由群成员发言。' : ''}`,
         ...(activeCallMode === 'video' && callConnectedAt
           ? [`当前为视频通话（已通话 ${Math.floor((Date.now() - callConnectedAt) / 60000)} 分钟）。本轮必须只生成一条完整、连贯的角色台词（reply 数组中唯一的非旁白项），口语自然，可以比普通微信消息稍长；不要拆成多条碎片消息。可以额外生成一条 {"kind":"narration","text":"旁白内容"}，用第三人称描写角色的动作、表情或神态，内容独立于台词，不能混进角色台词，也不要用括号动作文字包裹台词；旁白不计入语音。只允许一条角色台词和最多一条旁白，不要其他消息或附件。`]
           : []),
@@ -3158,7 +3161,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         const mcp = await runMcpDecision({ allowed: chat.mcpEnabled === true, query: proactive ? '' : pendingMcpInput(chat.messages, chat.participantIds), signal: controller.signal,
           history: chat.messages.filter(m => m.senderId === 'user' || chat.participantIds.includes(m.senderId)).slice(-8).map(m => ({ from: m.senderId === 'user' ? '玩家' : '角色', text: m.text })), mainApi: apiPreset });
         controller.signal.throwIfAborted();
-        if (mcp.context) promptMessages.splice(Math.max(0, promptMessages.length - 1), 0, { role: 'system', content: mcp.context });
+        if (mcp.context) promptMessages.splice(Math.max(0, promptMessages.length - 1), 0, { role: 'system', tokenCategory: 'other', content: mcp.context });
         if (mcp.status && mcp.status !== 'MCP：本轮无需查询。') setMcpStatus({ chatId: chat.id, text: mcp.status });
       }
       const requestMessages = withChatResponseFormat(withChatAvatarContext(promptMessages,chat,avatarContext), responseInstructions);
@@ -3174,9 +3177,10 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       ].join('\n') });
       else requestMessages.splice(requestMessages.length - 1, 0, { role: 'system', content: '【通话专用】本轮只需台词及视频允许的简短旁白，不生成独立 thought 心声。' });
       if (proxyEvents.length) requestMessages.splice(requestMessages.length - 1, 0, { role: 'system', content: phoneProxyInstructions(proxyEvents) });
-      const estimatedInput = estimatePromptTokens(withImageDescriptionRequest(requestMessages));
+      const estimate = estimatePromptTokenBreakdown(withImageDescriptionRequest(requestMessages));
+      const estimatedInput = estimate.input;
       if (previewOnly) {
-        setTokenPreview({ chatId: chat.id, input: estimatedInput });
+        setTokenPreview({ chatId: chat.id, ...estimate });
         return;
       }
       if (!apiPreset) throw new Error('找不到 API 配置，请重新保存。');
@@ -7259,6 +7263,15 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                 {tokenPreviewBusy ? '正在计算…' : '预估下一次生成'}
               </button>
               <p aria-live="polite" className="text-xs font-semibold text-sky-700">{tokenPreview?.chatId === chatSettingsDraft.id ? `下一次生成预计输入约 ${tokenPreview.input.toLocaleString()} Tokens` : '点击按钮，预估下一次生成的输入用量。'}</p>
+              {tokenPreview?.chatId === chatSettingsDraft.id && <>
+                <dl aria-label="单次输入 Token 明细" className="space-y-2 rounded-xl bg-white/70 p-3 text-[11px]">
+                  {PROMPT_TOKEN_CATEGORIES.map(category => <div key={category.id} className="flex items-start justify-between gap-3">
+                    <dt title={category.description} className="min-w-0 text-slate-600">{category.label}</dt>
+                    <dd className={`shrink-0 tabular-nums ${tokenPreview.breakdown[category.id] ? 'font-semibold text-sky-700' : 'text-slate-400'}`}>{tokenPreview.breakdown[category.id].toLocaleString()} Tokens</dd>
+                  </div>)}
+                </dl>
+                <p className="text-[11px] leading-relaxed text-slate-500">明细按本轮实际带入的内容归类，每段只计一次；消息格式开销单列，各项相加等于上方总计。</p>
+              </>}
               {tokenPreviewError && <p role="alert" className="text-[11px] text-rose-600">{tokenPreviewError}</p>}
               <p className="text-[11px] leading-relaxed text-slate-500">本地粗估，仅计输入；图片梗概按文字计入。不含回复输出、首次识图的视觉用量及额外工具调用或重试消耗。</p>
             </section>

@@ -1,6 +1,6 @@
 import { type ApiConnection } from './aiApi';
 import { parseChatResponse } from './aiResponse';
-import { type OpenAiMessage } from './buildPrompt';
+import { appendPromptContent, type OpenAiMessage } from './buildPrompt';
 import { estimatePromptTokens, estimateTextTokens } from './chatTokens';
 import { toGeminiContents, toOpenAiMessages } from './chatVision';
 import { apiTemperature, textApiConfig } from './textApiConfig';
@@ -73,7 +73,7 @@ export const withChatResponseFormat = (
         '结构示意（成员 ID 和条数以本轮实际要求为准；仅在本轮要求时另加独立 thought，其他允许的字段仍可按规则添加）：{"reply":["消息正文"],"speakerId":"有效成员ID"}',
       ].join('\n'),
     },
-    { ...last, content: `${last.content}\n\n${FORMAT_REMINDER}` },
+    appendPromptContent(last, `\n\n${FORMAT_REMINDER}`, 'system'),
   ];
 };
 

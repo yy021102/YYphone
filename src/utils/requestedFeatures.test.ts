@@ -27,13 +27,13 @@ import { readSetting, saveSetting, SETTINGS_KEYS } from './settings';
 import { emptyAlipayData, grantIntimatePay, readAlipayContacts, readAlipayData, requestIntimatePay, settleIncomingChatPayment, updateAlipayBalance, writeAlipayData, WECHAT_CHATS_STORAGE_KEY } from './alipayData';
 import { parseAiJson, parseChatResponse, parseForumPost } from './aiResponse';
 import { readStoredValue, readStorageString } from './localStorage';
-import { estimateConversationTokens, estimatePromptTokens, estimateTextTokens } from './chatTokens';
+import { estimateConversationTokens, estimatePromptTokenBreakdown, estimatePromptTokens, estimateTextTokens, PROMPT_TOKEN_CATEGORIES } from './chatTokens';
 import { withImageDescriptionRequest } from './imageDescriptions';
 import { normalizeForumHandle, readGeneratedForumHandles, resolveForumHandle } from './forumIdentity';
 import { BUILTIN_STICKERS, CHAT_STICKERS_STORAGE_KEY, readAvailableChatStickers } from './chatStickers';
 import { LITTLE_P_MESSAGES_KEY, LITTLE_P_VISIBLE_KEY, littlePHistory, littlePSystemPrompt, parseLittlePReply, readLittlePMessages, writeLittlePMessages, type LittlePMessage } from './littleP';
 import { requestConfiguredAiText } from './aiApi';
-import { buildPrompt, type OpenAiMessage } from './buildPrompt';
+import { appendPromptContent, buildPrompt, type OpenAiMessage } from './buildPrompt';
 import { WEATHER_CACHE_KEY, writeWeatherSettings } from './weatherData';
 import { getUserRealName } from './userPersona';
 import { toGeminiContents, toOpenAiMessages } from './chatVision';
@@ -1794,6 +1794,60 @@ test('latest thought injection adds flexible continuity guidance only when enabl
   assert.equal(buildPrompt({ chatId: chat.id }).some((message) => message.content.includes('刚刚的心声')), false);
 });
 
+test('scene-gated gift and image instructions preserve cross-app initiative without advertising call attachments', () => {
+  paperFixture();
+  saveSetting('yyphone:taobao-market-products', Array.from({ length: 20 }, (_, index) => ({
+    id: `scene-product-${index}`, category: 'eleme', title: `SCENE_PRODUCT_${index}`,
+    desc: '现做的家常饭菜，配有蔬菜和热汤', price: 24, emoji: '🍱',
+  })));
+  const normalOptions = {
+    chatId: 'chat-paper-a', currentInput: '你好', imageGenerationEnabled: true,
+    imageGenerationPrompt: 'SCENE_IMAGE_STYLE',
+  };
+  const normal = buildPrompt(normalOptions);
+  const giftContext = normal.find(message => message.content.includes('情节礼物规则：'));
+  assert.ok(giftContext);
+  assert.match(giftContext.content, /现有可送商品：.*SCENE_PRODUCT_19/);
+  assert.match(giftContext.content, /或提出一件新商品\/外卖/);
+  assert.ok(normal.some(message => message.content.includes('SCENE_IMAGE_STYLE')));
+  for (const callMode of ['voice', 'video'] as const) {
+    const messages = buildPrompt({ ...normalOptions, callMode });
+    const text = messages.map(message => message.content).join('\n');
+    assert.doesNotMatch(text, /SCENE_IMAGE_STYLE|本对话已开启生图/);
+    assert.ok(text.includes(giftContext.content));
+    assert.deepEqual(messages, buildPrompt({ ...normalOptions, callMode, imageGenerationEnabled: false }));
+    const estimate = estimatePromptTokenBreakdown(messages);
+    assert.equal(Object.values(estimate.breakdown).reduce((sum, value) => sum + value, 0), estimate.input);
+  }
+  for (const options of [
+    { ...normalOptions, regenerate: true }, { chatId: 'chat-observer' }, { chatId: 'chat-npc:test' },
+  ]) {
+    assert.doesNotMatch(buildPrompt(options).map(message => message.content).join('\n'), /情节礼物规则：|SCENE_PRODUCT_|existingProductId/);
+  }
+  assert.ok(buildPrompt({ chatId: 'chat-group' }).some(message => message.content.includes('情节礼物规则：')));
+  saveSetting('yyphone:taobao-market-products', []);
+  assert.ok(buildPrompt(normalOptions).some(message => message.content.includes('若要现场生成')));
+});
+
+test('social scene prompts skip disabled workflows but preserve every enabled spontaneous action', () => {
+  const ctx = socialFixture();
+  assert.match(buildSocialInstructions(ctx), /主动朋友圈/);
+  assert.doesNotMatch(buildSocialInstructions(ctx), /【群聊触发私聊】|目标私聊语言/);
+  for (const type of ['direct', 'group'] as const) {
+    const disabled = buildSocialInstructions({ ...ctx, chat: { ...ctx.chat, type, allowAutoMoments: false, allowGroupPrivate: false } });
+    assert.match(disabled, /禁止 privateMessage、momentPost、coupleWrite/);
+    assert.doesNotMatch(disabled, /【主动行为】|朋友圈正文|私聊消息|近期已发朋友圈/);
+    assert.ok(estimateTextTokens(disabled) < estimateTextTokens(buildSocialInstructions(ctx)));
+  }
+  const groupOnly = buildSocialInstructions({ ...ctx, chat: { ...ctx.chat, type: 'group', allowAutoMoments: false } });
+  assert.match(groupOnly, /【群聊触发私聊】/);
+  assert.doesNotMatch(groupOnly, /【主动朋友圈】/);
+  const momentsOnly = buildSocialInstructions({ ...ctx, chat: { ...ctx.chat, type: 'group', allowGroupPrivate: false } });
+  assert.match(momentsOnly, /【主动朋友圈】/);
+  assert.doesNotMatch(momentsOnly, /【群聊触发私聊】/);
+  assert.doesNotMatch(buildSocialInstructions({ ...ctx, actors: [] }), /【主动行为】|朋友圈正文|私聊消息/);
+});
+
 test('messaging prompts distinguish asynchronous messages from explicitly connected calls', () => {
   saveSetting(WECHAT_CHATS_STORAGE_KEY, [{
     id: 'call-context', type: 'direct', participantIds: [], noteName: '', context: '',
@@ -2168,6 +2222,81 @@ test('full input estimator includes every assembled message role and system cont
   }
 });
 
+test('token breakdown counts each source once, separates overhead and preserves the original total', () => {
+  const messages: OpenAiMessage[] = PROMPT_TOKEN_CATEGORIES.flatMap(category => category.id === 'overhead' ? [] : [{
+    role: 'system' as const, tokenCategory: category.id, content: '你好🙂 abcdefgh\n',
+  }]);
+  messages.push({ role: 'system', content: '未标记的回复规则' }, { role: 'user', content: '额外上下文' });
+  const before = JSON.stringify(messages);
+  const estimate = estimatePromptTokenBreakdown(messages);
+  assert.equal(estimate.input, 3 + messages.reduce((total, message) => total + 4 + estimateTextTokens(message.content), 0));
+  assert.equal(Object.values(estimate.breakdown).reduce((total, tokens) => total + tokens, 0), estimate.input);
+  assert.equal(estimate.breakdown.overhead, 3 + messages.length * 4);
+  for (const category of PROMPT_TOKEN_CATEGORIES) assert.ok(estimate.breakdown[category.id] > 0, category.id);
+  assert.equal(JSON.stringify(messages), before);
+  const empty = estimatePromptTokenBreakdown([]);
+  assert.equal(empty.input, 3);
+  assert.equal(empty.breakdown.overhead, 3);
+  assert.equal(Object.values(empty.breakdown).reduce((total, tokens) => total + tokens, 0), 3);
+});
+
+test('token breakdown separates appended protocol from player input with exact mixed-message rounding', () => {
+  const message: OpenAiMessage = { role: 'user', tokenCategory: 'currentInput', content: '你' };
+  const mixed = appendPromptContent(message, '好', 'system');
+  const estimate = estimatePromptTokenBreakdown([mixed]);
+  assert.equal(estimate.breakdown.currentInput, 2);
+  assert.equal(estimate.breakdown.system, 1);
+  assert.equal(estimate.input, 10);
+  const formatted = withChatResponseFormat([message], '返回聊天 JSON');
+  const formattedEstimate = estimatePromptTokenBreakdown(formatted);
+  assert.equal(formattedEstimate.breakdown.currentInput, estimateTextTokens(message.content));
+  assert.ok(formattedEstimate.breakdown.system > 100);
+  assert.equal(Object.values(formattedEstimate.breakdown).reduce((sum, tokens) => sum + tokens, 0), formattedEstimate.input);
+  const untagged = formatted.map(({ role, content, images }) => ({ role, content, images }));
+  assert.deepEqual(toOpenAiMessages(formatted), toOpenAiMessages(untagged));
+  assert.deepEqual(toGeminiContents(formatted), toGeminiContents(untagged));
+  assert.throws(() => estimatePromptTokenBreakdown([{ ...mixed, content: '已修改的内容' }]), /分类内容与实际提示词不一致/);
+});
+
+test('assembled token breakdown attributes world books, personas, memory and mounted records by their actual source', () => {
+  paperFixture();
+  const contacts = JSON.parse(readStorageString('pocketos:wechat-contacts')!);
+  contacts[0].persona = 'SOURCED_CHARACTER';
+  saveSetting('pocketos:wechat-contacts', contacts);
+  saveSetting('yyphone:world-books', [{
+    id: 'token-book', name: '明细测试书', isGlobal: true,
+    entries: ['front', 'middle', 'back'].map(depth => ({ id: depth, title: depth, content: `SOURCED_BOOK_${depth}`, depth })),
+  }]);
+  saveSetting(SETTINGS_KEYS.personas, { activeProfileId: 'token-player', profiles: [{
+    id: 'token-player', name: 'SOURCED_PLAYER', identity: '玩家', personality: '', background: '', speakingStyle: '',
+  }] });
+  const chats = JSON.parse(readStorageString(WECHAT_CHATS_STORAGE_KEY)!);
+  chats[0] = { ...chats[0], attachHistory: true, attachedHistoryChatIds: [chats[1].id], includeLatestThought: true,
+    messages: [
+      { id: 'old', senderId: 'user', text: 'SOURCED_HISTORY', createdAt: '2026-11-04T10:00:00Z' },
+      { id: 'reply', senderId: 'paper-a', text: 'SOURCED_REPLY', thought: 'SOURCED_THOUGHT', createdAt: '2026-11-04T10:01:00Z' },
+      { id: 'input', senderId: 'user', text: 'SOURCED_INPUT', createdAt: '2026-11-04T10:03:00Z' },
+    ] };
+  chats[1].messages = [{ id: 'mounted', senderId: 'paper-b', text: 'SOURCED_MOUNTED', createdAt: '2026-11-04T10:02:00Z' }];
+  saveSetting(WECHAT_CHATS_STORAGE_KEY, chats);
+  saveSetting('yyphone:character-context-events', [{ charId: 'paper-a', content: 'SOURCED_OTHER', createdAt: new Date().toISOString() }]);
+  const prompt = buildPrompt({ chatId: chats[0].id, memoryInjection: { text: 'SOURCED_MEMORY', ids: ['memory'] } });
+  const sources = {
+    SOURCED_HISTORY: 'history', SOURCED_MOUNTED: 'mountedHistory', SOURCED_INPUT: 'currentInput',
+    SOURCED_CHARACTER: 'character', SOURCED_PLAYER: 'userPersona', SOURCED_MEMORY: 'memory',
+    SOURCED_THOUGHT: 'memory', SOURCED_OTHER: 'other',
+    SOURCED_BOOK_front: 'worldBook', SOURCED_BOOK_middle: 'worldBook', SOURCED_BOOK_back: 'worldBook',
+  };
+  for (const [marker, category] of Object.entries(sources)) {
+    const messages = prompt.filter(message => message.content.includes(marker));
+    assert.equal(messages.length, 1, marker);
+    assert.equal(messages[0].tokenCategory, category, marker);
+  }
+  const estimate = estimatePromptTokenBreakdown(withChatResponseFormat(prompt, '回复协议'));
+  for (const category of PROMPT_TOKEN_CATEGORIES) assert.ok(estimate.breakdown[category.id] > 0, category.id);
+  assert.equal(Object.values(estimate.breakdown).reduce((sum, tokens) => sum + tokens, 0), estimate.input);
+});
+
 test('single-generation token preview uses the saved 400-message window instead of all 1001 records', () => {
   paperFixture();
   const chats = JSON.parse(readStorageString(WECHAT_CHATS_STORAGE_KEY)!);
@@ -2185,13 +2314,14 @@ test('single-generation token preview uses the saved 400-message window instead 
   const content = assembled.map(message => message.content).join('\n');
   assert.doesNotMatch(content, /UNMOUNTED_/);
   assert.equal((content.match(/MOUNTED_\d+_END/g) ?? []).length, 401, '400 historical messages plus the current player message');
-  const estimate = estimatePromptTokens(assembled);
+  const estimate = estimatePromptTokenBreakdown(assembled);
   chats[0].messages = messages.slice(-401);
   saveSetting(WECHAT_CHATS_STORAGE_KEY, chats);
-  assert.equal(estimatePromptTokens(prompt()), estimate, 'unmounted old messages must not affect the next request estimate');
+  assert.deepEqual(estimatePromptTokenBreakdown(prompt()), estimate, 'unmounted old messages must not affect the next request estimate');
   const source = readFileSync(resolve('src', 'apps', 'WeChatApp.tsx'), 'utf8');
   assert.match(source, /单次生成 Token 预估/);
-  assert.match(source, /estimatePromptTokens\(withImageDescriptionRequest\(requestMessages\)\)/);
+  assert.match(source, /estimatePromptTokenBreakdown\(withImageDescriptionRequest\(requestMessages\)\)/);
+  assert.match(source, /单次输入 Token 明细/);
   assert.doesNotMatch(source, /estimateConversationTokens|聊天记录约/);
 });
 

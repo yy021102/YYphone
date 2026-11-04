@@ -1,4 +1,4 @@
-import type { OpenAiMessage, PromptChatMessage } from './buildPrompt';
+import { appendPromptContent, type OpenAiMessage, type PromptChatMessage } from './buildPrompt';
 import { resolveChatHistoryCount } from './chatHistory';
 import { imageDescriptionText, imageSourceKey, photoPromptFields } from './imageDescriptions';
 
@@ -42,7 +42,7 @@ export function withChatAvatarContext(messages:OpenAiMessage[],chat:AvatarChat,c
   if(!context)return messages;
   const labelled=messages.map(m=>{
     const ids=context.photos.filter(p=>m.images?.includes(chat.messages.find(item=>item.id===p.messageId)?.imageUrl??'')).map(p=>p.messageId);
-    return ids.length?{...m,content:`${m.content}\n【本条实际附带的候选头像图片消息ID：${ids.join('、')}】`}:m;
+    return ids.length?appendPromptContent(m,`\n【本条实际附带的候选头像图片消息ID：${ids.join('、')}】`,'other'):m;
   });
   const extra:OpenAiMessage[]=[];
   for(const photo of context.photos){
@@ -50,7 +50,7 @@ export function withChatAvatarContext(messages:OpenAiMessage[],chat:AvatarChat,c
     if(!message)throw new Error('候选头像图片已不存在，请重新发送。');
     const description=imageDescriptionText(message);
     const attached=messages.some(m=>m.images?.includes(message.imageUrl??''));
-    extra.push({role:'user',content:`【候选头像图片，消息ID：${message.id}】${description||'请查看实际附带的图片，不要凭空猜测内容。'}`,
+    extra.push({role:'user',tokenCategory:'other',content:`【候选头像图片，消息ID：${message.id}】${description||'请查看实际附带的图片，不要凭空猜测内容。'}`,
       ...(!description&&!attached?photoPromptFields(message,chat):{})});
   }
   return [...labelled.slice(0,-1),...extra,...labelled.slice(-1)];

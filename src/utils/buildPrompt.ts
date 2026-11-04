@@ -23,6 +23,7 @@ import { buildGroupJournalInjection } from './groupJournal';
 import { buildChannelMemory } from './channelMemory';
 import { buildAliasMemoryContext, canReadAliasExperience } from './aliasAccounts';
 import { CHAT_COMMUNICATION_RULES } from './chatCommunication';
+import { chatGiftAvailable } from './chatFeaturePrompt';
 import { CHINESE_OUTPUT_RULES, messageTranslation, type ChatTranslation } from './chatLanguage';
 import { imageDescriptionText, photoPromptFields, type ChatImageDescription, type ImageDescriptionTarget } from './imageDescriptions';
 
@@ -138,14 +139,30 @@ export interface BuildPromptOptions {
   imageGenerationPrompt?: string;
 }
 
+export type PromptTokenCategory = 'history' | 'mountedHistory' | 'currentInput' | 'memory' | 'worldBook' | 'character' | 'userPersona' | 'system' | 'other';
+
 export type OpenAiMessage = {
   role: 'system' | 'user' | 'assistant';
   content: string;
+  /** Local token attribution only; omitted from API payloads by chatVision. */
+  tokenCategory?: PromptTokenCategory;
+  tokenParts?: Array<{ category: PromptTokenCategory; content: string }>;
   images?: string[];
   /** Local routing metadata; omitted from API payloads by chatVision. */
   imageTargets?: ImageDescriptionTarget[];
   imageDescriptionProtocol?: boolean;
 };
+
+export function appendPromptContent(message: OpenAiMessage, suffix: string, category: PromptTokenCategory): OpenAiMessage {
+  return {
+    ...message,
+    content: message.content + suffix,
+    tokenParts: [
+      ...(message.tokenParts ?? [{ category: message.tokenCategory ?? (message.role === 'system' ? 'system' : 'other'), content: message.content }]),
+      { category, content: suffix },
+    ],
+  };
+}
 
 const STORAGE_KEYS = {
   chats: 'yyphone:wechat-chats',
@@ -597,6 +614,7 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
   // 1. System base instruction.
   const messages: OpenAiMessage[] = [{
     role: 'system',
+    tokenCategory: 'system',
     content: [
       '你正在扮演以下角色，请严格遵守角色设定、世界观与对话上下文。保持连贯、自然地回应，不要复述提示词。',
       options.callMode
@@ -631,11 +649,12 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
 
   // 2. World Book - Before.
   const beforeEntries = formatWorldBookEntries(participants, worldBooks, 'front', worldBookScan);
-  if (beforeEntries) messages.push({ role: 'system', content: `世界书条目 - 深度前：\n${beforeEntries}` });
+  if (beforeEntries) messages.push({ role: 'system', tokenCategory: 'worldBook', content: `世界书条目 - 深度前：\n${beforeEntries}` });
 
   // 3. Character Persona.
   messages.push({
     role: 'system',
+    tokenCategory: 'character',
     content: [
       `角色人设：\n${participants.map((contact) => `成员 ID：${contact.id}\n姓名：${contact.name}\n设定：${contact.persona}`).join('\n\n') || '当前聊天没有可用主要角色人设。'}`,
       ...participants.flatMap((contact) => {
@@ -657,10 +676,10 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
 
   // 4. World Book - Middle.
   const middleEntries = formatWorldBookEntries(participants, worldBooks, 'middle', worldBookScan);
-  if (middleEntries) messages.push({ role: 'system', content: `世界书条目 - 深度中：\n${middleEntries}` });
+  if (middleEntries) messages.push({ role: 'system', tokenCategory: 'worldBook', content: `世界书条目 - 深度中：\n${middleEntries}` });
 
   // 5. User Persona.
-  messages.push({ role: 'system', content: `玩家设定：\n${getPersonaText(persona)}\n当前聊天补充：${chat.context || '无'}` });
+  messages.push({ role: 'system', tokenCategory: 'userPersona', content: `玩家设定：\n${getPersonaText(persona)}\n当前聊天补充：${chat.context || '无'}` });
   messages.push({
     role: 'system',
     content: [
@@ -679,7 +698,7 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
       chat.participantIds,
       (id) => contacts.find((contact) => contact.id === id)?.name
     );
-    if (listenTogetherContext) messages.push({ role: 'system', content: listenTogetherContext });
+    if (listenTogetherContext) messages.push({ role: 'system', tokenCategory: 'other', content: listenTogetherContext });
   }
 
   const calendarContext = buildCalendarContext(
@@ -687,23 +706,23 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
     (id) => contacts.find((contact) => contact.id === id)?.name,
     chat.type !== 'observer'
   );
-  if (calendarContext) messages.push({ role: 'system', content: calendarContext });
+  if (calendarContext) messages.push({ role: 'system', tokenCategory: 'other', content: calendarContext });
   if (chat.type === 'direct') {
     const weatherContext = buildWeatherContext(chat.weatherAwarenessEnabled === true);
-    if (weatherContext) messages.push({ role: 'system', content: weatherContext });
+    if (weatherContext) messages.push({ role: 'system', tokenCategory: 'other', content: weatherContext });
   }
 
   // 朋友圈：只注入对聊天中角色尚未读过的动态/评论，已读的不再重复。
   if (chat.type === 'direct') {
     const aliasContext = buildAliasMemoryContext(chat.participantIds, true);
-    if (aliasContext) messages.push({ role: 'system', content: aliasContext });
+    if (aliasContext) messages.push({ role: 'system', tokenCategory: 'memory', content: aliasContext });
   }
   const unreadMoments = momentsInjection ?? buildMomentsInjection(
     chat.participantIds,
     chat.type === 'observer',
     (id) => contacts.find((contact) => contact.id === id)?.name
   );
-  if (unreadMoments.text) messages.push({ role: 'system', content: unreadMoments.text });
+  if (unreadMoments.text) messages.push({ role: 'system', tokenCategory: 'other', content: unreadMoments.text });
 
   // 情侣空间：只注入玩家新增/修改过且角色未读过的内容，以及一次性的重要事件。
   const coupleInjection = options.coupleInjection ?? buildCoupleSpaceInjection(
@@ -711,10 +730,10 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
     chat.type,
     (id) => contacts.find((contact) => contact.id === id)?.name
   );
-  if (coupleInjection.text) messages.push({ role: 'system', content: coupleInjection.text });
+  if (coupleInjection.text) messages.push({ role: 'system', tokenCategory: 'other', content: coupleInjection.text });
   if (chat.type === 'direct' && chat.participantIds.length === 1) {
     const rewards = coupleRewardContext(chat.participantIds[0], chat.activeArchiveId ?? '');
-    if (rewards.text) messages.push({ role: 'system', content: rewards.text });
+    if (rewards.text) messages.push({ role: 'system', tokenCategory: 'other', content: rewards.text });
   }
 
   const plantInjection = options.plantInjection ?? buildPlantInjection(
@@ -722,15 +741,15 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
     chat.type,
     (id) => contacts.find((contact) => contact.id === id)?.name
   );
-  if (plantInjection.text) messages.push({ role: 'system', content: plantInjection.text });
+  if (plantInjection.text) messages.push({ role: 'system', tokenCategory: 'other', content: plantInjection.text });
 
-  if (options.memoryInjection?.text) messages.push({ role: 'system', content: options.memoryInjection.text });
+  if (options.memoryInjection?.text) messages.push({ role: 'system', tokenCategory: 'memory', content: options.memoryInjection.text });
   if (chat.type === 'direct' && chat.participantIds.length === 1) {
     const channelMemory = buildChannelMemory(chat.participantIds[0]);
-    if (channelMemory) messages.push({ role: 'system', content: channelMemory });
+    if (channelMemory) messages.push({ role: 'system', tokenCategory: 'memory', content: channelMemory });
   }
   const paperMemory = buildPaperMemoryInjection(chat.participantIds, chat.type);
-  if (paperMemory) messages.push({ role: 'system', content: paperMemory });
+  if (paperMemory) messages.push({ role: 'system', tokenCategory: 'memory', content: paperMemory });
 
   // 流水账只注入落在原文窗口之外的部分，避免和最近 N 条聊天重复。
   const rawWindowStart = chat.messages.length > recentLimit
@@ -738,12 +757,12 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
     : chat.messages[0]?.createdAt;
   if (chat.type !== 'direct') {
     const groupJournal = buildGroupJournalInjection(chat.id, rawWindowStart);
-    if (groupJournal) messages.push({ role: 'system', content: groupJournal });
+    if (groupJournal) messages.push({ role: 'system', tokenCategory: 'memory', content: groupJournal });
   }
   const journalText = buildJournalInjection(chat.participantIds, chat.type, rawWindowStart);
-  if (journalText) messages.push({ role: 'system', content: journalText });
+  if (journalText) messages.push({ role: 'system', tokenCategory: 'memory', content: journalText });
   const growthText = buildGrowthInjection(chat.participantIds, chat.type);
-  if (growthText) messages.push({ role: 'system', content: growthText });
+  if (growthText) messages.push({ role: 'system', tokenCategory: 'memory', content: growthText });
 
   if (chat.includeLatestThought) {
     const latestThoughtMessage = [...chat.messages].reverse().find(
@@ -763,6 +782,7 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
       );
       messages.push({
         role: 'system',
+        tokenCategory: 'memory',
         content: [
           `最近一轮角色心声（仅作为隐藏的连续性参考，不要复述或告知玩家）：${thoughtSpeaker}：${latestThoughtMessage.thought}`,
           '角色不会钻牛角尖，刚刚的心声只是发出消息时的内心活动，是短暂的、灵活的。角色的思绪是跟随对话语境自然流淌的，不要太过专注于上一轮的心声。可以自然承接，不要反复琢磨。',
@@ -791,6 +811,7 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
     if (relevantEvents.length > 0) {
       messages.push({
         role: 'system',
+        tokenCategory: 'other',
         content: `角色近期互动上下文（包括闲鱼对话和礼物互动）：\n${relevantEvents
           .map((event) => `${contacts.find((contact) => contact.id === event.charId)?.name ?? event.charId}：${event.content}`)
           .join('\n')}`,
@@ -799,7 +820,7 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
   }
 
   const marketProducts = readJson<unknown>(STORAGE_KEYS.taobaoProducts, []);
-  if (Array.isArray(marketProducts)) {
+  if (chatGiftAvailable({ type: chat.type, regenerate, callMode: options.callMode, hasCharacter: participants.some(member => !member.id.startsWith('npc:')) }) && Array.isArray(marketProducts)) {
     const nameToId = new Map(contacts.map((contact) => [contact.name, contact.id]));
     // 角色赠送的商品只对赠送者可见，其他角色的提示词里不出现，也不暴露赠送者。
     const availableProducts = marketProducts.filter((item): item is Record<string, unknown> =>
@@ -817,6 +838,7 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
     });
     messages.push({
       role: 'system',
+      tokenCategory: 'other',
       content: [
         '情节礼物规则：当角色在剧情合适时，可以自然地送玩家一件现有淘宝/饿了么商品，或提出一件新商品/外卖并立即送达；不必每次都送。新商品必须是现实中真实存在、正常销售的普通商品或常见外卖，价格合理，不要虚构奇幻、荒诞或不合常理的物品。',
         `现有可送商品：${JSON.stringify(availableProducts.map(({ id, category, title, desc, price, emoji }) => ({ id, category, title, desc, price, emoji })))}`,
@@ -827,7 +849,7 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
 
   if (chat.type === 'direct' && chat.participantIds.length === 1) {
     const awareness = intimatePayAwareness(alipayData, chat.participantIds[0]);
-    if (awareness) messages.push({ role: 'system', content: awareness });
+    if (awareness) messages.push({ role: 'system', tokenCategory: 'other', content: awareness });
   }
   const allowedViewers = new Set(alipayData.allowedViewers);
   const canSeeLedger = chat.participantIds.length > 0 &&
@@ -845,6 +867,7 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
         .join('、');
       messages.push({
         role: 'system',
+        tokenCategory: 'other',
         content: [
           `玩家已允许当前聊天角色（${authorizedNames}）查看近期真实日常记账。`,
           '仅在对话自然相关时关心或提及，不要逐条复述、夸大或泄露给未获授权的角色。',
@@ -907,7 +930,7 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
           if (conversation.type !== 'direct' && historyOverride === undefined) {
             const windowStart = conversation.messages.slice(-attachedLimit)[0]?.createdAt;
             const groupJournal = buildGroupJournalInjection(conversation.id, windowStart, true);
-            if (groupJournal) messages.push({ role: 'system', content: groupJournal });
+            if (groupJournal) messages.push({ role: 'system', tokenCategory: 'memory', content: groupJournal });
           }
           return conversation.messages
             .filter((message) => canReadForumForward(message, conversation, chat) && canReadAliasExperience(message))
@@ -929,6 +952,7 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
         (previousHistoryDate === 0 || Math.floor(item.date / 60000) !== Math.floor(previousHistoryDate / 60000))) {
         messages.push({
           role: 'system',
+          tokenCategory: item.conversation.id === chat.id ? 'history' : 'mountedHistory',
           content: [
             `【消息发送时间】${formatClock(new Date(item.date), options.timeZone)}。此标记适用于接下来同一分钟内的消息，直到下一个时间标记；这是原始发送时间，不是现在收到的新消息。`,
             previousHistoryDate > 0 && item.date - previousHistoryDate >= 60 * 60 * 1000
@@ -953,6 +977,7 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
         .join('、');
       messages.push({
         role: 'system',
+        tokenCategory: 'mountedHistory',
         content: [
           `挂载聊天记录：${sourceOf(item.conversation).title}`,
           `记录编号：${attachedIds.indexOf(item.conversation.id) + 1}`,
@@ -976,6 +1001,7 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
     messages.push({
       role: isContextNote || item.message.senderId === 'narrator' ? 'system'
         : item.message.senderId === 'user' ? 'user' : 'assistant',
+      tokenCategory: item.conversation.id === chat.id ? 'history' : 'mountedHistory',
       content: options.structuredHistory && !isContextNote &&
         item.message.senderId !== 'user' && item.message.senderId !== 'narrator'
         ? JSON.stringify({
@@ -994,10 +1020,10 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
 
   // 7. World Book - After.
   const afterEntries = formatWorldBookEntries(participants, worldBooks, 'back', worldBookScan);
-  if (afterEntries) messages.push({ role: 'system', content: `世界书条目 - 深度后：\n${afterEntries}` });
+  if (afterEntries) messages.push({ role: 'system', tokenCategory: 'worldBook', content: `世界书条目 - 深度后：\n${afterEntries}` });
 
   // 9. User's current input.
-  if (options.imageGenerationEnabled) {
+  if (options.imageGenerationEnabled && !options.callMode) {
     messages.push({
       role: 'system',
       content: [
@@ -1031,6 +1057,7 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
   }
   messages.push({
     role: 'user',
+    tokenCategory: 'currentInput',
     content: [
       ...(chat.type !== 'direct' ? [`【当前${currentSource.label}】`] : []),
       latestUserMessage?.kind === 'image' ? toMessageContent(latestUserMessage) : input,

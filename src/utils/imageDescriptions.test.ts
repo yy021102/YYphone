@@ -36,6 +36,8 @@ test('one OpenAI reply describes the photo and persists hidden metadata; later h
     assert(body.messages.some((m: any) => Array.isArray(m.content) && m.content.some((p: any) => p.type === 'image_url')));
     assert(body.messages.some((m: any) => typeof m.content === 'string' && m.content.includes('首次图片内容记录')));
     assert(!JSON.stringify(body).includes('archiveRevision'));
+    assert(!JSON.stringify(body).includes('"tokenCategory"'));
+    assert(!JSON.stringify(body).includes('"tokenParts"'));
     return response(result(first));
   });
   const before = readChats()[0].messages[0];
@@ -65,6 +67,8 @@ test('Gemini combines inline image and description output in the first reply and
   mock.method(globalThis, 'fetch', async (_: unknown, init?: RequestInit) => {
     calls++; const body = JSON.parse(String(init?.body));
     assert(body.contents.some((m: any) => m.parts.some((p: any) => p.inlineData?.data === 'AQID')));
+    assert(!JSON.stringify(body).includes('"tokenCategory"'));
+    assert(!JSON.stringify(body).includes('"tokenParts"'));
     return Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify(result(messages)) }] } }] });
   });
   await requestChatReply(messages, { ...api, endpoint: 'https://generativelanguage.googleapis.com/v1beta', model: 'gemini-flash' }, () => {});
