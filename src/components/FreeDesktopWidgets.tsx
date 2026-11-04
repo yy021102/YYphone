@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import { ArrowUpRight, Camera, Heart, Image as ImageIcon, Mail, MapPin, Package } from 'lucide-react';
 import type { UserProfile } from '../types';
-import type { DesktopWidgetItem } from '../utils/freeDesktop';
+import { GLASS_DISC_APPEARANCE, type DesktopWidgetItem } from '../utils/freeDesktop';
 import { CalendarWidget } from './CalendarWidget';
 import { ListenTogetherWidget } from './ListenTogetherWidget';
 import { readStoredValue } from '../utils/localStorage';
 import { frameGradient } from '../utils/avatarFrame';
-import { TemplateBow, TemplateCloud, TemplateHeart } from './DesktopTemplateArt';
+import { BatteryRing, TemplateBow, TemplateCloud, TemplateHeart } from './DesktopTemplateArt';
 
 export interface DesktopCharacter { id: string; name: string; avatarUrl: string }
 export function readDesktopCharacters(): DesktopCharacter[] {
@@ -41,8 +41,9 @@ export function FreeDesktopWidget({ widget, profile, characters, onCalendar, onP
   const photo = settings.images.length ? settings.images[photoIndex % settings.images.length] : undefined;
   if (widgetType === 'calendar') return <div className="free-widget-live"><CalendarWidget onOpen={onCalendar} backgroundImage={settings.backgroundImage}/></div>;
   if (widgetType === 'music') return <div className="free-widget-live"><ListenTogetherWidget modalContainer={musicPortal} backgroundImage={settings.backgroundImage}
-    variant={settings.template === 'vinyl' ? 'vinyl' : undefined} artwork={settings.images[0]} title={settings.title} note={settings.text}
-    vinylColor={settings.vinylColor} vinylOpacity={settings.vinylOpacity}/></div>;
+    variant={settings.template === 'vinyl' || settings.template === 'disc' ? settings.template : undefined} artwork={settings.images[0]} title={settings.title} note={settings.text}
+    vinylColor={settings.vinylColor ?? (settings.template === 'disc' ? GLASS_DISC_APPEARANCE.color : undefined)}
+    vinylOpacity={settings.vinylOpacity ?? (settings.template === 'disc' ? GLASS_DISC_APPEARANCE.opacity : undefined)}/></div>;
   if (widgetType === 'profile') return <div className="free-profile-widget">
     {!settings.backgroundImage && profile.coverImageUrl && <img className="free-profile-cover" src={profile.coverImageUrl} alt="" draggable={false}/>}
     <button type="button" className="free-profile-content" onClick={onProfile} aria-label="编辑个人资料">
@@ -56,9 +57,21 @@ export function FreeDesktopWidget({ widget, profile, characters, onCalendar, onP
       <span className="free-profile-actions"><button type="button" aria-label="小纸条" onClick={onNotes}><Mail size={13}/><span>纸条</span></button><button type="button" aria-label="物品" onClick={onInventory}><Package size={13}/><span>物品</span></button></span>
     </div>
   </div>;
+  if (widgetType === 'clock' && settings.template === 'capsule') return <div className="free-capsule-widget"
+    style={settings.backgroundImage ? { backgroundImage: `url(${JSON.stringify(settings.backgroundImage)})` } : undefined}>
+    {avatar(settings.images[0] || profile.avatarUrl || '', settings.title || profile.name)}
+    <div className="free-capsule-copy"><strong title={settings.title}>{settings.title}</strong><span>{now.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit', weekday: 'short' })}</span></div>
+    <div className="free-capsule-time"><time dateTime={now.toISOString()}>{now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })}</time>{settings.text && <small title={settings.text}>{settings.text}</small>}</div>
+  </div>;
   if (widgetType === 'clock') return <div className={settings.template === 'cloud' ? 'free-cloud-widget' : 'free-widget-centered'}>
     {settings.template === 'cloud' && <><TemplateCloud backgroundImage={settings.backgroundImage}/><span className="free-cloud-sparkle" aria-hidden="true">✦</span></>}
     <div className={settings.template === 'cloud' ? 'free-cloud-content' : 'free-clock-content'}><small>{settings.title || '此刻，刚刚好'}</small><strong className="free-clock-time">{now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })}</strong><span>{now.toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'short' })}</span>{settings.text && <small>{settings.text}</small>}</div></div>;
+  if (widgetType === 'text' && settings.template === 'battery') return <div className="free-battery-widget"
+    aria-label={`自定义装饰电量 ${settings.batteryLevel ?? 85}%`}
+    style={settings.backgroundImage ? { backgroundImage: `url(${JSON.stringify(settings.backgroundImage)})` } : undefined}>
+    <div className="free-battery-copy"><strong>{settings.batteryLevel ?? 85}%</strong><span>{settings.title}</span>{settings.text && <small title={settings.text}>{settings.text}</small>}</div>
+    <BatteryRing value={settings.batteryLevel ?? 85}/>
+  </div>;
   if (widgetType === 'text') return <div className="free-text-widget"><small>{settings.title}</small><p>{settings.text || '写一点喜欢的话吧。'}</p><span>✦</span></div>;
   if (widgetType === 'photo' && settings.template === 'heart') return <div className="free-heart-widget">
     <span className="free-heart-picture" role="img" aria-label={settings.title || '心形照片'}><TemplateHeart image={photo} backgroundImage={settings.backgroundImage}/></span>
@@ -84,15 +97,43 @@ export function FreeDesktopWidget({ widget, profile, characters, onCalendar, onP
     ...(settings.includePlayer ? [{ id: 'player', name: profile.name, avatarUrl: profile.avatarUrl ?? '' }] : []),
     ...settings.characterIds.map(id => characters.find(person => person.id === id)),
   ];
+  const personAt = (index: number) => {
+    const person = people[index];
+    const missing = !person && index >= (settings.includePlayer ? 1 : 0) && !!settings.characterIds[index - (settings.includePlayer ? 1 : 0)];
+    return {
+      name: missing ? '角色已不存在' : settings.personNames?.[index] || person?.name || (index === 0 ? '你' : 'TA'),
+      avatarUrl: settings.images[index] || person?.avatarUrl || '',
+    };
+  };
+  if (settings.template === 'portrait') {
+    const person = personAt(0);
+    return <div className="free-portrait-widget">
+      <div className="free-portrait-cover" style={settings.backgroundImage ? { backgroundImage: `url(${JSON.stringify(settings.backgroundImage)})` } : undefined}/>
+      <div className="free-portrait-card">
+        {avatar(person.avatarUrl, person.name)}
+        <strong className="free-portrait-name">{settings.title || person.name}</strong>
+        {settings.subtitle && <span className="free-portrait-subtitle">{settings.subtitle}</span>}
+        {settings.text && <p className="free-portrait-note">{settings.text}</p>}
+        {settings.location && <span className="free-portrait-location"><MapPin size={12}/>{settings.location}</span>}
+      </div>
+    </div>;
+  }
+  if (settings.template === 'whisper') return <div className="free-whisper-widget">
+    {[settings.title, settings.text].map((text, index) => {
+      const person = personAt(index);
+      return <div className="free-whisper-pill" key={index}
+        style={settings.backgroundImage ? { backgroundImage: `url(${JSON.stringify(settings.backgroundImage)})` } : undefined}>
+        {avatar(person.avatarUrl, person.name)}<span title={text}>{text}</span>
+      </div>;
+    })}
+  </div>;
   if (settings.template === 'ticket') return <div className="free-ticket-widget">
     <div className="free-ticket-paper" style={settings.backgroundImage ? { backgroundImage: `url(${JSON.stringify(settings.backgroundImage)})` } : undefined}>
       <div className="free-ticket-main"><small className="free-ticket-heading">TWO LITTLE WORLDS <Heart size={12}/></small>
         <strong className="free-ticket-title">{settings.title || '只属于我们的纪念'}</strong>
         <div className="free-ticket-people">{[0, 1].map(index => {
-          const person = people[index];
-          const missing = !person && index >= (settings.includePlayer ? 1 : 0) && !!settings.characterIds[index - (settings.includePlayer ? 1 : 0)];
-          const name = missing ? '角色已不存在' : settings.personNames?.[index] || person?.name || (index === 0 ? '你' : 'TA');
-          return <span key={index}>{avatar(settings.images[index] || person?.avatarUrl || '', name)}<small>{name}</small></span>;
+          const person = personAt(index);
+          return <span key={index}>{avatar(person.avatarUrl, person.name)}<small>{person.name}</small></span>;
         })}<Heart className="free-ticket-heart" size={16}/></div>
         {settings.text && <p className="free-ticket-note">{settings.text}</p>}
       </div><span className="free-ticket-stub" aria-hidden="true"><span>ONLY US</span><i/><small>02</small></span>

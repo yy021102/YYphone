@@ -1,6 +1,6 @@
 import { useId, type CSSProperties } from 'react';
 import { Heart, Music2, Sparkles } from 'lucide-react';
-import type { DesktopWidgetTemplate } from '../utils/freeDesktop';
+import { GLASS_DISC_APPEARANCE, type DesktopWidgetTemplate } from '../utils/freeDesktop';
 
 const heartPath = 'M100 177C85 164 10 121 10 66C10 12 74 7 100 48C126 7 190 12 190 66C190 121 115 164 100 177Z';
 const cloudPath = 'M49 149C-8 150-10 73 43 65C37 10 111 2 132 43C173 13 219 47 211 84C258 102 244 151 204 149Z';
@@ -37,21 +37,34 @@ export function TemplateCloud({ backgroundImage }: { backgroundImage?: string })
   </svg>;
 }
 
-export function VinylRecord({ artwork, color, opacity, playing = false }: { artwork?: string; color?: string; opacity?: number; playing?: boolean }) {
-  return <span className="free-vinyl-record" data-playing={playing} style={{
+export function VinylRecord({ artwork, color, opacity, playing = false, fullArtwork = false }: { artwork?: string; color?: string; opacity?: number; playing?: boolean; fullArtwork?: boolean }) {
+  return <span className="free-vinyl-record" data-playing={playing} data-full-artwork={fullArtwork || undefined} style={{
     '--vinyl-color': color, '--vinyl-groove': color ? `color-mix(in srgb, ${color} 85%, #000)` : undefined,
     '--vinyl-opacity': opacity === undefined ? undefined : opacity / 100, animationPlayState: playing ? 'running' : 'paused',
   } as CSSProperties}>
+    {fullArtwork && artwork && <img className="free-disc-artwork" src={artwork} alt="" draggable={false}/>}
     <span className="free-vinyl-surface" aria-hidden="true"/>
-    <span className="free-vinyl-label">{artwork ? <img src={artwork} alt="唱片中心图片" draggable={false}/> : <Music2 size={22}/>}</span>
+    <span className="free-vinyl-label">{!fullArtwork && (artwork ? <img src={artwork} alt="唱片中心图片" draggable={false}/> : <Music2 size={22}/>)}</span>
   </span>;
+}
+
+export function BatteryRing({ value }: { value: number }) {
+  return <svg className="free-battery-ring" viewBox="0 0 48 48" aria-hidden="true">
+    <circle cx="24" cy="24" r="19" fill="none" stroke="currentColor" strokeWidth="4" opacity=".12"/>
+    <circle cx="24" cy="24" r="19" fill="none" stroke="currentColor" strokeWidth="4" pathLength="100"
+      strokeDasharray={`${value} 100`} strokeLinecap="round" opacity={value === 0 ? 0 : 1} transform="rotate(-90 24 24)"/>
+  </svg>;
 }
 
 export function DesktopTemplateThumbnail({ template, vinylColor, vinylOpacity }: { template: DesktopWidgetTemplate; vinylColor?: string; vinylOpacity?: number }) {
   return <span className="free-template-thumbnail" data-template={template} aria-hidden="true">
     {template === 'heart' ? <TemplateHeart/> : template === 'bow' ? <><span className="free-thumb-polaroid"><Sparkles size={24}/></span><TemplateBow/></> :
       template === 'ticket' ? <span className="free-thumb-ticket"><i/><Heart size={12}/><i/></span> :
-      template === 'vinyl' ? <span className="free-thumb-record"><VinylRecord color={vinylColor} opacity={vinylOpacity}/></span> :
+      template === 'vinyl' || template === 'disc' ? <span className="free-thumb-record"><VinylRecord color={vinylColor ?? (template === 'disc' ? GLASS_DISC_APPEARANCE.color : undefined)} opacity={vinylOpacity ?? (template === 'disc' ? GLASS_DISC_APPEARANCE.opacity : undefined)} fullArtwork={template === 'disc'}/></span> :
+      template === 'portrait' ? <span className="free-thumb-portrait"><i/><span><b/>晴天来信<small>把喜欢收藏</small></span></span> :
+      template === 'whisper' ? <span className="free-thumb-whisper"><i><b/>把喜欢放在这里</i><i>另一半是你<b/></i></span> :
+      template === 'capsule' ? <span className="free-thumb-capsule"><i/><span>今天也慢慢来<small>11月04日</small></span><strong>18:52</strong></span> :
+      template === 'battery' ? <span className="free-thumb-battery"><span><strong>85%</strong><small>剩余电量</small></span><BatteryRing value={85}/></span> :
       <><TemplateCloud/><span className="free-thumb-clock">10:24</span></>}
   </span>;
 }

@@ -147,8 +147,9 @@ test('desktop polish exposes background upload on all eight widgets and override
   }
   assert.equal(localStorage.getItem(MUSIC_APPEARANCE_KEY), before);
 });
-test('desktop templates render five different original shapes, editable fields and linked music without requiring external artwork', () => {
-  const classes = { heart: 'free-heart-widget', bow: 'free-bow-widget', ticket: 'free-ticket-widget', vinyl: 'free-vinyl-widget', cloud: 'free-cloud-widget' };
+test('desktop templates render distinct original shapes, editable fields and linked music without requiring external artwork', () => {
+  const classes = { heart: 'free-heart-widget', bow: 'free-bow-widget', ticket: 'free-ticket-widget', vinyl: 'free-vinyl-widget', cloud: 'free-cloud-widget',
+    portrait: 'free-portrait-widget', whisper: 'free-whisper-widget', capsule: 'free-capsule-widget', battery: 'free-battery-widget', disc: 'free-disc-widget' };
   let layout = defaultFreeDesktopLayout();
   for (const template of DESKTOP_WIDGET_TEMPLATES) {
     const widget = newDesktopTemplate(template.id, `render:${template.id}`);
@@ -160,8 +161,9 @@ test('desktop templates render five different original shapes, editable fields a
     }));
     assert.ok(markup.includes(classes[template.id]));
     assert.ok(markup.includes('我自己的标题'));
-    assert.ok(markup.includes('我自己的短句'));
-    if (template.id !== 'cloud') assert.ok(markup.includes('https://example.test/my-photo.png'));
+    if (template.id !== 'disc') assert.ok(markup.includes('我自己的短句'));
+    else assert.doesNotMatch(markup, /free-vinyl-sleeve|free-vinyl-controls|我自己的短句/);
+    if (template.id !== 'cloud' && template.id !== 'battery') assert.ok(markup.includes('https://example.test/my-photo.png'));
     if (template.id === 'vinyl') {
       for (const label of ['管理唱片音乐', '播放', '下一首', '播放进度']) assert.ok(markup.includes(`aria-label="${label}"`));
       assert.match(markup, /animation-play-state:paused/);
@@ -171,6 +173,14 @@ test('desktop templates render five different original shapes, editable fields a
     assert.match(editor, /上传组件背景图/);
     if (template.id === 'ticket') { assert.match(editor, /左侧称呼/); assert.match(editor, /右侧称呼/); }
     if (template.id === 'vinyl') assert.match(editor, /唱片中心图片/);
+    if (template.id === 'portrait') for (const label of ['显示名称', '签名', '账号／副标题', '地点文字', '名片封面图']) assert.ok(editor.includes(label));
+    if (template.id === 'whisper') for (const label of ['上方胶囊文字', '下方胶囊文字', '上方头像称呼', '下方头像称呼']) assert.ok(editor.includes(label));
+    if (template.id === 'capsule') assert.match(editor, /时间旁的小字/);
+    if (template.id === 'battery') assert.match(editor, /装饰电量数值/);
+    if (template.id === 'disc') {
+      for (const label of ['唱片盘面颜色', '唱片盘面不透明度', '组件名称（不显示在桌面下方）', '备用唱片图片', '播放按钮颜色']) assert.ok(editor.includes(label));
+      assert.doesNotMatch(editor, /组件字号|背景颜色/);
+    }
     layout = putDesktopWidget(layout, 1, widget);
   }
   const home = renderToStaticMarkup(createElement(HomeScreen, {
@@ -178,6 +188,28 @@ test('desktop templates render five different original shapes, editable fields a
     appIcons: {}, userProfile: INITIAL_USER_PROFILE, onOpenApp: () => {}, onSaveUserProfile: () => true,
   }));
   for (const template of DESKTOP_WIDGET_TEMPLATES) assert.ok(home.includes(`data-widget-template="${template.id}"`));
+});
+test('desktop decorative battery renders boundary levels and glass disc defaults match its editor', () => {
+  const props = { profile: INITIAL_USER_PROFILE, characters: [], onCalendar: () => {}, onProfile: () => {}, onNotes: () => {}, onInventory: () => {} };
+  const battery = newDesktopTemplate('battery', 'battery:levels');
+  for (const level of [0, 37, 100]) {
+    battery.settings.batteryLevel = level;
+    const markup = renderToStaticMarkup(createElement(FreeDesktopWidget, { ...props, widget: battery }));
+    assert.ok(markup.includes(`<strong>${level}%</strong>`));
+    assert.ok(markup.includes(`自定义装饰电量 ${level}%`));
+    assert.ok(markup.includes(`stroke-dasharray="${level} 100" stroke-linecap="round" opacity="${level === 0 ? 0 : 1}"`));
+  }
+  const disc = newDesktopTemplate('disc', 'disc:defaults');
+  delete disc.settings.vinylColor;
+  for (const opacity of [undefined, 0, 100]) {
+    disc.settings.vinylOpacity = opacity;
+    const markup = renderToStaticMarkup(createElement(FreeDesktopWidget, { ...props, widget: disc }));
+    const editor = renderToStaticMarkup(createElement(DesktopWidgetEditor, { widget: disc, characters: [], onSave: () => true, onClose: () => {} }));
+    assert.match(markup, /--vinyl-color:#ded3df/);
+    assert.ok(markup.includes(`--vinyl-opacity:${(opacity ?? 45) / 100}`));
+    assert.match(editor, /aria-label="唱片盘面颜色"[^>]*value="#ded3df"/);
+    assert.ok(editor.includes(`aria-label="唱片盘面不透明度" type="range" min="0" max="100" value="${opacity ?? 45}"`));
+  }
 });
 test('desktop templates use unique SVG clip IDs and ticket names can be changed without changing profile or contacts', () => {
   const heart = newDesktopTemplate('heart', 'clip:first'), cloud = newDesktopTemplate('cloud', 'clip:cloud');

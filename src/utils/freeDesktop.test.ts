@@ -4,7 +4,7 @@ import { ALL_APPS } from '../data/mockData';
 import { portableHomeBeauty } from './homeAppearance';
 import {
   canRemoveDesktopWidget, completeFreeDesktopLayout, defaultFreeDesktopLayout, DESKTOP_WIDGET_TEMPLATES, isFreeDesktopLayout, moveDesktopItem, newDesktopTemplate, REQUIRED_WIDGET_TYPES, WIDGET_TYPES,
-  newDesktopWidget, putDesktopWidget, removeDesktopWidget, type FreeDesktopLayout,
+  minimumWidgetSize, newDesktopWidget, putDesktopWidget, removeDesktopWidget, type FreeDesktopLayout,
 } from './freeDesktop';
 
 const appIds = (layout: FreeDesktopLayout) => [...layout.dock, ...layout.pages.flat().flatMap(item => item.kind === 'app' ? [item.appId] : [])].sort();
@@ -180,13 +180,14 @@ test('every widget supports an independent portable background, including legacy
     }
   }
 });
-test('all five original templates have editable portable defaults and keep all existing desktop apps', () => {
+test('all original templates have editable portable defaults and keep all existing desktop apps', () => {
   let layout = defaultFreeDesktopLayout();
   for (const template of DESKTOP_WIDGET_TEMPLATES) {
     const widget = newDesktopTemplate(template.id, `template:${template.id}`);
     assert.equal(widget.settings.template, template.id);
     assert.equal(widget.widgetType, template.widgetType);
-    assert.ok(widget.w >= 2 && widget.h >= 2);
+    const min = minimumWidgetSize(widget.widgetType, widget.settings.template);
+    assert.ok(widget.w >= min.w && widget.h >= min.h);
     widget.settings.images = ['data:image/webp;base64,AAAA'];
     widget.settings.title = '我的标题';
     widget.settings.text = '只保存玩家填写的文字';
@@ -195,6 +196,28 @@ test('all five original templates have editable portable defaults and keep all e
     const roundTrip: unknown = JSON.parse(JSON.stringify(layout));
     assert.ok(isFreeDesktopLayout(roundTrip));
     assert.deepEqual(roundTrip, layout);
+  }
+});
+test('reference widgets persist independent captions, locations and decorative battery boundaries', () => {
+  const original = defaultFreeDesktopLayout(), before = JSON.stringify(original);
+  for (const batteryLevel of [0, 85, 100]) {
+    const widget = newDesktopTemplate('battery', `battery:${batteryLevel}`);
+    widget.settings.batteryLevel = batteryLevel;
+    widget.settings.title = '我的能量';
+    const layout = putDesktopWidget(original, 1, widget);
+    assertComplete(layout);
+    assert.deepEqual(JSON.parse(JSON.stringify(layout)), layout);
+  }
+  const portrait = newDesktopTemplate('portrait', 'my:portrait');
+  Object.assign(portrait.settings, { subtitle: '自己的账号', location: '自定义地点', images: ['data:image/png;base64,AAAA'], backgroundImage: 'https://example.test/cover.png' });
+  const layout = putDesktopWidget(original, 1, portrait);
+  const portable = portableHomeBeauty({ themeId: 'test', wallpaperId: 'test', wallpapers: { lockScreen: '', homeScreen: '' }, appIcons: {}, freeDesktop: layout });
+  assert.deepEqual(JSON.parse(JSON.stringify(portable)).freeDesktop, layout);
+  assert.equal(JSON.stringify(original), before);
+  for (const patch of [{ batteryLevel: -1 }, { batteryLevel: 101 }, { batteryLevel: .5 }, { batteryLevel: '85' }, { batteryLevel: null }, { subtitle: 'x'.repeat(121) }, { location: 'x'.repeat(81) }]) {
+    const invalid = structuredClone(portrait);
+    Object.assign(invalid.settings, patch);
+    assert.throws(() => putDesktopWidget(original, 1, invalid), /无效/);
   }
 });
 test('template validation rejects unsupported, incompatible, undersized and invalid-name settings without mutating saved data', () => {

@@ -15,14 +15,21 @@ export const DESKTOP_WIDGET_TEMPLATES = [
   { id: 'ticket', widgetType: 'character', name: '双人纪念票', description: '两张头像，两个人的小小纪念', w: 4, h: 2 },
   { id: 'vinyl', widgetType: 'music', name: '慢慢听唱片', description: '换上封面，让喜欢的歌慢慢转', w: 4, h: 2 },
   { id: 'cloud', widgetType: 'clock', name: '云朵时钟', description: '让时间停靠在软绵绵的云上', w: 2, h: 2 },
+  { id: 'portrait', widgetType: 'character', name: '晴空名片', description: '封面、圆头像和签名，留一张自己的名片', w: 4, h: 3 },
+  { id: 'whisper', widgetType: 'character', name: '悄悄话胶囊', description: '两枚头像，两句只想放在眼前的话', w: 4, h: 2 },
+  { id: 'capsule', widgetType: 'clock', name: '时光胶囊', description: '头像陪着日期和时间，轻轻停在桌面上', w: 4, h: 1 },
+  { id: 'battery', widgetType: 'text', name: '心情充电站', description: '可自定义数值的电量圆环，为今天充点电', w: 2, h: 1 },
+  { id: 'disc', widgetType: 'music', name: '玻璃唱片', description: '没有封套的透明唱片，点中心播放音乐', w: 2, h: 2 },
 ] as const;
 export type DesktopWidgetTemplate = typeof DESKTOP_WIDGET_TEMPLATES[number]['id'];
+export const GLASS_DISC_APPEARANCE = { color: '#ded3df', opacity: 45 };
 export interface DesktopWidgetSettings {
   title: string; text: string; images: string[]; background: string; color: string;
   radius: number; fontSize: number; date: string; characterIds: string[]; includePlayer?: boolean; interval: number; backgroundImage?: string;
   template?: DesktopWidgetTemplate; personNames?: string[];
   vinylColor?: string; vinylOpacity?: number;
   opacity?: number;
+  subtitle?: string; location?: string; batteryLevel?: number;
 }
 interface Cell { x: number; y: number; w: number; h: number }
 export interface DesktopAppItem extends Cell { id: string; kind: 'app'; appId: AppId }
@@ -49,7 +56,8 @@ const dateKey = (value: unknown): value is string => {
 };
 export const overlaps = (a: Cell, b: Cell) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 export const minimumWidgetSize = (type: DesktopWidgetType, template?: DesktopWidgetTemplate) =>
-  template || ['calendar', 'music', 'profile'].includes(type) ? { w: 2, h: 2 } : { w: 1, h: 1 };
+  template === 'portrait' ? { w: 2, h: 3 } : template === 'battery' || template === 'capsule' ? { w: 2, h: 1 } :
+    template || ['calendar', 'music', 'profile'].includes(type) ? { w: 2, h: 2 } : { w: 1, h: 1 };
 
 function isWidgetSettings(value: unknown): value is DesktopWidgetSettings {
   return record(value) && typeof value.title === 'string' && value.title.length <= 80 &&
@@ -61,6 +69,9 @@ function isWidgetSettings(value: unknown): value is DesktopWidgetSettings {
     (value.vinylColor === undefined || color(value.vinylColor)) &&
     (value.vinylOpacity === undefined || integer(value.vinylOpacity, 0, 100)) &&
     (value.opacity === undefined || integer(value.opacity, 0, 100)) &&
+    (value.subtitle === undefined || (typeof value.subtitle === 'string' && value.subtitle.length <= 120)) &&
+    (value.location === undefined || (typeof value.location === 'string' && value.location.length <= 80)) &&
+    (value.batteryLevel === undefined || integer(value.batteryLevel, 0, 100)) &&
     color(value.background) && color(value.color) && integer(value.radius, 0, 48) &&
     integer(value.fontSize, 10, 64) && (value.date === '' || dateKey(value.date)) &&
     (value.includePlayer === undefined || typeof value.includePlayer === 'boolean') &&
@@ -149,11 +160,18 @@ export function newDesktopWidget(type: DesktopWidgetType, id: string): DesktopWi
 export function newDesktopTemplate(templateId: DesktopWidgetTemplate, id: string): DesktopWidgetItem {
   const template = DESKTOP_WIDGET_TEMPLATES.find(template => template.id === templateId)!;
   const widget = newDesktopWidget(template.widgetType, id);
+  const additions: Partial<Record<DesktopWidgetTemplate, Partial<DesktopWidgetSettings>>> = {
+    portrait: { title: '晴天来信', subtitle: '@把日子写成诗', text: '喜欢的事，要慢慢收藏。', location: '心动常驻地', background: '#fffafc', includePlayer: true },
+    whisper: { title: '把一点喜欢，放在这里。', text: '另一半，是你留给我的悄悄话。', background: '#f1edf2', radius: 48, includePlayer: true },
+    capsule: { title: '今天也要喜欢自己', text: '慢慢来，刚刚好', background: '#f1edf2', radius: 48 },
+    battery: { title: '剩余电量', text: '', batteryLevel: 85, background: '#f1edf2', radius: 48 },
+    disc: { title: '这一刻的旋律', text: '', vinylColor: GLASS_DISC_APPEARANCE.color, vinylOpacity: GLASS_DISC_APPEARANCE.opacity },
+  };
   return { ...widget, w: template.w, h: template.h, settings: { ...widget.settings, template: template.id,
     title: template.id === 'ticket' ? '只属于我们的纪念' : template.id === 'cloud' ? '今天也慢慢来' : template.id === 'vinyl' ? '慢慢听' : '把喜欢收藏',
     text: template.id === 'ticket' ? '两个人，一张通往日常的车票。' : template.id === 'vinyl' ? '为这一刻留一首歌。' : template.id === 'bow' ? '平凡的日子，也值得被记录。' : '',
     background: template.id === 'cloud' ? '#f0f5fa' : '#fff8f4', color: '#887184',
-    includePlayer: template.id === 'ticket', personNames: ['', ''] } };
+    includePlayer: template.id === 'ticket', personNames: ['', ''], ...additions[template.id] } };
 }
 export function defaultFreeDesktopLayout(): FreeDesktopLayout {
   const profile = newDesktopWidget('profile', 'widget:default-profile');

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { X, Upload, Trash2 } from 'lucide-react';
 import { compressImage } from '../utils/imageFile';
-import { DESKTOP_WIDGET_TEMPLATES, isWidgetImage, minimumWidgetSize, WIDGET_NAMES, type DesktopWidgetItem } from '../utils/freeDesktop';
+import { DESKTOP_WIDGET_TEMPLATES, GLASS_DISC_APPEARANCE, isWidgetImage, minimumWidgetSize, WIDGET_NAMES, type DesktopWidgetItem } from '../utils/freeDesktop';
 import type { DesktopCharacter } from './FreeDesktopWidgets';
 import { DesktopTemplateThumbnail } from './DesktopTemplateArt';
 
@@ -39,8 +39,10 @@ export function DesktopWidgetEditor({ widget, characters, onSave, onClose }: {
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   const patch = (settings: Partial<DesktopWidgetItem['settings']>) => { setDraft(current => ({ ...current, settings: { ...current.settings, ...settings } })); setError(''); };
   const min = minimumWidgetSize(draft.widgetType, draft.settings.template);
-  const vinyl = draft.settings.template === 'vinyl', ticket = draft.settings.template === 'ticket';
-  const hasImages = ['photo', 'character'].includes(draft.widgetType) || vinyl;
+  const disc = draft.settings.template === 'disc', portrait = draft.settings.template === 'portrait';
+  const whisper = draft.settings.template === 'whisper', capsule = draft.settings.template === 'capsule', battery = draft.settings.template === 'battery';
+  const vinyl = draft.settings.template === 'vinyl' || disc, ticket = draft.settings.template === 'ticket';
+  const hasImages = ['photo', 'character'].includes(draft.widgetType) || vinyl || capsule;
   const live = ['calendar', 'music'].includes(draft.widgetType);
   const templates = DESKTOP_WIDGET_TEMPLATES.filter(template => template.widgetType === draft.widgetType);
   const addImages = (images: string[]) => {
@@ -90,29 +92,39 @@ export function DesktopWidgetEditor({ widget, characters, onSave, onClose }: {
         <label>宽度 · {draft.w} 格<input aria-label="组件宽度" type="range" min={min.w} max={4} value={draft.w} onChange={event => setDraft(current => ({ ...current, w: Number(event.target.value) }))}/></label>
         <label>高度 · {draft.h} 格<input aria-label="组件高度" type="range" min={min.h} max={6} value={draft.h} onChange={event => setDraft(current => ({ ...current, h: Number(event.target.value) }))}/></label>
       </div></details>
-      {(!live || vinyl) && draft.widgetType !== 'profile' && <><label>标题<input maxLength={80} value={draft.settings.title} placeholder="取一个喜欢的名字" onChange={event => patch({ title: event.target.value })}/></label>
-      <label>文字<textarea maxLength={4000} rows={3} value={draft.settings.text} placeholder="写一点自己的话……" onChange={event => patch({ text: event.target.value })}/></label></>}
+      {(!live || vinyl) && draft.widgetType !== 'profile' && <><label>{portrait ? '显示名称' : whisper ? '上方胶囊文字' : disc ? '组件名称（不显示在桌面下方）' : '标题'}<input maxLength={80} value={draft.settings.title} placeholder="取一个喜欢的名字" onChange={event => patch({ title: event.target.value })}/></label>
+      {!disc && <label>{portrait ? '签名' : whisper ? '下方胶囊文字' : capsule ? '时间旁的小字' : '文字'}<textarea maxLength={4000} rows={3} value={draft.settings.text} placeholder="写一点自己的话……" onChange={event => patch({ text: event.target.value })}/></label>}</>}
+      {portrait && <div className="free-fields-two">
+        <label>账号／副标题<input maxLength={120} value={draft.settings.subtitle ?? ''} placeholder="可留空" onChange={event => patch({ subtitle: event.target.value })}/></label>
+        <label>地点文字<input maxLength={80} value={draft.settings.location ?? ''} placeholder="可留空，不读取真实定位" onChange={event => patch({ location: event.target.value })}/></label>
+      </div>}
+      {battery && <fieldset><legend>自己定义今天的电量</legend>
+        <label>电量数值 · {draft.settings.batteryLevel ?? 85}%<input aria-label="装饰电量数值" type="range" min={0} max={100} value={draft.settings.batteryLevel ?? 85} onChange={event => patch({ batteryLevel: Number(event.target.value) })}/></label>
+        <p className="free-help">这是可编辑的装饰数值，不读取设备真实电量，也不会自动变化。可以把它当作心情、能量或期待值。</p>
+      </fieldset>}
       {vinyl && <fieldset><legend>唱片盘面 · 颜色与透明度</legend>
-        <label>盘面颜色<input aria-label="唱片盘面颜色" type="color" value={draft.settings.vinylColor ?? '#31313d'} onChange={event => patch({ vinylColor: event.target.value })}/></label>
-        <label>盘面不透明度 · {draft.settings.vinylOpacity ?? 100}%<input aria-label="唱片盘面不透明度" type="range" min={0} max={100} value={draft.settings.vinylOpacity ?? 100} onChange={event => patch({ vinylOpacity: Number(event.target.value) })}/></label>
-        <p className="free-help">0% 为完全透明，100% 为不透明；只调整外圈盘面，中心图片、文字和播放按钮不受影响。预览会跟随变化，保存后应用到桌面。</p>
+        <label>盘面颜色<input aria-label="唱片盘面颜色" type="color" value={draft.settings.vinylColor ?? (disc ? GLASS_DISC_APPEARANCE.color : '#31313d')} onChange={event => patch({ vinylColor: event.target.value })}/></label>
+        <label>盘面不透明度 · {draft.settings.vinylOpacity ?? (disc ? GLASS_DISC_APPEARANCE.opacity : 100)}%<input aria-label="唱片盘面不透明度" type="range" min={0} max={100} value={draft.settings.vinylOpacity ?? (disc ? GLASS_DISC_APPEARANCE.opacity : 100)} onChange={event => patch({ vinylOpacity: Number(event.target.value) })}/></label>
+        <p className="free-help">{disc ? '只调整盘面的纹理与染色层，铺满盘面的图片和播放按钮不受影响；0% 为透明，100% 为不透明。' : '0% 为完全透明，100% 为不透明；只调整外圈盘面，中心图片、文字和播放按钮不受影响。'}预览会跟随变化，保存后应用到桌面。</p>
         <button type="button" className="free-vinyl-reset" onClick={() => patch({ vinylColor: undefined, vinylOpacity: undefined })}>恢复原始盘面</button>
       </fieldset>}
       {draft.widgetType === 'countdown' && <label>纪念日期<input type="date" required value={draft.settings.date} onChange={event => patch({ date: event.target.value })}/></label>}
-      {draft.widgetType === 'character' && <fieldset><legend>{ticket ? '头像来源（可选，也可只上传图片和填写称呼）' : '最多显示两位（含你），也可以只放合照'}</legend>
+      {draft.widgetType === 'character' && <fieldset><legend>{portrait ? '头像来源（选择自己或一位角色，上传图片优先）' : ticket || whisper ? '头像来源（可选，也可只上传图片和填写称呼）' : '最多显示两位（含你），也可以只放合照'}</legend>
         <label className="free-character-choice"><input type="checkbox" checked={!!draft.settings.includePlayer} onChange={event => {
+          if (portrait) { patch({ includePlayer: event.target.checked, ...(event.target.checked ? { characterIds: [] } : {}) }); return; }
           if (event.target.checked && draft.settings.characterIds.length > 1) { setError('显示你的头像时，最多再选择一位角色。'); return; }
           patch({ includePlayer: event.target.checked });
         }}/>显示我的头像</label>
         {characters.length ? characters.map(person => <label className="free-character-choice" key={person.id}><input type="checkbox" checked={draft.settings.characterIds.includes(person.id)} onChange={event => {
+          if (portrait) { patch({ includePlayer: false, characterIds: event.target.checked ? [person.id] : [] }); return; }
           if (event.target.checked && draft.settings.characterIds.length + (draft.settings.includePlayer ? 1 : 0) >= 2) { setError('最多显示两位，包含你自己的头像。'); return; }
           patch({ characterIds: event.target.checked ? [...draft.settings.characterIds, person.id] : draft.settings.characterIds.filter(id => id !== person.id) });
         }}/>{person.name}</label>) : <p className="free-help">通讯录还没有角色，可以先放一张合照。</p>}
       </fieldset>}
-      {ticket && <div className="free-fields-two">{[0, 1].map(index => <label key={index}>{index === 0 ? '左侧称呼' : '右侧称呼'}<input maxLength={80} placeholder="留空沿用资料姓名" value={draft.settings.personNames?.[index] ?? ''} onChange={event => {
+      {(ticket || whisper) && <div className="free-fields-two">{[0, 1].map(index => <label key={index}>{whisper ? index === 0 ? '上方头像称呼' : '下方头像称呼' : index === 0 ? '左侧称呼' : '右侧称呼'}<input maxLength={80} placeholder="留空沿用资料姓名" value={draft.settings.personNames?.[index] ?? ''} onChange={event => {
         const names = [...(draft.settings.personNames ?? ['', ''])]; names[index] = event.target.value; patch({ personNames: names });
       }}/></label>)}</div>}
-      {hasImages && <fieldset><legend>{vinyl ? '唱片中心图片（优先显示第一张）' : ticket ? '两位的头像（前两张依次替换；留空沿用资料头像）' : draft.widgetType === 'character' ? '合照（有图片时优先显示第一张）' : '相册（按顺序自动轮播）'}</legend>
+      {hasImages && <fieldset><legend>{disc ? '唱片图片（第一张铺满圆形盘面）' : vinyl ? '唱片中心图片（优先显示第一张）' : portrait || capsule ? '头像图片（第一张优先；留空沿用资料头像）' : ticket || whisper ? '两位的头像（前两张依次替换；留空沿用资料头像）' : draft.widgetType === 'character' ? '合照（有图片时优先显示第一张）' : '相册（按顺序自动轮播）'}</legend>
         <div className="free-photo-list">{draft.settings.images.map((image, index) => <span key={`${index}:${image.slice(0, 35)}`}><img src={image} alt={`图片 ${index + 1}`}/><button type="button" aria-label={`移除图片 ${index + 1}`} onClick={() => patch({ images: draft.settings.images.filter((_, position) => position !== index) })}><Trash2 size={12}/></button></span>)}</div>
         <label className="free-upload"><Upload size={15}/>{busy ? '正在处理图片…' : '上传图片'}<input type="file" accept="image/*" multiple disabled={busy} onChange={event => { void upload(event.target.files); event.currentTarget.value = ''; }}/></label>
         <div className="free-url-row"><input aria-label="组件图片链接" placeholder="或粘贴图片链接" value={imageUrl} onChange={event => setImageUrl(event.target.value)}/><button type="button" disabled={busy} onClick={() => {
@@ -122,8 +134,8 @@ export function DesktopWidgetEditor({ widget, characters, onSave, onClose }: {
         }}>添加</button></div>
         {draft.widgetType === 'photo' && <label>轮播间隔 · {draft.settings.interval} 秒<input type="range" min={3} max={60} value={draft.settings.interval} onChange={event => patch({ interval: Number(event.target.value) })}/></label>}
       </fieldset>}
-      <details className="free-widget-advanced" open={!draft.settings.template}><summary>背景与配色（可选）</summary><fieldset><legend>组件背景图</legend>
-        <p className="free-help">仅用于这一个组件，居中铺满；移除后恢复原背景。相册照片和合照仍显示在背景之上。</p>
+      <details className="free-widget-advanced" open={!draft.settings.template}><summary>背景与配色（可选）</summary><fieldset><legend>{portrait ? '名片封面图' : disc ? '备用唱片图片' : '组件背景图'}</legend>
+        <p className="free-help">{portrait ? '用作名片上半部封面，与头像独立；不会修改个人资料或角色原头像。' : disc ? '未上传唱片图片时，用这张图铺满圆形盘面，不会在唱片外增加底板。' : '仅用于这一个组件，居中铺满；移除后恢复原背景。相册照片和合照仍显示在背景之上。'}</p>
         {draft.settings.backgroundImage && <div className="free-photo-list"><span><img src={draft.settings.backgroundImage} alt="组件背景预览"/><button type="button" aria-label="移除背景图" disabled={busy} onClick={() => patch({ backgroundImage: '' })}><Trash2 size={12}/></button></span></div>}
         <label className="free-upload"><Upload size={15}/>{busy ? '正在处理图片…' : '上传背景图'}<input aria-label="上传组件背景图" type="file" accept="image/*" disabled={busy} onChange={event => { void upload(event.target.files, 'background'); event.currentTarget.value = ''; }}/></label>
         <div className="free-url-row"><input aria-label="组件背景图链接" placeholder="或粘贴背景图链接" value={backgroundUrl} onChange={event => setBackgroundUrl(event.target.value)}/><button type="button" disabled={busy} onClick={() => {
@@ -131,9 +143,9 @@ export function DesktopWidgetEditor({ widget, characters, onSave, onClose }: {
           patch({ backgroundImage: backgroundUrl.trim() }); setBackgroundUrl('');
         }}>设为背景</button></div>
       </fieldset>
-      {(!live || vinyl) && <div className="free-fields-two"><label>背景颜色<input type="color" value={draft.settings.background} onChange={event => patch({ background: event.target.value })}/></label><label>文字颜色<input type="color" value={draft.settings.color} onChange={event => patch({ color: event.target.value })}/></label></div>}
-      {!draft.settings.template && <label>圆角 · {draft.settings.radius}px<input aria-label="组件圆角" type="range" min={0} max={48} value={draft.settings.radius} onChange={event => patch({ radius: Number(event.target.value) })}/></label>}
-      {(!live || vinyl) && <label>文字大小 · {draft.settings.fontSize}px<input aria-label="组件字号" type="range" min={10} max={64} value={draft.settings.fontSize} onChange={event => patch({ fontSize: Number(event.target.value) })}/></label>}
+      {(!live || vinyl) && <div className="free-fields-two">{!disc && <label>背景颜色<input type="color" value={draft.settings.background} onChange={event => patch({ background: event.target.value })}/></label>}<label>{disc ? '播放按钮颜色' : '文字颜色'}<input type="color" value={draft.settings.color} onChange={event => patch({ color: event.target.value })}/></label></div>}
+      {(!draft.settings.template || portrait || whisper || capsule || battery) && <label>圆角 · {draft.settings.radius}px<input aria-label="组件圆角" type="range" min={0} max={48} value={draft.settings.radius} onChange={event => patch({ radius: Number(event.target.value) })}/></label>}
+      {(!live || vinyl) && !disc && <label>文字大小 · {draft.settings.fontSize}px<input aria-label="组件字号" type="range" min={10} max={64} value={draft.settings.fontSize} onChange={event => patch({ fontSize: Number(event.target.value) })}/></label>}
       </details>
       {['calendar', 'music', 'profile'].includes(draft.widgetType) && <p className="free-help">内容继续关联原有日历、播放器或个人资料；背景图只覆盖本组件的外观，不修改原有设置。日历和音乐的其他内部样式沿用原组件设置。</p>}
       {error && <p role="alert" className="free-error">{error}</p>}

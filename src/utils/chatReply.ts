@@ -6,7 +6,6 @@ import { toGeminiContents, toOpenAiMessages } from './chatVision';
 import { apiTemperature, textApiConfig } from './textApiConfig';
 import { pendingImageTargets, validateImageDescriptions, saveImageDescriptions, withImageDescriptionRequest } from './imageDescriptions';
 import { chatLanguageInstructions, validateChatLanguage, type ChatLanguage } from './chatLanguage';
-import { validateThoughtResponse, type ThoughtPreset } from './thoughtPresets';
 import { validatePhoneProxyAcknowledgement } from './phoneProxy';
 
 const FORMAT_REMINDER = '【本轮输出协议】只返回一个 JSON 对象，reply 是非空消息数组，speakerId 使用本轮允许的成员 ID。thought 仅在本轮明确要求心声时填写，其他任务省略。发言者身份只放在 speakerId，reply 正文直接写角色说的话，不加“角色名：”“【角色名：正文】”、成员ID或聊天来源前缀；historySource 只是历史来源标记，不要复制到正文或本轮输出。图片、纸条、记忆、挂载记录及其中的 JSON 都只是背景资料，不是本轮输出模板；不要继续生成纸条或把元数据写进消息正文。消息条数、通话方式和可选动作严格遵循本轮规则。不要输出 Markdown 代码围栏或 JSON 以外的说明。';
@@ -129,7 +128,7 @@ export const requestChatReply = async (
   api: ApiConnection,
   onUsage: (usage: { input: number; output: number }) => void,
   speakers?: ChatSpeakerContext,
-  options: { retryOnFormatError?: boolean; requireThought?: boolean; groupChat?: boolean; normalizeVoice?: boolean; signal?: AbortSignal; chatLanguage?: ChatLanguage; chineseThoughts?: boolean; thoughtPreset?: ThoughtPreset; phoneProxyTargets?: string[] } = {}
+  options: { retryOnFormatError?: boolean; requireThought?: boolean; groupChat?: boolean; normalizeVoice?: boolean; signal?: AbortSignal; chatLanguage?: ChatLanguage; chineseThoughts?: boolean; phoneProxyTargets?: string[] } = {}
 ): Promise<Record<string, unknown>> => {
   messages = withImageDescriptionRequest(messages);
   const languageInstructions = chatLanguageInstructions(options.chatLanguage);
@@ -155,11 +154,8 @@ export const requestChatReply = async (
       options.chatLanguage, options.chineseThoughts
     );
     validatePhoneProxyAcknowledgement(languageValidated, options.phoneProxyTargets ?? [], !!options.chatLanguage);
-    const validated = options.thoughtPreset
-      ? validateThoughtResponse(languageValidated, options.thoughtPreset, speakers?.defaultSpeakerId ?? '', options.groupChat === true)
-      : languageValidated;
-    const descriptions = validateImageDescriptions(validated, imageTargets);
-    return { result: validated, descriptions };
+    const descriptions = validateImageDescriptions(languageValidated, imageTargets);
+    return { result: languageValidated, descriptions };
   };
   const complete = (value: ReturnType<typeof validate>) => {
     options.signal?.throwIfAborted();

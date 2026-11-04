@@ -31,7 +31,7 @@ function MusicPanelLayer({ container, children }: { container?: HTMLElement; chi
 }
 
 export const ListenTogetherWidget: React.FC<{
-  modalContainer?: HTMLElement; backgroundImage?: string; variant?: 'vinyl'; artwork?: string; title?: string; note?: string; vinylColor?: string; vinylOpacity?: number;
+  modalContainer?: HTMLElement; backgroundImage?: string; variant?: 'vinyl' | 'disc'; artwork?: string; title?: string; note?: string; vinylColor?: string; vinylOpacity?: number;
 }> = ({ modalContainer, backgroundImage, variant, artwork, title, note, vinylColor, vinylOpacity }) => {
   const player = useMusicPlayer();
   const { appearance, patch } = useWidgetAppearance(MUSIC_APPEARANCE_KEY);
@@ -102,7 +102,16 @@ export const ListenTogetherWidget: React.FC<{
 
   return (
     <>
-      {variant === 'vinyl' ? <div className="free-vinyl-widget" data-desktop-widget>
+      {variant === 'disc' ? <div className="free-disc-widget" data-desktop-widget>
+        <button type="button" className="free-disc-open" aria-label={`管理唱片音乐${title ? `：${title}` : ''}`} onClick={openPanel}
+          title={title || track?.title || '添加或管理音乐'}>
+          <VinylRecord artwork={artwork || backgroundImage || appearance.disc} color={vinylColor} opacity={vinylOpacity} playing={player.isPlaying} fullArtwork/>
+        </button>
+        <button type="button" className="free-disc-play" onClick={togglePlayback} aria-label={player.isPlaying ? '暂停' : '播放'}>
+          {player.isPlaying ? <Pause size={15}/> : <Play size={15}/>}
+        </button>
+        {player.error && <span className="free-disc-error" role="alert">{player.error}</span>}
+      </div> : variant === 'vinyl' ? <div className="free-vinyl-widget" data-desktop-widget>
         <span className="free-vinyl-heading"><strong>{title || '慢慢听'}</strong>{note && <small>{note}</small>}</span>
         <button type="button" className="free-vinyl-sleeve" aria-label="添加或管理音乐" onClick={openPanel}
           style={background ? { backgroundImage: `url(${JSON.stringify(background)})` } : undefined}>

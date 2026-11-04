@@ -141,10 +141,8 @@ import { applySocialWrites, buildSocialInstructions, parseSocialActions, type So
 import { chatAvatarInstructions, prepareChatAvatar, resolveChatAvatar, withChatAvatarContext } from '../utils/chatAvatar';
 import { BUILTIN_STICKERS, CHAT_STICKERS_STORAGE_KEY, type ChatSticker } from '../utils/chatStickers';
 import { ChatNotification, ChatRuntimeSettings, getRoundThought, incomingCallsAllowed, isProactiveDue, permittedSticker, preserveRoundThoughts } from '../utils/chatRuntime';
-import { ThoughtWorkshop } from '../components/ThoughtWorkshop';
-import { ThoughtCard } from '../components/ThoughtCard';
 import { pendingPhoneProxyEvents, phoneProxyInstructions } from '../utils/phoneProxy';
-import { BUILTIN_THOUGHT_PRESETS, THOUGHT_PRESETS_KEY, isThoughtPresetList, isThoughtSnapshot, makeThoughtSnapshot, previousThoughtStates, readThoughtPresets, resolveThoughtPreset, roundThoughtSnapshot, thoughtInstructions, validateThoughtTemplate, type ThoughtPreset, type ThoughtSnapshot } from '../utils/thoughtPresets';
+import { isThoughtSnapshot, type ThoughtSnapshot } from '../utils/thoughtPresets';
 import { readBlockedInteractions, updateBlockedInteraction, type BlockedInteraction } from '../utils/blockedContact';
 import { AvatarFrameStyle, avatarFrameWrapStyle } from '../utils/avatarFrame';
 import {
@@ -349,7 +347,6 @@ interface GeneratedAiMessage {
   imageSubject?: ImageSubject;
   speakerId?: string;
   thought?: string;
-  thoughtStatus?: Record<string, string>;
   packetClaims?: PacketClaim[];
   intimateStatus?: ChatMessage['intimateStatus'];
   text: string;
@@ -1080,9 +1077,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
     return () => window.clearTimeout(timer);
   }, [activeChatId, activeMessageCount, activePaymentUpdates]);
   const [editingMessage, setEditingMessage] = useState<{ id: string; text: string } | null>(null);
-  const [activeThought, setActiveThought] = useState<{ name: string; thought: string; snapshot?: ThoughtSnapshot } | null>(null);
-  const [thoughtWorkshopOpen, setThoughtWorkshopOpen] = useState(false);
-  const [thoughtPresets, setThoughtPresets] = useState(readThoughtPresets);
+  const [activeThought, setActiveThought] = useState<{ name: string; thought: string } | null>(null);
   useEffect(() => {
     if (!activeChatId) return;
     let alive = true;
@@ -1802,25 +1797,6 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       ? update({ ...chat, messages: preserveRoundThoughts(chat.messages) }) : chat));
     return persistChats(nextChats);
   };
-  const saveThoughtLibrary = async (next: ThoughtPreset[]) => {
-    if (!isThoughtPresetList(next)) throw new Error('心声预设库格式无效。');
-    const latest = readStoredValue(CHATS_STORAGE_KEY, chats, isChatList);
-    const available = new Set([...BUILTIN_THOUGHT_PRESETS, ...next].map(preset => preset.id));
-    const updated = latest.map(chat => chat.thoughtPresetId && !available.has(chat.thoughtPresetId)
-      ? { ...chat, thoughtPresetId: 'classic' } : chat);
-    const changedChats = updated.some((chat, index) => chat !== latest[index]);
-    await setStorageItemsAtomically({ [THOUGHT_PRESETS_KEY]: next, ...(changedChats ? { [CHATS_STORAGE_KEY]: updated } : {}) });
-    setThoughtPresets(next);
-    if (changedChats) setChats(updated);
-  };
-  const applyThoughtPreset = async (chatId: string, id: string) => {
-    resolveThoughtPreset(id);
-    const latest = readStoredValue(CHATS_STORAGE_KEY, chats, isChatList);
-    if (!latest.some(chat => chat.id === chatId)) throw new Error('当前聊天已不存在，无法应用预设。');
-    const updated = latest.map(chat => chat.id === chatId ? { ...chat, thoughtPresetId: id } : chat);
-    await setStorageItemsAtomically({ [CHATS_STORAGE_KEY]: updated });
-    setChats(updated);
-  };
 
   const settlePayment = (action: 'received' | 'returned') => {
     try {
@@ -1871,7 +1847,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       if (nextName) setFavoriteNotice(`已进入「${nextName}」`);
       setVisibleMessageCount(HISTORY_PAGE_SIZE);
       setReactionMenuId('');
-      setReplyingTo(null); setEditingMessage(null); setActiveThought(null); setThoughtWorkshopOpen(false); setHiddenMessageIds([]);
+      setReplyingTo(null); setEditingMessage(null); setActiveThought(null); setHiddenMessageIds([]);
       setArchiveNameDraft('');
       setArchiveOpen(false);
     } catch (error) { setArchiveError(error instanceof Error ? error.message : '存档失败，请重试。'); }
@@ -3182,9 +3158,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       }
       const requestMessages = withChatResponseFormat(withChatAvatarContext(promptMessages,chat,avatarContext), responseInstructions);
       const replyLanguage = effectiveChatLanguage(chat);
-      const thoughtPreset = activeCallMode ? undefined : resolveThoughtPreset(chat.thoughtPresetId);
       const proxyEvents = chat.type === 'direct' ? pendingPhoneProxyEvents(chat.messages, contact.id) : [];
-      if (thoughtPreset) validateThoughtTemplate(thoughtPreset);
       requestMessages.splice(requestMessages.length - 1, 0, { role: 'system', content: chatLanguageInstructions(replyLanguage) });
       controller.signal.throwIfAborted();
       if (!activeCallMode) requestMessages.splice(requestMessages.length - 1, 0, { role: 'system', content: [
@@ -3194,12 +3168,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
           : { reply: [{ speakerId: contact.id, text: '消息正文', thought: '这位发言者的第一人称内心独白' }], speakerId: contact.id, thought: '主要角色的内心独白' }),
       ].join('\n') });
       else requestMessages.splice(requestMessages.length - 1, 0, { role: 'system', content: '【通话专用】本轮只需台词及视频允许的简短旁白，不生成独立 thought 心声。' });
-      if (thoughtPreset) requestMessages.splice(requestMessages.length - 1, 0, { role: 'system', content: thoughtInstructions(thoughtPreset) });
       if (proxyEvents.length) requestMessages.splice(requestMessages.length - 1, 0, { role: 'system', content: phoneProxyInstructions(proxyEvents) });
-      if (thoughtPreset) {
-        const previous = previousThoughtStates(thoughtPreset, chat.messages, chatMembers.map(member => member.id));
-        if (previous) requestMessages.splice(requestMessages.length - 1, 0, { role: 'system', content: previous });
-      }
       const estimatedInput = estimatePromptTokens(requestMessages);
       if (previewOnly) {
         setTokenPreview({ chatId: chat.id, input: estimatedInput });
@@ -3223,7 +3192,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         namesById: Object.fromEntries(chatMembers.map((member) => [
           member.id, [member.name, chat.groupNicknames?.[member.id] ?? ''],
         ])),
-      }, { requireThought: !activeCallMode, groupChat: chat.type !== 'direct', normalizeVoice: true, signal: controller.signal, chatLanguage: replyLanguage, chineseThoughts: true, thoughtPreset, phoneProxyTargets: [...new Set(proxyEvents.map(event => event.title))] });
+      }, { requireThought: !activeCallMode, groupChat: chat.type !== 'direct', normalizeVoice: true, signal: controller.signal, chatLanguage: replyLanguage, chineseThoughts: true, phoneProxyTargets: [...new Set(proxyEvents.map(event => event.title))] });
       controller.signal.throwIfAborted();
       let reply = '';
       let replyParts: GeneratedAiMessage[] = [];
@@ -3312,9 +3281,6 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
               ? stripVoiceMessagePrefix(text) : null;
             if (voiceText) { kind = 'voice'; text = voiceText; }
             const message: GeneratedAiMessage = { text, ...(kind ? { kind } : {}) };
-            if (part.thoughtStatus && typeof part.thoughtStatus === 'object' && !Array.isArray(part.thoughtStatus)) {
-              message.thoughtStatus = Object.fromEntries(Object.entries(part.thoughtStatus).filter((entry): entry is [string, string] => typeof entry[1] === 'string'));
-            }
             if (replyLanguage && (!kind || kind === 'text' || kind === 'voice') && typeof part.translation === 'string' && part.translation.trim()) {
               message.chatTranslation = { language: replyLanguage, text: part.translation.trim(), sourceText: text };
             }
@@ -3518,15 +3484,6 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
           ...(intimateAction.monthlyLimit ? { amount: intimateAction.monthlyLimit.toFixed(2) } : {}),
         });
       }
-      const thoughtSnapshots = new Map<string, ThoughtSnapshot>();
-      if (thoughtPreset) {
-        const ids = new Set([speakerId, ...replyParts.filter(part => part.kind !== 'narration').map(part => part.speakerId ?? speakerId)]);
-        for (const id of ids) {
-          const part = replyParts.find(item => item.kind !== 'narration' && (item.speakerId ?? speakerId) === id);
-          thoughtSnapshots.set(id, makeThoughtSnapshot(thoughtPreset, part?.thoughtStatus ?? result.thoughtStatus,
-            part?.thought ?? (id === speakerId ? thought : ''), getChatParticipantName(chat, id), new Date().toISOString()));
-        }
-      }
       if (generatedGift && !regenerate && !speakerId.startsWith('npc:')) {
         const marketStorageKey = 'yyphone:taobao-market-products';
         const rawProducts = readStorageString(marketStorageKey);
@@ -3629,7 +3586,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       const replyMessages: ChatMessage[] = deliverableParts.map((part, index) => {
         const partSpeakerId = part.speakerId ?? speakerId;
         const speakerName = getChatParticipantName(chat, partSpeakerId);
-        const { kind: partKind, quoteText, speakerId: _partSpeakerId, thought: partThought, thoughtStatus: _partStatus, imageSubject: _imageSubject, ...rest } = part;
+        const { kind: partKind, quoteText, speakerId: _partSpeakerId, thought: partThought, imageSubject: _imageSubject, ...rest } = part;
         const quoted = findQuotedMessage(chat.messages, quoteText);
         if (partKind === 'narration') {
           return {
@@ -3654,7 +3611,6 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
             ? `“${speakerName}” 拍了拍你${part.text && part.text.length <= 12 ? ` ${part.text}` : ''}`
             : part.text,
           thought: activeCallMode ? '' : partThought ?? (partSpeakerId === speakerId ? thought : ''),
-          ...(thoughtPreset ? { thoughtCard: thoughtSnapshots.get(partSpeakerId) } : {}),
           createdAt: new Date(replyTimestamp + index).toISOString(),
         };
       });
@@ -4472,7 +4428,6 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                         onClick={() => handleAvatarTap(message.senderId, () => setActiveThought({
                           name: sender?.name ?? '角色',
                           thought: getRoundThought(message, activeChat.messages) || '这轮消息没有记录角色心声。',
-                          snapshot: roundThoughtSnapshot(message, activeChat.messages),
                         }))}
                         aria-label={`查看${sender?.name ?? '角色'}的心声`}
                         style={{
@@ -4816,8 +4771,6 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                 }}
                 className="yy-chat-composer relative flex items-end gap-2 border-t border-white/70 bg-white/80 p-3"
               >
-                <button type="button" aria-label="心声工坊" onClick={() => { setThoughtPresets(readThoughtPresets()); setThoughtWorkshopOpen(true); }}
-                  className="yy-chat-attachments flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600"><Heart className="h-4 w-4" /></button>
                 <span className="shrink-0 rounded-lg bg-slate-200 px-2 py-2 text-[10px] font-semibold text-slate-600">旁白</span>
                 <textarea
                   ref={chatComposerTextareaRef}
@@ -5024,9 +4977,6 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                   >
                     <div className="grid min-h-[132px] grid-cols-4 content-start gap-y-4">
                     {([
-                      { page: 1, title: '心声工坊', icon: Heart, run: () => {
-                        setComposerOpen(false); setThoughtPresets(readThoughtPresets()); setThoughtWorkshopOpen(true);
-                      } },
                       { page: 0, title: '照片', icon: ImagePlus, run: () => openAttachment('photo') },
                       { page: 0, title: '拍摄', icon: Camera, run: () => openAttachment('camera') },
                       { page: 0, title: '视频通话', icon: Video, run: () => {
@@ -8237,19 +8187,10 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         </div>
       )}
       {activeThought && (
-        <div className="yy-thought-overlay absolute inset-0 z-[80] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={event => { if (event.target === event.currentTarget) setActiveThought(null); }}>
-          {activeThought.snapshot ? (
-            <section role="dialog" aria-modal="true" aria-label={`${activeThought.name}的心声`} className="flex max-h-full w-full max-w-sm flex-col">
-              <div className="flex shrink-0 justify-end pb-2">
-                <button type="button" aria-label="关闭心声" onClick={() => setActiveThought(null)} className="flex h-11 w-11 items-center justify-center rounded-full bg-white/90 text-slate-500 shadow-sm hover:bg-white">
-                  <X className="h-5 w-5" />
-                </button>
-              </div>
-              <div className="min-h-0 overflow-y-auto overscroll-contain">
-                <ThoughtCard snapshot={activeThought.snapshot} />
-              </div>
-            </section>
-          ) : <section role="dialog" aria-modal="true" aria-labelledby="thought-title" className="max-h-full w-full max-w-sm space-y-3 overflow-y-auto rounded-3xl bg-white p-5 shadow-2xl">
+        <div className="absolute inset-0 z-[80] flex items-center justify-center bg-black/40 p-5 backdrop-blur-sm"
+          style={{ paddingTop: 'calc(var(--safe-top, 0px) + 20px)', paddingBottom: 'calc(var(--safe-bottom, 0px) + 20px)' }}
+          onClick={event => { if (event.target === event.currentTarget) setActiveThought(null); }}>
+          <section role="dialog" aria-modal="true" aria-labelledby="thought-title" className="max-h-full w-full max-w-sm space-y-3 overflow-y-auto rounded-3xl bg-white p-5 shadow-2xl">
             <header className="flex items-center justify-between">
               <h2 id="thought-title" className="text-base font-bold text-[#2C4A5C]">{activeThought.name}的心声</h2>
               <button type="button" aria-label="关闭" onClick={() => setActiveThought(null)} className="flex h-8 w-8 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100">
@@ -8257,12 +8198,9 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
               </button>
             </header>
             <p className="whitespace-pre-wrap rounded-2xl bg-slate-50 p-4 text-sm leading-relaxed text-slate-700">{activeThought.thought}</p>
-          </section>}
+          </section>
         </div>
       )}
-      {thoughtWorkshopOpen && activeChat && <ThoughtWorkshop key={activeChat.id} presets={thoughtPresets}
-        selectedId={activeChat.thoughtPresetId} characterName={getChatParticipantName(activeChat, activeChat.participantIds[0])}
-        onSaveLibrary={saveThoughtLibrary} onApply={id => applyThoughtPreset(activeChat.id, id)} onClose={() => setThoughtWorkshopOpen(false)} />}
       {guessRecordPreview && (
         <div className="absolute inset-0 z-[85] flex items-center justify-center bg-black/40 p-5 backdrop-blur-sm"
           onClick={(event) => { if (event.target === event.currentTarget) setGuessRecordPreview(null); }}>
