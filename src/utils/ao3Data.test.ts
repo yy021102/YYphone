@@ -228,6 +228,40 @@ test('passerby CP writing uses player identity but never sends private chats, me
   assert.ok(work.tags.includes('CP向')); assert.ok(isAo3State(updateAo3(initialAo3State(), { type: 'discover', work })));
   assert.equal(readStorageString('yyphone:wechat-chats'), chats); assert.equal(readStorageString('yyphone:memory-items'), memories); assert.deepEqual(readAo3Draft(), draft);
 });
+test('passerby fiction prioritizes the active persona real name rather than online nickname, without changing character-author naming', async () => {
+  setupDiscovery();
+  writeStoredValue('pocketos:personas', { activeProfileId: 'player', profiles: [
+    { id: 'other', realName: '不应使用的另一人设真名' },
+    { id: 'player', realName: '许知夏', nickname: '今天也想睡觉', identity: '书店店员' },
+  ] });
+  const names: string[] = [];
+  mock.method(globalThis, 'fetch', async (_url: unknown, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body)), input = JSON.parse(body.messages.at(-1).content);
+    names.push(input.player.name);
+    assert.doesNotMatch(JSON.stringify(input), /不应使用的另一人设真名/);
+    assert.match(body.messages[0].content, /不从聊天称呼推断并改成玩家网名/);
+    return Response.json({ choices: [{ message: { content: JSON.stringify(discoveryResult({ body: `${input.player.name}走进了书店。` })) } }] });
+  });
+  const passerby = await generateAo3Discovery(discoveryOptions({ includeExperiences: false }), '桌面昵称', new AbortController().signal);
+  assert.equal(passerby.relationship, '林渡 / 许知夏');
+  assert.deepEqual(passerby.characters, ['林渡', '许知夏']);
+  assert.equal(passerby.generation?.playerName, '许知夏');
+  assert.match(passerby.chapters[0].body, /许知夏/);
+  assert.doesNotMatch(passerby.chapters[0].body, /今天也想睡觉|桌面昵称/);
+  const character = await generateAo3Discovery(discoveryOptions({ authorType: 'character', includeExperiences: false }), '桌面昵称', new AbortController().signal);
+  assert.equal(character.generation?.playerName, '今天也想睡觉');
+  assert.deepEqual(names, ['许知夏', '今天也想睡觉']);
+});
+test('changing real name during passerby generation rejects stale fiction', async () => {
+  setupDiscovery();
+  writeStoredValue('pocketos:personas', { activeProfileId: 'p', profiles: [{ id: 'p', realName: '许知夏', nickname: '网名' }] });
+  mock.method(globalThis, 'fetch', async () => {
+    writeStoredValue('pocketos:personas', { activeProfileId: 'p', profiles: [{ id: 'p', realName: '新真名', nickname: '网名' }] });
+    return Response.json({ choices: [{ message: { content: JSON.stringify(discoveryResult()) } }] });
+  });
+  await assert.rejects(generateAo3Discovery(discoveryOptions(), 'user', new AbortController().signal), /人设已变化/);
+  assert.equal(readAo3State().works.length, 0);
+});
 test('character CP writing optionally uses only current main-account experiences, then keeps a consistent anonymous pen name', async () => {
   setupDiscovery(); const requests: Record<string, unknown>[] = [];
   mock.method(globalThis, 'fetch', async (_url: unknown, options?: RequestInit) => {

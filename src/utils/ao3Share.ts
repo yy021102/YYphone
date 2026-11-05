@@ -1,4 +1,4 @@
-import { isAo3Work, type Ao3Work } from './ao3Data';
+import { ao3ChapterComments, isAo3Work, type Ao3Work } from './ao3Data';
 import { readAo3Characters } from './ao3Generation';
 import { mutateDirectChat } from './coupleSpaceData';
 
@@ -7,10 +7,12 @@ export function ao3ShareContent(work: Ao3Work): string {
 
     `标题：${work.title}\n作者：${work.author}\n同人圈：${work.fandom}\n关系：${work.relationship}\n分级：${work.rating}\n预警：${work.warning}`,
     `简介：${work.summary}`, ...(work.notes ? [`作者的话：${work.notes}`] : []),
-    ...work.chapters.map((c, i) => `【第 ${i + 1} 章：${c.title}】\n${c.body}`),
-    '【读者评论】', ...work.comments.map(c => {
-      const parent = work.comments.find(p => p.id === c.replyTo);
-      return `${parent ? `【回复 ${parent.author}：${parent.body.slice(0, 100)}】\n` : ''}${c.author}：${c.body}`;
+    ...work.chapters.flatMap((chapter, i) => {
+      const comments = ao3ChapterComments(work, i);
+      return [`【第 ${i + 1} 章：${chapter.title}】\n${chapter.body}`, `【第 ${i + 1} 章读者评论】`, ...comments.map(c => {
+        const parent = comments.find(p => p.id === c.replyTo);
+        return `${parent ? `【回复 ${parent.author}：${parent.body.slice(0, 100)}】\n` : ''}${c.author}：${c.body}`;
+      })];
     })].join('\n\n');
 }
 /** Share an independent snapshot, never a live reference or a character's hidden identity. */

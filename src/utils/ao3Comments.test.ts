@@ -6,9 +6,10 @@ import { Ao3Comments } from '../components/Ao3Comments';
 import { clearDbStorage } from './dbStorage';
 import { readStorageString, writeStoredValue } from './localStorage';
 import { ao3ShareContent } from './ao3Share';
-import { createAo3CommentPlan, generateAo3Comments, parseAo3Comments, type Ao3CommentPlan } from './ao3Comments';
+import { createAo3CommentPlan, generateAo3ChapterUpdate, generateAo3Comments, parseAo3Comments, type Ao3CommentPlan } from './ao3Comments';
+import { exportAo3Data, importAo3Data, clearAo3Data } from './ao3Settings';
 import { generateAo3Discovery } from './ao3Discovery';
-import { initialAo3State, isAo3Work, newAo3Draft, publishAo3Draft, readAo3State, updateAo3, writeAo3State, type Ao3Comment, type Ao3Work } from './ao3Data';
+import { ao3ChapterComments, initialAo3State, isAo3Work, newAo3Draft, publishAo3Draft, readAo3State, updateAo3, writeAo3State, type Ao3Comment, type Ao3Work } from './ao3Data';
 
 const values = new Map<string, string>();
 const storage = { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => values.set(key, value),
@@ -111,7 +112,7 @@ test('extra generation appends exactly three comments with a guaranteed characte
   let calls = 0;
   mockComments((input, plan) => {
     calls++; assert.equal(plan.count, 3); assert.equal(plan.requiredSpeakerId, 'character:a');
-    assert.deepEqual((input.work as Ao3Work).chapters, work.chapters);
+    assert.deepEqual((input.work as Ao3Work).chapters, work.chapters.slice(0, 1));
     assert.deepEqual(input.comments, [original]);
     assert.ok(plan.participants.some(p => p.persona.includes('沉静')));
     assert.doesNotMatch(JSON.stringify(input), /不应发送的私聊|不应发送的其他角色人设|不应出现的NPC/);
@@ -214,4 +215,116 @@ test('comment UI exposes replies, role badges and append controls, escapes user 
   const unrelated = renderToStaticMarkup(createElement(Ao3Comments, { work: { ...work, generation: undefined, characters: [] }, userName: '小满', onAction: () => true }));
   assert.match(unrelated, /disabled=""[^>]*>更新评论/);
   assert.match(unrelated, /无关联角色时，你仍可留言/);
+});
+
+test('chapter comments are isolated in display, AI context, replies, shared snapshots and backups; legacy comments remain in chapter one', async () => {
+  let work = setup();
+  const user: Ao3Comment = { ...original, id: 'chapter-two-user', chapter: 1, author: '玩家网名', body: '第二章的约定实现了！', identity: { type: 'user', id: 'user' } };
+  work = { ...work, comments: [...work.comments, user] };
+  writeAo3State({ ...initialAo3State(), works: [work] });
+  mockComments((input, plan) => {
+    assert.equal(plan.chapter, 1); assert.equal(plan.replyTo, user.id);
+    assert.deepEqual(input.comments, [user]);
+    assert.deepEqual(input.currentChapter, { number: 2, ...work.chapters[1] });
+    assert.deepEqual((input.work as Ao3Work).chapters, work.chapters);
+  });
+  const replies = await generateAo3Comments(work, 'reply', new AbortController().signal, user.id, 1);
+  assert.ok(replies.every(c => c.chapter === 1 && c.replyTo === user.id));
+  const state = updateAo3(readAo3State(), { type: 'comments', work, comments: replies });
+  work = state.works[0]; writeAo3State(state);
+  assert.deepEqual(ao3ChapterComments(work, 0), [original]);
+  assert.equal(ao3ChapterComments(work, 1).length, 4);
+  const markup = (chapter: number) => renderToStaticMarkup(createElement(Ao3Comments, { work, chapter, userName: '玩家网名', onAction: () => true }));
+  assert.match(markup(0), /喜欢初章的结尾/); assert.doesNotMatch(markup(0), /第二章的约定实现了/);
+  assert.match(markup(1), /第二章的约定实现了/); assert.doesNotMatch(markup(1), /喜欢初章的结尾/);
+  assert.match(markup(1), /第 2 章评论/);
+  assert.equal(work.comments.find(c => c.id === user.id)?.author, '玩家网名');
+  const snapshot = ao3ShareContent(work);
+  assert.ok(snapshot.indexOf('【第 1 章读者评论】') < snapshot.indexOf(original.body));
+  assert.ok(snapshot.indexOf(original.body) < snapshot.indexOf('【第 2 章：'));
+  assert.ok(snapshot.indexOf('【第 2 章读者评论】') < snapshot.indexOf(user.body));
+  const backup = exportAo3Data(); await clearAo3Data(); await importAo3Data(backup);
+  assert.deepEqual(readAo3State(), state);
+  await assert.rejects(generateAo3Comments(work, 'reply', new AbortController().signal, user.id, 0), /属于本章/);
+  await assert.rejects(generateAo3Comments(work, 'extra', new AbortController().signal, undefined, 2), /章节不存在/);
+  assert.throws(() => updateAo3(state, { type: 'comment', id: work.id, comment: { ...user, id: 'cross', chapter: 0, replyTo: user.id } }), /回复关系无效/);
+  assert.throws(() => updateAo3(state, { type: 'comments', work, comments: [{ ...user, id: 'missing-chapter', chapter: 2 }] }), /回复关系无效/);
+  assert.equal(isAo3Work({ ...work, comments: [{ ...user, chapter: -1 }] }), false);
+  assert.equal(isAo3Work({ ...work, comments: [{ ...user, chapter: 0.5 }] }), false);
+  assert.equal(isAo3Work({ ...work, comments: [{ ...user, chapter: 2 }] }), false);
+});
+
+test('earlier chapter AI comments never receive future text or another chapter discussion', async () => {
+  const work = setup();
+  work.comments.push({ ...original, id: 'future', chapter: 1, body: '后章不应泄露的评论' });
+  mockComments((input, plan) => {
+    assert.equal(plan.chapter, 0);
+    assert.doesNotMatch(JSON.stringify(input), /后章不应泄露的评论|他们终于重逢/);
+    assert.deepEqual(input.comments, [original]);
+  });
+  const comments = await generateAo3Comments(work, 'extra', new AbortController().signal, undefined, 0);
+  assert.ok(comments.every(c => c.chapter === 0));
+});
+
+test('追更 produces a new chapter and five independent comments, then commits them together without replacing old discussions', async () => {
+  const work = setup('character'); let calls = 0;
+  mock.method(Math, 'random', () => 0.1);
+  mock.method(globalThis, 'fetch', async (_url: unknown, options?: RequestInit) => {
+    calls++;
+    const input = JSON.parse(JSON.parse(String(options?.body)).messages.at(-1).content);
+    if (calls === 1) {
+      assert.equal(input.chapter, 3);
+      return Response.json({ choices: [{ message: { content: '{"chapterTitle":"新的约定","body":"第三章的新正文。"}' } }] });
+    }
+    assert.equal(input.commentPlan.count, 5); assert.equal(input.commentPlan.chapter, 2);
+    assert.equal(input.currentChapter.body, '第三章的新正文。');
+    assert.deepEqual(input.comments, []);
+    assert.equal(input.work.chapters.length, 3);
+    return completion(generated(input.commentPlan));
+  });
+  const update = await generateAo3ChapterUpdate(work, new AbortController().signal);
+  assert.equal(calls, 2); assert.equal(update.comments.length, 5);
+  assert.ok(update.comments.every(c => c.chapter === 2));
+  assert.equal(update.comments[1].replyTo, update.comments[0].id);
+  assert.equal(update.comments[1].author, work.author);
+  assert.deepEqual(readAo3State().works[0], work);
+  let state = updateAo3(readAo3State(), { type: 'kudos', id: work.id });
+  state = updateAo3(state, { type: 'continue', work, ...update, now });
+  assert.equal(state.works[0].chapters.length, 3);
+  assert.deepEqual(ao3ChapterComments(state.works[0], 0), [original]);
+  assert.equal(ao3ChapterComments(state.works[0], 1).length, 0);
+  assert.equal(ao3ChapterComments(state.works[0], 2).length, 5);
+  assert.equal(state.works[0].kudos, 1);
+  writeAo3State(state); assert.deepEqual(readAo3State(), state);
+  assert.throws(() => updateAo3({ ...initialAo3State(), works: [work] }, { type: 'continue', work, ...update,
+    comments: update.comments.map(c => ({ ...c, chapter: 0 })), now }), /回复跨章/);
+});
+
+test('failed or cancelled new-chapter comments never partially save a chapter or overwrite old comments', async () => {
+  const work = setup(); let calls = 0;
+  const controller = new AbortController();
+  mock.method(globalThis, 'fetch', async () => {
+    calls++;
+    if (calls % 2 === 1) return Response.json({ choices: [{ message: { content: '{"chapterTitle":"未保存的续章","body":"新章正文"}' } }] });
+    return completion([]);
+  });
+  await assert.rejects(generateAo3ChapterUpdate(work, controller.signal), /五条评论/);
+  assert.deepEqual(readAo3State().works[0], work);
+  mock.method(globalThis, 'fetch', async () => {
+    calls++;
+    if (calls % 2 === 1) return Response.json({ choices: [{ message: { content: '{"chapterTitle":"未保存的续章","body":"新章正文"}' } }] });
+    controller.abort(); return completion([]);
+  });
+  await assert.rejects(generateAo3ChapterUpdate(work, controller.signal));
+  assert.deepEqual(readAo3State().works[0], work);
+});
+
+test('removing trailing chapters through the editor removes only their comments and keeps retained chapter threads valid', () => {
+  const source = setup();
+  const work = { ...source, owned: true, comments: [...source.comments, { ...original, id: 'second', chapter: 1 }] };
+  const draft = { ...newAo3Draft(work.author), workId: work.id, title: work.title, chapters: [work.chapters[0]] };
+  const published = publishAo3Draft(draft, work);
+  const state = updateAo3({ ...initialAo3State(), works: [work] }, { type: 'publish', work: published });
+  assert.ok(isAo3Work(state.works[0]));
+  assert.deepEqual(state.works[0].comments, [original]);
 });

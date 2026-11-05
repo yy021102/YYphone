@@ -8,7 +8,7 @@ export type Ao3Rating = typeof AO3_RATINGS[number];
 export type Ao3Category = typeof AO3_CATEGORIES[number];
 export interface Ao3Chapter { title: string; body: string }
 export interface Ao3Comment {
-  id: string; author: string; body: string; createdAt: string; replyTo?: string;
+  id: string; author: string; body: string; createdAt: string; replyTo?: string; chapter?: number;
   identity?: { type: 'character' | 'npc' | 'user'; id: string };
 }
 export interface Ao3Generation {
@@ -42,19 +42,25 @@ const row = (value: unknown): value is Record<string, unknown> => !!value && typ
 const str = (value: unknown, max: number): value is string => typeof value === 'string' && value.length <= max;
 const strings = (value: unknown) => Array.isArray(value) && value.length <= 30 && value.every(v => str(v, 200));
 const date = (value: unknown) => typeof value === 'string' && value.length <= 40 && Number.isFinite(Date.parse(value));
-const count = (value: unknown) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+const count = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+// Legacy archive-wide comments belong to the first chapter.
+export const ao3CommentChapter = (comment: Ao3Comment) => comment.chapter ?? 0;
+export const ao3ChapterComments = (work: Pick<Ao3Work, 'comments'>, chapter: number) => work.comments.filter(c => ao3CommentChapter(c) === chapter);
+const commentsWithinChapters = (comments: Ao3Comment[], chapterCount: number) => comments.every(c => ao3CommentChapter(c) < chapterCount);
 export const isAo3Comment = (c: unknown): c is Ao3Comment => row(c) &&
   str(c.id, 200) && !!c.id && str(c.author, 200) && !!c.author.trim() &&
   str(c.body, 5000) && !!c.body.trim() && date(c.createdAt) &&
+  (c.chapter === undefined || count(c.chapter) && c.chapter < 100) &&
   (c.replyTo === undefined || str(c.replyTo, 200) && !!c.replyTo) &&
   (c.identity === undefined || row(c.identity) && ['character', 'npc', 'user'].includes(String(c.identity.type)) &&
     str(c.identity.id, 200) && !!c.identity.id);
 export function isAo3Comments(value: unknown): value is Ao3Comment[] {
   if (!Array.isArray(value)) return false;
-  const ids = new Set<string>();
+  const ids = new Map<string, number>();
   for (const comment of value) {
-    if (!isAo3Comment(comment) || ids.has(comment.id) || comment.replyTo && !ids.has(comment.replyTo)) return false;
-    ids.add(comment.id);
+    if (!isAo3Comment(comment) || ids.has(comment.id) ||
+      comment.replyTo && ids.get(comment.replyTo) !== ao3CommentChapter(comment)) return false;
+    ids.set(comment.id, ao3CommentChapter(comment));
   }
   return true;
 }
@@ -72,7 +78,7 @@ export const isAo3Work = (value: unknown): value is Ao3Work => row(value) &&
   chapters(value.chapters) && typeof value.complete === 'boolean' && typeof value.owned === 'boolean' &&
   date(value.createdAt) && date(value.updatedAt) && count(value.kudos) && count(value.hits) &&
   (value.generation === undefined || isGeneration(value.generation)) &&
-  isAo3Comments(value.comments);
+  isAo3Comments(value.comments) && commentsWithinChapters(value.comments, value.chapters.length);
 export function isAo3State(value: unknown): value is Ao3State {
   if (!row(value) || value.version !== 1 || !Array.isArray(value.works) || !value.works.every(isAo3Work)) return false;
   const works = value.works;
@@ -127,7 +133,7 @@ export type Ao3Action = { type: 'kudos' | 'bookmark' | 'later'; id: string } |
   { type: 'read'; id: string; chapter: number; now: string; countHit?: boolean } |
   { type: 'comment'; id: string; comment: Ao3Comment } | { type: 'publish'; work: Ao3Work } | { type: 'discover'; work: Ao3Work } |
   { type: 'comments'; work: Ao3Work; comments: Ao3Comment[] } |
-  { type: 'continue'; work: Ao3Work; chapter: Ao3Chapter; now: string } | { type: 'delete'; id: string };
+  { type: 'continue'; work: Ao3Work; chapter: Ao3Chapter; comments?: Ao3Comment[]; now: string } | { type: 'delete'; id: string };
 /** Pure archive operations: one kudos per reader, chapter-aware history, no chat/memory side effects. */
 export function updateAo3(state: Ao3State, action: Ao3Action): Ao3State {
   if (action.type === 'comments') {
@@ -136,7 +142,7 @@ export function updateAo3(state: Ao3State, action: Ao3Action): Ao3State {
       throw new Error('作品已修改或删除，评论未追加，请重新生成。');
     }
     const comments = [...work.comments, ...action.comments];
-    if (!action.comments.length || !isAo3Comments(comments)) throw new Error('评论内容或回复关系无效，原评论已保留。');
+    if (!action.comments.length || !isAo3Comments(comments) || comments.some(c => ao3CommentChapter(c) >= work.chapters.length)) throw new Error('评论内容或回复关系无效，原评论已保留。');
     return { ...state, works: state.works.map(w => w.id === work.id ? { ...w, comments } : w) };
   }
   if (action.type === 'continue') {
@@ -144,7 +150,10 @@ export function updateAo3(state: Ao3State, action: Ao3Action): Ao3State {
     if (!work || work.updatedAt !== action.work.updatedAt || JSON.stringify(work.chapters) !== JSON.stringify(action.work.chapters)) {
       throw new Error('作品已修改或删除，请重新打开作品后追更。');
     }
-    const next = { ...work, chapters: [...work.chapters, action.chapter], complete: false, updatedAt: action.now };
+    const newComments = action.comments ?? [];
+    if (action.comments && (newComments.length !== 5 || newComments.some(c => ao3CommentChapter(c) !== work.chapters.length ||
+      c.replyTo && !newComments.some(parent => parent.id === c.replyTo)))) throw new Error('新章的五条评论不完整或回复跨章，原文已保留。');
+    const next = { ...work, chapters: [...work.chapters, action.chapter], comments: [...work.comments, ...newComments], complete: false, updatedAt: action.now };
     if (!isAo3Work(next) || !action.chapter.body.trim()) throw new Error('续章内容不完整或已达 100 章上限，原文已保留。');
     return { ...state, works: state.works.map(w => w.id === work.id ? next : w) };
   }
@@ -157,7 +166,8 @@ export function updateAo3(state: Ao3State, action: Ao3Action): Ao3State {
     if (!isAo3Work(action.work) || !action.work.owned) throw new Error('作品内容不完整，请检查后再发布。');
     const existing = state.works.find(w => w.id === action.work.id);
     if (existing && !existing.owned) throw new Error('只能编辑自己的作品。');
-    return { ...state, works: existing ? state.works.map(w => w.id === action.work.id ? { ...action.work, kudos: w.kudos, hits: w.hits, comments: w.comments, createdAt: w.createdAt } : w) : [action.work, ...state.works],
+    return { ...state, works: existing ? state.works.map(w => w.id === action.work.id ? { ...action.work, kudos: w.kudos, hits: w.hits,
+      comments: w.comments.filter(c => ao3CommentChapter(c) < action.work.chapters.length), createdAt: w.createdAt } : w) : [action.work, ...state.works],
       history: state.history.map(h => h.workId === action.work.id ? { ...h, chapter: Math.min(h.chapter, action.work.chapters.length - 1) } : h) };
   }
   const work = state.works.find(w => w.id === action.id);
@@ -177,7 +187,7 @@ export function updateAo3(state: Ao3State, action: Ao3Action): Ao3State {
   }
   if (action.type === 'comment') {
     const c = action.comment;
-    if (!isAo3Comments([...work.comments, c])) throw new Error('评论内容或回复关系无效，请检查后再发表。');
+    if (!isAo3Comments([...work.comments, c]) || ao3CommentChapter(c) >= work.chapters.length) throw new Error('评论内容或回复关系无效，请检查后再发表。');
     return { ...state, works: state.works.map(w => w.id === action.id ? { ...w, comments: [...w.comments, c] } : w) };
   }
   if (action.type !== 'read' || !Number.isInteger(action.chapter) || action.chapter < 0 || action.chapter >= work.chapters.length || !date(action.now)) return state;
@@ -195,5 +205,5 @@ export function publishAo3Draft(draft: Ao3Draft, existing?: Ao3Work): Ao3Work {
     rating: draft.rating, category: draft.category, warning: draft.warning.trim() || 'Creator Chose Not To Use Archive Warnings',
     summary: draft.summary.trim(), notes: draft.notes.trim(), chapters: draft.chapters.map((c, i) => ({ title: c.title.trim() || `Chapter ${i + 1}`, body: c.body.trim() })),
     complete: draft.complete, language: existing?.language ?? '中文', createdAt: existing?.createdAt ?? now, updatedAt: now,
-    kudos: existing?.kudos ?? 0, hits: existing?.hits ?? 0, comments: existing?.comments ?? [], owned: true };
+    kudos: existing?.kudos ?? 0, hits: existing?.hits ?? 0, comments: existing?.comments.filter(c => ao3CommentChapter(c) < draft.chapters.length) ?? [], owned: true };
 }

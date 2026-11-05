@@ -18,11 +18,12 @@ type Row = Record<string, unknown>;
 const row = (v: unknown): v is Row => !!v && typeof v === 'object' && !Array.isArray(v);
 const text = (v: unknown, max: number) => typeof v === 'string' ? v.trim().slice(0, max) : '';
 const rows = (key: string) => readStoredValue<unknown[]>(key, [], Array.isArray).filter(row);
-function playerProfile(fallback: string) {
+function playerProfile(fallback: string, preferRealName = false) {
   const collection = readStoredValue('pocketos:personas', {}, row);
   const profile = Array.isArray(collection.profiles) ? collection.profiles.find(p => row(p) && p.id === collection.activeProfileId) : undefined;
   const p = row(profile) ? profile : {};
-  return { id: text(p.id, 200), name: text(p.nickname, 100) || text(p.realName, 100) || text(fallback, 100) || 'user',
+  const realName = text(p.realName, 100), nickname = text(p.nickname, 100);
+  return { id: text(p.id, 200), name: (preferRealName ? realName || nickname : nickname || realName) || text(fallback, 100) || 'user',
     identity: text(p.identity, 2000), personality: text(p.personality, 2000), background: text(p.background, 2000), speakingStyle: text(p.speakingStyle, 1000) };
 }
 function pairingExperiences(charId: string) {
@@ -46,6 +47,7 @@ export const AO3_DISCOVERY_PROMPT = [
   'topic=fandom：写大众动漫、小说、游戏、影视等作品的原创同人。指定 fandom 或 CP 时遵从；未指定则从熟悉的作品中自行选择，标明真实作品名和人物关系，不要始终变成无关的原创陌生人故事。不要照抄原作段落，不假装查过实时热度。',
   'topic=couple：故事的核心 CP 必须是给定的角色和 player，按给定身份、性格及世界观塑造两个人。可以换用 AU、改编事件或虚构情节，不能把玩家替换为无个性的万人迷或把不同角色写成同一种霸总。',
   '路人写角色与 player 的 CP：像嗑到了这对的同人作者，在故事里产粮，文风可俏皮也可细腻。不写“我是一名路人现在来磕CP”式说明，不冒充偷听过他们的私聊；用可见的互动想象恋爱可能性，不声称知道真实秘密或内心。小说正文采用第三人称，不强制围观口吻贯穿正文。',
+  '路人作者作品中的玩家人物姓名以 player.name 为准，它优先取自玩家人设的真名。正文、标题、简介、CP 标签及评论谈及故事人物时都使用此姓名，不从聊天称呼推断并改成玩家网名；玩家在评论区的账号昵称是另一回事。',
   '角色匿名写自己与 player 的同人：有梦向和偷偷创作的私人感。角色可以把自己化成一个人物，把未说出口的愿望、不肯承认的偏爱、遗憾或顾虑寄托在虚构情节里。不是公开告白信，也不是简单复述聊天。不要替 player 预设无条件服从、原谅、亲密意愿，给双方真实的主动性。笔名不要直接暴露真名；作者的话可留下含蓄的小破绽，不能写“我是AI生成的角色同人”。',
   'direction 是用户指定的情节、设定、禁忌和文风，应优先满足；为空就自行选一个具体而有新意的切口，不需要追问。tone 为自由发挥时自行决定情绪走向；不要把所有故事都写成相同的雨夜重逢。已存在的标题见 avoidTitles，尽量换题材和展开方式。',
   '正文约 1500–2500 汉字，段落长短错落，具体场景、自然对话与人物选择共同推动情节。要有起伏、转折和余味，不以三大段概述草草收尾，不用空泛模板抒情，不输出大纲、创作解释、心声字段或未完待续。',
@@ -63,7 +65,7 @@ export async function generateAo3Discovery(options: Ao3DiscoveryOptions, userNam
   const needsCharacter = options.authorType === 'character' || options.topic === 'couple';
   const character = needsCharacter ? readAo3Characters().find(c => c.id === options.charId) : undefined;
   if (needsCharacter && !character) throw new Error('请先选择一位通讯录中的角色。');
-  const player = playerProfile(userName);
+  const player = playerProfile(userName, options.authorType === 'passerby');
   const generation: Ao3Generation = { authorType: options.authorType, topic: options.topic,
     ...(options.authorType === 'character' ? { authorCharId: character!.id, authorCharName: character!.name.slice(0, 200) } : {}),
     ...(options.topic === 'couple' ? { pairCharId: character!.id, pairCharName: character!.name.slice(0, 200), playerName: player.name } : {}) };
@@ -86,7 +88,7 @@ export async function generateAo3Discovery(options: Ao3DiscoveryOptions, userNam
   }), { json: true, maxTokens: 8500, includeGlobalWorldBooks: false, signal });
   signal.throwIfAborted();
   if (character && (!readAo3Characters().some(c => c.id === character.id) || activeMemoryArchive(character.id) !== archive)) throw new Error('角色或聊天存档已变化，请重新生成。');
-  if (player && JSON.stringify(playerProfile(userName)) !== JSON.stringify(player)) throw new Error('当前玩家人设已变化，请重新生成。');
+  if (player && JSON.stringify(playerProfile(userName, options.authorType === 'passerby')) !== JSON.stringify(player)) throw new Error('当前玩家人设已变化，请重新生成。');
   if (experiences) {
     const current = pairingExperiences(character!.id);
     if (current.chatId !== experiences.chatId || current.revision !== experiences.revision) throw new Error('聊天存档已变化，请重新生成。');

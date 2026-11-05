@@ -1,17 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
 import { Square } from 'lucide-react';
 import { ao3CommentCharacters, generateAo3Comments } from '../utils/ao3Comments';
-import { readAo3State, type Ao3Action, type Ao3Comment, type Ao3Work } from '../utils/ao3Data';
+import { ao3ChapterComments, readAo3State, type Ao3Action, type Ao3Comment, type Ao3Work } from '../utils/ao3Data';
 
-export function Ao3Comments({ work, userName, onAction }: {
-  work: Ao3Work; userName: string; onAction: (action: Ao3Action) => boolean;
+export function Ao3Comments({ work, chapter = 0, userName, onAction }: {
+  work: Ao3Work; chapter?: number; userName: string; onAction: (action: Ao3Action) => boolean;
 }) {
   const [text, setText] = useState(''), [replyTo, setReplyTo] = useState('');
   const [busy, setBusy] = useState(false), [error, setError] = useState('');
   const [retry, setRetry] = useState<{ mode: 'extra' | 'reply'; target?: string } | null>(null);
   const request = useRef<AbortController | null>(null), input = useRef<HTMLTextAreaElement>(null);
   useEffect(() => () => request.current?.abort(), []);
-  const target = work.comments.find(c => c.id === replyTo);
+  const chapterComments = ao3ChapterComments(work, chapter);
+  const target = chapterComments.find(c => c.id === replyTo);
   const hasCharacter = ao3CommentCharacters(work).length > 0;
   const generate = async (mode: 'extra' | 'reply', targetId?: string) => {
     if (request.current) return;
@@ -20,7 +21,7 @@ export function Ao3Comments({ work, userName, onAction }: {
     try {
       const current = readAo3State().works.find(w => w.id === work.id);
       if (!current) throw new Error('作品已不存在，无法生成评论。');
-      const comments = await generateAo3Comments(current, mode, controller.signal, targetId);
+      const comments = await generateAo3Comments(current, mode, controller.signal, targetId, chapter);
       if (controller.signal.aborted || request.current !== controller) return;
       if (!onAction({ type: 'comments', work: current, comments })) throw new Error('新评论未能保存，原评论已保留，请重试。');
       setRetry(null);
@@ -33,14 +34,14 @@ export function Ao3Comments({ work, userName, onAction }: {
   const post = () => {
     if (!text.trim() || request.current) return;
     const comment: Ao3Comment = { id: crypto.randomUUID(), author: userName, body: text.trim(), createdAt: new Date().toISOString(),
-      identity: { type: 'user', id: 'user' }, ...(replyTo ? { replyTo } : {}) };
+      chapter, identity: { type: 'user', id: 'user' }, ...(replyTo ? { replyTo } : {}) };
     if (!onAction({ type: 'comment', id: work.id, comment })) return;
     setText(''); setReplyTo(''); void generate('reply', comment.id);
   };
-  const roots = work.comments.filter(c => !c.replyTo);
+  const roots = chapterComments.filter(c => !c.replyTo);
   const rootIds = new Map<string, string>();
   const threads = new Map<string, Ao3Comment[]>();
-  for (const comment of work.comments) {
+  for (const comment of chapterComments) {
     const rootId = comment.replyTo ? rootIds.get(comment.replyTo)! : comment.id;
     rootIds.set(comment.id, rootId);
     const thread = threads.get(rootId) ?? [];
@@ -50,7 +51,8 @@ export function Ao3Comments({ work, userName, onAction }: {
     setReplyTo(comment.id); input.current?.focus(); input.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   };
   return <div className="ao3-comment-section">
-    <h3>评论 / Comments</h3>
+    <h3>第 {chapter + 1} 章评论 / Comments ({chapterComments.length})</h3>
+    <p className="ao3-help">评论与回复仅属于本章；更新评论会追加，不覆盖已有留言。</p>
     <div className="ao3-actions">
       <button className="ao3-button" disabled={busy || !hasCharacter} onClick={() => void generate('extra')}>更新评论</button>
       {busy && <button className="ao3-button" onClick={() => { request.current?.abort(); request.current = null; setBusy(false); setError('已停止生成，已发表的留言和原评论均已保留。'); }}><Square size={12}/>停止生成评论</button>}
@@ -60,7 +62,7 @@ export function Ao3Comments({ work, userName, onAction }: {
     {error && <p className="ao3-notice ao3-error" role="alert">{error}</p>}
     {!busy && retry && <button className="ao3-button" onClick={() => void generate(retry.mode, retry.target)}>重试生成{retry.mode === 'reply' ? '回复' : '评论'}</button>}
     {roots.map(root => <div className="ao3-comment-thread" key={root.id}>{threads.get(root.id)!.map(comment => {
-      const parent = work.comments.find(c => c.id === comment.replyTo);
+      const parent = chapterComments.find(c => c.id === comment.replyTo);
       const isAuthor = comment.identity?.type === 'character' && work.generation?.authorType === 'character' && work.generation.authorCharId === comment.identity.id;
       const badge = isAuthor ? '作者' : comment.identity?.type === 'character' ? '角色' : comment.identity?.type === 'npc' ? 'NPC' : comment.identity?.type === 'user' ? '你' : '';
       return <article className={parent ? 'ao3-comment-reply' : ''} key={comment.id} id={`ao3-comment-${comment.id}`}>
@@ -68,7 +70,7 @@ export function Ao3Comments({ work, userName, onAction }: {
         {parent && <div className="ao3-reply-context">回复 {parent.author}：{parent.body.slice(0, 100)}{parent.body.length > 100 ? '…' : ''}</div>}
         <p>{comment.body}</p><div className="ao3-comment-actions">
           <button className="ao3-link" disabled={busy} onClick={() => chooseReply(comment)}>回复</button>
-          {comment.identity?.type === 'user' && !work.comments.some(c => c.replyTo === comment.id && c.identity?.type !== 'user') &&
+          {comment.identity?.type === 'user' && !chapterComments.some(c => c.replyTo === comment.id && c.identity?.type !== 'user') &&
             <button className="ao3-link" disabled={busy} onClick={() => void generate('reply', comment.id)}>生成回复</button>}
         </div>
       </article>;

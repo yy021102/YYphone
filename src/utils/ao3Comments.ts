@@ -1,17 +1,17 @@
 import { ao3Preferences } from './ao3Settings';
 import { requestConfiguredAiText } from './aiApi';
 import { parseAiJson } from './aiResponse';
-import { readAo3Characters } from './ao3Generation';
+import { generateAo3Continuation, readAo3Characters } from './ao3Generation';
 import { readCharacterNpcs } from './characterNpcs';
 import { getWorldBookEntriesForContacts } from './worldBookPrompt';
-import { isAo3Comments, isAo3Work, type Ao3Comment, type Ao3Work } from './ao3Data';
+import { ao3ChapterComments, isAo3Comments, isAo3Work, type Ao3Comment, type Ao3Work } from './ao3Data';
 
 interface CommentParticipant {
   speakerId: string; identity: NonNullable<Ao3Comment['identity']>;
   name: string; persona: string; isAuthor: boolean;
 }
 export interface Ao3CommentPlan {
-  count: number; participants: CommentParticipant[]; requiredSpeakerId?: string; replyTo?: string;
+  count: number; participants: CommentParticipant[]; requiredSpeakerId?: string; replyTo?: string; chapter?: number;
 }
 type CommentSource = Pick<Ao3Work, 'generation' | 'characters' | 'comments'>;
 const row = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
@@ -44,6 +44,7 @@ export function createAo3CommentPlan(work: CommentSource, count: number, forceCh
 
 export const AO3_COMMENT_RULES = [
   'commentPlan 决定本次评论参与者与条数。未列入 participants 的角色或 NPC 不得冒名出场，不得新造 NPC。普通读者 speakerId="reader"，网名不得冒充角色、NPC 或作者。',
+  '评论区按章节独立。currentChapter 是本次评论对象；work.chapters 只含截至本章的正文，不得剧透后续章节。围绕本章新情节发表评论，不把旧章评论搬过来；只能回复所给本章 comments 或本批新评论。故事人物姓名沿用正文，不替换成玩家账号网名。',
   '必须恰好生成 commentPlan.count 条评论；若有 requiredSpeakerId，至少一条必须由该身份发言。其余可为不同路人、已提供的角色或 NPC，自然讨论正文细节，不照搬已有评论，不用固定模板。',
   '每条评论格式 {"speakerId":"reader 或 participants 中的 speakerId","author":"路人网名；已知身份可省略","body":"评论正文","replyTo":"可选：已有评论 id 或本批前面第 N 条的 new:N（从 0 开始）"}。回复只能指向已存在或本批较早的评论。',
   'commentPlan.replyTo 存在时，本批每条必须 replyTo 该 id，直接回应 user 的这条评论或回复，而不是只泛泛评论文章；不要替 user 发言，不要求 user 表态。',
@@ -82,7 +83,7 @@ export function parseAo3Comments(value: unknown, plan: Ao3CommentPlan, existing:
     if (!name || name.length > 200 || (!participant && (plan.participants.some(p => p.name === name) || name === author))) {
       throw new Error('评论署名无效或冒充已知身份，请重新生成。');
     }
-    comments.push({ id: crypto.randomUUID(), author: name, body: item.body.trim(), createdAt: new Date().toISOString(),
+    comments.push({ id: crypto.randomUUID(), author: name, body: item.body.trim(), createdAt: new Date().toISOString(), chapter: plan.chapter ?? 0,
       ...(participant ? { identity: participant.identity } : {}), ...(replyTo ? { replyTo } : {}) });
     speakers.add(String(speakerId));
   }
@@ -100,20 +101,31 @@ export function assertAo3CommentParticipants(plan: Ao3CommentPlan) {
   }
 }
 
-export async function generateAo3Comments(work: Ao3Work, mode: 'extra' | 'reply', signal: AbortSignal, replyTo?: string): Promise<Ao3Comment[]> {
+export async function generateAo3Comments(work: Ao3Work, mode: 'extra' | 'reply' | 'chapter', signal: AbortSignal, replyTo?: string, chapter = 0): Promise<Ao3Comment[]> {
   signal.throwIfAborted();
   if (!isAo3Work(work)) throw new Error('作品内容不完整，无法生成评论。');
-  if (mode === 'reply' && !work.comments.some(c => c.id === replyTo && c.identity?.type === 'user')) throw new Error('找不到你的留言，请重新打开作品。');
-  const plan = createAo3CommentPlan(work, 3, mode === 'extra', mode === 'reply' ? replyTo : undefined);
+  if (!Number.isInteger(chapter) || chapter < 0 || chapter >= work.chapters.length) throw new Error('评论章节不存在，请重新打开作品。');
+  const existing = ao3ChapterComments(work, chapter);
+  if (mode === 'reply' && !existing.some(c => c.id === replyTo && c.identity?.type === 'user')) throw new Error('找不到你的留言，请确认留言属于本章并重新打开作品。');
+  const plan = { ...createAo3CommentPlan(work, mode === 'chapter' ? 5 : 3, mode === 'extra', mode === 'reply' ? replyTo : undefined), chapter };
   const characterIds = plan.participants.filter(p => p.identity.type === 'character').map(p => p.identity.id);
   const raw = await requestConfiguredAiText(`你正在模拟私人 AO3 文库的评论区，只生成评论，不改写作品。\n${AO3_COMMENT_RULES}\n只返回 {"comments":[评论对象]}。\n${ao3Preferences()}`,
     JSON.stringify({ work: { title: work.title, author: work.author, fandom: work.fandom, relationship: work.relationship,
       characters: work.characters, tags: work.tags, rating: work.rating, warning: work.warning, summary: work.summary,
-      notes: work.notes, chapters: work.chapters, generation: work.generation },
-    comments: work.comments, commentPlan: plan, worldBooks: getWorldBookEntriesForContacts(characterIds) }),
+      notes: work.notes, chapters: work.chapters.slice(0, chapter + 1), generation: work.generation },
+    currentChapter: { number: chapter + 1, ...work.chapters[chapter] },
+    comments: existing, commentPlan: plan, worldBooks: getWorldBookEntriesForContacts(characterIds) }),
     { json: true, maxTokens: 3000, includeGlobalWorldBooks: false, signal });
   signal.throwIfAborted();
   assertAo3CommentParticipants(plan);
   const result = parseAiJson(raw);
-  return parseAo3Comments(row(result) ? result.comments : undefined, plan, work.comments, work.author);
+  return parseAo3Comments(row(result) ? result.comments : undefined, plan, existing, work.author);
+}
+
+export async function generateAo3ChapterUpdate(work: Ao3Work, signal: AbortSignal) {
+  const chapter = await generateAo3Continuation(work, signal);
+  const next = { ...work, chapters: [...work.chapters, chapter] };
+  const comments = await generateAo3Comments(next, 'chapter', signal, undefined, work.chapters.length);
+  signal.throwIfAborted();
+  return { chapter, comments };
 }
