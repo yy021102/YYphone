@@ -25,6 +25,13 @@ test('actual prompt retains personality and deep discussion guidance while calen
   assert.match(text, /独立、直率/);
   assert.ok(text.includes(CHAT_COMMUNICATION_RULES));
   assert.match(text, /不必等玩家问/); assert.match(text, /不临时编造创伤、前任或共同回忆/);
+  assert.match(text, /【深聊与小作文：何时展开】/);
+  assert.match(text, /不凭单个情绪关键词/);
+  assert.match(text, /玩家明确说“多说一点”/);
+  assert.match(text, /在一条 text 消息中写较长、完整、有正常标点的小作文/);
+  assert.match(text, /真正愿意说出口的想法应放在 reply 中/);
+  assert.match(text, /允许长，不强制长；允许深入，不强行分析/);
+  assert.match(text, /不受日常短句与少标点习惯限制/);
   const calendar = buildCalendarContext(['a'], () => '林渡', true, new Date('2026-10-31T12:00:00'));
   assert.match(calendar!, /目前正处于经期/); assert.match(calendar!, /不是本轮必须执行的关怀任务/);
   assert.equal(buildCalendarContext(['unrelated'], () => '别人', true, new Date('2026-10-31T12:00:00')), null);
@@ -60,4 +67,26 @@ test('custom lower bounds and deliberate fixed counts remain respected, and grou
   assert.match(chatReplyPacing({ min: 3, max: 3 }), /恰好 3 条/);
   assert.match(chatReplyPacing({ min: 1, max: 5 }, true), /全群消息总数/);
   assert.doesNotMatch(chatReplyPacing({ min: 2, max: 4 }), /reply 只放一条即可/);
+  assert.match(chatReplyPacing({ min: 1, max: 5 }), /消息条数不等于句数或段数/);
+});
+
+test('a long punctuated deep-talk message preserves its full content and paragraphs in a single reply bubble', async () => {
+  const paragraph = '我认真想了想，你提起的那件事，我并不想急着替你下结论。对我来说，能够坦白自己的犹豫，也是一种信任。';
+  const text = `${paragraph.repeat(12)}\n\n${paragraph.repeat(12)}`;
+  let instructions = '';
+  mock.method(globalThis, 'fetch', async (_url: unknown, init: RequestInit) => {
+    const payload = JSON.parse(String(init.body));
+    instructions = payload.messages.filter((m: { role: string }) => m.role === 'system').map((m: { content: string }) => m.content).join('\n');
+    return Response.json({ choices: [{ message: { content: JSON.stringify({ reply: [{ kind: 'text', text }], thought: '这次想把话认真说清楚。', speakerId: 'a' }) } }] });
+  });
+  const prompt = withChatResponseFormat(buildPrompt({ chatId: 'chat', currentInput: '想和你认真聊聊，多说一点，可以写长一些。', historyLimit: 30 }),
+    `${chatReplyPacing({ min: 1, max: 5 })}\n${CHAT_THOUGHT_STYLE}`);
+  const result = await requestChatReply(prompt, { endpoint: 'https://ai.invalid/v1', apiKey: 'test', model: 'test' }, () => {},
+    { defaultSpeakerId: 'a', namesById: { a: ['林渡'] } }, { requireThought: true });
+  assert.ok(Array.isArray(result.reply));
+  assert.equal(result.reply.length, 1);
+  assert.equal(result.reply[0].text, text);
+  assert.match(instructions, /【深聊与小作文：何时展开】/);
+  assert.match(instructions, /1～5 条/);
+  assert.match(instructions, /消息条数不等于句数或段数/);
 });

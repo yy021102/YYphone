@@ -51,7 +51,7 @@ function InspectionViewer({ charId, chatId, actorName, avatarUrl, userName, user
   const reactionPanel = useRef<HTMLElement>(null);
   const request = useRef<AbortController | null>(null); const alive = useRef(true); const started = useRef(false); const ending = useRef(false);
   const contacts = readInspectionContacts(charId, options);
-  const home = readPage('home');
+  const home = finished ? session.steps.find(step => step.page.id === 'home')?.page ?? readPage('home') : readPage('home');
   const show = (tab: Tab, detail: string | null = null) => { const value = { tab, detail }; routeRef.current = value; setRoute(value); };
   const pulse = (x: number, y: number, swipe = false) => setTouch({ x, y, id: ++touchId.current, swipe });
   const tap = async (target: string, signal: AbortSignal) => {
@@ -101,7 +101,7 @@ function InspectionViewer({ charId, chatId, actorName, avatarUrl, userName, user
   const finish = async () => {
     if (!prepared.current.length) { request.current?.abort(); onClose(); return; }
     if (ending.current || finished) return; ending.current = true; request.current?.abort(); setAutomatic(false); setBusy(false); setSaving(true); setError('');
-    try { await mutation.current?.catch(() => {}); await finishPhoneInspection(state.current, actorName, userName); if (!alive.current) return; onChanged(); setActions(readInspectionActions(state.current.id)); setFinished(true); }
+    try { await mutation.current?.catch(() => {}); await finishPhoneInspection(state.current, actorName, userName); if (!alive.current) return; onChanged(); setActions(readInspectionActions(state.current.id)); setNextId(''); setTouch(null); setFinished(true); }
     catch (e) { if (alive.current) setError(e instanceof Error ? e.message : '保存失败，请重试'); }
     finally { ending.current = false; if (alive.current) setSaving(false); }
   };
@@ -144,11 +144,28 @@ function InspectionViewer({ charId, chatId, actorName, avatarUrl, userName, user
   useEffect(() => { if (!automatic || busy || saving || finished || !nextId || error) return; const timer = window.setTimeout(() => void visit(nextId), 3000); return () => window.clearTimeout(timer); }, [automatic, busy, saving, finished, nextId, error]);
   useEffect(() => { if (!touch) return; const timer = window.setTimeout(() => setTouch(null), 900); return () => window.clearTimeout(timer); }, [touch]);
   const detail = route.detail !== null;
+  const reviewIndex = session.steps.findIndex(step => step.page.id === (route.detail ?? 'home'));
+  const review = (index: number) => {
+    const step = session.steps[index];
+    if (!finished || !step) return;
+    const id = step.page.id;
+    const tab: Tab = id === 'remark' || id.startsWith('contact:') ? 'contacts' : id === 'moments' ? 'discover' : 'home';
+    setPage(step.page); setComments([...step.comments]); show(tab, id === 'home' ? null : id);
+    if (scroll.current) scroll.current.scrollTop = 0;
+  };
   const title = detail ? (page.kind === 'remark' || page.kind === 'contact' ? '详细资料' : page.title) : tabs.find(t => t.id === route.tab)!.label;
   if (preparing) return <section className="phone-inspection inspection-preparing" role="dialog" aria-modal="true" aria-label="准备反查手机"><button type="button" className="inspection-prepare-cancel" onClick={() => { request.current?.abort(); onClose(); }}>取消</button><div className="inspection-preparing-orbit"><Avatar name={actorName} src={avatarUrl} large /><span /><span /></div><h2>{actorName}接过了手机</h2><p>{error || '稍等片刻，故事正在展开…'}</p>{error && <button type="button" className="inspection-prepare-retry" onClick={() => void prepare()}><RefreshCw size={14} />重新准备</button>}</section>;
   return <section className="phone-inspection" role="dialog" aria-modal="true" aria-label="反查手机">
-    <header className="inspection-header"><Smartphone size={17} /><div><h2>反查手机</h2><p>{actorName}{finished ? '归还了手机' : '正在翻看'}</p></div><button type="button" disabled={saving} onClick={() => finished ? onClose() : void finish()}>{saving ? '保存中…' : finished ? '返回聊天' : '结束查看'}</button></header>
-    <div className="inspection-screen" ref={screen} onPointerDownCapture={event => { const bounds = screen.current!.getBoundingClientRect(); pulse(event.clientX - bounds.left, event.clientY - bounds.top); }}>
+    <header className="inspection-header"><Smartphone size={17} /><div><h2>反查手机</h2><p>{actorName}{finished ? '归还了手机 · 可回看，退出前不会关闭' : '正在翻看'}</p></div><button type="button" disabled={saving} onClick={() => finished ? onClose() : void finish()}>{saving ? '保存中…' : finished ? '返回聊天' : '结束查看'}</button></header>
+    {finished && <div className="inspection-review" role="group" aria-label="回看本次查手机">
+      <label>回看本次查看<select aria-label="选择回看页面" value={reviewIndex} onChange={event => review(Number(event.target.value))}>
+        {reviewIndex < 0 && <option value={-1}>选择已看页面</option>}
+        {session.steps.map((step, index) => <option key={step.page.id} value={index}>{index + 1}. {step.page.title}</option>)}
+      </select></label>
+      <div><button type="button" disabled={reviewIndex <= 0} onClick={() => review(reviewIndex - 1)}>上一页</button>
+        <button type="button" disabled={reviewIndex >= session.steps.length - 1} onClick={() => review(reviewIndex + 1)}>下一页</button></div>
+    </div>}
+    <div className="inspection-screen" ref={screen} onPointerDownCapture={event => { if (finished) return; const bounds = screen.current!.getBoundingClientRect(); pulse(event.clientX - bounds.left, event.clientY - bounds.top); }}>
       <div className="inspection-phone-nav"><button type="button" data-inspection-target="back" aria-label="返回微信列表" disabled={!detail || saving || finished || !!operation} onClick={() => manualTab(route.tab)}>{detail && <ArrowLeft size={23} />}</button><h3>{title === '消息' ? '微信' : title}</h3><span data-inspection-target={detail && page.kind === 'moments' ? 'compose-moment' : undefined}>{detail ? page.kind === 'moments' ? <Camera size={22} /> : <MoreHorizontal size={22} /> : <Plus size={22} />}</span></div>
       <div ref={scroll} className={`inspection-page ${detail ? `is-${page.kind}` : `is-root-${route.tab}`}`} key={route.detail ?? route.tab}>
         {!detail && route.tab === 'home' && <>{!home.lines.length && <p className="inspection-empty">暂无聊天</p>}{home.lines.map((line, i) => <button type="button" className="inspection-list-row" key={line.targetId ?? i} data-inspection-target={line.targetId} disabled={saving || finished} onClick={() => manualOpen(line.targetId!)}><Avatar name={line.from} src={line.avatar} /><div><strong>{line.from}</strong><p>{line.text}</p></div><time>{dateLabel(line.time)}</time></button>)}</>}
@@ -165,7 +182,7 @@ function InspectionViewer({ charId, chatId, actorName, avatarUrl, userName, user
       {touch && <span key={touch.id} className={`inspection-touch${touch.swipe ? ' is-swipe' : ''}`} style={{ left: touch.x, top: touch.y }} aria-hidden="true" />}
     </div>
     <aside ref={reactionPanel} className="inspection-reaction"><div className="inspection-actor"><Avatar name={actorName} src={avatarUrl} /><strong>{actorName}</strong>{busy && <small>正在看…</small>}</div>
-      <div className="inspection-comments" aria-live="polite">{comments.map((comment, i) => <p key={i}>{comment}</p>)}{finished && <small>这次查看已记住</small>}{error && <p role="alert">{error}</p>}</div>
+      <div className="inspection-comments" aria-live="polite">{comments.map((comment, i) => <p key={i}>{comment}</p>)}{finished && <small>这次查看已记住 · 回看仅展示已看内容，不会重复操作</small>}{error && <p role="alert">{error}</p>}</div>
       {!!actions.length && <div className="inspection-action-receipts" aria-live="polite">{actions.map(action => <p key={action.id}><Check size={12} /><span>{inspectionActionLabel(action)}</span></p>)}</div>}
       {!finished && <div className="inspection-controls"><button type="button" disabled={saving} onClick={() => { setAutomatic(!automatic); if (!automatic && !busy && !nextId && !error) void visit(page.id); }}>{automatic ? <Pause size={13} /> : <Play size={13} />}{automatic ? '暂停' : '自动翻看'}</button>{error ? <button type="button" disabled={busy || saving} onClick={() => void visit(page.id)}><RefreshCw size={13} />重试</button> : <button type="button" disabled={busy || saving || !nextId} onClick={() => void visit(nextId)}>继续翻看<ChevronRight size={13} /></button>}</div>}
       {error && <button type="button" className="inspection-exit" onClick={onClose}>返回聊天</button>}

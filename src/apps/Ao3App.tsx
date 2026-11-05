@@ -7,10 +7,11 @@ import {
 } from '../utils/ao3Data';
 import { generateAo3Chapter, generateAo3Continuation, readAo3Characters } from '../utils/ao3Generation';
 import { Ao3Discovery } from '../components/Ao3Discovery';
+import { Ao3Settings } from '../components/Ao3Settings';
 import { Ao3Comments } from '../components/Ao3Comments';
 import { shareAo3Work } from '../utils/ao3Share';
 
-type Page = 'browse' | 'fandoms' | 'library' | 'reader' | 'editor' | 'generate';
+type Page = 'browse' | 'fandoms' | 'library' | 'reader' | 'editor' | 'generate' | 'settings';
 type Shelf = 'bookmarks' | 'later' | 'history' | 'works';
 const day = (iso: string) => new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 const ratingCode = (rating: string) => rating === 'General Audiences' ? 'G' : rating === 'Teen And Up Audiences' ? 'T' : rating === 'Mature' ? 'M' : rating === 'Explicit' ? 'E' : '?';
@@ -190,10 +191,11 @@ export function Ao3App({ onBack, userName = 'user' }: { onBack: () => void; user
       <span>AO3 <span className="ao3-bar-divider">/</span> Archive of Our Own</span><span className="ao3-private">私人文库</span></div>
     <div className="ao3-scroll" ref={scroller}>
       <header className="ao3-site-header"><button className="ao3-brand" onClick={() => { setFilters(emptyAo3Filters()); setQuery(''); navigate('browse'); }}><ArchiveLogo/><span>Archive of Our Own<sup>beta</sup></span></button>
-        <button className="ao3-account ao3-link" onClick={() => navigate('library')}>Hi, {userName}!</button>
+        <button className="ao3-account ao3-link" onClick={() => navigate('settings')}>Hi, {userName}!</button>
         <nav aria-label="AO3 导航">{([['fandoms', '同人圈'], ['browse', '浏览作品'], ['library', '我的文库']] as const).map(([id, label]) => <button key={id} aria-current={page === id ? 'page' : undefined} onClick={() => navigate(id)}>{label}</button>)}
           <button aria-label="投稿" aria-current={page === 'editor' ? 'page' : undefined} onClick={() => startEditor()}>投稿{draft ? ' ·' : ''}</button></nav></header>
       <div className="ao3-content">
+        {page === 'settings' && <Ao3Settings onChanged={() => { setState(readAo3State()); setDraft(readAo3Draft()); setWorkId(''); setFilters(emptyAo3Filters()); setQuery(''); }}/>}
         {error && <div className="ao3-notice ao3-error" role="alert">{error}<button aria-label="关闭错误提示" onClick={() => setError('')}><X size={14}/></button></div>}
         {notice && <p className="ao3-notice" role="status">{notice}</p>}
         {page === 'fandoms' && <section><h2>同人圈 <small>Fandoms</small></h2><p className="ao3-section-note">在喜欢的故事里，找到另一个故事。</p><ul className="ao3-fandom-list">{fandoms.map(f => <li key={f}><button className="ao3-link" onClick={() => { setFilters({ ...emptyAo3Filters(), fandom: f }); setQuery(''); navigate('browse'); }}>{f}</button><span>({state.works.filter(w => w.fandom === f).length})</span></li>)}</ul></section>}

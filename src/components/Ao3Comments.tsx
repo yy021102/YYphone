@@ -52,10 +52,9 @@ export function Ao3Comments({ work, userName, onAction }: {
   return <div className="ao3-comment-section">
     <h3>评论 / Comments</h3>
     <div className="ao3-actions">
-      <button className="ao3-button" disabled={busy || !hasCharacter} onClick={() => void generate('extra')}>再生成 3 条评论 · 角色必出现</button>
+      <button className="ao3-button" disabled={busy || !hasCharacter} onClick={() => void generate('extra')}>更新评论</button>
       {busy && <button className="ao3-button" onClick={() => { request.current?.abort(); request.current = null; setBusy(false); setError('已停止生成，已发表的留言和原评论均已保留。'); }}><Square size={12}/>停止生成评论</button>}
     </div>
-    <p className="ao3-help">新评论只会追加。</p>
     {!hasCharacter && <p className="ao3-help">额外生成需有关联的通讯录角色；无关联角色时，你仍可留言并收到路人回复。</p>}
     {busy && <p role="status" className="ao3-writing-status">正在生成 3 条{retry?.mode === 'reply' ? '回复你的留言' : '新评论'}…</p>}
     {error && <p className="ao3-notice ao3-error" role="alert">{error}</p>}

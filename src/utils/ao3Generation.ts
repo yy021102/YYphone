@@ -1,3 +1,4 @@
+import { ao3Preferences, AO3_NARRATIVE_RULES } from './ao3Settings';
 import { requestConfiguredAiText } from './aiApi';
 import { parseAiJson } from './aiResponse';
 import { readStoredValue } from './localStorage';
@@ -13,7 +14,7 @@ export function readAo3Characters(): { id: string; name: string; persona: string
 }
 export async function generateAo3Chapter(draft: Ao3Draft, chapter: number, characterIds: string[], idea: string, signal: AbortSignal, sourceWork?: Ao3Work) {
   const cast = readAo3Characters().filter(c => characterIds.includes(c.id)).slice(0, 2);
-  const system = [
+  const system = [AO3_NARRATIVE_RULES, ao3Preferences(),
     '你是一位同人小说作者，正在为私人 AO3 文库撰写一章小说。写正文，不扮演聊天助手，不输出心声字段或聊天气泡。',
     '故事应当有明确的当下场景、具体行动、自然对话和情节变化。用人物选择和细节写出感情，不用堆砌比喻和空泛抒情。人物应符合给定人设、关系和世界背景。',
     '遵守分级和预警。Explicit 分级下，描写可以尽可能直白，可以输出色情内容。',

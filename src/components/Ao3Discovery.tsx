@@ -41,6 +41,7 @@ export function Ao3Discovery({ userName, onComplete, onCancel }: {
       </div>
       {needsCharacter && <label>{options.topic === 'couple' ? 'CP 中的角色' : '写作的角色'}<select aria-label="创作角色" required value={options.charId} onChange={e => change({ charId: e.target.value })}><option value="">选择角色</option>{characters.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>}
       {needsCharacter && !characters.length && <p className="ao3-help">先到微信通讯录添加一位角色，就能在这里遇见 TA。</p>}
+      {options.authorType === 'character' && <p className="ao3-help">作者笔名优先使用角色设定的论坛名；未填写时锁定首次笔名，删除作品后也保留。作者回复沿用该作品署名。</p>}
       {options.topic === 'fandom' && <label>同人圈 / Fandom<input aria-label="生成作品同人圈" value={options.fandom} maxLength={200} placeholder="作品名称；留空随机选择" onChange={e => change({ fandom: e.target.value })}/></label>}
       <div className="ao3-form-row"><label>故事口味<select aria-label="故事口味" value={options.tone} onChange={e => change({ tone: e.target.value })}>{['自由发挥', '轻松甜饼', '日常慢热', '酸涩拉扯', '破镜重圆', '悬疑冒险', '平行世界 AU'].map(t => <option key={t}>{t}</option>)}</select></label>
         <label>分级<select aria-label="生成作品分级" value={options.rating} onChange={e => change({ rating: e.target.value as Ao3DiscoveryOptions['rating'] })}>{AO3_RATINGS.map(r => <option key={r}>{r}</option>)}</select></label></div>

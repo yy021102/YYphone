@@ -4,6 +4,12 @@
 .inspection-header h2 { font-size:13px; font-weight:600; }
 .inspection-header p { margin-top:2px; font-size:10px; opacity:.65; }
 .inspection-header button { padding:8px 11px; border-radius:20px; background:#ffffffa3; font-size:11px; flex-shrink:0; }
+.inspection-review { flex-shrink:0; display:flex; align-items:center; gap:10px; padding:9px 15px; border-bottom:1px solid #fff9; background:#ffffff80; font-size:11px; }
+.inspection-review label { flex:1; min-width:0; display:grid; gap:4px; }
+.inspection-review select { width:100%; min-width:0; padding:6px; border:1px solid #d5dfe8; border-radius:8px; background:#fff; color:inherit; }
+.inspection-review > div { display:flex; gap:5px; }
+.inspection-review button { padding:8px; border-radius:12px; background:#ffffffa3; }
+.inspection-review button:disabled { opacity:.4; }
 .inspection-screen { --inspection-bg:#ededed; --inspection-paper:#fff; --inspection-text:#191919; --inspection-muted:#999; --inspection-rule:#e5e5e5; position:relative; isolation:isolate; display:flex; flex:1; min-height:0; flex-direction:column; overflow:hidden; background:var(--inspection-bg); color:var(--inspection-text); }
 .inspection-phone-nav { display:flex; align-items:center; justify-content:space-between; height:49px; flex-shrink:0; padding:0 12px; border-bottom:1px solid var(--inspection-rule); background:var(--inspection-bg); }
 .inspection-phone-nav > :is(button,span) { display:flex; align-items:center; justify-content:center; width:32px; height:36px; flex-shrink:0; }

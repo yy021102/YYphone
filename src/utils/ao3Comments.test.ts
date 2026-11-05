@@ -209,9 +209,9 @@ test('comment UI exposes replies, role badges and append controls, escapes user 
   const comments: Ao3Comment[] = [original, { ...original, id: 'u', author: '小满', body: '<script>danger</script>', replyTo: original.id, identity: { type: 'user', id: 'user' } },
     { ...original, id: 'c', author: '林渡', replyTo: 'u', identity: { type: 'character', id: 'a' } }];
   const markup = renderToStaticMarkup(createElement(Ao3Comments, { work: { ...work, comments }, userName: '小满', onAction: () => true }));
-  assert.match(markup, /再生成 3 条评论/); assert.match(markup, /回复 小满/); assert.match(markup, /ao3-comment-reply/);
+  assert.match(markup, /更新评论/); assert.doesNotMatch(markup, /新评论只会追加|角色必出现/); assert.match(markup, /回复 小满/); assert.match(markup, /ao3-comment-reply/);
   assert.match(markup, /角色/); assert.match(markup, /&lt;script&gt;/); assert.doesNotMatch(markup, /<script>danger/);
   const unrelated = renderToStaticMarkup(createElement(Ao3Comments, { work: { ...work, generation: undefined, characters: [] }, userName: '小满', onAction: () => true }));
-  assert.match(unrelated, /disabled=""[^>]*>再生成 3 条评论/);
+  assert.match(unrelated, /disabled=""[^>]*>更新评论/);
   assert.match(unrelated, /无关联角色时，你仍可留言/);
 });

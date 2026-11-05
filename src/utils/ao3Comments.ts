@@ -1,3 +1,4 @@
+import { ao3Preferences } from './ao3Settings';
 import { requestConfiguredAiText } from './aiApi';
 import { parseAiJson } from './aiResponse';
 import { readAo3Characters } from './ao3Generation';
@@ -105,7 +106,7 @@ export async function generateAo3Comments(work: Ao3Work, mode: 'extra' | 'reply'
   if (mode === 'reply' && !work.comments.some(c => c.id === replyTo && c.identity?.type === 'user')) throw new Error('找不到你的留言，请重新打开作品。');
   const plan = createAo3CommentPlan(work, 3, mode === 'extra', mode === 'reply' ? replyTo : undefined);
   const characterIds = plan.participants.filter(p => p.identity.type === 'character').map(p => p.identity.id);
-  const raw = await requestConfiguredAiText(`你正在模拟私人 AO3 文库的评论区，只生成评论，不改写作品。\n${AO3_COMMENT_RULES}\n只返回 {"comments":[评论对象]}。`,
+  const raw = await requestConfiguredAiText(`你正在模拟私人 AO3 文库的评论区，只生成评论，不改写作品。\n${AO3_COMMENT_RULES}\n只返回 {"comments":[评论对象]}。\n${ao3Preferences()}`,
     JSON.stringify({ work: { title: work.title, author: work.author, fandom: work.fandom, relationship: work.relationship,
       characters: work.characters, tags: work.tags, rating: work.rating, warning: work.warning, summary: work.summary,
       notes: work.notes, chapters: work.chapters, generation: work.generation },

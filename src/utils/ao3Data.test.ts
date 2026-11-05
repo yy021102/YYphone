@@ -7,6 +7,7 @@ import { clearDbStorage } from './dbStorage';
 import { readStorageString, writeStoredValue } from './localStorage';
 import { generateAo3Chapter, generateAo3Continuation } from './ao3Generation';
 import { shareAo3Work } from './ao3Share';
+import { clearAo3Data, exportAo3Data, importAo3Data, lockAo3PenName, readAo3PenName, readAo3Settings, saveAo3Prompt, AO3_NARRATIVE_RULES } from './ao3Settings';
 import { toMessageContent } from './buildPrompt';
 import { generateAo3Discovery, type Ao3DiscoveryOptions } from './ao3Discovery';
 import { AO3_KEY, ao3DraftFromWork, ao3WordCount, emptyAo3Filters, filterAo3Works, initialAo3State as emptyAo3State, isAo3State,
@@ -20,6 +21,29 @@ Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: s
 beforeEach(async () => { await clearDbStorage(); values.clear(); mock.method(Math, 'random', () => 0.9); });
 afterEach(() => mock.restoreAll());
 const now = '2026-11-05T12:00:00.000Z';
+test('AO3 backup round-trips settings, drafts and archive; invalid imports preserve data and clearing leaves chats untouched', async () => {
+  saveAo3Prompt('克制的文风，评论区轻松一些');
+  writeAo3State(initialAo3State()); writeAo3Draft(newAo3Draft('writer'));
+  writeStoredValue('yyphone:wechat-chats', [{ id: 'keep', messages: [] }]);
+  const backup = exportAo3Data();
+  await assert.rejects(importAo3Data({ ...backup, state: { works: [] } }), /格式/);
+  assert.deepEqual(exportAo3Data(), backup);
+  await clearAo3Data(); assert.equal(readAo3State().works.length, 0); assert.equal(readAo3Draft(), null); assert.equal(readAo3Settings().prompt, '');
+  assert.ok(readStorageString('yyphone:wechat-chats')!.includes('keep'));
+  await importAo3Data(JSON.parse(JSON.stringify(backup))); assert.deepEqual(exportAo3Data(), backup);
+});
+test('creation prompt includes saved AO3 preferences and role-aware first-person dream narrative rules', async () => {
+  setupDiscovery(); saveAo3Prompt('测试偏好：短段落，评论爱讨论细节');
+  mock.method(globalThis, 'fetch', async (_url: unknown, init?: RequestInit) => {
+    const request = JSON.parse(String(init?.body));
+    const system = request.messages[0].content;
+    assert.ok(system.includes('测试偏好：短段落，评论爱讨论细节'));
+    assert.ok(system.includes(AO3_NARRATIVE_RULES));
+    assert.match(system, /角色第一人称/); assert.match(system, /路人作者的正文使用第三人称/);
+    return Response.json({ choices: [{ message: { content: JSON.stringify(discoveryResult()) } }] });
+  });
+  await generateAo3Discovery(discoveryOptions(), 'user', new AbortController().signal);
+});
 function initialAo3State(): Ao3State {
   const base: Ao3Work = { ...publishAo3Draft({ ...newAo3Draft('test-author'), title: '测试作品',
     chapters: [{ title: '测试第一章', body: '测试正文。\n\n保留段落。' }] }), owned: false, createdAt: now, updatedAt: now };
@@ -219,6 +243,55 @@ test('character CP writing optionally uses only current main-account experiences
   assert.equal(requests[1].experiences, undefined); assert.equal(second.author, 'night_window'); assert.equal(requests[1].knownPenName, 'night_window');
   assert.equal(readAo3State().works.filter(w => w.owned).length, 0);
 });
+test('character pen names remain locked after every work is deleted and follow configured forum names for new stories', async () => {
+    setupDiscovery();
+    let requests = 0;
+    const names: unknown[] = [];
+    mock.method(globalThis, 'fetch', async (_url: unknown, options?: RequestInit) => {
+      const body = JSON.parse(String(options?.body)), input = JSON.parse(body.messages.at(-1).content);
+      names.push(input.knownPenName); requests++;
+      return Response.json({ choices: [{ message: { content: JSON.stringify(discoveryResult({ author: `random_${requests}` })) } }] });
+    });
+    const options = discoveryOptions({ authorType: 'character', includeExperiences: false });
+    const first = await generateAo3Discovery(options, 'user', new AbortController().signal);
+    assert.equal(first.author, 'random_1'); assert.equal(readAo3PenName('a'), first.author);
+    let state = updateAo3(readAo3State(), { type: 'discover', work: first });
+    state = updateAo3(state, { type: 'delete', id: first.id }); writeAo3State(state);
+    assert.equal(state.works.length, 0);
+    const second = await generateAo3Discovery(options, 'user', new AbortController().signal);
+    assert.equal(second.author, first.author); assert.equal(names[1], first.author);
+    writeStoredValue('pocketos:wechat-contacts', [{ id: 'a', name: '林渡', forumHandle: '@forum_name', persona: '沉静' }]);
+    const third = await generateAo3Discovery(options, 'user', new AbortController().signal);
+    assert.equal(third.author, 'forum_name'); assert.equal(names[2], 'forum_name');
+    assert.equal(first.author, 'random_1');
+    writeStoredValue('pocketos:wechat-contacts', [{ id: 'a', name: '林渡', forumHandle: '新的论坛名' }]);
+    assert.equal((await generateAo3Discovery(options, 'user', new AbortController().signal)).author, '新的论坛名');
+    assert.equal(readAo3PenName('b'), undefined);
+  });
+  test('pen-name settings survive prompt edits and backup round trips; legacy backups and invalid imports are handled safely', async () => {
+    setupDiscovery(); lockAo3PenName('a', 'locked_name'); lockAo3PenName('a', 'should_not_replace');
+    assert.equal(readAo3PenName('a'), 'locked_name');
+    saveAo3Prompt('保留笔名的偏好');
+    assert.equal(readAo3PenName('a'), 'locked_name');
+    const backup = exportAo3Data();
+    await clearAo3Data(); assert.equal(readAo3PenName('a'), undefined);
+    await importAo3Data(backup);
+    assert.equal(readAo3PenName('a'), 'locked_name'); assert.equal(readAo3Settings().prompt, '保留笔名的偏好');
+    await assert.rejects(importAo3Data({ ...backup, settings: { prompt: '', penNames: { a: 123 } } }), /备份内容不完整/);
+    assert.equal(readAo3PenName('a'), 'locked_name');
+    await importAo3Data({ ...backup, settings: { prompt: '旧版本备份' } });
+    assert.equal(readAo3PenName('a'), undefined); assert.equal(readAo3Settings().prompt, '旧版本备份');
+  });
+  test('failed or cancelled character fiction never locks a newly invented pen name', async () => {
+    setupDiscovery();
+    const options = discoveryOptions({ authorType: 'character', includeExperiences: false });
+    mock.method(globalThis, 'fetch', async () => Response.json({ choices: [{ message: { content: JSON.stringify(discoveryResult({ comments: [] })) } }] }));
+    await assert.rejects(generateAo3Discovery(options, 'user', new AbortController().signal), /五条评论/);
+    assert.equal(readAo3PenName('a'), undefined);
+    const controller = new AbortController(); controller.abort();
+    await assert.rejects(generateAo3Discovery(options, 'user', controller.signal));
+    assert.equal(readAo3PenName('a'), undefined);
+  });
 test('ordinary fandom may be random or specified, and character authorship does not turn it into a user pairing', async () => {
   setupDiscovery(); const requests: Record<string, unknown>[] = [];
   mock.method(globalThis, 'fetch', async (_url: unknown, options?: RequestInit) => {
