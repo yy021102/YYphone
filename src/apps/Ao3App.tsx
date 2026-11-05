@@ -246,7 +246,7 @@ export function Ao3App({ onBack, userName = 'user' }: { onBack: () => void; user
             <button className="ao3-button" aria-pressed={state.bookmarks.includes(work.id)} onClick={() => commit({ type: 'bookmark', id: work.id })}>{state.bookmarks.includes(work.id) ? '移除书签' : '加入书签'}</button><button className="ao3-button" onClick={() => comments.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>第 {chapter + 1} 章评论 ({ao3ChapterComments(work, chapter).length})</button><button className="ao3-button" onClick={() => setSharing(true)}>分享给角色</button></div>
           {state.kudosed.includes(work.id) && <p className="ao3-kudos-note">♥ {userName} 为这篇作品留下了 Kudos。</p>}
         </article>}
-        <footer className="ao3-footer"><ArchiveLogo/><p>为喜欢的故事，留一个位置。</p><small>AO3 风格模拟 · 内容仅保存在小手机中</small></footer>
+        <footer className="ao3-footer"><ArchiveLogo/><p>为喜欢的故事，留一个位置。</p></footer>
       </div>
     </div>
     {notice && <div className="ao3-toast" aria-hidden="true">{notice}</div>}

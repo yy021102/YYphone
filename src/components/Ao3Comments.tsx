@@ -53,11 +53,13 @@ export function Ao3Comments({ work, chapter = 0, userName, onAction }: {
   return <div className="ao3-comment-section">
     <h3>第 {chapter + 1} 章评论 / Comments ({chapterComments.length})</h3>
     <p className="ao3-help">评论与回复仅属于本章；更新评论会追加，不覆盖已有留言。</p>
+    {hasCharacter && work.generation?.authorType === 'passerby' && work.generation.topic === 'fandom' &&
+      <p className="ao3-help">更新评论会随机邀请一位通讯录角色作为读者，也可能有其关联 NPC；不会改变原文 CP。</p>}
     <div className="ao3-actions">
       <button className="ao3-button" disabled={busy || !hasCharacter} onClick={() => void generate('extra')}>更新评论</button>
       {busy && <button className="ao3-button" onClick={() => { request.current?.abort(); request.current = null; setBusy(false); setError('已停止生成，已发表的留言和原评论均已保留。'); }}><Square size={12}/>停止生成评论</button>}
     </div>
-    {!hasCharacter && <p className="ao3-help">额外生成需有关联的通讯录角色；无关联角色时，你仍可留言并收到路人回复。</p>}
+    {!hasCharacter && <p className="ao3-help">本篇暂无可用的通讯录评论角色；添加或恢复相应角色后即可更新评论，你仍可留言并收到路人回复。</p>}
     {busy && <p role="status" className="ao3-writing-status">正在生成 3 条{retry?.mode === 'reply' ? '回复你的留言' : '新评论'}…</p>}
     {error && <p className="ao3-notice ao3-error" role="alert">{error}</p>}
     {!busy && retry && <button className="ao3-button" onClick={() => void generate(retry.mode, retry.target)}>重试生成{retry.mode === 'reply' ? '回复' : '评论'}</button>}

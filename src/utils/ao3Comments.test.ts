@@ -205,7 +205,7 @@ test('HTTP errors, missing characters, deleted NPCs, malformed AI replies and ca
   await assert.rejects(generateAo3Comments(work, 'extra', new AbortController().signal), /没有可用/);
 });
 
-test('comment UI exposes replies, role badges and append controls, escapes user text, and disables guaranteed-role generation for unrelated works', () => {
+test('comment UI exposes replies, role badges and append controls, escapes user text, and enables random-role updates only for passerby fandom works', () => {
   const work = setup();
   const comments: Ao3Comment[] = [original, { ...original, id: 'u', author: '小满', body: '<script>danger</script>', replyTo: original.id, identity: { type: 'user', id: 'user' } },
     { ...original, id: 'c', author: '林渡', replyTo: 'u', identity: { type: 'character', id: 'a' } }];
@@ -214,7 +214,104 @@ test('comment UI exposes replies, role badges and append controls, escapes user 
   assert.match(markup, /角色/); assert.match(markup, /&lt;script&gt;/); assert.doesNotMatch(markup, /<script>danger/);
   const unrelated = renderToStaticMarkup(createElement(Ao3Comments, { work: { ...work, generation: undefined, characters: [] }, userName: '小满', onAction: () => true }));
   assert.match(unrelated, /disabled=""[^>]*>更新评论/);
-  assert.match(unrelated, /无关联角色时，你仍可留言/);
+  assert.match(unrelated, /本篇暂无可用的通讯录评论角色/);
+  const fandom = { ...work, characters: ['其他CP人物'], generation: { authorType: 'passerby' as const, topic: 'fandom' as const } };
+  const fandomMarkup = renderToStaticMarkup(createElement(Ao3Comments, { work: fandom, userName: '小满', onAction: () => true }));
+  assert.doesNotMatch(fandomMarkup, /disabled=""[^>]*>更新评论/);
+  assert.match(fandomMarkup, /随机邀请一位通讯录角色/);
+  writeStoredValue('pocketos:wechat-contacts', []);
+  const emptyMarkup = renderToStaticMarkup(createElement(Ao3Comments, { work: fandom, userName: '小满', onAction: () => true }));
+  assert.match(emptyMarkup, /disabled=""[^>]*>更新评论/);
+});
+
+test('other-CP passerby works randomly select one contact as a reader, with only their existing NPCs and a 50% participation boundary', () => {
+  const source = setup();
+  const work = { ...source, characters: ['原作人物甲', '原作人物乙'], generation: { authorType: 'passerby' as const, topic: 'fandom' as const } };
+  let draws = [0.499999, 0];
+  mock.method(Math, 'random', () => draws.shift() ?? 0);
+  let plan = createAo3CommentPlan(work, 5);
+  assert.deepEqual(plan.participants.map(p => p.identity.id), ['a', 'npc-a']);
+  assert.equal(plan.requiredSpeakerId, 'character:a');
+  assert.ok(plan.participants.every(p => !p.isAuthor));
+  draws = [0.5];
+  plan = createAo3CommentPlan(work, 5);
+  assert.deepEqual(plan.participants, []); assert.equal(plan.requiredSpeakerId, undefined);
+  draws = [0.1, 0.99];
+  plan = createAo3CommentPlan(work, 5);
+  assert.deepEqual(plan.participants.map(p => p.identity.id), ['unrelated', 'npc-other']);
+  assert.equal(plan.requiredSpeakerId, 'character:unrelated');
+  for (const draw of [0, 0.99]) {
+    draws = [draw];
+    plan = createAo3CommentPlan(work, 3, true);
+    assert.equal(plan.requiredSpeakerId, draw === 0 ? 'character:a' : 'character:unrelated');
+  }
+  writeStoredValue('pocketos:wechat-contacts', []);
+  assert.deepEqual(createAo3CommentPlan(work, 5).participants, []);
+  assert.throws(() => createAo3CommentPlan(work, 3, true), /没有可用的评论角色/);
+  assert.deepEqual(work.characters, ['原作人物甲', '原作人物乙']);
+});
+
+test('other-CP discovery generates random contact comments without making that contact the fictional CP or exposing private chats', async () => {
+  setup(); mock.method(Math, 'random', () => 0.1);
+  writeStoredValue('pocketos:wechat-contacts', [{ id: 'a', name: '林渡', persona: '沉静且有主见', worldBooks: [{ bookId: 'comment-book' }] },
+    { id: 'unrelated', name: '无关角色', persona: '不应发送的其他角色人设', worldBooks: [{ bookId: 'other-book' }] }]);
+  writeStoredValue('yyphone:world-books', [
+    { id: 'comment-book', name: '评论角色背景', entries: [{ id: 'entry', title: '角色口吻', content: '只供评论使用的角色背景', depth: 'front' }] },
+    { id: 'other-book', name: '未选中的角色背景', entries: [{ id: 'other', title: '角色背景', content: '不应发送的其他角色世界书', depth: 'front' }] },
+  ]);
+  mock.method(globalThis, 'fetch', async (_url: unknown, options?: RequestInit) => {
+    const body = JSON.parse(String(options?.body)), input = JSON.parse(body.messages.at(-1).content);
+    assert.equal(input.character, undefined); assert.equal(input.experiences, undefined);
+    assert.equal(input.worldBooks, '');
+    assert.match(input.commentWorldBooks, /只供评论使用的角色背景/);
+    assert.match(body.messages[0].content, /只是偶然读到作品的读者/);
+    assert.equal(input.commentPlan.requiredSpeakerId, 'character:a');
+    assert.doesNotMatch(JSON.stringify(input), /不应发送的私聊|不应发送的其他角色人设|不应发送的其他角色世界书|其他角色的私有资料/);
+    return Response.json({ choices: [{ message: { content: JSON.stringify({ title: '其他CP的新故事', author: 'anonymous_pen', fandom: '原作',
+      relationship: '原作人物甲 / 原作人物乙', characters: ['原作人物甲', '原作人物乙'], chapterTitle: '开篇', body: '其他CP的独立正文。', comments: generated(input.commentPlan) }) } }] });
+  });
+  const work = await generateAo3Discovery({ authorType: 'passerby', topic: 'fandom', charId: '', fandom: '原作', direction: '', tone: '自由发挥',
+    rating: 'Teen And Up Audiences', includeExperiences: true }, '小满', new AbortController().signal);
+  assert.equal(work.comments.length, 5);
+  assert.equal(work.comments.find(c => c.identity?.type === 'character')?.identity?.id, 'a');
+  assert.equal(work.comments.find(c => c.identity?.type === 'npc')?.identity?.id, 'npc-a');
+  assert.deepEqual(work.characters, ['原作人物甲', '原作人物乙']);
+  assert.equal(work.relationship, '原作人物甲 / 原作人物乙');
+  assert.deepEqual(work.generation, { authorType: 'passerby', topic: 'fandom' });
+});
+
+test('other-CP updates append three comments with a guaranteed random character; chapter comments and user replies share the same reader pool', async () => {
+  const source = setup();
+  let work = { ...source, characters: ['原作人物甲', '原作人物乙'], generation: { authorType: 'passerby' as const, topic: 'fandom' as const } };
+  writeAo3State({ ...initialAo3State(), works: [work] });
+  mock.method(Math, 'random', () => 0.99);
+  mockComments((input, plan) => {
+    assert.deepEqual(plan.participants.map(p => p.identity.id), ['unrelated', 'npc-other']);
+    assert.equal(plan.requiredSpeakerId, 'character:unrelated');
+    assert.doesNotMatch(JSON.stringify(input), /不应发送的私聊|熟悉林渡的老友/);
+  });
+  const comments = await generateAo3Comments(work, 'extra', new AbortController().signal, undefined, 1);
+  assert.equal(comments.length, 3); assert.ok(comments.every(c => c.chapter === 1));
+  assert.equal(comments[1].identity?.id, 'unrelated');
+  const state = updateAo3(readAo3State(), { type: 'comments', work, comments });
+  assert.deepEqual(ao3ChapterComments(state.works[0], 0), [original]);
+  assert.deepEqual(state.works[0].chapters, source.chapters);
+  writeAo3State(state); assert.deepEqual(readAo3State(), state);
+  mock.method(Math, 'random', () => 0.1);
+  const user: Ao3Comment = { ...original, id: 'other-cp-user', chapter: 1, identity: { type: 'user', id: 'user' } };
+  work = { ...work, comments: [...work.comments, user] };
+  mockComments((_input, plan) => assert.equal(plan.requiredSpeakerId, 'character:a'));
+  const replies = await generateAo3Comments(work, 'reply', new AbortController().signal, user.id, 1);
+  assert.ok(replies.every(c => c.replyTo === user.id && c.chapter === 1));
+  const chapterComments = await generateAo3Comments(work, 'chapter', new AbortController().signal, undefined, 1);
+  assert.equal(chapterComments.length, 5); assert.equal(chapterComments[1].identity?.id, 'a');
+  mock.method(globalThis, 'fetch', async (_url: unknown, options?: RequestInit) => {
+    const plan = JSON.parse(JSON.parse(String(options?.body)).messages.at(-1).content).commentPlan;
+    writeStoredValue('pocketos:wechat-contacts', []);
+    return completion(generated(plan));
+  });
+  await assert.rejects(generateAo3Comments(work, 'extra', new AbortController().signal, undefined, 1), /角色或关联 NPC 已变化/);
+  assert.deepEqual(readAo3State(), state);
 });
 
 test('chapter comments are isolated in display, AI context, replies, shared snapshots and backups; legacy comments remain in chapter one', async () => {

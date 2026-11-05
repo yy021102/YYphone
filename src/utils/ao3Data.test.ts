@@ -165,6 +165,8 @@ test('reader-provided text is escaped and the app exposes real navigation/search
   assert.ok(markup.includes('&lt;img src=x onerror=alert(1)&gt;'));
   assert.ok(markup.includes('搜索作品') && markup.includes('私人文库'));
   assert.ok(!markup.includes('<img src=x') && !markup.includes('type="password"'));
+  assert.doesNotMatch(markup, /AO3 风格模拟|内容仅保存在小手机中/);
+  assert.match(markup, /为喜欢的故事，留一个位置/);
 });
 test('chapter generation uses one configured request and selected character only, preserving draft and avoiding chat/memory writes', async () => {
   writeStoredValue('yyphone:api-presets', [{ id: 'qa', name: 'QA', endpoint: 'https://ao3.invalid/v1', apiKey: 'test', model: 'qa' }]);
