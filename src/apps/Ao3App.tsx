@@ -5,15 +5,15 @@ import {
   newAo3Draft, publishAo3Draft, readAo3Draft, readAo3State, updateAo3, writeAo3Draft, writeAo3State,
   type Ao3Action, type Ao3Draft, type Ao3Filters, type Ao3State, type Ao3Work,
 } from '../utils/ao3Data';
-import { generateAo3Chapter, readAo3Characters } from '../utils/ao3Generation';
+import { generateAo3Chapter, generateAo3Continuation, readAo3Characters } from '../utils/ao3Generation';
 import { Ao3Discovery } from '../components/Ao3Discovery';
+import { Ao3Comments } from '../components/Ao3Comments';
 import { shareAo3Work } from '../utils/ao3Share';
 
 type Page = 'browse' | 'fandoms' | 'library' | 'reader' | 'editor' | 'generate';
 type Shelf = 'bookmarks' | 'later' | 'history' | 'works';
 const day = (iso: string) => new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 const ratingCode = (rating: string) => rating === 'General Audiences' ? 'G' : rating === 'Teen And Up Audiences' ? 'T' : rating === 'Mature' ? 'M' : rating === 'Explicit' ? 'E' : '?';
-const uid = () => crypto.randomUUID();
 
 function ArchiveLogo() {
   return <img className="ao3-logo" src={`${import.meta.env?.BASE_URL ?? '/'}ao3-logo.png`} alt="" aria-hidden="true"/>;
@@ -108,13 +108,19 @@ export function Ao3App({ onBack, userName = 'user' }: { onBack: () => void; user
   const [state, setState] = useState<Ao3State>(readAo3State), [page, setPage] = useState<Page>('browse');
   const [filters, setFilters] = useState(emptyAo3Filters), [query, setQuery] = useState(''), [shelf, setShelf] = useState<Shelf>('bookmarks');
   const [workId, setWorkId] = useState(''), [chapter, setChapter] = useState(0), [entire, setEntire] = useState(false);
-  const [draft, setDraft] = useState<Ao3Draft | null>(readAo3Draft), [comment, setComment] = useState('');
+  const [draft, setDraft] = useState<Ao3Draft | null>(readAo3Draft);
   const [error, setError] = useState(''), [notice, setNotice] = useState(''), [deleteId, setDeleteId] = useState('');
   const [sharing, setSharing] = useState(false);
+  const [continuing, setContinuing] = useState(false);
+  const continuationRequest = useRef<AbortController | null>(null);
   const scroller = useRef<HTMLDivElement>(null), comments = useRef<HTMLElement>(null);
   const listing = useRef<{ page: Page; scroll: number }>({ page: 'browse', scroll: 0 });
   const restore = useRef(false);
   const work = state.works.find(w => w.id === workId);
+  useEffect(() => {
+    setContinuing(false);
+    return () => { continuationRequest.current?.abort(); continuationRequest.current = null; };
+  }, [page, workId]);
   useLayoutEffect(() => {
     if (scroller.current) scroller.current.scrollTop = restore.current ? listing.current.scroll : 0;
     restore.current = false;
@@ -135,7 +141,7 @@ export function Ao3App({ onBack, userName = 'user' }: { onBack: () => void; user
   const openWork = (next: Ao3Work, resume = false) => {
     rememberList(); const saved = resume ? state.history.find(h => h.workId === next.id)?.chapter ?? 0 : 0;
     if (!commit({ type: 'read', id: next.id, chapter: saved, now: new Date().toISOString(), countHit: true })) return;
-    setWorkId(next.id); setChapter(saved); setEntire(false); setComment(''); navigate('reader');
+    setWorkId(next.id); setChapter(saved); setEntire(false); navigate('reader');
   };
   const selectChapter = (index: number) => {
     if (!work || !commit({ type: 'read', id: work.id, chapter: index, now: new Date().toISOString() })) return;
@@ -150,9 +156,27 @@ export function Ao3App({ onBack, userName = 'user' }: { onBack: () => void; user
     try {
       const published = publishAo3Draft(next, state.works.find(w => w.id === next.workId));
       if (!commit({ type: 'publish', work: published })) return;
-      saveDraft(null); setWorkId(published.id); setChapter(0); setEntire(false); setComment(''); navigate('reader'); setNotice('作品已发布');
+      saveDraft(null); setWorkId(published.id); setChapter(0); setEntire(false); navigate('reader'); setNotice('作品已发布');
     } catch (cause) { setError(cause instanceof Error ? cause.message : '请检查作品内容。'); }
   };
+  const continueWork = async () => {
+    if (!work || continuationRequest.current) return;
+    const controller = new AbortController();
+    continuationRequest.current = controller; setContinuing(true); setError(''); setNotice('');
+    try {
+      const next = await generateAo3Continuation(work, controller.signal);
+      if (controller.signal.aborted || continuationRequest.current !== controller) return;
+      if (!commit({ type: 'continue', work, chapter: next, now: new Date().toISOString() })) return;
+      selectChapter(work.chapters.length); setNotice(`第 ${work.chapters.length + 1} 章已更新`);
+    } catch (cause) {
+      if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : '追更失败，原文已保留，请重试。');
+    } finally {
+      if (continuationRequest.current === controller) { continuationRequest.current = null; setContinuing(false); }
+    }
+  };
+  const continuationButton = work && (continuing ?
+    <button className="ao3-button" onClick={() => { continuationRequest.current?.abort(); continuationRequest.current = null; setContinuing(false); setNotice('已停止追更，原文未改动'); }}><Square size={12}/>停止追更</button> :
+    <button className="ao3-button ao3-primary" disabled={work.chapters.length >= 100} onClick={() => void continueWork()}>追更</button>);
   const libraryWorks = shelf === 'works' ? state.works.filter(w => w.owned) : shelf === 'history' ? state.history.flatMap(h => state.works.find(w => w.id === h.workId) ?? []) :
     state[shelf === 'bookmarks' ? 'bookmarks' : 'later'].slice().reverse().flatMap(id => state.works.find(w => w.id === id) ?? []);
   const visible = page === 'library' ? libraryWorks : filterAo3Works(state.works, filters);
@@ -197,7 +221,10 @@ export function Ao3App({ onBack, userName = 'user' }: { onBack: () => void; user
         {page === 'reader' && work && <article className="ao3-reader">
           <div className="ao3-actions ao3-reader-actions"><button className="ao3-button" onClick={returnToList}>作品列表</button><button className="ao3-button" aria-pressed={entire} onClick={() => setEntire(!entire)}>{entire ? '分章阅读' : '整篇阅读'}</button>
             <button className="ao3-button" aria-pressed={state.later.includes(work.id)} onClick={() => { if (commit({ type: 'later', id: work.id })) setNotice(state.later.includes(work.id) ? '已移出稍后阅读' : '已加入稍后阅读'); }}>{state.later.includes(work.id) ? '已标记待阅' : '稍后阅读'}</button>
-            {work.owned && <button className="ao3-button" onClick={() => startEditor(work)}>编辑</button>}{(work.owned || work.generation) && <button className="ao3-button" onClick={() => setDeleteId(work.id)}>删除</button>}</div>
+            {continuationButton}
+            {work.owned && <button className="ao3-button" disabled={continuing} onClick={() => startEditor(work)}>编辑</button>}{(work.owned || work.generation) && <button className="ao3-button" disabled={continuing} onClick={() => setDeleteId(work.id)}>删除</button>}</div>
+          <p className="ao3-help">追更使用当前 API，根据全部前文追加下一章并自动保存，不覆盖原文。最多 100 章。</p>
+          {continuing && <p className="ao3-writing-status" role="status"><BookOpen size={24}/>正在续写第 {work.chapters.length + 1} 章…</p>}
           <dl className="ao3-work-meta"><dt>Rating:</dt><dd>{work.rating}</dd><dt>Archive Warning:</dt><dd>{work.warning}</dd><dt>Category:</dt><dd>{work.category}</dd>
             <dt>Fandom:</dt><dd><button className="ao3-link" onClick={() => tagSearch(work.fandom)}>{work.fandom}</button></dd>{work.relationship && <><dt>Relationship:</dt><dd><button className="ao3-link" onClick={() => tagSearch(work.relationship)}>{work.relationship}</button></dd></>}
             {work.characters.length > 0 && <><dt>Characters:</dt><dd>{work.characters.join(', ')}</dd></>}{work.tags.length > 0 && <><dt>Additional Tags:</dt><dd>{work.tags.map((tag, i) => <span key={tag}>{i > 0 && ', '}<button className="ao3-link" onClick={() => tagSearch(tag)}>{tag}</button></span>)}</dd></>}
@@ -209,11 +236,10 @@ export function Ao3App({ onBack, userName = 'user' }: { onBack: () => void; user
             <h2>Chapter {c.index + 1}{c.title ? `: ${c.title}` : ''}</h2><div className="ao3-prose">{c.body.split(/\n\s*\n/).map((paragraph, i) => <p key={i}>{paragraph}</p>)}</div></section>)}
           {!entire && chapterControls}
           <div className="ao3-actions ao3-reader-bottom"><button className="ao3-button" aria-pressed={state.kudosed.includes(work.id)} onClick={() => { if (commit({ type: 'kudos', id: work.id })) setNotice(state.kudosed.includes(work.id) ? '你已经为这篇作品留下过 Kudos 了。' : '感谢你留下 Kudos！'); }}><Heart size={13} fill={state.kudosed.includes(work.id) ? 'currentColor' : 'none'}/> Kudos ({work.kudos})</button>
+            {continuationButton}
             <button className="ao3-button" aria-pressed={state.bookmarks.includes(work.id)} onClick={() => commit({ type: 'bookmark', id: work.id })}>{state.bookmarks.includes(work.id) ? '移除书签' : '加入书签'}</button><button className="ao3-button" onClick={() => comments.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>评论 ({work.comments.length})</button><button className="ao3-button" onClick={() => setSharing(true)}>分享给角色</button></div>
           {state.kudosed.includes(work.id) && <p className="ao3-kudos-note">♥ {userName} 为这篇作品留下了 Kudos。</p>}
-          <section ref={comments} className="ao3-comments"><h3>评论 / Comments</h3>{work.comments.map(c => <article key={c.id}><header><strong>{c.author}</strong><time>{day(c.createdAt)}</time></header><p>{c.body}</p></article>)}
-            <form onSubmit={e => { e.preventDefault(); if (!comment.trim()) return; if (commit({ type: 'comment', id: work.id, comment: { id: uid(), author: userName, body: comment.trim(), createdAt: new Date().toISOString() } })) { setComment(''); setNotice('评论已发布'); } }}>
-              <label>以 {userName} 的身份留言<textarea aria-label="评论内容" rows={4} maxLength={5000} required value={comment} onChange={e => setComment(e.target.value)}/></label><button className="ao3-button" disabled={!comment.trim()} type="submit">发表评论</button></form></section>
+          <section ref={comments} className="ao3-comments"><Ao3Comments key={work.id} work={work} userName={userName} onAction={commit}/></section>
         </article>}
         <footer className="ao3-footer"><ArchiveLogo/><p>为喜欢的故事，留一个位置。</p><small>AO3 风格模拟 · 内容仅保存在小手机中</small></footer>
       </div>

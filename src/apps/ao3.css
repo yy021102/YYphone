@@ -128,6 +128,11 @@
 .ao3-comments article p { padding: 13px 10px; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .ao3-comments form { display: grid; gap: 12px; }
 .ao3-comments form .ao3-button { justify-self: end; }
+.ao3-comment-thread { margin: 16px 0; }
+.ao3-comments .ao3-comment-reply { margin-left: 14px; border-left: 3px solid #c9aaaa; }
+.ao3-comment-badge { margin-left: 7px; color: #900; font-size: 10px; font-weight: normal; }
+.ao3-reply-context { padding: 8px 10px; background: #f8f4f4; color: #666; font-size: 11px; overflow-wrap: anywhere; }
+.ao3-comment-actions { display: flex; gap: 16px; padding: 0 10px 10px; }
 .ao3-editor fieldset { border: 1px solid #ccc; background: #f8f8f8; padding: 12px; margin: 0 0 20px; display: grid; gap: 14px; min-width: 0; }
 .ao3-editor legend { font: 17px Georgia, 'Songti SC', serif; padding: 0 5px; color: #444; }
 .ao3-editor label { font-size: 12px; }

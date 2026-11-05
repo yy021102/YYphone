@@ -5,21 +5,49 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { Ao3App } from '../apps/Ao3App';
 import { clearDbStorage } from './dbStorage';
 import { readStorageString, writeStoredValue } from './localStorage';
-import { generateAo3Chapter } from './ao3Generation';
+import { generateAo3Chapter, generateAo3Continuation } from './ao3Generation';
 import { shareAo3Work } from './ao3Share';
 import { toMessageContent } from './buildPrompt';
 import { generateAo3Discovery, type Ao3DiscoveryOptions } from './ao3Discovery';
-import { ao3DraftFromWork, ao3WordCount, emptyAo3Filters, filterAo3Works, initialAo3State, isAo3State,
-  newAo3Draft, publishAo3Draft, readAo3Draft, readAo3State, splitAo3Tags, updateAo3, writeAo3Draft, writeAo3State } from './ao3Data';
+import { AO3_KEY, ao3DraftFromWork, ao3WordCount, emptyAo3Filters, filterAo3Works, initialAo3State as emptyAo3State, isAo3State,
+  newAo3Draft, publishAo3Draft, readAo3Draft, readAo3State, splitAo3Tags, updateAo3, writeAo3Draft, writeAo3State, type Ao3State, type Ao3Work } from './ao3Data';
 
 const values = new Map<string, string>();
 const storage = { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => values.set(key, value),
   removeItem: (key: string) => values.delete(key), clear: () => values.clear(), key: (i: number) => [...values.keys()][i] ?? null, get length() { return values.size; } };
 Object.defineProperty(globalThis, 'window', { configurable: true, value: { localStorage: storage, setTimeout, clearTimeout } });
 Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: storage });
-beforeEach(async () => { await clearDbStorage(); values.clear(); });
+beforeEach(async () => { await clearDbStorage(); values.clear(); mock.method(Math, 'random', () => 0.9); });
 afterEach(() => mock.restoreAll());
 const now = '2026-11-05T12:00:00.000Z';
+function initialAo3State(): Ao3State {
+  const base: Ao3Work = { ...publishAo3Draft({ ...newAo3Draft('test-author'), title: '测试作品',
+    chapters: [{ title: '测试第一章', body: '测试正文。\n\n保留段落。' }] }), owned: false, createdAt: now, updatedAt: now };
+  return { ...emptyAo3State(), works: [
+    { ...base, id: 'test-rain', tags: ['雨夜'] },
+    { ...base, id: 'test-moon', title: '月亮测试', author: 'paper_satellite', fandom: '测试星海',
+      relationship: '领航员 / 通讯员', tags: ['Slow Burn'], rating: 'Teen And Up Audiences', category: 'Other', complete: false,
+      chapters: [...base.chapters, { title: '测试第二章', body: '后续正文。' }] },
+    { ...base, id: 'test-breakfast' },
+  ] };
+}
+test('new archives are empty and legacy sample cleanup persists without removing user works or interactions', () => {
+  assert.deepEqual(readAo3State(), emptyAo3State());
+  const fixtures = initialAo3State().works;
+  const own = { ...fixtures[0], id: 'my-work', owned: true };
+  const generated = { ...fixtures[1], id: 'generated', generation: { authorType: 'passerby' as const, topic: 'fandom' as const } };
+  const works = [...fixtures.map((w, i) => ({ ...w, id: ['ao3-sample-rain', 'ao3-sample-moon', 'ao3-sample-breakfast'][i] })), own, generated];
+  const ids = works.map(w => w.id);
+  writeAo3State({ ...emptyAo3State(), works, bookmarks: ids, later: ids, kudosed: ids,
+    history: ids.map(workId => ({ workId, chapter: 0, readAt: now })) });
+  const clean = readAo3State();
+  assert.deepEqual(clean.works, [own, generated]);
+  for (const key of ['bookmarks', 'later', 'kudosed'] as const) assert.deepEqual(clean[key], ['my-work', 'generated']);
+  assert.deepEqual(clean.history.map(h => h.workId), ['my-work', 'generated']);
+  assert.ok(isAo3State(clean));
+  assert.deepEqual(JSON.parse(readStorageString(AO3_KEY)!), clean);
+  assert.deepEqual(readAo3State(), clean);
+});
 test('AO3 sharing sends complete chapters and comments to the selected chat as a readable, independent fiction snapshot', () => {
   writeStoredValue('pocketos:wechat-contacts', [{ id: 'a', name: '林渡' }]);
   const work = initialAo3State().works[1];
@@ -54,7 +82,7 @@ test('original archive fixtures validate; corrupted references, duplicate works 
 });
 test('search includes title, author, relationship and tags, combines filters and excludes terms', () => {
   const { works } = initialAo3State(), filters = emptyAo3Filters();
-  for (const query of ['月亮', 'PAPER_SATELLITE', 'Slow Burn', '领航员 / 通讯员']) assert.deepEqual(filterAo3Works(works, { ...filters, query }).map(w => w.id), ['ao3-sample-moon']);
+  for (const query of ['月亮', 'PAPER_SATELLITE', 'Slow Burn', '领航员 / 通讯员']) assert.deepEqual(filterAo3Works(works, { ...filters, query }).map(w => w.id), ['test-moon']);
   assert.equal(filterAo3Works(works, { ...filters, fandom: 'Original Work', complete: 'complete' }).length, 2);
   assert.equal(filterAo3Works(works, { ...filters, rating: 'Teen And Up Audiences', category: 'Other', complete: 'ongoing' }).length, 1);
   assert.equal(filterAo3Works(works, { ...filters, exclude: '雨夜, Slow Burn' }).length, 1);
@@ -73,7 +101,7 @@ test('kudos is idempotent, bookmarks and later toggle independently and all arch
   writeAo3State(state); assert.deepEqual(readAo3State(), state); assert.ok(isAo3State(state));
 });
 test('chapter history resumes the latest chapter, only entry counts a hit, invalid positions do not change state', () => {
-  let state = initialAo3State(); const id = 'ao3-sample-moon';
+  let state = initialAo3State(); const id = 'test-moon';
   state = updateAo3(state, { type: 'read', id, chapter: 0, now, countHit: true });
   state = updateAo3(state, { type: 'read', id, chapter: 1, now });
   assert.equal(state.history.length, 1); assert.equal(state.history[0].chapter, 1);
@@ -235,7 +263,7 @@ test('switching persona or archive during generation discards stale character fi
   await assert.rejects(generateAo3Discovery(discoveryOptions(), 'user', new AbortController().signal), /人设已变化/);
   setupDiscovery(); switchArchive = true;
   await assert.rejects(generateAo3Discovery(discoveryOptions({ authorType: 'character' }), 'user', new AbortController().signal), /存档已变化/);
-  assert.equal(readAo3State().works.length, 3);
+  assert.equal(readAo3State().works.length, 0);
 });
 
 test('both authors can use exactly the latest 150 visible messages; AU separates plot while retaining settings and five comments in one call', async () => {
@@ -263,5 +291,73 @@ test('incomplete comments reject the entire generation without extra API calls o
   setupDiscovery(); let calls = 0;
   mock.method(globalThis, 'fetch', async () => { calls++; return Response.json({ choices: [{ message: { content: JSON.stringify(discoveryResult({ comments: [{ author: '读者', body: '喜欢' }] })) } }] }); });
   await assert.rejects(generateAo3Discovery(discoveryOptions(), 'user', new AbortController().signal), /五条评论/);
-  assert.equal(calls, 1); assert.equal(readAo3State().works.length, 3);
+  assert.equal(calls, 1); assert.equal(readAo3State().works.length, 0);
+});
+
+test('追更 sends all complete previous chapters and original author context, then appends without overwriting metadata or interactions', async () => {
+  setupDiscovery();
+  const work: Ao3Work = { ...initialAo3State().works[0], id: 'continued', complete: true, author: 'anonymous_author',
+    generation: { authorType: 'character', topic: 'couple', authorCharId: 'a', authorCharName: '林渡', pairCharId: 'a', pairCharName: '林渡', playerName: '小满' } };
+  let state = { ...emptyAo3State(), works: [work] };
+  writeAo3State(state);
+  const draft = readAo3Draft(), chats = readStorageString('yyphone:wechat-chats');
+  let calls = 0;
+  mock.method(globalThis, 'fetch', async (_url: unknown, options?: RequestInit) => {
+    calls++;
+    const body = JSON.parse(String(options?.body)), input = JSON.parse(body.messages.at(-1).content);
+    assert.equal(input.chapter, work.chapters.length + 1);
+    assert.deepEqual(input.previousChapters, work.chapters);
+    assert.equal(input.currentChapter.body, '');
+    assert.equal(input.author, 'anonymous_author');
+    assert.deepEqual(input.generation, work.generation);
+    assert.equal(input.rating, work.rating);
+    assert.equal(input.cast.length, 1); assert.equal(input.cast[0].name, '林渡');
+    assert.match(body.messages[0].content, /必须承接最后一章/);
+    assert.doesNotMatch(JSON.stringify(input), /不应发出的其他角色|隐藏的心声/);
+    return Response.json({ choices: [{ message: { content: JSON.stringify({ chapterTitle: `续章${calls}`, body: `后续发展${calls}。\n\n不是重写。`, title: '不应覆盖标题' }) } }] });
+  });
+  const chapter = await generateAo3Continuation(work, new AbortController().signal);
+  assert.equal(readAo3State().works[0].chapters.length, 1);
+  state = updateAo3(state, { type: 'kudos', id: work.id });
+  state = updateAo3(state, { type: 'bookmark', id: work.id });
+  state = updateAo3(state, { type: 'comment', id: work.id, comment: { id: 'new-comment', author: 'reader', body: '期待后续', createdAt: now } });
+  state = updateAo3(state, { type: 'read', id: work.id, chapter: 0, now, countHit: true });
+  const before = state.works[0];
+  state = updateAo3(state, { type: 'continue', work, chapter, now });
+  assert.deepEqual(state.works[0], { ...before, chapters: [...work.chapters, chapter], complete: false, updatedAt: now });
+  assert.deepEqual(state.bookmarks, [work.id]);
+  assert.equal(state.history[0].chapter, 0);
+  assert.throws(() => updateAo3(state, { type: 'continue', work, chapter, now }), /已修改或删除/);
+  assert.throws(() => updateAo3(emptyAo3State(), { type: 'continue', work, chapter, now }), /已修改或删除/);
+  // Later chapters must receive even the beginning of a long first chapter.
+  work.chapters = [{ title: '长章', body: '必须保留的开头' + '中'.repeat(6000) }, ...Array.from({ length: 3 }, (_, i) => ({ title: `旧章${i}`, body: '旧章正文' }))];
+  const next = await generateAo3Continuation(work, new AbortController().signal);
+  state = updateAo3({ ...emptyAo3State(), works: [work] }, { type: 'continue', work, chapter: next, now });
+  writeAo3State(state);
+  assert.deepEqual(readAo3State(), state); assert.ok(isAo3State(state));
+  assert.equal(calls, 2); assert.deepEqual(readAo3Draft(), draft);
+  assert.equal(readStorageString('yyphone:wechat-chats'), chats);
+});
+test('failed, cancelled, malformed or over-limit continuations preserve the archive', async () => {
+  setupDiscovery();
+  const state = initialAo3State(), work = state.works[0]; writeAo3State(state);
+  let response = '{"body":""}';
+  mock.method(globalThis, 'fetch', async () => Response.json({ choices: [{ message: { content: response } }] }));
+  await assert.rejects(generateAo3Continuation(work, new AbortController().signal), /原稿已保留/);
+  response = 'not json';
+  await assert.rejects(generateAo3Continuation(work, new AbortController().signal));
+  response = JSON.stringify({ body: 'x'.repeat(200001) });
+  await assert.rejects(generateAo3Continuation(work, new AbortController().signal), /原稿已保留/);
+  const controller = new AbortController();
+  mock.method(globalThis, 'fetch', async () => {
+    controller.abort();
+    return Response.json({ choices: [{ message: { content: '{"body":"不应保存"}' } }] });
+  });
+  await assert.rejects(generateAo3Continuation(work, controller.signal));
+  mock.method(globalThis, 'fetch', async () => new Response('unavailable', { status: 503 }));
+  await assert.rejects(generateAo3Continuation(work, new AbortController().signal), /503/);
+  const full = { ...work, chapters: Array.from({ length: 100 }, () => work.chapters[0]) };
+  await assert.rejects(generateAo3Continuation(full, new AbortController().signal), /100 章上限/);
+  assert.throws(() => updateAo3({ ...state, works: [full] }, { type: 'continue', work: full, chapter: work.chapters[0], now }), /100 章上限/);
+  assert.deepEqual(readAo3State(), state);
 });

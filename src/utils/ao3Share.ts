@@ -8,7 +8,10 @@ export function ao3ShareContent(work: Ao3Work): string {
     `标题：${work.title}\n作者：${work.author}\n同人圈：${work.fandom}\n关系：${work.relationship}\n分级：${work.rating}\n预警：${work.warning}`,
     `简介：${work.summary}`, ...(work.notes ? [`作者的话：${work.notes}`] : []),
     ...work.chapters.map((c, i) => `【第 ${i + 1} 章：${c.title}】\n${c.body}`),
-    '【读者评论】', ...work.comments.map(c => `${c.author}：${c.body}`)].join('\n\n');
+    '【读者评论】', ...work.comments.map(c => {
+      const parent = work.comments.find(p => p.id === c.replyTo);
+      return `${parent ? `【回复 ${parent.author}：${parent.body.slice(0, 100)}】\n` : ''}${c.author}：${c.body}`;
+    })].join('\n\n');
 }
 /** Share an independent snapshot, never a live reference or a character's hidden identity. */
 export function shareAo3Work(work: Ao3Work, charId: string) {
