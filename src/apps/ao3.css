@@ -1,0 +1,177 @@
+.ao3-app {
+  --ao3-red: #900; --ao3-ink: #2a2a2a; --ao3-line: #ccc; --ao3-paper: #fff;
+  display: flex; flex: 1; flex-direction: column; width: 100%; min-height: 0; overflow: hidden;
+  color: var(--ao3-ink); background: var(--ao3-paper); font-family: Arial, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-size: 13px; line-height: 1.55; color-scheme: light; position: relative;
+}
+.ao3-app *, .ao3-app *::before, .ao3-app *::after { box-sizing: border-box; }
+.ao3-app button, .ao3-app input, .ao3-app textarea, .ao3-app select { font: inherit; }
+.ao3-app button { cursor: pointer; }
+.ao3-app button:disabled { opacity: .5; cursor: default; }
+.ao3-app button:focus-visible, .ao3-app summary:focus-visible { outline: 2px solid #900; outline-offset: 3px; }
+.ao3-app input:focus, .ao3-app textarea:focus, .ao3-app select:focus { outline: 1px solid #900; border-color: #900; }
+.ao3-app h1, .ao3-app h2, .ao3-app h3 { font-family: Georgia, 'Songti SC', SimSun, serif; font-weight: normal; }
+.ao3-app h2 { font-size: 21px; line-height: 1.5; margin: 4px 0 18px; overflow-wrap: anywhere; }
+.ao3-app h2 small { font-size: 13px; color: #777; margin-left: 5px; }
+.ao3-app label { display: grid; gap: 5px; min-width: 0; }
+.ao3-app input:not([type=checkbox]), .ao3-app textarea, .ao3-app select { width: 100%; min-width: 0; max-width: 100%; padding: 7px 8px; border: 1px solid #aaa; border-radius: 3px; background: #fff; color: #333; box-shadow: inset 0 1px 3px #00000012; }
+.ao3-app textarea { resize: vertical; white-space: pre-wrap; }
+.ao3-app-bar { flex: none; display: flex; align-items: center; gap: 6px; padding: calc(var(--safe-top, 0px) + 8px) 10px 8px; border-bottom: 1px solid #ddd; background: #f7f7f7; color: #555; font-size: 10px; }
+.ao3-app-bar > button { display: grid; place-items: center; min-width: 32px; height: 32px; color: #900; }
+.ao3-bar-divider { margin: 0 4px; color: #bbb; }
+.ao3-private { margin-left: auto; font-size: 9px; color: #888; white-space: nowrap; }
+.ao3-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: #c2a8a8 #f7f7f7; padding-bottom: max(16px, var(--safe-bottom, 0px)); }
+.ao3-site-header { position: relative; padding-top: 17px; }
+.ao3-brand { display: flex; align-items: center; gap: 8px; color: #900; padding: 0 12px 16px; width: 100%; text-align: left; }
+.ao3-brand > .ao3-logo { width: 49px; height: 45px; flex-shrink: 0; object-fit: contain; }
+.ao3-brand > span { font-family: Georgia, 'Times New Roman', serif; font-size: clamp(18px, 5vw, 25px); letter-spacing: -.6px; line-height: 1.3; }
+.ao3-brand sup { display: inline-block; font-size: 9px; font-style: italic; letter-spacing: 0; margin-left: 3px; vertical-align: super; }
+.ao3-account { display: block; margin: -5px 14px 12px auto; max-width: 75%; overflow-wrap: anywhere; font-size: 11px !important; text-align: right; }
+.ao3-site-header nav { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); background: linear-gradient(#a00, #800); box-shadow: inset 0 1px 0 #ffffff30, 0 2px 3px #0002; color: #fff; }
+.ao3-site-header nav button { padding: 10px 4px; font-size: 12px; white-space: nowrap; border-right: 1px solid #ffffff15; }
+.ao3-site-header nav button:hover, .ao3-site-header nav button[aria-current=page] { background: #610000; box-shadow: inset 0 1px 4px #0003; }
+.ao3-content { padding: 17px 12px 0; }
+.ao3-link { color: #900; border-bottom: 1px solid currentColor; text-align: inherit; display: inline; line-height: 1.35; overflow-wrap: anywhere; }
+.ao3-link:hover { color: #222; background: #eee; }
+.ao3-site-header > .ao3-account { display: block; margin-right: 14px; text-align: right; width: fit-content; }
+.ao3-button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 30px; padding: 4px 9px; border: 1px solid #bbb; border-radius: 4px; background: linear-gradient(#fff, #eee); color: #333; box-shadow: 0 1px 2px #0002; text-decoration: none; white-space: normal; }
+.ao3-button:hover { background: #ddd; }
+.ao3-button:disabled:hover { background: linear-gradient(#fff, #eee); }
+.ao3-button.ao3-primary { background: linear-gradient(#a00, #800); border-color: #700; color: #fff; }
+.ao3-button[aria-pressed=true], .ao3-button[aria-current=page] { background: #ddd; border-color: #999; box-shadow: inset 0 1px 3px #0003; color: #900; }
+.ao3-search { display: flex; gap: 7px; margin-bottom: 12px; }
+.ao3-search > label { flex: 1; position: relative; }
+.ao3-search > label > svg { position: absolute; top: 10px; left: 9px; color: #888; }
+.ao3-search input { padding-left: 30px !important; height: 36px; }
+.ao3-search .ao3-button { padding: 4px 14px; }
+.ao3-filters { border: 1px solid #ccc; background: #f6f6f6; border-radius: 3px; margin: 0 0 22px; }
+.ao3-filters summary, .ao3-writing-tools summary { display: flex; align-items: center; gap: 7px; padding: 9px 11px; cursor: pointer; list-style: none; }
+.ao3-filters summary::-webkit-details-marker, .ao3-writing-tools summary::-webkit-details-marker { display: none; }
+.ao3-filters summary > svg:last-child, .ao3-writing-tools summary > svg:last-child { margin-left: auto; transition: transform .2s; }
+.ao3-filters[open] summary > svg:last-child, .ao3-writing-tools[open] summary > svg:last-child { transform: rotate(180deg); }
+.ao3-filter-fields { padding: 3px 11px 12px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; font-size: 12px; }
+.ao3-filter-fields .ao3-button { justify-self: start; }
+.ao3-results-title { border-bottom: 1px solid #ccc; padding-bottom: 7px; margin-bottom: 12px !important; font-size: 19px !important; }
+.ao3-results-title small { display: block; margin-left: 0 !important; font-family: Arial, sans-serif; font-size: 11px !important; }
+.ao3-work-list { display: grid; gap: 15px; }
+.ao3-blurb { border: 1px solid #ccc; padding: 11px 10px 9px; border-radius: 2px; box-shadow: 0 1px 2px #0000000d; overflow-wrap: anywhere; }
+.ao3-blurb-header { display: flex; gap: 8px; align-items: flex-start; }
+.ao3-blurb-header > div:last-child { flex: 1; min-width: 0; }
+.ao3-symbols { display: grid; grid-template-columns: repeat(2, 20px); grid-template-rows: repeat(2, 20px); gap: 2px; flex: none; padding-top: 2px; }
+.ao3-symbols > span { display: grid; place-items: center; font: bold 12px/1 Arial, sans-serif; border: 1px solid #888; color: #fff; }
+.ao3-symbols .ao3-rating-g { background: #4c8b22; }
+.ao3-symbols .ao3-rating-t { background: #d9b538; color: #222; }
+.ao3-symbols .ao3-rating-m { background: #d77a27; }
+.ao3-symbols .ao3-rating-e { background: #a22; }
+.ao3-symbols .ao3-rating-\? { background: #ddd; color: #333; }
+.ao3-symbols .ao3-category { background: #729ca2; color: #fff; font-size: 8px; }
+.ao3-symbols .ao3-warning { background: #ba5e1c; }
+.ao3-symbols .ao3-no-warning { background: white; color: #222; }
+.ao3-symbols .ao3-complete { background: #fff; color: #32742f; font-size: 19px; }
+.ao3-symbols .ao3-ongoing { background: #fff; color: #900; font-size: 17px; }
+.ao3-blurb h3 { font-size: 17px; line-height: 1.4; margin: 0 0 3px; }
+.ao3-blurb h3 small { font-size: 12px; font-family: Arial, sans-serif; }
+.ao3-fandom-link { font-size: 11px; color: #555; }
+.ao3-blurb-date { font-size: 10px; text-align: right; margin: 8px 0; color: #666; }
+.ao3-tags { display: block; margin: 0 0 12px; padding: 0; list-style: none; font-size: 11px; line-height: 1.8; }
+.ao3-tags li { display: inline; }
+.ao3-tags li:not(:last-child)::after { content: ', '; color: #777; }
+.ao3-tags .ao3-link { color: #333; border-bottom-color: #aaa; }
+.ao3-warning-tag, .ao3-relationship { font-weight: bold; }
+.ao3-tags .ao3-relationship { background: #eee; padding: 1px 2px; }
+.ao3-summary { white-space: pre-wrap; margin: 10px 5px 15px; font-size: 12px; line-height: 1.85; }
+.ao3-stats { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 3px 9px; margin: 7px 0 0; color: #666; font-size: 10px; }
+.ao3-stats > div { display: inline-flex; gap: 3px; }
+.ao3-stats dd { margin: 0; }
+.ao3-section-note { color: #777; margin: -8px 0 24px; }
+.ao3-fandom-list { padding: 0; margin: 0; list-style: none; }
+.ao3-fandom-list li { display: flex; justify-content: space-between; align-items: baseline; gap: 15px; padding: 18px 4px; border-bottom: 1px solid #ddd; font-family: Georgia, 'Songti SC', serif; font-size: 16px; }
+.ao3-fandom-list li > span { color: #777; font: 12px Arial, sans-serif; }
+.ao3-shelf-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 18px; }
+.ao3-shelf-tabs .ao3-button { flex: 1; padding: 5px 6px; white-space: nowrap; font-size: 11px; }
+.ao3-draft-row { border: 1px dashed #bda7a7; background: #fbf7f7; padding: 10px; margin-bottom: 14px; display: flex; align-items: center; gap: 10px; justify-content: space-between; }
+.ao3-draft-row .ao3-button { flex-shrink: 0; font-size: 11px; }
+.ao3-resume { font-size: 11px; margin: 3px 0 5px; }
+.ao3-empty { display: grid; justify-items: center; gap: 12px; padding: 50px 15px; color: #777; text-align: center; }
+.ao3-empty svg { color: #a88; }
+.ao3-empty p { margin: 0; }
+.ao3-notice { display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 1px solid #baa; background: #f8f0ed; color: #683939; border-radius: 3px; padding: 9px; font-size: 12px; margin: 0 0 16px; overflow-wrap: anywhere; }
+.ao3-error { border-color: #c88; background: #fff1f1; color: #900; }
+.ao3-notice button { flex-shrink: 0; }
+.ao3-actions { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; justify-content: flex-end; margin: 16px 0; }
+.ao3-reader-actions { justify-content: flex-start; margin: 0 0 18px; }
+.ao3-reader-actions .ao3-button { font-size: 11px; }
+.ao3-work-meta { display: grid; grid-template-columns: 100px minmax(0, 1fr); gap: 7px 10px; padding: 13px 11px; border: 1px solid #aaa; box-shadow: 0 1px 3px #0002; font-size: 11px; }
+.ao3-work-meta dt { font-weight: bold; }
+.ao3-work-meta dd { margin: 0; overflow-wrap: anywhere; }
+.ao3-work-meta .ao3-stats { justify-content: flex-start; margin: 0; }
+.ao3-work-preface { margin: 32px 8px; text-align: center; }
+.ao3-work-preface h1 { font-size: 25px; line-height: 1.5; margin: 0 0 7px; overflow-wrap: anywhere; }
+.ao3-work-preface > p { margin: 0 0 30px; }
+.ao3-work-preface > div { text-align: left; margin: 21px 0; font-size: 13px; }
+.ao3-work-preface h3 { font-size: 16px; margin: 0 0 9px; }
+.ao3-work-preface > div p { margin-left: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ao3-chapter-controls { display: flex; gap: 6px; margin: 23px 0; align-items: center; }
+.ao3-chapter-controls .ao3-button { font-size: 11px; padding: 5px 7px; flex-shrink: 0; }
+.ao3-chapter-select { flex: 1; }
+.ao3-chapter-select select { padding: 6px !important; font-size: 11px !important; }
+.ao3-chapter { margin: 35px 4px; }
+.ao3-chapter > h2 { text-align: center; font-size: 19px; margin-bottom: 28px; }
+.ao3-prose { font-family: Georgia, 'Songti SC', 'Noto Serif SC', SimSun, serif; font-size: 16px; line-height: 2; overflow-wrap: anywhere; }
+.ao3-prose p { white-space: pre-wrap; margin: 0 0 1.35em; }
+.ao3-kudos-note { color: #777; font-size: 11px; padding: 13px 8px; border-top: 1px solid #ddd; margin-bottom: 22px; }
+.ao3-comments { border-top: 2px solid #900; padding-top: 14px; scroll-margin-top: 12px; }
+.ao3-comments h3 { font-size: 18px; margin-bottom: 17px; }
+.ao3-comments article { border: 1px solid #ccc; margin-bottom: 14px; }
+.ao3-comments article header { display: flex; gap: 10px; flex-wrap: wrap; justify-content: space-between; background: #eee; padding: 8px 10px; }
+.ao3-comments article time { font-size: 10px; color: #777; }
+.ao3-comments article p { padding: 13px 10px; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ao3-comments form { display: grid; gap: 12px; }
+.ao3-comments form .ao3-button { justify-self: end; }
+.ao3-editor fieldset { border: 1px solid #ccc; background: #f8f8f8; padding: 12px; margin: 0 0 20px; display: grid; gap: 14px; min-width: 0; }
+.ao3-editor legend { font: 17px Georgia, 'Songti SC', serif; padding: 0 5px; color: #444; }
+.ao3-editor label { font-size: 12px; }
+.ao3-form-row { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 10px; }
+.ao3-app .ao3-checkbox { display: flex; align-items: center; gap: 7px; }
+.ao3-checkbox input { accent-color: #900; width: 15px; height: 15px; }
+.ao3-chapter-editor { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 6px; }
+.ao3-chapter-editor label { width: 100%; }
+.ao3-body-editor { font-family: Georgia, 'Songti SC', serif !important; line-height: 1.9 !important; font-size: 15px !important; min-height: 300px; }
+.ao3-writing-tools { border: 1px solid #ccc; margin-bottom: 20px; }
+.ao3-writing-tools > fieldset { border: 0; border-top: 1px solid #ddd; margin: 0; padding-top: 16px; }
+.ao3-writing-tools > button { margin: 12px; }
+.ao3-help { font-size: 10px; color: #888; line-height: 1.7; }
+.ao3-actions > .ao3-help { width: 100%; }
+.ao3-cast { display: flex; gap: 10px 15px; flex-wrap: wrap; margin: 6px 0; }
+.ao3-footer { margin: 42px -12px 0; background: #eee; border-top: 2px solid #900; padding: 23px 14px 25px; text-align: center; color: #888; font-size: 11px; }
+.ao3-footer .ao3-logo { margin: 0 auto 5px; width: 30px; height: 28px; object-fit: contain; opacity: .65; }
+.ao3-footer p { margin: 5px 0; }
+.ao3-footer small { font-size: 9px; color: #999; }
+.ao3-toast { position: absolute; bottom: calc(24px + var(--safe-bottom, 0px)); left: 50%; transform: translateX(-50%); width: max-content; max-width: 85%; text-align: center; padding: 10px 16px; border-radius: 4px; background: #333e; color: #fff; font-size: 12px; pointer-events: none; box-shadow: 0 3px 12px #0002; z-index: 5; }
+.ao3-dialog-shade { position: absolute; z-index: 10; inset: 0; background: #0006; display: flex; align-items: center; justify-content: center; padding: 22px; }
+.ao3-dialog { background: #fff; color: #333; border-top: 4px solid #900; padding: 22px; width: 100%; max-width: 350px; box-shadow: 0 8px 35px #0004; }
+.ao3-dialog h3 { font-size: 21px; margin-bottom: 14px; }
+.ao3-share-recipients { display: grid; gap: 9px; max-height: 45vh; overflow-y: auto; }
+.ao3-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.ao3-discover-bar { display: flex; gap: 12px; align-items: center; justify-content: space-between; margin: 0 0 14px; }
+.ao3-discover-bar > span { font: italic 12px Georgia, serif; color: #888; }
+.ao3-discover-bar > button { white-space: nowrap; font-size: 12px; }
+.ao3-discovery fieldset { border: 1px solid #ccc; padding: 15px 12px; margin: 0 0 22px; display: grid; gap: 16px; min-width: 0; background: #fafafa; }
+.ao3-discovery legend { padding: 0 6px; font: 17px Georgia, 'Songti SC', serif; }
+.ao3-choice-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.ao3-app .ao3-choice { position: relative; display: block; cursor: pointer; }
+.ao3-choice input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.ao3-choice > span { display: grid; gap: 6px; padding: 13px 10px; border: 1px solid #ccc; background: #fff; min-height: 92px; height: 100%; }
+.ao3-choice strong { font: 16px Georgia, 'Songti SC', serif; }
+.ao3-choice small { font-size: 10px; line-height: 1.6; color: #888; }
+.ao3-choice input:checked + span { border-color: #900; background: #faf1ef; box-shadow: inset 0 2px #900; }
+.ao3-choice input:checked + span strong { color: #900; }
+.ao3-choice input:focus-visible + span { outline: 2px solid #900; outline-offset: 2px; }
+.ao3-choice input:disabled + span { opacity: .6; cursor: default; }
+.ao3-author-hint { display: block; margin: -3px 0 10px; color: #888; font-size: 10px; font-weight: normal; }
+.ao3-work-preface .ao3-author-hint { margin-top: 8px; }
+.ao3-writing-status { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 24px 8px; color: #900; font: 14px Georgia, 'Songti SC', serif; }
+.ao3-writing-status svg { animation: ao3-page-breathe 2s ease-in-out infinite; }
+@keyframes ao3-page-breathe { 0%, 100% { opacity: .45; transform: rotate(-5deg); } 50% { opacity: 1; transform: rotate(5deg); } }
+@media (prefers-reduced-motion: reduce) { .ao3-writing-status svg { animation: none; } }
+@media (max-width: 350px) { .ao3-content { padding-left: 9px; padding-right: 9px; } .ao3-footer { margin-left: -9px; margin-right: -9px; } .ao3-brand { gap: 5px; padding-left: 9px; } .ao3-brand > .ao3-logo { width: 40px; } .ao3-work-meta { grid-template-columns: 85px minmax(0, 1fr); padding: 10px 8px; gap: 6px 8px; font-size: 10px; } .ao3-private { font-size: 8px; } }

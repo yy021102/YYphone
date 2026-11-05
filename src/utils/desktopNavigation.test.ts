@@ -11,10 +11,10 @@ import { desktopPageAfterSwipe, isDesktopActivity } from './desktopNavigation';
 test('desktop identities are unique, place WeChat in the shared dock and route all six second-page activities', () => {
   assert.deepEqual(MAIN_GRID_APPS.map(app => app.id), ['world_book', 'phone_explorer', 'alipay', 'taobao', 'forum', 'pomodoro', 'offline_mode', 'couple_space']);
   assert.deepEqual(DOCK_APPS.map(app => app.id), ['settings', 'customizer', 'memory', 'wechat']);
-  assert.deepEqual(SECOND_PAGE_APPS.map(app => app.id), ['text-adventure', 'time-capsule', 'divination', 'little-sip', 'character-perspective', 'kitchen']);
+  assert.deepEqual(SECOND_PAGE_APPS.map(app => app.id), ['text-adventure', 'time-capsule', 'divination', 'little-sip', 'character-perspective', 'kitchen', 'ao3']);
   assert.equal(new Set(ALL_APPS.map(app => app.id)).size, ALL_APPS.length);
   assert.equal(ALL_APPS.length, MAIN_GRID_APPS.length + DOCK_APPS.length + SECOND_PAGE_APPS.length);
-  for (const app of SECOND_PAGE_APPS) assert.equal(isDesktopActivity(app.id), true);
+  for (const app of SECOND_PAGE_APPS) assert.equal(isDesktopActivity(app.id), app.id !== 'ao3');
   for (const app of [...MAIN_GRID_APPS, ...DOCK_APPS]) assert.equal(isDesktopActivity(app.id), false);
   assert.equal(isDesktopActivity(null), false);
   assert.equal(isDesktopActivity(undefined), false);
@@ -43,7 +43,7 @@ test('page controls expose two named keyboard-operable buttons and the current p
   }
 });
 
-test('all four leisure themes render six apps, a shared dock and replaceable custom icons without requiring new stored data', () => {
+test('all four leisure themes render second-page apps, a shared dock and replaceable custom icons without requiring new stored data', () => {
   for (const homeStyle of ['classic', 'minimal', 'moonlit', 'halloween'] as const) {
     const markup = renderToStaticMarkup(createElement(HomeScreen, {
       page: 1, onPageChange: () => {}, homeStyle, userProfile: INITIAL_USER_PROFILE,
@@ -52,7 +52,7 @@ test('all four leisure themes render six apps, a shared dock and replaceable cus
     }));
     assert.match(markup, new RegExp(`leisure-${homeStyle}`));
     for (const app of [...SECOND_PAGE_APPS, ...DOCK_APPS]) assert.ok(markup.includes(`>${app.name}</span>`), app.name);
-    assert.equal((markup.match(/class="leisure-app(?: has-custom-icon)?"/g) ?? []).length, 10);
+    assert.equal((markup.match(/class="leisure-app(?: has-custom-icon)?"/g) ?? []).length, SECOND_PAGE_APPS.length + DOCK_APPS.length);
     assert.equal((markup.match(/aria-label="系统应用"/g) ?? []).length, 1);
     assert.equal((markup.match(/has-custom-icon/g) ?? []).length, 3);
     for (const name of ['custom-divination.png', 'custom-kitchen.png', 'custom-settings.png']) assert.ok(markup.includes(`src="${name}"`));

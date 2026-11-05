@@ -1,0 +1,4 @@
+Archive of Our Own logo
+Source: https://github.com/otwcode/otwarchive/blob/master/public/images/ao3_logos/logo_42.png
+Archive of Our Own and its logo belong to the Organization for Transformative Works.
+Used to identify an AO3-style local simulation. This project is not affiliated with AO3 or OTW.

@@ -60,6 +60,7 @@ const WorldBookApp = lazy(() => import('./apps/WorldBookApp').then((module) => (
 const MemoryApp = lazy(() => import('./apps/MemoryApp').then((module) => ({ default: module.MemoryApp })));
 const InventoryApp = lazy(() => import('./apps/InventoryApp').then((module) => ({ default: module.InventoryApp })));
 const CalendarApp = lazy(() => import('./components/CalendarPanel').then((module) => ({ default: module.CalendarPanel })));
+const Ao3App = lazy(() => import('./apps/Ao3App').then((module) => ({ default: module.Ao3App })));
 
 type LockMode = 'none' | 'lock' | 'password';
 interface LockSettings {
@@ -728,6 +729,7 @@ export default function App() {
                 setCouponGift(null); if (use) openNotifiedChat(use.chatId); else handleBackToHome();
               }} onCouponGiftComplete={chatId => { setCouponGift(null); openNotifiedChat(chatId); }} />}
               {activeApp === 'forum' && <ForumApp onBack={handleBackToHome} />}
+              {activeApp === 'ao3' && <Ao3App onBack={handleBackToHome} userName={userProfile.name} />}
               {activeApp === 'pomodoro' && <PomodoroApp onBack={handleBackToHome} />}
               {activeApp === 'offline_mode' && (
                 <OfflineModeApp onBack={handleBackToHome} />

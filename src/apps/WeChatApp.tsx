@@ -230,7 +230,7 @@ const TextAdventureApp = React.lazy(() => import('../components/TextAdventureApp
 const TimeCapsuleApp = React.lazy(() => import('../components/TimeCapsuleApp').then(module => ({ default: module.TimeCapsuleApp })));
 const DivinationApp = React.lazy(() => import('../components/DivinationApp').then(module => ({ default: module.DivinationApp })));
 const CharacterPerspective = React.lazy(() => import('../components/CharacterPerspective').then(module => ({ default: module.CharacterPerspective })));
-const PREVIEWABLE_LINK_SOURCES = ['微信游戏 · 同词相遇', '微信游戏 · 猜词', '微信游戏 · 狼人杀', '微信游戏 · 剧本杀', '微信游戏 · 海龟汤', '微信游戏 · 炸金花', '微信读书', '微信占卜 · 塔罗', '微信占卜 · 星盘', '微信占卜 · 奇门', '微信 · 一杯之间'];
+const PREVIEWABLE_LINK_SOURCES = ['AO3', '微信游戏 · 同词相遇', '微信游戏 · 猜词', '微信游戏 · 狼人杀', '微信游戏 · 剧本杀', '微信游戏 · 海龟汤', '微信游戏 · 炸金花', '微信读书', '微信占卜 · 塔罗', '微信占卜 · 星盘', '微信占卜 · 奇门', '微信 · 一杯之间'];
 
 interface ContactWorldBookLink {
   bookId: string;
@@ -8218,7 +8218,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       {guessRecordPreview && (
         <div className="absolute inset-0 z-[85] flex items-center justify-center bg-black/40 p-5 backdrop-blur-sm"
           onClick={(event) => { if (event.target === event.currentTarget) setGuessRecordPreview(null); }}>
-          <section role="dialog" aria-modal="true" aria-label={guessRecordPreview.source === '生日来信' ? '生日来信' : guessRecordPreview.source === '微信占卜 · 塔罗' ? '塔罗完整手记' : guessRecordPreview.source === '微信占卜 · 星盘' ? '星盘完整手记' : guessRecordPreview.source === '微信占卜 · 奇门' ? '奇门完整手记' : guessRecordPreview.source === '微信 · 一杯之间' ? '饮品完整配方' : '游戏完整记录'}
+          <section role="dialog" aria-modal="true" aria-label={guessRecordPreview.source === '生日来信' ? '生日来信' : guessRecordPreview.source === '微信占卜 · 塔罗' ? '塔罗完整手记' : guessRecordPreview.source === '微信占卜 · 星盘' ? '星盘完整手记' : guessRecordPreview.source === '微信占卜 · 奇门' ? '奇门完整手记' : guessRecordPreview.source === '微信 · 一杯之间' ? '饮品完整配方' : guessRecordPreview.source === 'AO3' ? 'AO3 作品' : '游戏完整记录'}
             className="flex max-h-[85%] w-full max-w-md flex-col overflow-hidden rounded-3xl border border-white/80 bg-white/95 shadow-2xl">
             <header className="flex items-center justify-between border-b border-slate-100 p-4">
               <div><p className="text-[10px] text-sky-600">{guessRecordPreview.source}</p><h2 className="text-sm font-bold text-[#2C4A5C]">{guessRecordPreview.title}</h2></div>

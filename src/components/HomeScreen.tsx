@@ -82,6 +82,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     className = 'w-6 h-6 text-[#587589]'
   ) => {
     switch (iconName) {
+      case 'AO3':
+        return <img className={className} src={`${import.meta.env?.BASE_URL ?? '/'}ao3-logo.png`} alt="" aria-hidden="true" style={{ objectFit: 'contain', position: 'static', width: '75%', height: '75%' }}/>;
       case 'MessageCircle':
         return <MessageCircle className={className} />;
       case 'BookOpenText':

@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./apps/ao3.css";
 @import "./components/calendar.css";
 @import "./components/periodTracker.css";
 @import "./components/xianyuConversation.css";

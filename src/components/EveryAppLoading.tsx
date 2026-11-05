@@ -6,6 +6,10 @@ import { PomodoroLoading } from './PomodoroLoading';
 
 type IllustratedApp = Exclude<AppId, 'wechat' | 'phone_explorer' | 'memory' | 'couple_space' | 'pomodoro'>;
 const scenes: Record<IllustratedApp, { title: string; caption: string; eyebrow: string; footer: string; art: ReactNode }> = {
+  ao3: {
+    title: 'AO3', caption: '故事，总有另一种可能。', eyebrow: 'ARCHIVE OF OUR OWN', footer: '翻开你喜欢的那一篇',
+    art: <g className="every-opening-float"><path d="M61 92q48-17 99 7 51-24 99-7v151q-48-17-99 7-51-24-99-7Z" fill="#fffaf4" stroke="#d5b4b8" strokeWidth="2"/><path d="M160 99v151M82 120q29-6 56 5m-56 19q29-6 56 5m-56 19q29-6 56 5m-56 19q29-6 56 5m44-73q29-11 56-5m-56 29q29-11 56-5m-56 29q29-11 56-5" stroke="#dccbca" strokeWidth="2"/><path d="M196 88v109l12-9 12 9V88" fill="#b66d79"/><path d="M148 69c-15-20-31 1 0 18 31-17 15-38 0-18" fill="#dbb3bb"/></g>,
+  },
   kitchen: {
     title: '下厨房', caption: '把喜欢，慢慢做成一餐。', eyebrow: 'A LITTLE KITCHEN, A LOT OF LOVE', footer: '今天，也有一份为你留的热乎心意',
     art: <g className="every-opening-float">

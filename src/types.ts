@@ -1,6 +1,7 @@
 export type DesktopActivityId = 'text-adventure' | 'time-capsule' | 'divination' | 'little-sip' | 'character-perspective' | 'kitchen';
 
 export type AppId =
+  | 'ao3'
   | DesktopActivityId
   | 'wechat'
   | 'phone_explorer'
