@@ -1,3 +1,5 @@
+import { CHAT_DICE_STICKER_ID } from './chatDice';
+
 interface ChatFeatureScene {
   type: 'direct' | 'group' | 'observer';
   callMode?: 'voice' | 'video' | null;
@@ -57,6 +59,9 @@ export function chatFeatureInstructions(options: ChatFeatureOptions): string {
     stickers ? [
       '【表情包】玩家导入了一批表情包，你可以像真人聊天一样，根据人设、性格和当下情绪，在合适的时候主动发表情包（比如开心、撒娇、无语、委屈、吐槽时），一般可单独作为一条 {"kind":"sticker","stickerId":"表情包ID"}，也可在文字消息后附带一条；偏活泼的人设可以更常用，内敛冷淡的人设就少用，不要每轮都发，也不要连发多个。表情包不只是表达情绪，也可以用来糊弄回复、反讽、玩梗、做社交缓冲（不知道说什么、尴尬、不想认真回答时）；但不要过度解读表情包的含义，也不要给它强加深意。根据当前对话氛围和人设选择性地发，同一个表情包不要反复发（回看历史，近期发过的就换一个或不发）。',
       `只能从下列目录选择，格式 分类：[ID|名称]：${options.stickerCatalog}。`,
+      ...(options.stickerCatalog.includes(`[${CHAT_DICE_STICKER_ID}|`) ? [
+        `骰子也是表情包；获准使用默认分类时可发送 {"kind":"sticker","stickerId":"${CHAT_DICE_STICKER_ID}"}，用于掷骰子、比点数或自然互动。点数由小手机随机决定并保存，不能通过 text 或其他字段指定、修改或提前宣称自己掷出的点数；后续只以聊天记录里实际显示的结果为准。`,
+      ] : []),
       `每位角色只能从获准分类选择：${options.stickerPermissions}。`,
     ].join('\n') : '本轮无可用表情包，禁止返回 sticker。',
     incomingCall

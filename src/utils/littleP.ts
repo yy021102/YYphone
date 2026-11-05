@@ -1,6 +1,6 @@
 import { readStoredValue, writeStoredValue } from './localStorage';
 import { parseChatResponse } from './aiResponse';
-import type { ChatSticker } from './chatStickers';
+import { resolveChatSticker, type ChatSticker } from './chatStickers';
 
 export const LITTLE_P_MESSAGES_KEY = 'yyphone:little-p-messages';
 export const LITTLE_P_VISIBLE_KEY = 'yyphone:little-p-visible';
@@ -14,7 +14,7 @@ export const LITTLE_P_GUIDE = [
   { title: '消息操作与聊天设置', content: '长按消息可编辑、删除、引用、转发、多选或收藏，点击角色头像可看心声，真实图片点开可看大图。聊天右上角的对话设置可以调字号、头像、携带的聊天记录数量、补充设定，以及主动消息、主动来电等功能。想按条数删除记录，到对话设置最下方的「按范围删除聊天记录」，例如填 1～100。删除前请核对范围。' },
   { title: '回车发送与自动回复', content: '设置 → 聊天输入，可以开启「回车发送后自动回复」。开启后，微信大小号聊天中回车发送消息会接着让角色回复；Shift + 回车仍可换行，中文输入法选词不会误发送。点击小飞机只发送消息，想让角色回复时再点爱心。' },
   { title: '我的人设与参考照片', content: '微信 → 我 → 设置 → 我的 AI 人设，可保存不同身份、昵称、真名、头像和介绍。「我的照片」用于生图时参考你的长相，上传后开启「生图时参考我的脸」，调整强度并保存。每个人设可以放不同照片，照片不会替换头像；相似效果取决于所用生图模型。' },
-  { title: '表情包、旁白与通话', content: '聊天表情面板支持导入表情包并分分类，角色可用的分类在角色编辑页选择。加号第二页的「旁白」可以描述场景和动作。语音、视频通话入口也在加号中；这是与角色的模拟通话。想让角色主动来电，在对应聊天的对话设置中开启。' },
+  { title: '表情包、旁白与通话', content: '聊天表情面板支持导入表情包并分分类，角色可用的分类在角色编辑页选择。「默认」分类第一位是骰子，玩家和获准使用默认分类的角色都能发送；骰子转动后随机停在 1～6 点，点数会保存，回看不会重掷。加号第二页的「旁白」可以描述场景和动作。语音、视频通话入口也在加号中；这是与角色的模拟通话。想让角色主动来电，在对应聊天的对话设置中开启。' },
   { title: '语音与生图', content: '设置 → 语音模型可填写语音服务、调整语速并测试，角色音色在角色资料中设置。设置 → 生图模型可选择尺寸、拉取模型、测试和保存预设。聊天 → 对话设置 → 生图，可开启生图、添加提示词与参考图并调整相似度。连接测试可能消耗服务额度，使用前记得保存配置；参考图需要所选服务支持。' },
   { title: '收藏与链接', content: '长按微信消息 → 收藏，之后到微信 → 我 → 收藏查看。收藏可搜索，长按可以分享或删除，也能用右上角加号新建文字收藏。分享网页链接时会尝试显示标题和预览图；部分需要登录或限制访问的网站可能只能显示链接。' },
   { title: '红包、转账与亲密付', content: '点击角色发来的红包卡片领取，转账卡片可以收款或退还，收到的钱可在支付宝查看。支付宝里可向角色申请亲密付，填写额度和理由后，到私聊让角色回复；是否同意由角色决定。红包、余额和购物都是小手机里的虚拟玩法，不涉及真实支付。' },
@@ -53,6 +53,7 @@ export interface LittlePMessage {
   id: string;
   role: 'user' | 'assistant';
   text: string;
+  createdAt?: string;
   sticker?: ChatSticker;
 }
 
@@ -61,6 +62,7 @@ export const readLittlePMessages = (): LittlePMessage[] =>
     Array.isArray(value) && value.every((item) => !!item && typeof item === 'object' &&
       typeof item.id === 'string' && (item.role === 'user' || item.role === 'assistant') &&
       typeof item.text === 'string' &&
+      (item.createdAt === undefined || typeof item.createdAt === 'string') &&
       (item.sticker === undefined || (!!item.sticker && typeof item.sticker.id === 'string' &&
         typeof item.sticker.imageUrl === 'string' && typeof item.sticker.description === 'string')))
   );
@@ -98,7 +100,7 @@ export const parseLittlePReply = (text: string, stickers: ChatSticker[]): Array<
       if (Object.keys(part).some((key) => key !== 'stickerId')) throw new Error('小P 返回了不支持的消息字段。');
       const sticker = stickers.find((item) => item.id === part.stickerId);
       if (!sticker || ++stickerCount > 1) throw new Error('小P 返回了无效或过多的表情包。');
-      return { text: '', sticker };
+      return { text: '', sticker: resolveChatSticker(sticker) };
     }
     if (Object.keys(part).some((key) => key !== 'text' && key !== 'kind')) throw new Error('小P 返回了不支持的消息字段。');
     if ('kind' in part && part.kind !== 'text') throw new Error('小P 不支持此消息功能。');

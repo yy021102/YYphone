@@ -1,5 +1,6 @@
 import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
+import { FirstUseGate } from './components/FirstUseGate';
 import './index.css';
 import { initializeDbStorage } from './utils/dbStorage';
 
@@ -11,5 +12,5 @@ void initializeDbStorage()
     console.error('Could not initialize persistent storage.', error);
   })
   .finally(() => {
-    createRoot(rootElement).render(<App />);
+    createRoot(rootElement).render(<FirstUseGate><App /></FirstUseGate>);
   });

@@ -1,0 +1,42 @@
+.yy-chat-dice {
+  display: inline-flex;
+  position: relative;
+  width: 64px;
+  height: 72px;
+  align-items: center;
+  justify-content: center;
+  perspective: 240px;
+}
+.yy-chat-dice-image {
+  display: block;
+  width: 64px;
+  height: 72px;
+  object-fit: contain;
+}
+.yy-chat-dice.is-rolling .yy-chat-dice-image { visibility: hidden; }
+.yy-chat-dice-cube {
+  position: absolute;
+  display: block;
+  width: 38px;
+  height: 38px;
+  transform-style: preserve-3d;
+}
+.yy-chat-dice-face {
+  position: absolute;
+  inset: 0;
+  width: 38px;
+  height: 38px;
+  border-radius: 6px;
+  backface-visibility: hidden;
+}
+.yy-chat-dice.is-rolling .yy-chat-dice-cube {
+  animation: yy-chat-dice-roll 360ms linear infinite;
+}
+@keyframes yy-chat-dice-roll {
+  from { transform: rotateX(-18deg) rotateY(-26deg) rotateZ(0deg); }
+  to { transform: rotateX(342deg) rotateY(694deg) rotateZ(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .yy-chat-dice.is-rolling .yy-chat-dice-cube { display: none; animation: none; }
+  .yy-chat-dice.is-rolling .yy-chat-dice-image { visibility: visible; }
+}

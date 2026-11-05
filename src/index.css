@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./components/firstUseGate.css";
 @import "./apps/ao3.css";
 @import "./components/calendar.css";
 @import "./components/periodTracker.css";
@@ -24,6 +25,7 @@
 @import "./components/wordEncounter.css";
 @import "./components/coupleCorrespondence.css";
 @import "./components/birthday.css";
+@import "./components/chatDice.css";
 
 :root {
   color-scheme: light;

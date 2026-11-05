@@ -140,7 +140,9 @@ import { estimatePromptTokenBreakdown, PROMPT_TOKEN_CATEGORIES, type PromptToken
 import { buildCharacterExport, parsePortableWorldBooks, remapImportedWorldBooks } from '../utils/characterExport';
 import { applySocialWrites, buildSocialInstructions, parseSocialActions, type SocialContext } from '../utils/chatSocial';
 import { chatAvatarInstructions, prepareChatAvatar, resolveChatAvatar, withChatAvatarContext } from '../utils/chatAvatar';
-import { BUILTIN_STICKERS, CHAT_STICKERS_STORAGE_KEY, type ChatSticker } from '../utils/chatStickers';
+import { BUILTIN_STICKERS, CHAT_STICKERS_STORAGE_KEY, resolveChatSticker, type ChatSticker } from '../utils/chatStickers';
+import { CHAT_DICE_STICKER_ID, readChatDiceValue } from '../utils/chatDice';
+import { ChatDice } from '../components/ChatDice';
 import { ChatNotification, ChatRuntimeSettings, getRoundThought, incomingCallsAllowed, isProactiveDue, permittedSticker, preserveRoundThoughts } from '../utils/chatRuntime';
 import { pendingPhoneProxyEvents, phoneProxyInstructions } from '../utils/phoneProxy';
 import { isThoughtSnapshot, type ThoughtSnapshot } from '../utils/thoughtPresets';
@@ -2809,7 +2811,8 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
   };
 
   const sendSticker = (sticker: ChatSticker) => {
-    if (saveAttachmentMessage('sticker', sticker.description, { imageUrl: sticker.imageUrl })) {
+    const sent = resolveChatSticker(sticker);
+    if (saveAttachmentMessage('sticker', sent.description, { imageUrl: sent.imageUrl })) {
       setEmojiPanelOpen(false);
     }
   };
@@ -3313,8 +3316,9 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
               const sticker = speakerStickers.find((item) => item.id === part.stickerId)
                 ?? speakerStickers.find((item) => item.description === (part.stickerId ?? part.text));
               if (!sticker) throw new Error('AI 选择了不存在或未分配给该角色的表情包，已取消本次回复。');
-              message.imageUrl = sticker.imageUrl;
-              message.text = text || sticker.description;
+              const sent = resolveChatSticker(sticker);
+              message.imageUrl = sent.imageUrl;
+              message.text = sticker.id === CHAT_DICE_STICKER_ID ? sent.description : text || sent.description;
             }
             if (kind === 'narration') {
               if (!message.text) throw new Error('AI 返回了空旁白，请重试。');
@@ -3720,7 +3724,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
           text: privateMessages.map((message) => message.text).join(' ').slice(0, 160),
         });
       }
-      // 逐条出现：updateChat 每次都读写存储，即使中途离开聊天页也会把剩余消息补完。
+      // 记录逐条送达的时间，让骰子从到达时开始转动；离开聊天页也会继续保存。
       for (const message of replyMessages.slice(1)) {
         const length = (message.text ?? '').length;
         await new Promise((resolve) => setTimeout(resolve, 500 + Math.min(1300, length * 40)));
@@ -3729,10 +3733,11 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
         if (!live || live.blocked || live.activeArchiveId !== chat.activeArchiveId || live.archiveRevision !== chat.archiveRevision || live.coupleCouponRevision !== expectedCouponRevision ||
           effectiveChatLanguage(live) !== effectiveChatLanguage(chat) ||
           live.participantIds.length !== chat.participantIds.length || !chat.participantIds.every(id => live.participantIds.includes(id))) return;
+        const deliveredMessage = { ...message, createdAt: new Date().toISOString() };
         updateChat(chat.id, (current) => ({
           ...current,
-          messages: [...current.messages, message],
-          updatedAt: message.createdAt,
+          messages: [...current.messages, deliveredMessage],
+          updatedAt: deliveredMessage.createdAt,
         }));
       }
       if (replySaved && generatedGroupTitle && generatedGroupTitle !== getChatTitle(chat)) {
@@ -4233,6 +4238,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
               })()}
               {displayChatMessages.slice(-visibleMessageCount).flatMap((message, messageIndex, visibleList) => {
                 const previousMessage = visibleList[messageIndex - 1];
+                const diceValue = readChatDiceValue(message);
                 const divider = shouldShowTimestamp(previousMessage?.createdAt, message.createdAt) ? (
                   <div key={`time-${message.id}`} className="yy-chat-timestamp py-1 text-center text-[10px] text-slate-400">
                     {formatChatTimestamp(
@@ -4645,7 +4651,8 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                           {message.source && <p className="mt-1 text-[9px] text-slate-400">{message.source}{PREVIEWABLE_LINK_SOURCES.includes(message.source) && ' · 点击查看完整记录'}</p>}
                         </button>
                       ) : message.kind === 'sticker' && message.imageUrl ? (
-                        <img src={message.imageUrl} alt={message.text} className="h-24 w-24 rounded-xl object-contain" />
+                        diceValue ? <ChatDice value={diceValue} createdAt={message.createdAt}/> :
+                          <img src={message.imageUrl} alt={message.text} className="h-24 w-24 rounded-xl object-contain" />
 
                       ) : message.kind === 'voice' ? (
                         (() => {

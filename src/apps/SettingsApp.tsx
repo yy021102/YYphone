@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { McpSettingsPanel } from '../components/McpSettingsPanel';
+import { GithubBackup } from '../components/GithubBackup';
 import { ApiModelPicker } from '../components/ApiModelPicker';
 import { ChatApiConnectionTest } from '../components/ChatApiConnectionTest';
 import { apiTemperature } from '../utils/textApiConfig';
@@ -991,6 +992,7 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
                 />
               </label>
             </div>
+            <GithubBackup onRestore={handleImportBackup}/>
             {backupMessage && <p className="text-[11px] text-emerald-700">{backupMessage}</p>}
             {backupError && <p role="alert" className="text-[11px] text-rose-600">{backupError}</p>}
             <button

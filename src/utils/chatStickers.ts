@@ -1,4 +1,5 @@
 import { readStoredValue } from './localStorage';
+import { CHAT_DICE_IMAGES, CHAT_DICE_STICKER_ID, rollChatDice } from './chatDice';
 
 export interface ChatSticker {
   id: string;
@@ -24,9 +25,15 @@ const BUILTIN_STICKER_DATA: Array<[string, string, string]> = [
   ['抽象', '屏幕有水是我的泪', 'https://i.postimg.cc/Fsw4KS0t/IMG-3830.jpg'],
 ];
 
-export const BUILTIN_STICKERS: ChatSticker[] = BUILTIN_STICKER_DATA.map(([category, description, imageUrl], index) => ({
+export const BUILTIN_STICKERS: ChatSticker[] = [
+  { id: CHAT_DICE_STICKER_ID, imageUrl: CHAT_DICE_IMAGES[0], description: '骰子', category: '默认' },
+  ...BUILTIN_STICKER_DATA.map(([category, description, imageUrl], index) => ({
   id: `builtin-${index + 1}`, imageUrl, description, category,
-}));
+  })),
+];
+
+export const resolveChatSticker = (sticker: ChatSticker): ChatSticker =>
+  sticker.id === CHAT_DICE_STICKER_ID ? { ...sticker, ...rollChatDice() } : sticker;
 
 export const readAvailableChatStickers = (): ChatSticker[] => [
   ...BUILTIN_STICKERS,

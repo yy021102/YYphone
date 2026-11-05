@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { requestConfiguredAiText } from '../utils/aiApi';
-import { readAvailableChatStickers, type ChatSticker } from '../utils/chatStickers';
+import { readAvailableChatStickers, resolveChatSticker, type ChatSticker } from '../utils/chatStickers';
+import { readChatDiceValue } from '../utils/chatDice';
+import { ChatDice } from './ChatDice';
 import { LITTLE_P_GUIDE, littlePHistory, littlePSystemPrompt, parseLittlePReply, readLittlePMessages, writeLittlePMessages, type LittlePMessage } from '../utils/littleP';
 
 interface LittlePPanelProps {
@@ -42,7 +44,8 @@ export const LittlePPanel: React.FC<LittlePPanelProps> = ({ open, onClose, onHid
   const addUserMessage = (sticker?: ChatSticker) => {
     if (running.current || (!draft.trim() && !sticker)) return;
     try {
-      persist([...messages, { id: crypto.randomUUID(), role: 'user', text: sticker ? '' : draft.trim(), ...(sticker ? { sticker } : {}) }]);
+      persist([...messages, { id: crypto.randomUUID(), role: 'user', text: sticker ? '' : draft.trim(), createdAt: new Date().toISOString(),
+        ...(sticker ? { sticker: resolveChatSticker(sticker) } : {}) }]);
       if (!sticker) setDraft('');
       setStickersOpen(false);
       setError('');
@@ -71,7 +74,7 @@ export const LittlePPanel: React.FC<LittlePPanelProps> = ({ open, onClose, onHid
       });
       controller.signal.throwIfAborted();
       const reply = parseLittlePReply(response, stickers).map((part): LittlePMessage => ({
-        ...part, id: crypto.randomUUID(), role: 'assistant',
+        ...part, id: crypto.randomUUID(), role: 'assistant', createdAt: new Date().toISOString(),
       }));
       persist([...messages, ...reply]);
     } catch (failure) {
@@ -114,11 +117,15 @@ export const LittlePPanel: React.FC<LittlePPanelProps> = ({ open, onClose, onHid
         ) : (
           <div ref={scroll} className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
             <p className="rounded-2xl bg-white p-3 text-xs leading-relaxed text-slate-500">嗨，我是小P！想找功能、遇到疑问，或者只是想聊聊天，都可以来找我。发出消息后，点「让小P回复」就好；还没配置 API 的话，也可以先翻翻功能指南。</p>
-            {messages.map((message) => <div key={message.id} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+            {messages.map((message) => {
+              const diceValue = readChatDiceValue({ kind: 'sticker', imageUrl: message.sticker?.imageUrl });
+              return <div key={message.id} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
               <div className={`max-w-[88%] whitespace-pre-wrap break-words rounded-2xl px-3 py-2 text-xs leading-relaxed ${message.role === 'user' ? 'bg-sky-100 text-slate-700' : 'bg-white text-slate-600'}`}>
-                {message.sticker ? <img src={message.sticker.imageUrl} alt={message.sticker.description} className="h-24 w-24 object-contain" /> : message.text}
+                {diceValue ? <ChatDice value={diceValue} createdAt={message.createdAt ?? ''}/> :
+                  message.sticker ? <img src={message.sticker.imageUrl} alt={message.sticker.description} className="h-24 w-24 object-contain" /> : message.text}
               </div>
-            </div>)}
+            </div>;
+            })}
             {busy && <p role="status" className="text-xs text-sky-600">小P 正在想怎么回复…</p>}
           </div>
         )}

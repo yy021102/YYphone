@@ -30,6 +30,7 @@ jobs:
         run: bun run build
         env:
           VITE_NETEASE_API_URL: ${{ vars.NETEASE_API_URL }}
+          VITE_FIRST_USE_PASSWORD_HASH: ${{ secrets.FIRST_USE_PASSWORD_HASH }}
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
