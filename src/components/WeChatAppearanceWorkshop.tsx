@@ -8,11 +8,12 @@ import { WeChatAppearancePreview } from './WeChatAppearancePreview';
 import './weChatAppearanceWorkshop.css';
 
 type Tab = 'page' | 'bubbles' | 'preview';
-interface Props { appearance: ChatAppearance; userName: string; userAvatar?: string; onSave: (next: ChatAppearance) => Promise<void> }
-export function WeChatAppearanceWorkshop({ appearance, userName, userAvatar, onSave }: Props) {
+interface Props { appearance: ChatAppearance; userName: string; userAvatar?: string; characterAvatar?: string; characterName?: string; onSave: (next: ChatAppearance) => Promise<void> }
+export function WeChatAppearanceWorkshop({ appearance, userName, userAvatar, characterAvatar, characterName, onSave }: Props) {
   const [draft, setDraft] = useState(() => structuredClone(appearance));
   const [tab, setTab] = useState<Tab>('page');
   const [darkPreview, setDarkPreview] = useState(false);
+  const [groupPreview, setGroupPreview] = useState(false);
   const [name, setName] = useState('');
   const [selected, setSelected] = useState<Record<AppearancePart, string>>({ page: '', bubbles: '', all: '' });
   const [busy, setBusy] = useState(false);
@@ -102,7 +103,8 @@ export function WeChatAppearanceWorkshop({ appearance, userName, userAvatar, onS
     </div>
     <section className="workshop-preview-card">
       <div className="workshop-preview-heading"><span>实时预览</span><div className="workshop-preview-mode" aria-label="预览模式"><button aria-pressed={!darkPreview} onClick={() => setDarkPreview(false)}>浅色</button><button aria-pressed={darkPreview} onClick={() => setDarkPreview(true)}>深色</button></div></div>
-      <WeChatAppearancePreview appearance={draft} compiledCss={compiledCss} dark={darkPreview} tall={tab === 'preview'} userAvatar={userAvatar} userName={userName} />
+      <div className="workshop-preview-mode" aria-label="预览对话类型"><button aria-pressed={!groupPreview} onClick={() => setGroupPreview(false)}>单聊</button><button aria-pressed={groupPreview} onClick={() => setGroupPreview(true)}>群聊</button></div>
+      <WeChatAppearancePreview appearance={draft} compiledCss={compiledCss} dark={darkPreview} group={groupPreview} tall={tab === 'preview'} userAvatar={userAvatar} userName={userName} characterAvatar={characterAvatar} characterName={characterName} />
       {darkPreview && <p className="workshop-note">深色预览使用系统样式，自定义美化在浅色模式生效。</p>}
     </section>
     <fieldset disabled={busy} className="workshop-fields" id="workshop-panel" role="tabpanel" aria-labelledby={`workshop-tab-${tab}`}>

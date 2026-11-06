@@ -190,6 +190,34 @@ body {
   background-color: transparent;
 }
 
+/* Wide touch devices use the whole display; mouse desktops retain the phone frame. */
+@media (min-width: 768px) {
+  .phone-viewport[data-tablet-layout="true"] {
+    height: 100vh;
+    height: 100dvh;
+    min-height: 0;
+    padding: 0;
+    background: transparent;
+  }
+  .phone-viewport[data-tablet-layout="true"] > [data-phone-canvas] {
+    width: 100%;
+    height: 100%;
+    max-width: none;
+    max-height: none;
+    border-radius: 0;
+    box-shadow: none;
+  }
+  .phone-viewport[data-tablet-layout="true"] .classic-home-content {
+    overflow-y: auto;
+    scrollbar-width: none;
+  }
+}
+@media (min-width: 768px) and (orientation: landscape) {
+  .phone-viewport[data-tablet-layout="true"] .classic-home-widgets {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
 .wechat-app.wechat-chat-open > .glass-nav,
 .wechat-app.wechat-favorites-open > .glass-nav {
   background: #ededed;

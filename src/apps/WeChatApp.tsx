@@ -64,6 +64,7 @@ import {
   Gamepad2,
 } from 'lucide-react';
 import { AppHeader } from '../components/AppHeader';
+import { chatAvatarThemeVariables } from '../utils/chatAvatarTheme';
 import { ChatPaymentCard } from '../components/ChatPaymentCard';
 import { WeChatFavorites } from '../components/WeChatFavorites';
 import { WECHAT_FAVORITES_KEY, isWeChatFavorites, snapshotFavoriteMessage, favoriteShareContent, type WeChatFavorite } from '../utils/wechatFavorites';
@@ -4040,6 +4041,9 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
     return line.trim().slice(0, 400);
   };
   const isDiscoverSubpage = activeTab === 'discover' && discoverPage !== 'home';
+  const headerContact = activeChat?.type === 'direct' ? contacts.find(c => c.id === activeChat.participantIds[0]) : undefined;
+  const headerAvatar = headerContact ? activeChat?.avatars[headerContact.id] || headerContact.avatarUrl || '' : '';
+  const avatarThemeVariables = chatAvatarThemeVariables(headerAvatar, activeChat?.avatars.user || personaDraft.avatarUrl || '');
   const isMeSubpage = activeTab === 'me' && mePage !== 'home';
   const stopChatBannerPress = () => {
     if (chatBannerPressTimer.current) clearTimeout(chatBannerPressTimer.current);
@@ -4061,9 +4065,12 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
 
   return (
     <React.Suspense fallback={<AppLoading app={activityPage ?? 'wechat'} onBack={onBack} />}>
-    <div data-wechat-theme={useWeChatDark ? 'dark' : 'light'} data-wechat-qna={!activeChat && activeTab === 'discover' && discoverPage === 'qna' ? 'true' : undefined} data-wechat-divination={!activeChat && activeTab === 'discover' && discoverPage === 'divination' ? 'true' : undefined} className={`wechat-app ${activeTab === 'me' && mePage === 'favorites' ? 'wechat-favorites-open' : ''} relative flex-1 min-h-0 w-full flex flex-col overflow-hidden ${activeChat ? 'wechat-chat-open bg-[#ededed]' : 'bg-[#ededed]'} ${!activeChat && !isDiscoverSubpage && !isMeSubpage ? 'wechat-main-tabs' : ''}`}>
+    <div data-wechat-theme={useWeChatDark ? 'dark' : 'light'} style={avatarThemeVariables as React.CSSProperties} data-wechat-qna={!activeChat && activeTab === 'discover' && discoverPage === 'qna' ? 'true' : undefined} data-wechat-divination={!activeChat && activeTab === 'discover' && discoverPage === 'divination' ? 'true' : undefined} className={`wechat-app ${activeTab === 'me' && mePage === 'favorites' ? 'wechat-favorites-open' : ''} relative flex-1 min-h-0 w-full flex flex-col overflow-hidden ${activeChat ? 'wechat-chat-open bg-[#ededed]' : 'bg-[#ededed]'} ${!activeChat && !isDiscoverSubpage && !isMeSubpage ? 'wechat-main-tabs' : ''}`}>
       {(activeTab !== 'me' || mePage !== 'home') && !(activeTab === 'discover' && (discoverPage === 'moments' || discoverPage === 'channels')) && <AppHeader
         className="yy-wechat-header"
+        titleDecoration={activeChat ? <span className="yy-header-avatar hidden" aria-hidden="true" style={avatarThemeVariables as React.CSSProperties}>
+          {headerAvatar ? <img src={headerAvatar} alt="" className="h-full w-full object-cover"/> : <span>{getChatTitle(activeChat).trim().charAt(0)}</span>}
+        </span> : undefined}
         title={
           activeChat
             ? isGeneratingReply ? '对方正在输入...' : getChatTitle(activeChat)
@@ -4463,6 +4470,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                       </button>
                     )}
                     <div className={`yy-chat-message-content flex min-w-0 flex-col ${isUserMessage ? 'items-end' : 'items-start'}`}>
+                    {activeChat.type === 'group' && !isUserMessage && <span className="yy-chat-sender-name hidden">{getChatParticipantName(activeChat, message.senderId)}</span>}
                     {richMenu}
                     <div className="relative max-w-full">
                     <div
@@ -6553,7 +6561,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
           </div>
         )}
         {activeTab === 'me' && mePage === 'beauty' && <WeChatAppearanceWorkshop
-          appearance={chatAppearance} userName={personaNickname} userAvatar={personaDraft.avatarUrl}
+          appearance={chatAppearance} userName={personaNickname} userAvatar={personaDraft.avatarUrl} characterAvatar={contacts[0]?.avatarUrl} characterName={contacts[0]?.name}
           onSave={async next => {
             compileChatAppearance(next);
             await setStorageItemsAtomically({ [SETTINGS_KEYS.chatAppearance]: next });

@@ -16,6 +16,9 @@ export function FirstUseGate({ children, passwordHash = import.meta.env?.VITE_FI
     return () => { alive = false; };
   }, [hash, scope, passwordHash]);
   if (state === 'open') return children;
+  // Resolve the saved authorization before showing any verification UI.
+  // Returning visitors only see the phone's quiet background during this read.
+  if (state === 'checking') return <main className="first-use-gate" aria-busy="true" aria-label="正在打开歪歪机"/>;
   const unlock = async () => {
     if (busy || !hash) return;
     setBusy(true); setError('');
@@ -28,12 +31,12 @@ export function FirstUseGate({ children, passwordHash = import.meta.env?.VITE_FI
   return <main className="first-use-gate"><div className="first-use-orb first-use-orb-blue"/><div className="first-use-orb first-use-orb-pink"/>
     <section className="first-use-card" aria-label="歪歪机首次使用验证"><div className="first-use-key"><KeyRound size={24} strokeWidth={1.4}/></div>
       <p className="first-use-eyebrow">A LITTLE WORLD OF YOUR OWN</p><h1>欢迎来到歪歪机</h1>
-      {state === 'checking' ? <p role="status">正在打开你的小世界…</p> : <><p>第一次见面，请输入使用口令。</p>
+      <p>第一次见面，请输入使用口令。</p>
         <form onSubmit={e => { e.preventDefault(); void unlock(); }}><label htmlFor="yyphone-entry-phrase">使用口令</label>
           <input id="yyphone-entry-phrase" type="password" autoComplete="off" autoFocus required value={phrase} disabled={busy} onChange={e => { setPhrase(e.target.value); setError(''); }}/>
           {error && <p className="first-use-error" role="alert">{error}</p>}
           <button type="submit" disabled={busy || !phrase || !hash}>{busy ? '正在验证…' : '进入歪歪机'}<ArrowRight size={16}/></button>
-        </form><small>验证一次，这个浏览器以后就记得你了。</small></>}
+        </form><small>验证一次，这个浏览器以后就记得你了。</small>
     </section><span className="first-use-footer">愿你在这里，天天开心。</span>
   </main>;
 }

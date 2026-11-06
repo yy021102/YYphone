@@ -184,7 +184,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   return wrapDesktop(
     <div className="home-desktop classic-home relative w-full h-full flex flex-col justify-between overflow-hidden select-none">
       {/* Upper Content Area (Profile Card + 4 Quadrants Grid) */}
-      <div className="w-full flex-1 min-h-0 flex flex-col justify-between px-[clamp(12px,3vw,18px)] pt-1 pb-1.5 overflow-hidden">
+      <div className="classic-home-content w-full flex-1 min-h-0 flex flex-col justify-between px-[clamp(12px,3vw,18px)] pt-1 pb-1.5 overflow-hidden">
         {/* 
           Section 1: Player Personal Profile Card
         - Generous & spacious height with banner, avatar, mood pill, bio, and stats
@@ -299,7 +299,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       </div>
 
       {/* Home widgets and app groups retain the 2×2 phone home layout. */}
-      <div className="grid grid-cols-2 gap-[clamp(10px,2.6vw,14px)] w-full my-auto shrink-0">
+      <div className="classic-home-widgets grid grid-cols-2 gap-[clamp(10px,2.6vw,14px)] w-full my-auto shrink-0">
         {/* Music widget */}
         <ListenTogetherWidget />
 

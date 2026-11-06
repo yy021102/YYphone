@@ -1,3 +1,4 @@
+import { chatAvatarThemeVariables } from '../utils/chatAvatarTheme';
 import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowLeft, Heart, MoreHorizontal, Plus, Send, Smile, Volume2 } from 'lucide-react';
@@ -12,7 +13,7 @@ body { font-family: "PingFang SC","Microsoft YaHei",sans-serif; font-size: 14px;
 button,input { font: inherit; } button { border: 0; cursor: default; } p { margin: 0; } svg { flex-shrink: 0; }
 .wechat-app { --font-scale: 1; --yy-chat-avatar-size: var(--yy-theme-avatar-size,40px); display: flex; flex-direction: column; width: 100%; height: 100%; overflow: hidden; background: #ededed; color: #111; }
 .yy-wechat-header { display: flex; align-items: center; gap: 12px; padding: 12px; flex-shrink: 0; }
-.yy-header-title { flex: 1; text-align: center; font-size: 17px; font-weight: 600; }
+.yy-header-identity { flex:1;display:flex;flex-direction:column;align-items:center;min-width:0; } .yy-header-avatar { display:none; } .yy-header-avatar img { width:100%;height:100%;object-fit:cover; } .yy-header-title { flex: 1; text-align: center; font-size: 17px; font-weight: 600; }
 .yy-header-back,.yy-header-action button { display: flex; padding: 0; background: transparent; color: inherit; }
 .yy-chat-surface { display: flex; flex: 1; min-height: 0; flex-direction: column; }
 .yy-chat-history { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior-y: contain; padding: 16px 12px; background-image: var(--yy-chat-wallpaper,none); background-size: cover; background-position: center; background-attachment: scroll; }
@@ -22,6 +23,7 @@ button,input { font: inherit; } button { border: 0; cursor: default; } p { margi
 .yy-chat-message-row { display: flex; gap: 12px; align-items: flex-start; } .flex-row-reverse { flex-direction: row-reverse; }
 .yy-chat-avatar { display: flex; align-items: center; justify-content: center; width: var(--yy-chat-avatar-size); height: var(--yy-chat-avatar-size); border-radius: 4px; flex-shrink: 0; background: #dce9ef; color: #657c90; overflow: hidden; font-size: 14px; }
 .yy-chat-avatar > span { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; border-radius: inherit; overflow: hidden; } .yy-chat-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.yy-chat-sender-name { display: none; }
 .yy-chat-message-content { display: flex; flex-direction: column; min-width: 0; max-width: calc(100% - var(--yy-chat-avatar-size) * 2 - 24px); }
 .yy-chat-message-bubble { position: relative; padding: 8px 12px; font-size: 16px; line-height: 1.5; border-radius: 4px; overflow-wrap: anywhere; color: #111; }
 .yy-chat-message-bubble:not(.is-special) { background-color: var(--yy-character-bubble-color); } .yy-chat-message-bubble.is-user:not(.is-special) { background-color: var(--yy-user-bubble-color); }
@@ -42,24 +44,24 @@ button,input { font: inherit; } button { border: 0; cursor: default; } p { margi
 `;
 const DOCUMENT = `<!doctype html><html lang="zh-CN"><head><meta name="viewport" content="width=device-width, initial-scale=1"><style>${BASE}</style></head><body><div id="preview-root"></div></body></html>`;
 
-export function WeChatAppearancePreview({ appearance, compiledCss, dark, tall = false, userAvatar, userName = '我' }: {
-  appearance: ChatAppearance; compiledCss: string; dark: boolean; tall?: boolean; userAvatar?: string; userName?: string;
+export function WeChatAppearancePreview({ appearance, compiledCss, dark, group = false, tall = false, userAvatar, userName = '我', characterAvatar, characterName = '聊天预览' }: {
+  appearance: ChatAppearance; compiledCss: string; dark: boolean; group?: boolean; tall?: boolean; userAvatar?: string; userName?: string; characterAvatar?: string; characterName?: string;
 }) {
   const [target, setTarget] = useState<HTMLElement | null>(null);
   const [input, setInput] = useState('');
   const userColor = dark ? '#20b565' : hexToRgba(appearance.userBubbleColor, appearance.userBubbleOpacity ?? 1);
   const charColor = dark ? '#2c2c2c' : hexToRgba(appearance.characterBubbleColor, appearance.characterBubbleOpacity ?? 1);
-  const avatar = (own: boolean) => <span className="yy-chat-avatar" style={avatarFrameWrapStyle(dark ? undefined : own ? appearance.userAvatarFrame : appearance.characterAvatarFrame)}><span>{own && userAvatar ? <img src={userAvatar} alt="" /> : own ? userName.slice(0, 1) : 'TA'}</span></span>;
+  const avatar = (own: boolean) => <span className="yy-chat-avatar" style={avatarFrameWrapStyle(dark ? undefined : own ? appearance.userAvatarFrame : appearance.characterAvatarFrame)}><span>{own && userAvatar ? <img src={userAvatar} alt="" /> : own ? userName.slice(0, 1) : characterAvatar ? <img src={characterAvatar} alt=""/> : characterName.slice(0, 1)}</span></span>;
   const row = (id: string, own: boolean, content: React.ReactNode, kind = 'is-plain', quote?: string) => <div key={id} className={`yy-chat-message-row flex ${own ? 'flex-row-reverse' : ''}`}>
-    {avatar(own)}<div className="yy-chat-message-content" style={{ alignItems: own ? 'flex-end' : 'flex-start' }}><div className={`yy-chat-message-bubble ${own ? 'is-user' : 'is-character'} ${kind}`}>{content}</div>{quote && <div className={`yy-chat-quote ${own ? 'is-user' : 'is-character'}`}>{quote}</div>}</div>
+    {avatar(own)}<div className="yy-chat-message-content" style={{ alignItems: own ? 'flex-end' : 'flex-start' }}>{group && !own && <span className="yy-chat-sender-name">{characterName}</span>}<div className={`yy-chat-message-bubble ${own ? 'is-user' : 'is-character'} ${kind}`}>{content}</div>{quote && <div className={`yy-chat-quote ${own ? 'is-user' : 'is-character'}`}>{quote}</div>}</div>
   </div>;
   return <div className="wechat-workshop-preview">
     <iframe title="聊天美化实时预览" sandbox="allow-same-origin" srcDoc={DOCUMENT} style={{ height: tall ? 560 : 300 }}
       onLoad={e => setTarget(e.currentTarget.contentDocument?.getElementById('preview-root') ?? null)} />
     {target && createPortal(<>
       <style>{dark ? '' : compiledCss}</style>
-      <div className="wechat-app wechat-chat-open" data-wechat-theme={dark ? 'dark' : 'light'}>
-        <header className="yy-wechat-header"><button className="yy-header-back" aria-label="预览返回"><ArrowLeft size={22} /></button><span className="yy-header-title">聊天预览</span><span className="yy-header-action"><button aria-label="预览设置"><MoreHorizontal size={22} /></button></span></header>
+      <div className="wechat-app wechat-chat-open" data-wechat-theme={dark ? 'dark' : 'light'} style={chatAvatarThemeVariables(characterAvatar, userAvatar) as React.CSSProperties}>
+        <header className="yy-wechat-header"><button className="yy-header-back" aria-label="预览返回"><ArrowLeft size={22} /></button><div className="yy-header-identity"><span className="yy-header-avatar" aria-hidden="true">{characterAvatar ? <img src={characterAvatar} alt=""/> : characterName.slice(0, 1)}</span><span className="yy-header-title">{characterName}</span></div><span className="yy-header-action"><button aria-label="预览设置"><MoreHorizontal size={22} /></button></span></header>
         <div className="yy-chat-surface" style={{ '--yy-user-bubble-color': userColor, '--yy-character-bubble-color': charColor,
           '--yy-chat-wallpaper': !dark && appearance.backgroundUrl ? `linear-gradient(rgba(243,246,250,.38),rgba(243,246,250,.38)),url("${appearance.backgroundUrl.replaceAll('"', '%22')}")` : 'none' } as React.CSSProperties}>
           <div className="yy-chat-history">

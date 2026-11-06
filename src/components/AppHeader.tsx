@@ -7,6 +7,7 @@ interface AppHeaderProps {
   onBack: () => void;
   rightAction?: React.ReactNode;
   className?: string;
+  titleDecoration?: React.ReactNode;
 }
 
 export const AppHeader: React.FC<AppHeaderProps> = ({
@@ -15,6 +16,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
   onBack,
   rightAction,
   className = '',
+  titleDecoration,
 }) => {
   return (
     <header className={`sticky top-0 z-30 w-full glass-nav px-3 pt-[env(safe-area-inset-top,0px)] md:pt-2.5 pb-1.5 flex items-center justify-between text-[#2C4A5C] shrink-0 border-b border-white/60 ${className}`}>
@@ -30,7 +32,8 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
       </button>
 
       {/* Title & Subtitle */}
-      <div className="flex flex-col items-center justify-center text-center px-2 flex-1 min-w-0">
+      <div className="yy-header-identity flex flex-col items-center justify-center text-center px-2 flex-1 min-w-0">
+        {titleDecoration}
         <h1 className="yy-header-title text-[15px] font-bold tracking-tight text-[#2C4A5C] truncate max-w-[210px]">
           {title}
         </h1>

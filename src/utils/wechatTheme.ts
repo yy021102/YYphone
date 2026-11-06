@@ -32,6 +32,14 @@ export const DEFAULT_WECHAT_THEME_CSS = `/* 微信完整聊天主题 · 默认�
 .yy-wechat-header .yy-header-back,
 .yy-wechat-header .yy-header-action button { color: inherit; }
 /* .yy-header-back = 返回；.yy-header-action = 右侧设置按钮。仅改变外观和位置。 */
+/* 顶部真实头像接口：.yy-header-identity 包含头像与标题；.yy-header-avatar 默认隐藏。
+ * 单聊头像自动跟随当前角色，优先使用本对话设置的头像。群聊显示群名首字，不冒用某个成员。
+ * 如需显示顶部头像，可取消下面注释。图片直接设置在真实 img 上，无需自己填写角色头像链接。
+ * .yy-header-avatar { display:flex; width:56px; height:56px; border-radius:50%; overflow:hidden; align-items:center; justify-content:center; }
+ * .yy-header-avatar img { width:100%; height:100%; object-fit:cover; }
+ * 图片变量可用于 background-image（不用再加 url）：var(--yy-character-avatar-url)、var(--yy-user-avatar-url)。
+ * 顶部头像变量：var(--yy-header-avatar-url)。这些变量随当前对话自动更新，不会写入导出的美化预设。
+ */
 
 /* 03 消息滚动区域：背景图片可以直接填在这里，背景固定在区域中，只有消息滚动 */
 .yy-chat-surface { background-color: var(--yy-theme-background); }
@@ -49,6 +57,13 @@ export const DEFAULT_WECHAT_THEME_CSS = `/* 微信完整聊天主题 · 默认�
 .yy-chat-history > * + * { margin-top: 20px; }
 .yy-chat-message-row { gap: 12px; align-items: flex-start; }
 .yy-chat-avatar { width: var(--yy-chat-avatar-size, 40px); height: var(--yy-chat-avatar-size, 40px); border-radius: 4px; }
+/* 群聊发言者名字：.yy-chat-sender-name，仅群聊对方消息提供，默认隐藏。
+ * 如需显示名字，取消下一行注释；不影响单聊，也不会改变默认页面。
+ * .yy-chat-sender-name { display:block; font-size:12px; color:#888; margin-bottom:4px; overflow-wrap:anywhere; }
+ * 隐藏头像但保留原位置点击查看心声，可用下面的写法（不要用 display:none 或 visibility:hidden）：
+ * .yy-chat-avatar { opacity:0; }
+ * 名字与心声入口相互独立，群聊隐藏头像时建议显示名字，以便辨认发言者。
+ */
 .yy-chat-message-content {
   /* 为对侧头像留出位置，长消息自动换行 */
   max-width: calc(100% - var(--yy-chat-avatar-size, 40px) - var(--yy-chat-avatar-size, 40px) - 24px);
