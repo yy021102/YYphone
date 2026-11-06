@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import type { AppIconOverrides, AppId, AppMetadata, BeautySettings } from '../types';
 import { SECOND_PAGE_APPS } from '../data/mockData';
+import { HomeSystemDock } from './HomeSystemDock';
 
 export function LeisureHome({ homeStyle = 'classic', appIcons, dockApps, onOpenApp, renderIcon, navigation }: {
   homeStyle?: BeautySettings['homeStyle']; appIcons: AppIconOverrides; dockApps: AppMetadata[];
@@ -16,7 +17,7 @@ export function LeisureHome({ homeStyle = 'classic', appIcons, dockApps, onOpenA
     <div className="leisure-scroll">
       <nav className="leisure-app-grid" aria-label="第2页应用">{SECOND_PAGE_APPS.map(appButton)}</nav>
     </div>
-    <nav className="leisure-dock leisure-panel" aria-label="系统应用">{dockApps.map(appButton)}</nav>
+    <HomeSystemDock homeStyle={homeStyle} apps={dockApps} appIcons={appIcons} onOpenApp={onOpenApp} renderIcon={renderIcon}/>
     {navigation}
   </main>;
 }

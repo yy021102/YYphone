@@ -4,6 +4,7 @@ import type { AppIconOverrides, AppId, AppMetadata, UserProfile } from '../types
 import { HalloweenTown } from './HalloweenArt';
 import { ListenTogetherWidget } from './ListenTogetherWidget';
 import { frameGradient } from '../utils/avatarFrame';
+import { HomeSystemDock } from './HomeSystemDock';
 
 export function HalloweenHome({ userProfile, apps, dockApps, appIcons, wallpaperUrl, onOpenApp, renderIcon, onEditProfile, onOpenNotes, navigation }: {
   userProfile: UserProfile; apps: AppMetadata[]; dockApps: AppMetadata[]; appIcons: AppIconOverrides; wallpaperUrl?: string;
@@ -36,7 +37,7 @@ export function HalloweenHome({ userProfile, apps, dockApps, appIcons, wallpaper
       <details className="hw-market-music"><summary><span>♫ 一起听</span><small>掀开音乐盒 <i>＋</i></small></summary><div><ListenTogetherWidget/></div></details>
       <footer className="hw-market-footer"><span>{userProfile.location} · {userProfile.mood}</span><span>{userProfile.stats.moments} 动态 / {userProfile.stats.notes} 随笔</span></footer>
     </div>
-    <nav className="hw-market-tools hw-market-bottom-dock" aria-label="系统应用">{dockApps.map(appButton)}</nav>
+    <HomeSystemDock homeStyle="halloween" apps={dockApps} appIcons={appIcons} onOpenApp={onOpenApp} renderIcon={renderIcon}/>
     {navigation}
   </main>;
 }

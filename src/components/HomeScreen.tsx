@@ -33,6 +33,7 @@ import { MinimalHome } from './MinimalHome';
 import { HalloweenHome } from './HalloweenHome';
 import { DesktopPager, DesktopPageNavigation } from './DesktopPager';
 import { LeisureHome } from './LeisureHome';
+import { HomeSystemDock } from './HomeSystemDock';
 import type { DesktopPage } from '../utils/desktopNavigation';
 import type { FreeDesktopLayout } from '../utils/freeDesktop';
 import { FreeDesktopHome } from './FreeDesktopHome';
@@ -316,43 +317,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       </div>
     </div>
 
-      {/* Floating iOS-style translucent app dock */}
-      <div className="home-dock mx-4 mb-1.5 w-auto shrink-0 rounded-[28px] border border-white/75 bg-white/45 px-2 py-2 backdrop-blur-2xl shadow-[0_8px_28px_rgba(108,144,168,0.2),inset_0_1px_0_rgba(255,255,255,0.75)] flex items-center justify-around z-20">
-        {dockApps.map((dockApp) => (
-          <button
-            key={dockApp.id}
-            onClick={() => onOpenApp(dockApp.id)}
-            className="flex flex-col items-center cursor-pointer active:scale-90 transition-transform group py-0.5 px-2"
-          >
-            <div className={`w-[clamp(44px,11.8vw,54px)] h-[clamp(44px,11.8vw,54px)] rounded-[clamp(13px,3.2vw,17px)] shadow-[0_3px_12px_rgba(180,210,230,0.25)] flex items-center justify-center relative overflow-hidden transition-all group-hover:-translate-y-0.5 ${
-              appIcons[dockApp.id] ? '' : 'home-default-icon ' + 'bg-white/50 backdrop-blur-xl border border-white/80 group-hover:bg-white/70'
-            }`}>
-              {appIcons[dockApp.id] ? (
-                <img src={appIcons[dockApp.id]} alt="" className="absolute inset-0 h-full w-full object-cover" />
-              ) : (
-                <>
-                  <div
-                    className={`absolute inset-0 bg-gradient-to-br ${dockApp.color} opacity-80 pointer-events-none`}
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-t from-white/40 to-transparent pointer-events-none" />
-
-                  <div className="relative z-10">
-                    {renderAppIcon(
-                      dockApp.iconName,
-                      `w-[clamp(22px,5.8vw,26px)] h-[clamp(22px,5.8vw,26px)] ${
-                        dockApp.textColor || 'text-[#587589]'
-                      } stroke-[2.2] drop-shadow-xs`
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
-            <span className="mt-[clamp(2px,0.4vh,3px)] text-[clamp(10px,2.5vw,11.5px)] font-semibold text-[#587589] leading-tight">
-              {dockApp.name}
-            </span>
-          </button>
-        ))}
-      </div>
+      <HomeSystemDock homeStyle="classic" apps={dockApps} appIcons={appIcons} onOpenApp={onOpenApp} renderIcon={renderAppIcon}/>
       {navigation}
     </div>
   );

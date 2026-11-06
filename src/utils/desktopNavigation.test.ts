@@ -52,14 +52,15 @@ test('all four leisure themes render second-page apps, a shared dock and replace
     }));
     assert.match(markup, new RegExp(`leisure-${homeStyle}`));
     for (const app of [...SECOND_PAGE_APPS, ...DOCK_APPS]) assert.ok(markup.includes(`>${app.name}</span>`), app.name);
-    assert.equal((markup.match(/class="leisure-app(?: has-custom-icon)?"/g) ?? []).length, SECOND_PAGE_APPS.length + DOCK_APPS.length);
+    assert.equal((markup.match(/class="leisure-app(?: has-custom-icon)?"/g) ?? []).length, SECOND_PAGE_APPS.length);
+    assert.equal((markup.match(/class="home-system-app"/g) ?? []).length, DOCK_APPS.length);
     assert.equal((markup.match(/aria-label="系统应用"/g) ?? []).length, 1);
     assert.equal((markup.match(/has-custom-icon/g) ?? []).length, 3);
     for (const name of ['custom-divination.png', 'custom-kitchen.png', 'custom-settings.png']) assert.ok(markup.includes(`src="${name}"`));
     assert.ok(!markup.includes('日常应用'));
     assert.ok(!markup.includes('<header') && !markup.includes('<section') && !markup.includes('<footer'));
     assert.ok(!markup.includes('<h1') && !markup.includes('MAKE TIME') && !markup.includes('LITTLE JOYS'));
-    assert.ok(markup.indexOf('class="leisure-dock') < markup.indexOf('class="desktop-page-navigation'));
+    assert.ok(markup.indexOf('class="home-system-dock') < markup.indexOf('class="desktop-page-navigation'));
     assert.ok(!markup.includes('>游戏</span>'));
   }
 });

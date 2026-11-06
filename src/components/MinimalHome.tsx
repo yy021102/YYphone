@@ -3,6 +3,7 @@ import { ArrowUpRight, Mail, MapPin, Package, Pencil } from 'lucide-react';
 import type { AppIconOverrides, AppId, AppMetadata, UserProfile } from '../types';
 import { ListenTogetherWidget } from './ListenTogetherWidget';
 import { frameGradient } from '../utils/avatarFrame';
+import { HomeSystemDock } from './HomeSystemDock';
 
 export function MinimalHome({ userProfile, apps, dockApps, appIcons, onOpenApp, renderIcon, onEditProfile, onOpenNotes, variant = 'minimal', wallpaperUrl, navigation }: { variant?: 'minimal' | 'moonlit'; wallpaperUrl?: string; userProfile: UserProfile; apps: AppMetadata[]; dockApps: AppMetadata[]; appIcons: AppIconOverrides; onOpenApp: (id: AppId) => void; renderIcon: (name: string, className?: string) => ReactNode; onEditProfile: () => void; onOpenNotes: () => void; navigation?: ReactNode }) {
   const [now, setNow] = useState(() => new Date());
@@ -19,7 +20,7 @@ export function MinimalHome({ userProfile, apps, dockApps, appIcons, onOpenApp, 
       <details className="minimal-music"><summary><span>一起听</span><span className="minimal-music-indicator">音乐与播放 <span>＋</span></span></summary><div><ListenTogetherWidget /></div></details>
       <footer className="minimal-home-caption"><span>{userProfile.stats.moments} 动态 / {userProfile.stats.notes} 随笔</span><span>慢慢生活</span></footer>
     </div>
-    <nav className="minimal-dock" aria-label="系统应用">{dockApps.map(appButton)}</nav>
+    <HomeSystemDock homeStyle={variant} apps={dockApps} appIcons={appIcons} onOpenApp={onOpenApp} renderIcon={renderIcon}/>
     {navigation}
   </main>;
 }

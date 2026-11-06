@@ -44,7 +44,7 @@ test('response protocol accepts one-line jokes, punctuation, and five substantiv
     '所以对我来说，愿意体谅人和只能体谅人，差得很远',
     '如果对方不懂事的时候我就不喜欢他，那我珍惜的可能只是那份便利',
     '这件事我还得留意自己，不能光说别人',
-  ] ];
+  ], ['有点心动', '你拍的那张我看了好几遍 山后面那片云特别好看', '想去看看'] ];
   for (const reply of cases) {
     let payload: any;
     mock.method(globalThis, 'fetch', async (_url: unknown, init: RequestInit) => {

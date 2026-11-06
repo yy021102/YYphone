@@ -1,0 +1,37 @@
+.home-system-dock { --dock-ink:#587589;--dock-panel:#ffffff73;--dock-line:#ffffffbf;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;position:relative;z-index:2;flex-shrink:0;margin:3px 16px 6px;padding:8px;border:1px solid var(--dock-line);border-radius:28px;color:var(--dock-ink);background:var(--dock-panel);backdrop-filter:blur(20px);box-shadow:0 8px 28px #6c90a833,inset 0 1px 0 #ffffffbf; }
+.home-system-app { display:flex;align-items:center;flex-direction:column;gap:3px;min-width:0;padding:2px 0;cursor:pointer; }
+.home-system-icon { position:relative;display:grid;place-items:center;flex-shrink:0;overflow:hidden;width:clamp(44px,11.8vw,54px);height:clamp(44px,11.8vw,54px);border:1px solid #ffffffcc;border-radius:clamp(13px,3.2vw,17px);background:#ffffff80; }
+.home-system-icon > img { position:absolute;inset:0;width:100%;height:100%;object-fit:cover; }
+.home-system-icon-wash { position:absolute;inset:0;opacity:.8; }
+.home-system-glyph { position:relative;z-index:1;width:clamp(22px,5.8vw,26px);height:clamp(22px,5.8vw,26px);stroke-width:2.2; }
+.home-system-name { color:var(--dock-ink);font-size:calc(11px * var(--font-scale,1));line-height:1.4;text-align:center;overflow-wrap:anywhere; }
+.home-system-app:active { transform:scale(.94); }
+.home-system-dock[data-dock-style="minimal"] { --dock-ink:#6d6c64;--dock-panel:transparent;--dock-line:#dcd9d0;margin:0;padding:16px 22px 18px;border-width:1px 0 0;border-radius:0;box-shadow:none;backdrop-filter:none; }
+.home-system-dock[data-dock-style="minimal"] .home-system-app { gap:7px;padding:0; }
+.home-system-dock[data-dock-style="minimal"] .home-system-icon { width:44px;height:44px;border-radius:50%;border-color:transparent;background:#e8e5dc; }
+.home-system-dock[data-dock-style="minimal"] .home-system-glyph { width:23px;height:23px;stroke-width:1.45;color:#606159; }
+.home-system-dock[data-dock-style="minimal"] .home-system-name { font-size:calc(10px * var(--font-scale,1)); }
+.home-system-dock[data-dock-style="moonlit"] { --dock-ink:#aa91b3;--dock-panel:linear-gradient(110deg,#fff9,#ffffff50);--dock-line:#fff;margin:7px 17px 0;padding:13px 10px 11px;border-radius:27px;box-shadow:0 8px 26px #a391b52b,inset 0 2px 0 #fff9; }
+.home-system-dock[data-dock-style="moonlit"] .home-system-app { gap:6px;padding:0; }
+.home-system-dock[data-dock-style="moonlit"] .home-system-icon { width:43px;height:43px;border-radius:15px;background:linear-gradient(135deg,#f7f0fa,#e8e4f1);border-color:#fff9; }
+.home-system-dock[data-dock-style="moonlit"] .home-system-glyph { width:23px;height:23px;stroke-width:1.45; }
+.home-system-dock[data-dock-style="moonlit"] .home-system-name { font-size:calc(9px * var(--font-scale,1)); }
+.home-system-dock[data-dock-style="halloween"] { --dock-ink:#e1c8b0;--dock-panel:#382d3f;--dock-line:#6a5260;margin:3px 16px 4px;padding:10px 6px;border-radius:22px;box-shadow:none; }
+.home-system-dock[data-dock-style="halloween"] .home-system-icon { width:42px;height:42px;border-radius:14px;background:#473747;border-color:#705363;box-shadow:inset 0 0 0 3px #3a2e3e; }
+.home-system-dock[data-dock-style="halloween"] .home-system-glyph { width:22px;height:22px;stroke-width:1.6; }
+.home-system-dock[data-dock-style="halloween"] .home-system-name { font-size:calc(10px * var(--font-scale,1)); }
+.home-system-dock .home-system-icon.has-custom-icon { background:transparent;border:0;box-shadow:none; }
+/* The second page has horizontal padding; cancel it so both docks share the same bounds. */
+.leisure-home > .home-system-dock { margin-left:0;margin-right:0; }
+.leisure-home > .home-system-dock[data-dock-style="minimal"] { margin-left:-16px;margin-right:-16px; }
+.leisure-home > .home-system-dock[data-dock-style="moonlit"] { margin-left:1px;margin-right:1px; }
+@media (prefers-color-scheme:dark) {
+  :root[data-follow-system-dark="true"] .home-system-dock[data-dock-style="minimal"] { --dock-ink:#bfc0b4;--dock-line:#414237; }
+  :root[data-follow-system-dark="true"] .home-system-dock[data-dock-style="minimal"] .home-system-icon:not(.has-custom-icon) { background:#32332c;border-color:#45463d; }
+  :root[data-follow-system-dark="true"] .home-system-dock[data-dock-style="minimal"] .home-system-glyph { color:#bfc0b4; }
+  :root[data-follow-system-dark="true"] .home-system-dock[data-dock-style="moonlit"] { --dock-ink:#baacc9;--dock-panel:#ffffff0b;--dock-line:#ffffff21; }
+  :root[data-follow-system-dark="true"] .home-system-dock[data-dock-style="moonlit"] .home-system-icon:not(.has-custom-icon) { background:linear-gradient(135deg,#4c425c,#373746);border-color:#ffffff24; }
+}
+[data-desktop-icons] .home-system-icon:not(.has-custom-icon) { opacity:var(--desktop-icons); }
+[data-desktop-panels] .home-system-dock { background:rgb(255 255 255 / var(--desktop-panels)) !important;border-color:rgb(255 255 255 / var(--desktop-panels));box-shadow:none;backdrop-filter:none; }
+[data-desktop-color] .home-system-dock { --dock-ink:var(--desktop-text); }
