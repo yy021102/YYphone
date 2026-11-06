@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { AndroidFullscreenControl } from '../components/AndroidFullscreenControl';
 import { McpSettingsPanel } from '../components/McpSettingsPanel';
 import { GithubBackup } from '../components/GithubBackup';
 import { ApiModelPicker } from '../components/ApiModelPicker';
@@ -852,6 +853,7 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
                 }}
               />
             </div>
+            <AndroidFullscreenControl />
             <div className="flex items-center justify-between p-3.5">
               <div>
                   <p className="text-xs font-bold text-[#2C4A5C]">跟随系统深色模式</p>

@@ -7,7 +7,7 @@ import { installAndroidStatusBar } from './utils/androidStatusBar';
 
 const rootElement = document.getElementById('root');
 if (!rootElement) throw new Error('Could not find the application root element.');
-installAndroidStatusBar(rootElement);
+installAndroidStatusBar();
 
 void initializeDbStorage()
   .catch((error: unknown) => {

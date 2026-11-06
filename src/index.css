@@ -190,6 +190,16 @@ body {
   background-color: transparent;
 }
 
+/* On Android, follow the available viewport as system bars/fullscreen change. */
+@supports (height: 100dvh) {
+  html[data-yyphone-android],
+  html[data-yyphone-android] body,
+  html[data-yyphone-android] #root { height: 100dvh; }
+  @media (max-width: 767px) {
+    html[data-yyphone-android] .phone-viewport { height: 100dvh; min-height: 0; }
+  }
+}
+
 /* Wide touch devices use the whole display; mouse desktops retain the phone frame. */
 @media (min-width: 768px) {
   .phone-viewport[data-tablet-layout="true"] {
