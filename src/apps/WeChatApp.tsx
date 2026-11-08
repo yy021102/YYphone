@@ -98,6 +98,8 @@ import { cleanEncounterWord, encounterTask, encounterDetail, isEncounterResult, 
 import { getActiveApiPreset, requestConfiguredAiText, type ApiConnection } from '../utils/aiApi';
 import { ChatOverrideSettings } from '../components/ChatOverrideSettings';
 import { UserNpcSettings } from '../components/UserNpcSettings';
+import { ChatRegexSettings } from '../components/ChatRegexSettings';
+import { RegexMessage, useChatRegex } from '../components/RegexMessage';
 import { chatSecondaryApi, chatBackground, type ChatOverrides } from '../utils/chatOverrides';
 import { parseAiJson } from '../utils/aiResponse';
 import { withWorldBooksForContacts } from '../utils/worldBookPrompt';
@@ -777,7 +779,8 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
   const delivery = useRef({ isVisible, activeChatId: '', onMessage, onIncomingCall, runtimeSettings });
   const [activeTab, setActiveTab] = useState<WeChatTab>('chats');
   const [discoverPage, setDiscoverPage] = useState<DiscoverPage>('home');
-  const [mePage, setMePage] = useState<'home' | 'settings' | 'beauty' | 'favorites' | 'aliases'>('home');
+  const [mePage, setMePage] = useState<'home' | 'settings' | 'beauty' | 'favorites' | 'aliases' | 'regex'>('home');
+  const chatRegex = useChatRegex();
   const aliasState = useAliasAccounts();
   const [activeAliasAccountId, setActiveAliasAccountId] = useState('');
   const [activeAliasThreadId, setActiveAliasThreadId] = useState('');
@@ -4106,7 +4109,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
             ? '通讯录'
             : activeTab === 'discover'
             ? selectedGame?.name ?? (discoverPage === 'kitchen' ? '下厨房' : discoverPage === 'little-sip' ? '一杯之间' : discoverPage === 'divination' ? '占卜' : discoverPage === 'moments' ? '朋友圈' : discoverPage === 'channels' ? '视频号' : discoverPage === 'character-perspective' ? '侧写' : discoverPage === 'wechat-reading' ? '微信读书' : discoverPage === 'text-adventure' ? '文字冒险' : discoverPage === 'time-capsule' ? '时间胶囊' : discoverPage === 'games' ? '游戏' : '发现')
-            : mePage === 'settings' ? '设置' : mePage === 'beauty' ? '美化工坊' : mePage === 'favorites' ? '收藏' : mePage === 'aliases' ? '小号' : '我'
+            : mePage === 'settings' ? '设置' : mePage === 'beauty' ? '美化工坊' : mePage === 'favorites' ? '收藏' : mePage === 'aliases' ? '小号' : mePage === 'regex' ? '正则' : '我'
         }
         onBack={() => {
           if (activeChat) {
@@ -4745,7 +4748,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                             {message.text}
                           </div>
                         )
-                      ) : message.text}
+                      ) : (!message.kind || message.kind === 'text') ? <RegexMessage text={message.text} sender={isUserMessage ? 'user' : 'character'} settings={chatRegex} dark={useWeChatDark} /> : message.text}
                     </div>
                     {message.reactions && message.reactions.length > 0 && (
                       <div className={`absolute -top-3 flex gap-0.5 ${isUserMessage ? '-left-2' : '-right-2'}`}>
@@ -6415,6 +6418,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
               <button type="button" onClick={() => setMePage('favorites')} className="flex w-full items-center gap-4 px-6 py-3 text-left active:bg-slate-50"><Bookmark className="h-5 w-5 text-amber-500" /><span className="flex-1 text-[15px] text-[#222]">收藏</span><ChevronRight className="h-4 w-4 text-[#b4b4b4]" /></button>
               <button type="button" onClick={() => setMePage('aliases')} className="flex w-full items-center gap-4 px-6 py-3 text-left active:bg-slate-50"><Users className="h-5 w-5 text-sky-500" /><span className="flex-1 text-[15px] text-[#222]">小号</span>{pendingAliasCount > 0 && <span className="rounded-full bg-rose-400 px-1.5 text-[10px] text-white">{pendingAliasCount}</span>}<ChevronRight className="h-4 w-4 text-[#b4b4b4]" /></button>
               <button type="button" onClick={() => setMePage('beauty')} className="flex w-full items-center gap-4 px-6 py-3 text-left active:bg-slate-50"><Palette className="h-5 w-5 text-violet-500" /><span className="flex-1 text-[15px] text-[#222]">美化</span><ChevronRight className="h-4 w-4 text-[#b4b4b4]" /></button>
+              <button type="button" onClick={() => setMePage('regex')} className="flex w-full items-center gap-4 px-6 py-3 text-left active:bg-slate-50"><span className="w-5 text-center font-mono text-lg font-bold text-sky-500" aria-hidden="true">.*</span><span className="flex-1 text-[15px] text-[#222]">正则</span><ChevronRight className="h-4 w-4 text-[#b4b4b4]" /></button>
             </div>
             <div className="mt-3 bg-white">
               <button type="button" onClick={() => setMePage('settings')} className="flex w-full items-center gap-4 px-6 py-3 text-left active:bg-slate-50"><Settings className="h-5 w-5 text-sky-600" /><span className="flex-1 text-[15px] text-[#222]">设置</span><ChevronRight className="h-4 w-4 text-[#b4b4b4]" /></button>
@@ -6430,6 +6434,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
             const latest = readStoredValue(WECHAT_FAVORITES_KEY, favorites, isWeChatFavorites);
             return saveFavorites([{ id, sourceChatId: '', sourceMessageId: id, sourceChatTitle: '我的收藏', sourceSenderName: personaNickname, savedAt: new Date().toISOString(), message: { kind: 'text', text } }, ...latest]);
           }} />}
+        {activeTab === 'me' && mePage === 'regex' && <ChatRegexSettings settings={chatRegex} dark={useWeChatDark} />}
         {activeTab === 'me' && mePage === 'settings' && (
           <div className="p-4 space-y-3 pb-4">
             <section className="glass-card rounded-2xl p-3.5 space-y-3">

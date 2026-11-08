@@ -7,6 +7,7 @@ import { applyWithAlias, generateAliasReply } from '../utils/aliasAi';
 import { newAliasMessageIds, rememberAliasMessages } from '../utils/aliasExperiences';
 import { effectiveChatTimeZone, formatChatTimestamp, shouldShowTimestamp } from '../utils/chatTimestamp';
 import './wechatAliases.css';
+import { RegexMessage, useChatRegex } from './RegexMessage';
 
 function Avatar({ name, url }: { name: string; url?: string }) {
   return <span className="alias-avatar yy-chat-avatar">{url ? <img src={url} alt="" /> : name.trim().slice(0, 1) || <UserRound size={20} />}</span>;
@@ -16,6 +17,7 @@ const errorText = (error: unknown) => error instanceof Error ? error.message : '
 export function AliasChat({ thread, state, onBack, wallpaper, userColor, characterColor, timeZone, autoReplyOnEnter = false }: { thread: AliasThread; state: AliasState; onBack: () => void; wallpaper?: string; userColor: string; characterColor: string; timeZone?: string; autoReplyOnEnter?: boolean }) {
   const [text, setText] = useState(''), [acting, setBusy] = useState(false), [localError, setError] = useState('');
   const generationKey = `alias-reply:${thread.id}`;
+  const chatRegex = useChatRegex();
   const generation = useSyncExternalStore(subscribeBackgroundGeneration, () => backgroundGenerationState(generationKey));
   const busy = acting || generation.running, error = localError || generation.error;
   const [menu, setMenu] = useState(false), [extras, setExtras] = useState<'more' | 'emoji' | ''>('');
@@ -69,7 +71,7 @@ export function AliasChat({ thread, state, onBack, wallpaper, userColor, charact
             onPointerDown={event => { if (event.button !== 0) return; stopPress(); pressed.current = false; pressStart.current = { x: event.clientX, y: event.clientY }; press.current = setTimeout(() => { pressed.current = true; setExtras(''); setMessageMenu(m.id); }, 500); }} onPointerUp={stopPress} onPointerCancel={stopPress} onPointerLeave={stopPress} onPointerMove={event => { if (Math.hypot(event.clientX - pressStart.current.x, event.clientY - pressStart.current.y) > 8) stopPress(); }}
             onContextMenu={event => { event.preventDefault(); stopPress(); setExtras(''); setMessageMenu(m.id); }}
             onClick={() => { if (pressed.current) { pressed.current = false; return; } if (m.kind === 'image') setImagePreview(m); else setMessageMenu(messageMenu === m.id ? '' : m.id); }}>
-            {m.kind === 'image' ? <><span className="alias-image-heading"><Image size={22} strokeWidth={1.5} />图片</span><span className="alias-image-description">{m.text}</span></> : m.text}
+            {m.kind === 'image' ? <><span className="alias-image-heading"><Image size={22} strokeWidth={1.5} />图片</span><span className="alias-image-description">{m.text}</span></> : <RegexMessage text={m.text} sender={m.from === 'user' ? 'user' : 'character'} settings={chatRegex} dark={characterColor === '#30343a'} />}
           </button>
           {messageMenu === m.id && <div className="alias-message-actions" role="group" aria-label="小号消息操作">
             <button type="button" onClick={() => beginRemembering(m.id)}><Bookmark size={13} />记住这段</button>
