@@ -1,4 +1,5 @@
 import { activeMemoryArchive } from './memoryArchives';
+import { readMemoryUserName } from './memoryIdentity';
 import {
   embedMissingMemories, embeddingConfigured, newMemoryId, readMemories, readMemorySettings,
   writeMemories, type GiftMemoryDetails, type MemoryItem,
@@ -8,8 +9,8 @@ export const giftDateToday = () => new Intl.DateTimeFormat('en-CA', {
   timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
 }).format(new Date());
 
-export const giftMemoryContent = (gift: GiftMemoryDetails) => {
-  const who = gift.direction === 'player-to-character' ? '玩家送给我' : '我送给玩家';
+export const giftMemoryContent = (gift: GiftMemoryDetails, userName = readMemoryUserName()) => {
+  const who = gift.direction === 'player-to-character' ? `${userName}送给我` : `我送给${userName}`;
   return `${gift.date}，${who}「${gift.name}」。送礼情景：${gift.scene || '未记录'}`.slice(0, 300);
 };
 

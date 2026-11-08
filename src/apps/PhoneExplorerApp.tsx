@@ -43,10 +43,12 @@ import { readStorageString, writeStorageString } from '../utils/localStorage';
 import { readDirectMessages } from '../utils/journalData';
 import { applyPhoneGeneratedPatch, collectPastDiaries } from '../utils/phoneDiaryArchive';
 import { activeMemoryArchive } from '../utils/memoryArchives';
+import { readPhoneVisits, type PhoneVisit } from '../utils/phoneVisits';
 import { pendingPhoneProxyMessage, replyToPhoneProxyMessage, sendPhoneProxyMessage } from '../utils/phoneProxy';
 
 interface CheckPhoneAppProps {
   onBack: () => void;
+  isVisible?: boolean;
 }
 
 const getCharAvatar = (charObj: unknown): string => {
@@ -60,7 +62,7 @@ const getCharAvatar = (charObj: unknown): string => {
 type SubAppKey = 'home' | 'wechat' | 'album' | 'browser' | 'notes' | 'icity' | 'agent' | 'wallet' | 'maps' | 'health' | 'douban' | 'shopping' | 'past';
 
 const scopeForApp = (app: SubAppKey): 'all' | PhoneGenScope =>
-  app === 'home' ? 'all' : app === 'maps' ? 'album' : app === 'past' ? 'icity' : app;
+  app === 'home' ? 'all' : app === 'past' ? 'icity' : app;
 
 export interface PhoneWeChatMsg {
   id: string;
@@ -158,6 +160,7 @@ export interface CharacterPhoneData {
   health?: PhoneHealth;
   ratings?: PhoneRatingItem[];
   shoppingCart?: PhoneShoppingItem[];
+  visits?: PhoneVisit[];
 }
 
 const readRealUserMessagesForChar = (
@@ -230,14 +233,20 @@ const createDefaultPhoneData = (charId: string, _charName: string): CharacterPho
   agentSession: { doubaoTopic: '', doubaoTurns: [], claudeTopic: '', claudeTurns: [] },
 });
 
-export const CheckPhoneApp: React.FC<CheckPhoneAppProps> = ({ onBack }) => {
-  const [contacts] = useState<AlipayContact[]>(() => readAlipayContacts());
+export const CheckPhoneApp: React.FC<CheckPhoneAppProps> = ({ onBack, isVisible = true }) => {
+  const [contacts, setContacts] = useState<AlipayContact[]>(() => readAlipayContacts());
   const [selectedCharId, setSelectedCharId] = useState<string>(contacts[0]?.id || 'default_char');
   const currentChar = contacts.find((c) => c.id === selectedCharId) || {
     id: 'default_char',
     name: 'TA',
   };
   const currentCharAvatar = getCharAvatar(currentChar);
+  useEffect(() => {
+    if (!isVisible) return;
+    const latest = readAlipayContacts();
+    setContacts(latest);
+    setSelectedCharId(id => latest.some(contact => contact.id === id) ? id : latest[0]?.id || 'default_char');
+  }, [isVisible]);
 
   const userName = getUserWeChatName();
 
@@ -276,12 +285,14 @@ export const CheckPhoneApp: React.FC<CheckPhoneAppProps> = ({ onBack }) => {
 
   useEffect(() => {
     try {
-      writeStorageString(CHECK_PHONE_STORAGE_KEY, JSON.stringify(phonesMap));
+      const liveIds = new Set(readAlipayContacts().map(contact => contact.id));
+      const livePhones = Object.fromEntries(Object.entries(phonesMap).filter(([id]) => liveIds.has(id) || id === 'default_char' && liveIds.size === 0));
+      writeStorageString(CHECK_PHONE_STORAGE_KEY, JSON.stringify(livePhones));
     } catch {
       // 壁纸等大图可能超出存储空间：去掉本地图片壁纸再存一次，保证钱包等关键数据不丢
       try {
         const slim = Object.fromEntries(
-          Object.entries(phonesMap).map(([id, phone]) => [
+          Object.entries(phonesMap).filter(([id]) => id === 'default_char' || readAlipayContacts().some(contact => contact.id === id)).map(([id, phone]) => [
             id,
             phone.wallpaperUrl.startsWith('data:') ? { ...phone, wallpaperUrl: '' } : phone,
           ])
@@ -307,7 +318,13 @@ export const CheckPhoneApp: React.FC<CheckPhoneAppProps> = ({ onBack }) => {
 
   const [activeSubApp, setActiveSubApp] = useState<SubAppKey>('home');
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
+  const [generationError, setGenerationError] = useState('');
   const generatingRef = useRef(false);
+  useEffect(() => {
+    if (!isVisible || !generationError) return;
+    showYyError(generationError, '生成手机内容时出错了');
+    setGenerationError('');
+  }, [isVisible, generationError]);
   const [showTopMenu, setShowTopMenu] = useState<boolean>(false);
 
   const [selectedWeChatThreadId, setSelectedWeChatThreadId] = useState<string | null>(null);
@@ -405,11 +422,12 @@ export const CheckPhoneApp: React.FC<CheckPhoneAppProps> = ({ onBack }) => {
     const charId = selectedCharId;
     try {
       const patch = await generatePhoneScope(scope, ctx, phonesMapRef.current[charId] ?? currentPhone);
+      if (charId !== 'default_char' && !readAlipayContacts().some(contact => contact.id === charId)) return;
       setPhonesMap((prev) => ({
         ...prev, [charId]: applyPhoneGeneratedPatch(prev[charId] ?? createDefaultPhoneData(charId, currentChar.name), patch),
       }));
     } catch (error) {
-      showYyError(error instanceof Error ? error.message : String(error), '生成手机内容时出错了');
+      setGenerationError(error instanceof Error ? error.message : String(error));
     } finally {
       generatingRef.current = false;
       setIsGenerating(false);
@@ -500,10 +518,10 @@ export const CheckPhoneApp: React.FC<CheckPhoneAppProps> = ({ onBack }) => {
         if (!wallet) return null;
         return {
           appLabel: '钱包',
-          summary: `总资产 ¥${formatMoney(wallet.balance)}，最近 ${Math.min(wallet.records.length, 12)} 笔收支`,
+          summary: `总资产 ¥${formatMoney(wallet.balance)}，最近 ${Math.min(wallet.records.length, 6)} 笔收支`,
           detail: [
             `当前总资产：¥${formatMoney(wallet.balance)}`,
-            ...wallet.records.slice(0, 12).map(
+            ...wallet.records.slice(0, 6).map(
               (r) => `${r.timeStr}｜${r.title}｜${r.amount >= 0 ? '+' : '-'}¥${formatMoney(Math.abs(r.amount))}${r.note ? `（${r.note}）` : ''}`
             ),
           ].join('\n'),
@@ -780,6 +798,7 @@ export const CheckPhoneApp: React.FC<CheckPhoneAppProps> = ({ onBack }) => {
               return (
                 <button
                   key={dock.key}
+                  aria-label={dock.key === 'maps' ? '最近去过' : dock.key === 'wallet' ? '钱包' : '健康'}
                   onClick={() => setActiveSubApp(dock.key as SubAppKey)}
                   style={{ backgroundColor: dock.bg, color: dock.color }}
                   className="w-12 h-12 rounded-[15px] border border-white flex items-center justify-center shadow-2xs active:scale-95 transition-transform cursor-pointer"
@@ -1211,7 +1230,7 @@ export const CheckPhoneApp: React.FC<CheckPhoneAppProps> = ({ onBack }) => {
             )}
           </div>
           <p className="px-1 text-xs font-bold text-slate-600">收支明细</p>
-          {(currentPhone.wallet?.records ?? []).map((record) => (
+          {(currentPhone.wallet?.records ?? []).slice(0, 6).map((record) => (
             <div key={record.id} className="flex items-center justify-between rounded-[20px] border border-white bg-white/80 p-3.5">
               <div className="min-w-0">
                 <p className="truncate text-xs font-bold text-slate-700">{record.title}</p>
@@ -1228,17 +1247,35 @@ export const CheckPhoneApp: React.FC<CheckPhoneAppProps> = ({ onBack }) => {
       )}
 
       {activeSubApp === 'maps' && (
-        <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar p-4 space-y-2.5">
-          <p className="px-1 text-xs font-bold text-slate-600">最近去过</p>
-          {currentPhone.photos.filter((p) => !p.isPrivate).map((photo) => (
-            <div key={photo.id} className="flex items-center gap-3 rounded-[20px] border border-white bg-white/80 p-3.5">
-              <MapPin className="h-4 w-4 shrink-0 text-[#99737E]" />
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-xs font-bold text-slate-700">{photo.location}</p>
-                <p className="text-[10px] text-slate-400">{photo.dateStr}</p>
-              </div>
-            </div>
-          ))}
+        <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar px-4 pt-5 pb-8">
+          <div className="mb-5 flex items-center gap-2.5 px-1">
+            <span className="flex h-9 w-9 items-center justify-center rounded-2xl border border-white bg-white/70 text-[#A07C90] shadow-2xs"><MapPin className="h-4 w-4" /></span>
+            <p className="text-base font-semibold tracking-wide text-[#66586C]">最近去过</p>
+          </div>
+          <div className="relative ml-1 border-l border-[#D9CFDD] pl-5 space-y-5">
+            {readPhoneVisits(currentPhone).map((visit) => (
+              <article key={visit.id} className="relative min-w-0">
+                <span className="absolute -left-[25px] top-1.5 h-2 w-2 rounded-full bg-[#BA9EAE] ring-4 ring-[#F1EEF5]" />
+                <p className="mb-2 flex flex-wrap gap-x-2 text-[10px] tracking-wide text-[#94889D]">
+                  <span>{visit.dateStr}</span>{visit.timeStr && <span>{visit.timeStr}</span>}
+                </p>
+                <div className="overflow-hidden rounded-[22px] border border-white bg-white/80 shadow-[0_6px_22px_rgba(118,102,134,0.05)]">
+                  <div className="bg-gradient-to-r from-[#F5EBF0]/80 to-[#EAF2F7]/80 px-4 py-3.5">
+                    <h3 className="break-words text-sm font-semibold text-[#65556E]">{visit.location}</h3>
+                    {(visit.duration || visit.companion) && <p className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-[#99859C]">
+                      {visit.duration && <span>停留 {visit.duration}</span>}{visit.companion && <span>{visit.companion}</span>}
+                    </p>}
+                  </div>
+                  <div className="space-y-2.5 px-4 py-3.5">
+                    {visit.activity && <p className="break-words text-xs font-medium text-[#736179]">{visit.activity}</p>}
+                    {visit.detail && <p className="whitespace-pre-wrap break-words text-xs leading-relaxed text-[#857D8D]">{visit.detail}</p>}
+                    {visit.note && <p className="whitespace-pre-wrap break-words border-l-2 border-[#E2CEDB] pl-2.5 text-[11px] leading-relaxed text-[#AB899F]">{visit.note}</p>}
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+          {readPhoneVisits(currentPhone).length === 0 && <p className="py-14 text-center text-xs text-[#A69BAE]">还没有留下足迹</p>}
         </div>
       )}
 

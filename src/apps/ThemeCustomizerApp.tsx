@@ -154,7 +154,9 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
     setProcessing(field);
     setError('');
     try {
-      const image = await compressWallpaper(file);
+      const image = await (field === 'lockScreen'
+        ? compressImageFile(file, { maxDimension: 2560, maxBytes: 2 * 1024 * 1024, initialQuality: 0.95, minQuality: 0.8 })
+        : compressWallpaper(file));
       setWallpaperDraft((current) => ({ ...current, [field]: image }));
       setStatus('');
     } catch (uploadError) {

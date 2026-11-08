@@ -18,8 +18,8 @@ import { guardMemoryArchive } from './memoryArchives';
 import { readDirectMessages } from './journalData';
 export const PHONE_HISTORY_LIMIT = 150;
 
-export type PhoneGenScope = 'wechat' | 'album' | 'browser' | 'notes' | 'icity' | 'agent' | 'wallet' | 'health' | 'douban' | 'shopping';
-export const PHONE_GEN_SCOPES: PhoneGenScope[] = ['wechat', 'album', 'browser', 'notes', 'icity', 'agent', 'wallet', 'health', 'douban', 'shopping'];
+export type PhoneGenScope = 'wechat' | 'album' | 'maps' | 'browser' | 'notes' | 'icity' | 'agent' | 'wallet' | 'health' | 'douban' | 'shopping';
+export const PHONE_GEN_SCOPES: PhoneGenScope[] = ['wechat', 'album', 'maps', 'browser', 'notes', 'icity', 'agent', 'wallet', 'health', 'douban', 'shopping'];
 
 export interface PhoneGenContext {
   charId: string;
@@ -59,6 +59,7 @@ const parseJson = (text: string): Record<string, unknown> => {
 const SCOPE_LABEL: Record<PhoneGenScope, string> = {
   wechat: '微信里与朋友/同事/长辈的聊天',
   album: '相册',
+  maps: '最近去过（生活足迹）',
   browser: '浏览器搜索历史',
   notes: '备忘录',
   icity: 'icity 私密日记',
@@ -81,6 +82,11 @@ const scopeSpec = (scope: PhoneGenScope, ctx: PhoneGenContext, prevWallet: Phone
     case 'album':
       return `生成普通相册 4~5 张（日常抓拍、工作/学业随手拍、偷拍玩家背影、合照等）和私密相册 3~4 张（最隐秘的文字图：深夜胡言乱语草稿、偷偷珍藏的玩家睡颜、角色受挫时的私密自拍等）。每张是“文字图卡”：用文字描述画面。
 返回 JSON：{"photos":[{"isPrivate":false,"dateStr":"10月12日","location":"地点","sceneDesc":"画面描述","charThought":"角色拍下时的一句备注"}]}`;
+    case 'maps':
+      return `生成 3~5 条角色近期去过的地方，按时间从新到旧排列。结合角色人设、世界观、作息和最近聊天，写出生活轨迹，不是旅游攻略、打卡广告或全程围绕玩家的约会合集。地点具体到店铺、公园的一角、办公室附近等，不使用真实定位，不捏造精确住址。
+每条包含日期 dateStr、到访时间 timeStr、停留时长 duration、同行情况 companion（如独自、和同事；无依据可以留空）、去做什么 activity（一句简短摘要）、当时发生的小事 detail（约60~120字，具体、自然，有动作和环境细节）、角色第一人称随手记 note（可选，一两句符合性格的感受或小念头，不套煽情金句）。停留时间和活动要合理，风格和行程可以有差异，允许普通琐事。现在是 ${new Date().toLocaleString('zh-CN')}，不要生成未来已经到访的记录。
+已知经历以聊天为准，未交代处只补全合理的角色日常，不编造玩家的同行、说过的话、举动或重大共同经历；缺少日期、同行等信息时不把猜测写成已知事实。足迹与相册是独立栏目，不必每处都拍照。
+返回 JSON：{"visits":[{"location":"地点","dateStr":"如11月8日","timeStr":"如16:20","duration":"如半小时","companion":"独自","activity":"顺路买晚饭","detail":"在这里发生的小事","note":"角色随手记"}]}`;
     case 'browser':
       return `生成 5 条带时间的搜索记录，有反差感和窥探感：工作相关的硬核问题、关于玩家的纠结小心思、以及至少 1 条成人向/生理需求相关的私密搜索（tag 用“私密18+”，可以直白，但只写搜索词和简短摘要，不要描写性行为细节）。其余 tag 用“日常”或“情感”。
 返回 JSON：{"items":[{"query":"搜索词","urlDomain":"网站域名","timeStr":"如 昨天 18:20","tag":"日常|情感|私密18+","summary":"简短摘要"}]}`;
@@ -105,12 +111,12 @@ const scopeSpec = (scope: PhoneGenScope, ctx: PhoneGenContext, prevWallet: Phone
     case 'wallet': {
       const money = readRecentMoneyEvents(ctx.charId, PHONE_HISTORY_LIMIT);
       const prev = prevWallet
-        ? `当前钱包：资产 ¥${prevWallet.balance}，最近记录：${prevWallet.records.slice(0, 6).map((r) => `${r.timeStr}${r.title}${r.amount}`).join('；')}。请在此基础上延续，只生成“新增”的收支，并给出更新后的总资产。`
+        ? `当前钱包：资产 ¥${prevWallet.balance}，上次查看时间：${prevWallet.updatedAt}，上次明细：${prevWallet.records.slice(0, 6).map((r) => `${r.timeStr}${r.title}${r.amount}`).join('；')}。本次重新整理近期明细，替换上次列表。余额需延续角色经济状况，已计入的交易不能再次加减；没有新交易时不要为了刷新而凭空改变余额。`
         : '这是第一次生成钱包，请根据角色身份和经济状况设定一个合理的总资产。';
       return `${prev}
-与玩家「${ctx.userName}」之间发生过的转账、红包、礼物/订单（务必据实体现在收支里，方向和金额要对；若没有则不要编造）：
+近期聊天中与「${ctx.userName}」之间的转账、红包、礼物/订单（仅供核对真实事件，方向、金额、日期和到账状态要准确；待收款、已退回不能当作到账收入，不必逐条搬入明细）：
 ${money || '（暂无）'}
-本次总共新增恰好 6 条收支，真实事件与日常收支合计也是 6 条，不是各生成 6 条。优先延续近期真实事件，其余可补充符合人设的日常收支（工资、餐饮、交通、数码、请客、给家人转账等），不要重复入账已有记录。金额为数字，收入为正、支出为负。
+本次总共展示恰好 6 条近期收支，按时间从新到旧排列，真实事件与日常收支合计也是 6 条，不是各生成 6 条。不拼接旧列表，不机械复刻上次明细，也不反复围绕很早的转账。可补充符合人设的近期日常收支（工资、餐饮、交通、数码、请客等）；仍属近期的真实交易可以保留展示，但展示不等于再次入账。金额为数字，收入为正、支出为负。
 返回 JSON：{"balance":总资产数字,"records":[{"title":"名目","amount":数字,"timeStr":"如 10月16日 12:30","note":"可选备注"}]}`;
     }
     case 'health':
@@ -158,7 +164,7 @@ export const generatePhoneScope = async (
     ...(scope === 'all' ? { maxTokens: 16000 } : scope === 'icity' ? { maxTokens: 4096 } : {}),
   }));
   assertArchive();
-  if (scope !== 'all') return parsePhoneScope(scope, result, ctx, prev, prevWallet);
+  if (scope !== 'all') return parsePhoneScope(scope, result, ctx, prev);
   return Object.assign({}, ...scopes.map((item) => {
     const section = result[item];
     if (!isRecord(section)) throw new Error(`AI 遗漏了手机模块 ${SCOPE_LABEL[item]}，未保存，请重试。`);
@@ -166,13 +172,13 @@ export const generatePhoneScope = async (
       !list(section[key]).some((turn) => str(turn.content, 800)))) {
       throw new Error('AI 未生成两个助手的完整对话，未保存，请重试。');
     }
-    return parsePhoneScope(item, section, ctx, prev, item === 'wallet' ? prev.wallet ?? readCharacterWallet(ctx.charId) : null);
+    return parsePhoneScope(item, section, ctx, prev);
   }));
 };
 
 const parsePhoneScope = (
   scope: PhoneGenScope, result: Record<string, unknown>, ctx: PhoneGenContext,
-  prev: CharacterPhoneData, prevWallet: PhoneWallet | null
+  prev: CharacterPhoneData
 ): Partial<CharacterPhoneData> => {
   switch (scope) {
     case 'wechat': {
@@ -208,6 +214,17 @@ const parsePhoneScope = (
       })).filter((p) => p.sceneDesc);
       if (photos.length === 0) throw new Error('AI 没有生成有效的相册内容，请重试。');
       return { photos };
+    }
+    case 'maps': {
+      const visits = list(result.visits).slice(0, 5).map(visit => ({
+        id: uid('visit'), location: str(visit.location, 80), dateStr: str(visit.dateStr, 24),
+        timeStr: str(visit.timeStr, 30), duration: str(visit.duration, 30), companion: str(visit.companion, 60),
+        activity: str(visit.activity, 100), detail: str(visit.detail, 500), note: str(visit.note, 200),
+      }));
+      if (visits.length < 3 || visits.some(visit => !visit.location || !visit.dateStr || !visit.activity || !visit.detail)) {
+        throw new Error('AI 没有生成完整的近期足迹，原记录未改动，请重试。');
+      }
+      return { visits };
     }
     case 'browser': {
       const items: PhoneBrowserItem[] = list(result.items).slice(0, 8).map((item) => ({
@@ -288,7 +305,7 @@ const parsePhoneScope = (
       return {
         wallet: {
           balance: Math.max(0, Math.round(balance * 100) / 100),
-          records: [...newRecords, ...(prevWallet?.records ?? [])].slice(0, 40),
+          records: newRecords,
           updatedAt: new Date().toISOString(),
         },
       };

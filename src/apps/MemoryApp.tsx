@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Archive, ArrowUpRight, BookOpen, BrainCircuit, ChevronDown, Download, Film, Heart, Package, Pencil, Pin, PinOff, Plus, Search, Settings, Sparkles, Trash2, Upload, X } from 'lucide-react';
 import { AppHeader } from '../components/AppHeader';
 import { MemoryTheater } from '../components/MemoryTheater';
+import { readMemoryUserName } from '../utils/memoryIdentity';
 import { showYyError } from '../components/ErrorDialog';
 import { readOfflineContacts, OfflineContact } from '../utils/offlineData';
 import {
@@ -62,6 +63,7 @@ interface Candidate extends MemoryCandidate {
 }
 
 export const MemoryApp: React.FC<MemoryAppProps> = ({ onBack }) => {
+  const userName = readMemoryUserName();
   const [contacts] = useState<OfflineContact[]>(() => readOfflineContacts());
   const [memories, setMemories] = useState<MemoryItem[]>(() => readMemories());
   const [settings, setSettings] = useState<MemorySettings>(() => readMemorySettings());
@@ -674,13 +676,13 @@ export const MemoryApp: React.FC<MemoryAppProps> = ({ onBack }) => {
             </div>
             <div className="min-h-0 flex-1 space-y-3 overflow-y-auto text-xs">
               <label className="block space-y-1">
-                <span className="font-semibold text-slate-600">内容（用“玩家”指玩家，“我”指角色）</span>
+                <span className="font-semibold text-slate-600">内容（用“{userName}”称呼自己，“我”指角色）</span>
                 <textarea
                   className={`${inputClass} h-24 resize-none leading-relaxed`}
                   value={editing.content}
                   maxLength={300}
                   onChange={(e) => setEditing({ ...editing, content: e.target.value })}
-                  placeholder="例如：玩家怕黑，睡觉要留一盏小夜灯"
+                  placeholder={`例如：${userName}怕黑，睡觉要留一盏小夜灯`}
                 />
               </label>
               <div className="space-y-1">

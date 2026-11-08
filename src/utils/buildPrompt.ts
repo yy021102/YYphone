@@ -7,7 +7,7 @@ import type { FormerParticipant } from './deleteWeChatContact';
 import { COUPLE_PRODUCTS, coupleRewardContext, couponUseInstructions } from './coupleRewards';
 import { intimatePayAwareness, readAlipayData } from './alipayData';
 import { readSetting, SETTINGS_KEYS } from './settings';
-import { CharacterNpc, getNpcByParticipantId, readCharacterNpcs } from './characterNpcs';
+import { CharacterNpc, getNpcByParticipantId, readCharacterNpcs, userNpcContext } from './characterNpcs';
 import { readStorageString } from './localStorage';
 import { buildListenTogetherContext } from './musicPlayback';
 import { buildCalendarContext } from './calendarData';
@@ -235,6 +235,7 @@ const getPersonaText = (persona: UserPersona | undefined) => {
     persona.personality && `个性：${persona.personality}`,
     persona.background && `背景：${persona.background}`,
     persona.speakingStyle && `说话风格：${persona.speakingStyle}`,
+    userNpcContext(persona.id),
   ].filter(Boolean).join('\n');
 };
 

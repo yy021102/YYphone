@@ -95,7 +95,10 @@ import { DIVINATION_RESPONSE_STYLE } from '../utils/divination';
 import { tarotContext, tarotShareText, tarotSpread } from '../utils/tarot';
 import { WordEncounterGame, WordEncounterRecord } from '../components/WordEncounterGame';
 import { cleanEncounterWord, encounterTask, encounterDetail, isEncounterResult, type EncounterResult } from '../utils/wordEncounter';
-import { getActiveApiPreset, requestConfiguredAiText } from '../utils/aiApi';
+import { getActiveApiPreset, requestConfiguredAiText, type ApiConnection } from '../utils/aiApi';
+import { ChatOverrideSettings } from '../components/ChatOverrideSettings';
+import { UserNpcSettings } from '../components/UserNpcSettings';
+import { chatSecondaryApi, chatBackground, type ChatOverrides } from '../utils/chatOverrides';
 import { parseAiJson } from '../utils/aiResponse';
 import { withWorldBooksForContacts } from '../utils/worldBookPrompt';
 import { WerewolfGame } from '../components/WerewolfGame';
@@ -181,6 +184,7 @@ import {
 } from '../utils/momentsData';
 import {
   CharacterNpc,
+  hasNpcOwners,
   getNpcByParticipantId,
   npcParticipantId,
   readCharacterNpcs,
@@ -404,7 +408,7 @@ interface ApiPreset {
 
 type ChatArchive = ChatArchiveSlot<ChatMessage>;
 
-interface ChatConversation {
+interface ChatConversation extends ChatOverrides {
   thoughtPresetId?: string;
   foreignLanguageEnabled?: boolean;
   chatLanguage?: ChatLanguage;
@@ -440,6 +444,7 @@ interface ChatConversation {
   attachedHistoryCount?: number;
   attachedHistoryChatIds?: string[];
   currentChatHistoryCount?: number;
+  displayMessageCount?: number;
   attachedHistoryCounts?: Record<string, number>;
   replyMessageMin?: number;
   replyMessageMax?: number;
@@ -947,6 +952,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
   const [chatSettingsOpen, setChatSettingsOpen] = useState(false);
   const [mcpStatus, setMcpStatus] = useState<{ chatId: string; text: string } | null>(null);
   const [chatSettingsDraft, setChatSettingsDraft] = useState<ChatConversation | null>(null);
+  const [chatWallpaperBusy, setChatWallpaperBusy] = useState(false);
   const [imageReferenceBusy, setImageReferenceBusy] = useState(false);
   const [previewImageId, setPreviewImageId] = useState('');
   useEffect(() => { setPreviewImageId(''); setExpandedTranslationIds([]); }, [activeChatId, isVisible, chats.find(chat => chat.id === activeChatId)?.activeArchiveId]);
@@ -1021,7 +1027,8 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
   const voiceCacheRef = useRef(new Map<string, string>());
   const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
   const [hiddenMessageIds, setHiddenMessageIds] = useState<string[]>([]);
-  const HISTORY_PAGE_SIZE = 15;
+  const configuredDisplayCount = chats.find(chat => chat.id === activeChatId)?.displayMessageCount;
+  const HISTORY_PAGE_SIZE = typeof configuredDisplayCount === 'number' && Number.isInteger(configuredDisplayCount) && configuredDisplayCount >= 1 && configuredDisplayCount <= 1000 ? configuredDisplayCount : 15;
   const [visibleMessageCount, setVisibleMessageCount] = useState(HISTORY_PAGE_SIZE);
   const [composerPage, setComposerPage] = useState(0);
   const [selectMode, setSelectMode] = useState(false);
@@ -1063,7 +1070,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
     setVisibleMessageCount(HISTORY_PAGE_SIZE);
     setSelectMode(false);
     setSelectedIds([]);
-  }, [activeChatId, isVisible]);
+  }, [activeChatId, isVisible, HISTORY_PAGE_SIZE]);
 
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const composerTouchStartX = useRef(0);
@@ -1315,7 +1322,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
           ...npc,
           linkedCharIds: npc.linkedCharIds.filter((id) => contactIds.has(id)),
         }))
-        .filter((npc) => npc.linkedCharIds.length > 0);
+        .filter(hasNpcOwners);
       const contactsWithNpcLinks = nextContacts.map((contact) => ({
         ...contact,
         linkedNpcIds: nextNpcs
@@ -1369,7 +1376,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
             ...npc,
             linkedCharIds: npc.linkedCharIds.filter((id) => id !== contactDraft.id),
           }))
-          .filter((npc) => npc.linkedCharIds.length > 0);
+          .filter(hasNpcOwners);
         persistCharacterNpcs(updatedNpcs);
       }
     }
@@ -1478,6 +1485,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       avatarUrl: npcDraft.avatarUrl.trim(),
       persona: npcDraft.persona.trim(),
       linkedCharIds: [...new Set([...(existingNpc?.linkedCharIds ?? []), targetCharId])],
+      ...(existingNpc?.linkedUserIds ? { linkedUserIds: existingNpc.linkedUserIds } : {}),
     };
     const nextNpcs = existingNpc
       ? characterNpcs.map((item) => item.id === npc.id ? npc : item)
@@ -1494,14 +1502,14 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
 
   const unbindNpcFromCurrentCharacter = (npc: CharacterNpc) => {
     const linkedCharIds = npc.linkedCharIds.filter((id) => id !== contactDraft.id);
-    const nextNpcs = linkedCharIds.length
+    const nextNpcs = linkedCharIds.length || npc.linkedUserIds?.length
       ? characterNpcs.map((item) => item.id === npc.id ? { ...item, linkedCharIds } : item)
       : characterNpcs.filter((item) => item.id !== npc.id);
     persistCharacterNpcs(nextNpcs);
   };
 
   const deleteNpc = (npcId: string) => {
-    if (!window.confirm('彻底删除这个 NPC？所有角色的依附关系都会解除。')) return;
+    if (!window.confirm('彻底删除这个 NPC？所有角色和用户人设的关联都会解除。')) return;
     persistCharacterNpcs(characterNpcs.filter((npc) => npc.id !== npcId));
     setNpcDraft({ id: '', name: '', avatarUrl: '', persona: '' });
   };
@@ -1920,6 +1928,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
   };
 
   const openChatSettings = (chat: ChatConversation) => {
+    setChatWallpaperBusy(false);
     setTokenPreview(null);
     setTokenPreviewError('');
     setRangeDeleteFrom('1'); setRangeDeleteTo(String(Math.max(1, Math.min(100, chat.messages.filter(isVisibleChatMessage).length)))); setRangeDeleteNotice('');
@@ -1929,6 +1938,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       ...chat,
       avatars: { ...chat.avatars },
       currentChatHistoryCount: chat.currentChatHistoryCount ?? 200,
+      displayMessageCount: chat.displayMessageCount ?? 15,
       attachedHistoryCounts: { ...(chat.attachedHistoryCounts ?? {}) },
       replyMessageMin: range.min,
       replyMessageMax: range.max,
@@ -1953,7 +1963,10 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
   };
 
   const saveChatSettings = () => {
-    if (!chatSettingsDraft || imageReferenceBusy || contextPresetBusy) return;
+    if (!chatSettingsDraft || imageReferenceBusy || contextPresetBusy || chatWallpaperBusy) return;
+    let secondaryApi: ApiConnection | undefined;
+    try { secondaryApi = chatSecondaryApi(chatSettingsDraft); }
+    catch (cause) { setChatError(cause instanceof Error ? cause.message : '本对话 API 配置无效。'); return; }
     if (chatSettingsDraft.foreignLanguageEnabled && !isChatLanguage(chatSettingsDraft.chatLanguage)) {
       setChatError('请为本对话选择一种聊天语言。');
       return;
@@ -1989,6 +2002,11 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
     }
     const attachedHistoryChatIds = getAttachedHistoryChatIds(chatSettingsDraft);
     const messageRange = getReplyMessageRange(chatSettingsDraft);
+    if (!Number.isInteger(chatSettingsDraft.displayMessageCount) ||
+      (chatSettingsDraft.displayMessageCount ?? 0) < 1 || (chatSettingsDraft.displayMessageCount ?? 0) > 1000) {
+      setChatError('本对话消息展示条数请输入 1 到 1000 之间的整数。');
+      return;
+    }
     if (!Number.isInteger(chatSettingsDraft.currentChatHistoryCount) ||
       (chatSettingsDraft.currentChatHistoryCount ?? 0) < 1 ||
       (chatSettingsDraft.currentChatHistoryCount ?? 0) > 5000
@@ -2009,6 +2027,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
     }
     const savedDraft = {
       ...chatSettingsDraft,
+      secondaryApi,
       attachedHistoryChatIds,
       attachedHistoryCounts: Object.fromEntries(
         attachedHistoryChatIds.map((id) => [id, getAttachedHistoryCount(chatSettingsDraft, id)])
@@ -2955,9 +2974,15 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       apiPresets[0]?.id ?? '',
       (value): value is string => typeof value === 'string'
     );
-    const apiPreset =
+    let apiPreset: ApiConnection | undefined =
       apiPresets.find((preset) => preset.id === activePresetId) ??
       apiPresets.find((preset) => preset.endpoint.trim() && preset.apiKey.trim());
+    try { apiPreset = chatSecondaryApi(chat) ?? apiPreset; }
+    catch (cause) {
+      const message = cause instanceof Error ? cause.message : '本对话 API 配置无效。';
+      if (previewOnly) setTokenPreviewError(message); else setChatError(message);
+      return;
+    }
     if (!previewOnly && (!apiPreset?.endpoint.trim() || !apiPreset.apiKey.trim())) {
       setChatError('请先在设置页保存包含端点和 API Key 的 API 配置预设。');
       return;
@@ -4044,6 +4069,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
   const headerContact = activeChat?.type === 'direct' ? contacts.find(c => c.id === activeChat.participantIds[0]) : undefined;
   const headerAvatar = headerContact ? activeChat?.avatars[headerContact.id] || headerContact.avatarUrl || '' : '';
   const avatarThemeVariables = chatAvatarThemeVariables(headerAvatar, activeChat?.avatars.user || personaDraft.avatarUrl || '');
+  const activeChatBackground = chatBackground(activeChat, chatAppearance.backgroundUrl, useWeChatDark);
   const isMeSubpage = activeTab === 'me' && mePage !== 'home';
   const stopChatBannerPress = () => {
     if (chatBannerPressTimer.current) clearTimeout(chatBannerPressTimer.current);
@@ -4204,8 +4230,8 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
               '--yy-character-bubble-color': useWeChatDark ? '#2c2c2c' : chatAppearance.characterBubbleColor === DEFAULT_CHAT_APPEARANCE.characterBubbleColor
                 ? `var(--yy-default-character-bubble-color, ${hexToRgba(chatAppearance.characterBubbleColor, chatAppearance.characterBubbleOpacity ?? 1)})`
                 : hexToRgba(chatAppearance.characterBubbleColor, chatAppearance.characterBubbleOpacity ?? 1),
-              '--yy-chat-wallpaper': !useWeChatDark && chatAppearance.backgroundUrl
-                ? `linear-gradient(rgba(243,246,250,.38), rgba(243,246,250,.38)), url("${chatAppearance.backgroundUrl.replaceAll('"', '%22')}")`
+              '--yy-chat-wallpaper': activeChatBackground
+                ? `linear-gradient(rgba(243,246,250,.38), rgba(243,246,250,.38)), url("${activeChatBackground.replaceAll('"', '%22')}")`
                 : 'none',
             } as React.CSSProperties}
           >
@@ -4216,6 +4242,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
             )}
             <div
               ref={chatScrollRef}
+              style={!useWeChatDark && activeChat.backgroundUrl ? { backgroundImage: 'var(--yy-chat-wallpaper)', backgroundSize: 'cover', backgroundPosition: 'center', backgroundAttachment: 'scroll' } : undefined}
               className="yy-chat-history flex-1 min-h-0 overflow-y-auto no-scrollbar px-3 py-4 space-y-5"
               onClick={(event) => {
                 const target = event.target as HTMLElement;
@@ -6528,6 +6555,11 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                 />
               </label>
               <DocumentTextImport key={personaDraft.id} label="用户人设" value={personaDraft.identity} onChange={identity => updatePersonaField('identity', identity)} />
+              <UserNpcSettings key={`user-npcs-${personaDraft.id}`} personaId={personaDraft.id} npcs={characterNpcs} onSave={next => {
+                writeCharacterNpcs(next, contacts);
+                setCharacterNpcs(next);
+                return true;
+              }} />
               {isProcessingAvatar && <p className="text-[11px] text-sky-700">正在压缩图片…</p>}
               <button
                 onClick={handleSavePersona}
@@ -6662,6 +6694,8 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                 <X className="h-4 w-4" />
               </button>
             </header>
+            <ChatOverrideSettings key={chatSettingsDraft.id} value={chatSettingsDraft} onBusyChange={setChatWallpaperBusy}
+              onChange={patch => setChatSettingsDraft(current => current?.id === chatSettingsDraft.id ? { ...current, ...patch } : current)}/>
             <section style={{ order: 6 }} className="space-y-2 rounded-2xl border border-sky-100 bg-gradient-to-br from-sky-50/80 to-pink-50/60 p-3">
               <label className="flex items-center justify-between gap-3 text-xs font-semibold text-[#2C4A5C]">
                 本对话使用其他语言
@@ -7074,6 +7108,17 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                 {contextPresetNotice && <p role="status" className="text-[10px] leading-relaxed text-sky-700">{contextPresetNotice}</p>}
               </div>
             )}
+            <section style={{ order: 4 }} className="space-y-2 rounded-xl border border-sky-100 bg-sky-50/50 p-3">
+              <label className="block text-[11px] font-semibold text-[#2C4A5C]">
+                本对话消息展示条数
+                <input aria-label="本对话消息展示条数" type="number" min="1" max="1000" step="1"
+                  value={chatSettingsDraft.displayMessageCount || ''}
+                  onChange={event => setChatSettingsDraft({ ...chatSettingsDraft, displayMessageCount: event.target.value === '' ? 0 : Number(event.target.value) })}
+                  className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-normal outline-none" />
+              </label>
+              <p className="text-[10px] leading-relaxed text-slate-400">默认 15 条，可设为 1～1000 条。更早的消息可点「查看历史消息」继续加载，不影响 AI 挂载条数。</p>
+              <button type="button" onClick={() => setChatSettingsDraft({ ...chatSettingsDraft, displayMessageCount: 15 })} className="text-[10px] text-sky-700">恢复默认</button>
+            </section>
             <section style={{ order: 5 }} className="space-y-2 rounded-xl bg-slate-50 p-3">
               <p className="text-[11px] font-semibold text-[#2C4A5C]">挂载聊天记录</p>
               <label className="block text-[10px] text-slate-500">
@@ -7327,7 +7372,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
             )}
             {isProcessingChatImage && <p style={{ order: 15 }} className="text-[10px] text-sky-700">正在压缩图片…</p>}
             {chatError && <p style={{ order: 15 }} role="alert" className="text-[11px] text-rose-600">{chatError}</p>}
-            <button style={{ order: 16 }} onClick={saveChatSettings} disabled={imageReferenceBusy || contextPresetBusy} className="w-full rounded-xl bg-teal-600 py-2.5 text-sm font-bold text-white disabled:opacity-50">
+            <button style={{ order: 16 }} onClick={saveChatSettings} disabled={imageReferenceBusy || contextPresetBusy || chatWallpaperBusy} className="w-full rounded-xl bg-teal-600 py-2.5 text-sm font-bold text-white disabled:opacity-50">
               保存设置
             </button>
           </section>
@@ -7749,7 +7794,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
               {npcSectionOpen && (
                 <div className="space-y-3 border-t border-white/80 px-3.5 py-3">
                   <p className="text-[10px] leading-relaxed text-slate-500">
-                    NPC 依附于主要角色，可被多个角色共享，不会单独出现在通讯录或私聊列表。
+                    NPC 可关联角色或用户人设，支持共享，不会单独出现在通讯录或私聊列表。
                   </p>
                   <div className="space-y-2">
                     {characterNpcs

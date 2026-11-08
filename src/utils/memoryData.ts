@@ -390,7 +390,7 @@ export const buildMemoryInjection = async (
     if (always.length === 0 && related.length === 0) return empty;
     const text = [
       '【你的长期记忆】',
-      '下面是你自己真实记得的事（“我”指你，“玩家”指正在和你聊天的人）。像人自然想起往事那样融入对话：不要逐条复述，不要说“我记得系统里写着”，也不要每轮都提；和当下话题无关就不要硬提。如果玩家现在说的和记忆不一致，以当下为准，并可以自然地表现出“咦，变了”。',
+      '下面是你自己真实记得的事（“我”指你，其余人物按正文姓名与来源区分；旧记忆里的“玩家”是当时的交流对象，不据此识破陌生账号或改变身份归属）。像人自然想起往事那样融入对话：不要逐条复述，不要说“我记得系统里写着”，也不要每轮都提；和当下话题无关就不要硬提。如果对方现在说的和记忆不一致，以当下为准，并可以自然地表现出“咦，变了”。',
       always.length > 0 ? `你一直记在心里的事：\n${always.map((item) => formatMemoryLine(item, prefixOf(item))).join('\n')}` : '',
       related.length > 0 ? `与此刻话题相关、你想起的往事：\n${related.map((entry) => formatMemoryLine(entry.item, prefixOf(entry.item))).join('\n')}` : '',
     ].filter(Boolean).join('\n');

@@ -6,6 +6,8 @@ import { extractMemoryCandidates } from './memoryAi';
 import { addMemoryCandidates, buildMemoryInjection, DEFAULT_MEMORY_SETTINGS, embedMissingMemories, exportMemories, importMemories, readEmbeddings, readMemories, writeEmbeddings, writeMemories, writeMemorySettings, type MemoryCandidate, type MemoryItem } from './memoryData';
 import { conversationMemoryQuery, memoryQueryParts } from './memoryRecall';
 import { regeneratedReplyIds } from './chatRegeneration';
+import { readMemoryUserName } from './memoryIdentity';
+import { giftMemoryContent } from './giftMemory';
 
 const values = new Map<string, string>();
 Object.defineProperty(globalThis, 'window', { configurable: true, value: { setTimeout, clearTimeout, localStorage: {
@@ -28,6 +30,39 @@ beforeEach(async () => {
   ] }]);
 });
 afterEach(() => mock.restoreAll());
+
+test('memory names follow the active persona and never treat a modern preset label as a real name', () => {
+  writeStoredValue('pocketos:user-profile', { name: '桌面名字' });
+  const profiles = [
+    { id: 'a', name: '校园预设', realName: '小满', nickname: '小熊' },
+    { id: 'b', name: '另一个预设', realName: '', nickname: '阿晴' },
+    { id: 'legacy', name: '旧人设姓名' },
+  ];
+  for (const [id, name] of [['a', '小满'], ['b', '阿晴'], ['legacy', '旧人设姓名']]) {
+    writeStoredValue('pocketos:personas', { activeProfileId: id, profiles });
+    assert.equal(readMemoryUserName(), name);
+    assert.match(giftMemoryContent({ name: '围巾', direction: 'character-to-player', date: '2026-11-08', scene: '' }), new RegExp(`我送给${name}`));
+  }
+  writeStoredValue('pocketos:personas', { activeProfileId: 'missing', profiles });
+  assert.equal(readMemoryUserName(), '桌面名字');
+});
+
+test('extraction instructs new and updated memories to use the current name without rewriting existing stored entries', async () => {
+  writeStoredValue('pocketos:personas', { activeProfileId: 'p', profiles: [{ id: 'p', name: '预设标签', realName: '小满', nickname: '小熊' }] });
+  writeMemories([item('old', '玩家喜欢咖啡'), item('other-name', '阿晴喜欢红茶', { source: 'manual' })]);
+  const before = readMemories();
+  mock.method(globalThis, 'fetch', async (_url: unknown, init?: RequestInit) => {
+    const payload = JSON.parse(String(init?.body));
+    const system = payload.messages[0].content;
+    assert.match(system, /记忆正文用姓名“小满”/);
+    assert.doesNotMatch(system, /用“玩家”指代/);
+    assert.match(payload.messages.at(-1).content, /小满：最近喝咖啡会不舒服/);
+    return response([{ content: '小满最近喝咖啡会不舒服，暂时不喝咖啡。', category: 'preference', importance: 3 }]);
+  });
+  const result = await extractMemoryCandidates('a');
+  assert.match(result.candidates[0].content, /^小满/);
+  assert.deepEqual(readMemories(), before);
+});
 
 test('one extraction finds an older relevant entry, updates its text and retains the previous version without changing journals', async () => {
   const old = item('coffee', '玩家喜欢每天喝咖啡');

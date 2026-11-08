@@ -86,6 +86,28 @@ export function WeChatAppearanceWorkshop({ appearance, userName, userAvatar, cha
     } catch (cause) { if (mounted.current) setError(cause instanceof Error ? cause.message : '导入失败。'); }
     finally { if (mounted.current) setBusy(false); }
   };
+  const loadCss = async (target: 'page' | 'bubbles', file?: File) => {
+    if (!file || busy) return;
+    setBusy(true); setError(''); setMessage('');
+    try {
+      if (!/\.css$/i.test(file.name)) throw new Error('请选择 .css 文件。');
+      if (file.size > WECHAT_THEME_CSS_LIMIT * 4) throw new Error('CSS 文件过大，最多支持 60000 个字符。');
+      const css = (await file.text()).replace(/^\uFEFF/, '');
+      if (!css.trim()) throw new Error('CSS 文件是空的。');
+      if (css.length > WECHAT_THEME_CSS_LIMIT) throw new Error('CSS 最多支持 60000 个字符。');
+      const next: ChatAppearance = target === 'page' ? { ...draft, themeCss: css }
+        : { ...draft, bubbleMode: 'custom', bubbleOverride: { ...independentBubbles(draft), css } };
+      compileChatAppearance(next);
+      if (mounted.current) {
+        setDraft(next); setSelected(current => ({ ...current, [target]: '' }));
+        setMessage(`已载入${target === 'page' ? '页面' : '气泡'} CSS，可预览后应用。`);
+      }
+    } catch (cause) { if (mounted.current) setError(cause instanceof Error ? cause.message : 'CSS 导入失败。'); }
+    finally { if (mounted.current) setBusy(false); }
+  };
+  const cssUpload = (target: 'page' | 'bubbles') => <label className="workshop-upload"><Upload size={13} />导入{target === 'page' ? '页面' : '气泡'} CSS
+    <input type="file" aria-label={`导入${target === 'page' ? '页面' : '气泡'} CSS 文件`} accept=".css,text/css" onChange={e => { void loadCss(target, e.target.files?.[0]); e.currentTarget.value = ''; }}/>
+  </label>;
   const upload = async (key: 'backgroundUrl' | 'sendIconUrl' | 'generateIconUrl', file?: File) => {
     if (!file || busy) return;
     setBusy(true); setError('');
@@ -113,7 +135,7 @@ export function WeChatAppearanceWorkshop({ appearance, userName, userAvatar, cha
           <div className="workshop-card-heading"><h3>页面 CSS</h3><button onClick={() => void copyCss()}><Copy size={13} />复制</button></div>
           <p className="workshop-note">可修改背景、标题栏、头像、输入栏与页面原配气泡。代码可复制给 AI 修改。</p>
           <textarea aria-label="页面 CSS" value={draft.themeCss ?? ''} onChange={e => edit({ themeCss: e.target.value })} rows={12} maxLength={WECHAT_THEME_CSS_LIMIT} spellCheck={false} autoCapitalize="off" autoCorrect="off" />
-          <button className="workshop-text-button" onClick={() => edit({ themeCss: DEFAULT_WECHAT_THEME_CSS })}>填入默认 CSS</button>
+          <div className="workshop-inline">{cssUpload('page')}<button className="workshop-text-button" onClick={() => edit({ themeCss: DEFAULT_WECHAT_THEME_CSS })}>填入默认 CSS</button></div>
         </section>
         <section className="workshop-card">
           <h3>背景与图标</h3>
@@ -135,6 +157,7 @@ export function WeChatAppearanceWorkshop({ appearance, userName, userAvatar, cha
         <section className="workshop-card">
           <h3>气泡样式</h3><div className="workshop-mode"><button aria-pressed={draft.bubbleMode !== 'custom'} onClick={() => edit({ bubbleMode: 'follow' })}>跟随页面</button><button aria-pressed={draft.bubbleMode === 'custom'} onClick={() => editBubbles({})}>独立气泡</button></div>
           <p className="workshop-note">{draft.bubbleMode === 'custom' ? '独立替换文字与语音气泡，页面和红包转账卡片继续沿用原样式。' : '使用当前页面原配的气泡，也可在下方选择独立气泡预设。'}</p>
+          {cssUpload('bubbles')}
         </section>
         {draft.bubbleMode === 'custom' && <>
           <section className="workshop-card"><h3>颜色与透明度</h3><div className="workshop-colors">

@@ -1,4 +1,5 @@
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { backgroundGenerationState, startBackgroundGeneration, stopBackgroundGeneration, subscribeBackgroundGeneration } from '../utils/backgroundGeneration';
 import { isChatSendKey } from '../utils/chatSendKey';
 import { ArrowLeft, Bookmark, ChevronRight, Copy, Heart, Image, MoreHorizontal, Pencil, Plus, Send, ShieldCheck, Smile, Trash2, UserRound, X } from 'lucide-react';
 import { aliasCharacter, aliasMessageContext, aliasPeer, aliasRoundThought, aliasSelf, deleteAliasMessage, editAliasMessage, readAliasState, revealUserAlias, sendAliasMessage, updateAliasThread, writeAliasState, type AliasMessage, type AliasState, type AliasThread } from '../utils/aliasAccounts';
@@ -13,7 +14,10 @@ function Avatar({ name, url }: { name: string; url?: string }) {
 const errorText = (error: unknown) => error instanceof Error ? error.message : '操作失败，请重试。';
 
 export function AliasChat({ thread, state, onBack, wallpaper, userColor, characterColor, timeZone, autoReplyOnEnter = false }: { thread: AliasThread; state: AliasState; onBack: () => void; wallpaper?: string; userColor: string; characterColor: string; timeZone?: string; autoReplyOnEnter?: boolean }) {
-  const [text, setText] = useState(''), [busy, setBusy] = useState(false), [error, setError] = useState('');
+  const [text, setText] = useState(''), [acting, setBusy] = useState(false), [localError, setError] = useState('');
+  const generationKey = `alias-reply:${thread.id}`;
+  const generation = useSyncExternalStore(subscribeBackgroundGeneration, () => backgroundGenerationState(generationKey));
+  const busy = acting || generation.running, error = localError || generation.error;
   const [menu, setMenu] = useState(false), [extras, setExtras] = useState<'more' | 'emoji' | ''>('');
   const [messageMenu, setMessageMenu] = useState(''), [thought, setThought] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
@@ -31,11 +35,10 @@ export function AliasChat({ thread, state, onBack, wallpaper, userColor, charact
     history?.scrollTo({ top: history.scrollHeight });
     if (thread.unread) { const next = readAliasState(); writeAliasState({ ...next, threads: next.threads.map(t => t.id === thread.id ? { ...t, unread: 0 } : t) }); }
   }, [thread.id, thread.messages.length, thread.unread]);
-  const activity = useRef(0), working = useRef(false), replyController = useRef<AbortController | null>(null);
-  useEffect(() => () => replyController.current?.abort(), []);
+  const activity = useRef(0), working = useRef(false);
   const act = async (task: () => Promise<void>) => { if (working.current) return; working.current = true; const run = ++activity.current; setBusy(true); setError(''); try { await task(); } catch (e) { if (alive.current && activity.current === run) setError(errorText(e)); } finally { if (alive.current && activity.current === run) { working.current = false; setBusy(false); } } };
-  const generateReply = () => act(async () => { const controller = new AbortController(); replyController.current = controller; try { await generateAliasReply(thread.id, controller.signal); } finally { if (replyController.current === controller) replyController.current = null; } });
-  const stopReply = () => { replyController.current?.abort(); replyController.current = null; activity.current++; working.current = false; setBusy(false); };
+  const generateReply = () => { if (acting) return; setError(''); startBackgroundGeneration(generationKey, signal => generateAliasReply(thread.id, signal)); };
+  const stopReply = () => stopBackgroundGeneration(generationKey);
   const beginRemembering = (messageId?: string) => {
     const fresh = newAliasMessageIds(thread);
     setRemembering(messageId ? [...new Set([...fresh, messageId])] : fresh);
@@ -87,7 +90,7 @@ export function AliasChat({ thread, state, onBack, wallpaper, userColor, charact
         <button type="button" className="yy-chat-attachments" aria-label="小号更多功能" onClick={() => setExtras(extras === 'more' ? '' : 'more')}><Plus size={26} /></button>
         <textarea className="yy-chat-input" aria-label="小号消息输入框" rows={1} maxLength={4000} value={text} disabled={busy} onChange={event => setText(event.target.value)} onKeyDown={event => { if (isChatSendKey(event)) { event.preventDefault(); if (!busy && text.trim() && send() && autoReplyOnEnter) void generateReply(); } }} />
         <button type="button" className="yy-chat-emoji" aria-label="小号表情" onClick={() => setExtras(extras === 'emoji' ? '' : 'emoji')}><Smile size={25} /></button>
-        {text.trim() && !replyController.current ? <button type="submit" className="yy-chat-send" aria-label="发送小号消息" disabled={busy}><Send size={23} /></button> : <button type="button" className="yy-chat-generate" aria-label={replyController.current ? "停止生成小号回复" : "生成小号回复"} disabled={busy && !replyController.current} onClick={() => replyController.current ? stopReply() : void generateReply()}>{replyController.current ? <span aria-hidden="true">□</span> : <Heart size={24} />}</button>}
+        {text.trim() && !generation.running ? <button type="submit" className="yy-chat-send" aria-label="发送小号消息" disabled={busy}><Send size={23} /></button> : <button type="button" className="yy-chat-generate" aria-label={generation.running ? "停止生成小号回复" : "生成小号回复"} disabled={busy && !generation.running} onClick={() => generation.running ? stopReply() : void generateReply()}>{generation.running ? <span aria-hidden="true">□</span> : <Heart size={24} />}</button>}
       </form>
     </>}
     {remembering !== null && <div className="alias-dialog-backdrop" {...backdrop(() => { if (!busy) setRemembering(null); })}><section role="dialog" aria-modal="true" aria-label="记住这段" className="alias-dialog alias-remember-dialog">

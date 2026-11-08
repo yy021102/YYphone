@@ -25,6 +25,7 @@ import { BirthdayRuntime } from './components/BirthdayRuntime';
 import { HalloweenRuntime } from './components/HalloweenRuntime';
 import { birthdayIsDue, readBirthdaySettings, readBirthdaySeen } from './utils/birthday';
 import { HomeScreen } from './components/HomeScreen';
+import { EdgeSwipeBack } from './components/EdgeSwipeBack';
 import { isDesktopActivity, type DesktopPage } from './utils/desktopNavigation';
 import { isFreeDesktopLayout } from './utils/freeDesktop';
 import { AppLoading } from './components/EveryAppLoading';
@@ -290,6 +291,8 @@ export default function App() {
   const [desktopPage, setDesktopPage] = useState<DesktopPage>(0);
   const isActivityOpen = isDesktopActivity(activeApp);
   const isWeChatSurface = activeApp === 'wechat' || isActivityOpen;
+  const [phoneExplorerOpened, setPhoneExplorerOpened] = useState(false);
+  useEffect(() => { if (activeApp === 'phone_explorer') setPhoneExplorerOpened(true); }, [activeApp]);
   const [birthdayOpen, setBirthdayOpen] = useState(false);
   const [littlePOpen, setLittlePOpen] = useState(false);
   const [littlePVisible, setLittlePVisible] = useState(() =>
@@ -678,6 +681,7 @@ export default function App() {
             : !activeApp && !isLocked && beautySettings.homeStyle === 'halloween' ? { background: '#2b263e' } : !activeApp && !isLocked && beautySettings.homeStyle === 'minimal' ? { background: '#f4f2ee' } : !activeApp && !isLocked && beautySettings.homeStyle === 'moonlit' ? { background: '#ede9f4' } : { background: currentWallpaper.style }
         }
       >
+        <EdgeSwipeBack enabled={!isLocked && !openingVisible}/>
         <div className="contents" inert={openingVisible} aria-hidden={openingVisible || undefined}>
         {/* Dynamic theme backdrop wash */}
         {!beautySettings.wallpapers.homeScreen && (activeApp || isLocked || !['minimal', 'moonlit', 'halloween'].includes(beautySettings.homeStyle ?? 'classic')) && (
@@ -718,15 +722,12 @@ export default function App() {
               appearance={beautySettings.lockScreenAppearance}
               password={lockSettings.mode === 'password' ? lockSettings.password : undefined}
             />
-          ) : isWeChatSurface ? null : activeApp ? (
+          ) : isWeChatSurface || activeApp === 'phone_explorer' ? null : activeApp ? (
             /* Active Sub-App View: Header is safely padded below the notch, back arrow always clickable */
             <div className="w-full h-full flex flex-col overflow-hidden animate-fadeIn">
               <Suspense
                 fallback={<AppLoading app={activeApp} onBack={handleBackToHome}/>}
               >
-              {activeApp === 'phone_explorer' && (
-                <PhoneExplorerApp onBack={handleBackToHome} />
-              )}
               {activeApp === 'alipay' && <AlipayApp onBack={handleBackToHome} />}
               {activeApp === 'taobao' && <TaobaoApp giftCoupon={couponGift} onBack={() => {
                 const use = couponGift && findCouponUse(couponGift.charId, couponGift.useId);
@@ -808,6 +809,15 @@ export default function App() {
               appIcons={beautySettings.appIcons}
             />
           )}
+          {(phoneExplorerOpened || activeApp === 'phone_explorer') && <div
+            className={activeApp === 'phone_explorer' && !isLocked ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}
+            aria-hidden={activeApp !== 'phone_explorer' || isLocked}
+            inert={activeApp !== 'phone_explorer' || isLocked}
+          >
+            <Suspense fallback={activeApp === 'phone_explorer' && !isLocked ? <AppLoading app="phone_explorer" onBack={handleBackToHome}/> : null}>
+              <PhoneExplorerApp onBack={handleBackToHome} isVisible={activeApp === 'phone_explorer' && !isLocked} />
+            </Suspense>
+          </div>}
           <div
             className={isWeChatSurface && !isLocked ? 'flex min-h-0 flex-1 flex-col bg-white' : 'hidden'}
             aria-hidden={!isWeChatSurface || isLocked}

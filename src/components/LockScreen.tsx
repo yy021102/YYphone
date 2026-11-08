@@ -63,10 +63,14 @@ export const LockScreen: React.FC<LockScreenProps> = ({
           : { background: wallpaperStyle }),
       }}
     >
-      {/* Subtle background ambient overlays */}
-      <div className="absolute inset-0 bg-white/10 backdrop-blur-[2px] pointer-events-none" />
-      <div className="absolute -top-24 -right-24 w-72 h-72 rounded-full bg-pink-200/40 blur-3xl pointer-events-none" />
-      <div className="absolute -bottom-24 -left-24 w-72 h-72 rounded-full bg-sky-200/50 blur-3xl pointer-events-none" />
+      {/* Keep uploaded wallpaper sharp; ambient effects belong to the built-in background. */}
+      {!wallpaperImage && (
+        <>
+          <div className="absolute inset-0 bg-white/10 backdrop-blur-[2px] pointer-events-none" />
+          <div className="absolute -top-24 -right-24 w-72 h-72 rounded-full bg-pink-200/40 blur-3xl pointer-events-none" />
+          <div className="absolute -bottom-24 -left-24 w-72 h-72 rounded-full bg-sky-200/50 blur-3xl pointer-events-none" />
+        </>
+      )}
 
       {/* Main Lock Screen content */}
       {!showKeypad ? (

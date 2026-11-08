@@ -7,6 +7,7 @@ import { buildPrompt } from './buildPrompt';
 import { generatePhoneScope } from './phoneAi';
 import { settleOutgoingTransfer } from './outgoingTransfer';
 import { CHAT_COMMUNICATION_RULES } from './chatCommunication';
+import { readPhoneVisits } from './phoneVisits';
 import type { CharacterPhoneData } from '../apps/PhoneExplorerApp';
 
 const storage = new Map<string, string>();
@@ -38,7 +39,34 @@ beforeEach(async () => {
   });
 });
 afterEach(() => mock.restoreAll());
-test('wallet generation adds exactly six records, retains prior history, and asks for six total', async () => {
+
+test('recent visits refresh independently, replace old visits and reject incomplete generations', async () => {
+  const prev = previous();
+  prev.photos = [{ id: 'photo', isPrivate: false, location: '书店', dateStr: '昨天', sceneDesc: '窗边摆着旧书。', charThought: '下次再来。' },
+    { id: 'private', isPrivate: true, location: '私密地点', dateStr: '昨天', sceneDesc: '秘密', charThought: '' }];
+  assert.deepEqual(readPhoneVisits(prev).map(visit => [visit.location, visit.detail, visit.note]), [['书店', '窗边摆着旧书。', '下次再来。']]);
+  let visits: unknown[] = Array.from({ length: 3 }, (_, i) => ({ location: `街角小店${i}`, dateStr: '11月8日',
+    timeStr: '16:20', duration: '半小时', companion: '独自', activity: '买晚饭', detail: '站在门口等刚出锅的饼。', note: '还是这家的好吃。' }));
+  let prompt = '';
+  mock.method(globalThis, 'fetch', async (_url: unknown, init?: RequestInit) => {
+    prompt = String(init?.body);
+    return Response.json({ choices: [{ message: { content: JSON.stringify({ visits }) } }] });
+  });
+  const original = JSON.stringify(prev);
+  const result = await generatePhoneScope('maps', context, prev);
+  assert.equal(result.visits?.length, 3);
+  assert.equal(result.visits?.[0].detail, '站在门口等刚出锅的饼。');
+  assert.equal(result.photos, undefined, 'visits refresh must not replace the album');
+  assert.equal(readPhoneVisits({ ...prev, ...result }).length, 3, 'new visits replace the photo fallback');
+  const second = await generatePhoneScope('maps', context, { ...prev, ...result });
+  assert.equal(readPhoneVisits({ ...prev, ...second }).length, 3, 'refresh does not accumulate old visits');
+  assert.match(prompt, /不编造玩家的同行/);
+  visits = [{ location: '空记录' }];
+  await assert.rejects(generatePhoneScope('maps', context, prev), /原记录未改动/);
+  assert.equal(JSON.stringify(prev), original);
+});
+
+test('wallet refresh replaces the recent snapshot instead of accumulating old records', async () => {
   let prompt = '';
   mock.method(globalThis, 'fetch', async (_url: unknown, init?: RequestInit) => {
     prompt = String(init?.body);
@@ -48,10 +76,16 @@ test('wallet generation adds exactly six records, retains prior history, and ask
   });
   const prev = previous(), original = JSON.stringify(prev);
   const result = await generatePhoneScope('wallet', context, prev);
-  assert.equal(result.wallet?.records.length, 7);
-  assert.equal(result.wallet?.records.at(-1)?.id, 'existing');
+  assert.equal(result.wallet?.records.length, 6);
+  assert.equal(result.wallet?.records.some(record => record.id === 'existing'), false);
+  assert.equal(result.wallet?.balance, 900);
+  const refreshed = await generatePhoneScope('wallet', context, { ...prev, ...result });
+  assert.equal(refreshed.wallet?.records.length, 6);
+  assert.equal(refreshed.wallet?.balance, 900);
   assert.equal(JSON.stringify(prev), original);
   assert.match(prompt, /恰好 6 条/);
+  assert.match(prompt, /已计入的交易不能再次加减/);
+  assert.match(prompt, /替换上次列表/);
   assert.doesNotMatch(prompt, /新增 5~8/);
 });
 test('wallet rejects five, seven and malformed records without replacing existing money or history', async () => {

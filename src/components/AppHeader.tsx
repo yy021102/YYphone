@@ -24,6 +24,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
         Back button directly below device notch / Dynamic Island
       */}
       <button
+        data-swipe-back
         onClick={onBack}
         aria-label="返回上一级"
         className="yy-header-back w-10 h-10 -ml-1 rounded-full flex items-center justify-center hover:bg-black/5 active:scale-90 transition-all text-[#2C4A5C] cursor-pointer"

@@ -1,6 +1,6 @@
 import { setStorageItemsAtomically } from './dbStorage';
 import { readStoredValue } from './localStorage';
-import { CHARACTER_NPCS_STORAGE_KEY, npcParticipantId, readCharacterNpcs } from './characterNpcs';
+import { CHARACTER_NPCS_STORAGE_KEY, hasNpcOwners, npcParticipantId, readCharacterNpcs } from './characterNpcs';
 import { ALIAS_ACCOUNTS_KEY, aliasStateWithoutCharacter, readAliasState } from './aliasAccounts';
 import { PERSPECTIVE_SHELF_KEY } from './perspectiveShelf';
 import { PHONE_PROXY_EVENTS_KEY } from './phoneProxy';
@@ -24,7 +24,7 @@ export async function deleteWeChatContact(contactId: string) {
     const linkedCharIds = npc.linkedCharIds.filter(id => remainingIds.has(id));
     const primary = contacts.find(contact => linkedCharIds.includes(contact.id));
     return { ...npc, linkedCharIds, charId: primary?.id, charName: primary?.name };
-  }).filter(npc => npc.linkedCharIds.length);
+  }).filter(hasNpcOwners);
   const deletedIds = new Set([contactId, ...npcs.filter(npc => !nextNpcs.some(next => next.id === npc.id)).map(npc => npcParticipantId(npc.id))]);
   const nextContacts = contacts.filter(contact => contact.id !== contactId).map(contact => ({
     ...contact, linkedNpcIds: nextNpcs.filter(npc => npc.linkedCharIds.includes(contact.id)).map(npc => npc.id),

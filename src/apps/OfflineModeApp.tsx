@@ -20,6 +20,7 @@ import {
   X,
 } from 'lucide-react';
 import { AppHeader } from '../components/AppHeader';
+import { OfflineApiSettings } from '../components/OfflineApiSettings';
 import { ColorWheel, hexToRgba } from '../components/ColorWheel';
 import { compressImageFile } from '../utils/imageFile';
 import { showYyError } from '../components/ErrorDialog';
@@ -515,6 +516,7 @@ export const OfflineModeApp: React.FC<OfflineModeAppProps> = ({ onBack }) => {
       {/* ---------- 故事列表 ---------- */}
       {view === 'list' && (
         <div className="flex-1 min-h-0 space-y-3 overflow-y-auto p-4">
+          <OfflineApiSettings />
           <div className="flex flex-wrap gap-2">
             <button
               type="button"

@@ -1,4 +1,5 @@
 import { requestConfiguredAiText } from './aiApi';
+import { resolveOfflineApi } from './offlineApi';
 import { readStorageString } from './localStorage';
 import {
   currentVersionText,
@@ -173,6 +174,7 @@ export const generateOfflineText = async (
     task,
   ].filter(Boolean).join('\n\n');
   const raw = await requestConfiguredAiText(system, user, {
+    api: resolveOfflineApi(),
     temperature: preset?.temperature ?? 0.9,
     maxTokens: Math.max(1024, Math.min(8000, Math.round(words * 3) + (withChoices ? 300 : 0))),
   });
@@ -190,7 +192,7 @@ export const generateOfflineChoices = async (
   const text = await requestConfiguredAiText(
     system,
     `【剧情至今】\n${transcript(story, history, userName)}\n\n请站在玩家「${userName}」的角度，给出 3 个风格各异（如温和 / 大胆 / 出人意料）的下一步行动或对白建议，每条 10~40 字，用第一人称或直接的行动描述，且符合当前场景。只返回 JSON：{"choices":["建议一","建议二","建议三"]}`,
-    { json: true, temperature: 1 }
+    { api: resolveOfflineApi(), json: true, temperature: 1 }
   );
   try {
     const parsed: unknown = JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] ?? text);
@@ -215,6 +217,7 @@ export const summarizeOfflineStory = async (
   const segments = buildOfflineSummarySegments(story, userName, characterNames);
   if (segments.length === 0) throw new Error('这段线下剧情没有可整理的内容。');
   const summaries: string[] = [];
+  const api = resolveOfflineApi();
   for (const [index, segment] of segments.entries()) {
     const period = `${formatSummaryDate(segment.from)} 至 ${formatSummaryDate(segment.to)}`;
     const summary = await requestConfiguredAiText(
@@ -224,7 +227,7 @@ export const summarizeOfflineStory = async (
         segment.text,
         `请将以上这一段剧情整理为供角色日后回忆的客观事件记录。必须全程使用第三人称和真实姓名，明确写出玩家姓名“${userName}”以及角色姓名“${characterNames.join('、') || '登场角色'}”；禁止使用“我”“玩家”“对方”“他们”等代称替代姓名。按时间顺序逐项写出本段发生的每一件事，给每件事标注记录中对应的具体年月日（YYYY年M月D日）；不得用“后来”“之后”“某天”等模糊表述代替具体日期。保留具体言行、人物、地点、物品、数字、事件结果、情绪变化、关系变化、承诺、约定、悬念和来源；禁止省略事件、把多件事笼统合并、模糊化细节、杜撰记录中没有的信息。只可精简重复措辞，不能删减事实。只输出正文，不要标题、说明或评价。`,
       ].join('\n\n'),
-      { temperature: 0.2, maxTokens: Math.max(1600, Math.min(8000, Math.ceil(segment.text.length / 2))) }
+      { api, temperature: 0.2, maxTokens: Math.max(1600, Math.min(8000, Math.ceil(segment.text.length / 2))) }
     );
     if (!summary.trim()) throw new Error(`线下剧情 ${index + 1}/${segments.length} 的摘要为空，未保存不完整摘要。`);
     summaries.push(`【${period}】\n${summary.trim()}`);

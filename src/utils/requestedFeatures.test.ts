@@ -460,7 +460,7 @@ test('receiving the next paper evicts the oldest nonfavorite but preserves favor
   assert.equal((await openDailyPaper(questionPaper, { now: () => today }))?.favorite, true);
 });
 
-test('phone generates all eight scopes with one request and includes world, player and chat settings', async () => {
+test('phone generates all scopes with one request and includes world, player and chat settings', async () => {
   paperFixture(); testApi();
   const contacts = JSON.parse(readStorageString('pocketos:wechat-contacts')!);
   contacts[0].worldBooks = [{ bookId: 'phone-world' }];
@@ -479,6 +479,7 @@ test('phone generates all eight scopes with one request and includes world, play
   const generated = {
     wechat: { userRemark: '小雨', threads: [{ name: '朋友', messages: [{ from: 'char', text: '旅行中', time: '10:00' }] }] },
     album: { photos: [{ sceneDesc: '车窗', isPrivate: false }] },
+    maps: { visits: Array.from({ length: 3 }, (_, i) => ({ location: `海边小店${i}`, dateStr: '11月8日', activity: '买晚饭', detail: '在门口等了一会儿，买到刚出锅的饼。' })) },
     browser: { items: [{ query: '旅行攻略' }] }, notes: { notes: [{ content: '记得带伞' }] },
     icity: { diaries: [{ content: '今天和小雨去看海' }] },
     shopping: { items: [1, 2, 3].map(i => ({ name: `旅行用品${i}`, category: '旅行', price: 20 + i, variant: '便携款', note: '下次出门可以用' })) },
@@ -503,7 +504,7 @@ test('phone generates all eight scopes with one request and includes world, play
   assert.equal(calls, 1);
   for (const text of ['角色住在浮空城', '城市没有地铁', '钟表修理师', '玩家背景标记', '两人正在旅行', '今天一起去看了海']) assert.ok(body.includes(text), text);
   assert.doesNotMatch(body, /不应出现的世界书秘密/);
-  for (const key of ['npcThreads', 'photos', 'browserHistory', 'notes', 'icityDiaries', 'agentSession', 'wallet', 'health', 'ratings', 'shoppingCart']) assert.ok(key in result, key);
+  for (const key of ['npcThreads', 'photos', 'visits', 'browserHistory', 'notes', 'icityDiaries', 'agentSession', 'wallet', 'health', 'ratings', 'shoppingCart']) assert.ok(key in result, key);
   assert.equal(result.ratings?.length, 3);
   assert.equal(result.wallet?.records.length, 6);
   assert.match(body, /至少 3 条/);
