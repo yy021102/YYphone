@@ -4748,7 +4748,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                             {message.text}
                           </div>
                         )
-                      ) : (!message.kind || message.kind === 'text') ? <RegexMessage text={message.text} sender={isUserMessage ? 'user' : 'character'} settings={chatRegex} dark={useWeChatDark} /> : message.text}
+                      ) : (!message.kind || message.kind === 'text') ? <RegexMessage text={message.text} sender={isUserMessage ? 'user' : 'character'} settings={chatRegex} dark={useWeChatDark} disabled={selectMode} onActions={() => { if (!selectMode) setReactionMenuId(message.id); }} /> : message.text}
                     </div>
                     {message.reactions && message.reactions.length > 0 && (
                       <div className={`absolute -top-3 flex gap-0.5 ${isUserMessage ? '-left-2' : '-right-2'}`}>

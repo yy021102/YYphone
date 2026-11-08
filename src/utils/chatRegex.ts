@@ -1,7 +1,7 @@
 import { readStoredValue, writeStoredValue } from './localStorage';
 export const CHAT_REGEX_KEY = 'yyphone:chat-regex';
 export const CHAT_REGEX_EVENT = 'yyphone:chat-regex-change';
-export interface ChatRegexRule { id: string; name: string; enabled: boolean; pattern: string; flags: string; replacement: string; target: 'character' | 'user' | 'both' }
+export interface ChatRegexRule { id: string; name: string; enabled: boolean; pattern: string; flags: string; replacement: string; target: 'character' | 'user' | 'both'; interactive?: boolean }
 export interface ChatRegexSettings { enabled: boolean; rules: ChatRegexRule[] }
 export const EMPTY_CHAT_REGEX: ChatRegexSettings = { enabled: true, rules: [] };
 export const REGEX_EXAMPLE = {
@@ -22,8 +22,9 @@ export function validateChatRegex(value: unknown): ChatRegexSettings {
   const ids = new Set<string>();
   const rules = v.rules.map(rule => {
     if (!rule || typeof rule.id !== 'string' || !rule.id || ids.has(rule.id) || typeof rule.name !== 'string' || !rule.name.trim() || rule.name.length > 80 || typeof rule.enabled !== 'boolean' || typeof rule.pattern !== 'string' || typeof rule.flags !== 'string' || typeof rule.replacement !== 'string' || !rule.replacement.trim() || rule.replacement.length > 40000 || !['character', 'user', 'both'].includes(rule.target)) throw new Error('规则名称、匹配表达式或 HTML 模板不完整。');
+    if (rule.interactive !== undefined && typeof rule.interactive !== 'boolean') throw new Error('卡片交互开关格式无效。');
     ids.add(rule.id); regexExpression(rule.pattern, rule.flags);
-    return { id: rule.id, name: rule.name.trim(), enabled: rule.enabled, pattern: rule.pattern, flags: rule.flags, replacement: rule.replacement, target: rule.target };
+    return { id: rule.id, name: rule.name.trim(), enabled: rule.enabled, pattern: rule.pattern, flags: rule.flags, replacement: rule.replacement, target: rule.target, ...(rule.interactive !== undefined ? { interactive: rule.interactive } : {}) };
   });
   return { enabled: v.enabled, rules };
 }
@@ -39,7 +40,7 @@ export const escapeRegexHtml = (text: string) => text.replace(/[&<>"']/g, c => (
 const captureHtml = (text: string) => escapeRegexHtml(text).replace(/\r?\n/g, '<br>');
 
 /** Runs only in a time-limited worker in the browser; never modifies the stored message. */
-export function renderChatRegex(text: string, sender: 'character' | 'user', settings: ChatRegexSettings): { html: string; ruleName: string } | null {
+export function renderChatRegex(text: string, sender: 'character' | 'user', settings: ChatRegexSettings): { html: string; ruleName: string; interactive: boolean } | null {
   if (!settings.enabled || text.length > 20000) return null;
   for (const rule of settings.rules) {
     if (!rule.enabled || rule.target !== 'both' && rule.target !== sender) continue;
@@ -63,7 +64,7 @@ export function renderChatRegex(text: string, sender: 'character' | 'user', sett
       if (!expression.global) break;
       if (!match[0].length) expression.lastIndex += expression.unicode && (text.codePointAt(expression.lastIndex) ?? 0) > 0xffff ? 2 : 1;
     }
-    if (hits) return { html: html + `<span style="white-space:pre-wrap">${escapeRegexHtml(text.slice(end))}</span>`, ruleName: rule.name };
+    if (hits) return { html: html + `<span style="white-space:pre-wrap">${escapeRegexHtml(text.slice(end))}</span>`, ruleName: rule.name, interactive: rule.interactive === true };
   }
   return null;
 }

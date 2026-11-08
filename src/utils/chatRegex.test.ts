@@ -38,4 +38,9 @@ test('invalid imports and expressions fail before saving; export configuration r
   assert.throws(() => regexExpression('a', 'gg'), /不能重复/);
   assert.throws(() => validateChatRegex(settings([rule(), rule()])), /不完整/);
   assert.throws(() => validateChatRegex(settings([rule({ replacement: 'x'.repeat(40001) })])), /不完整/);
+  assert.equal(renderChatRegex(REGEX_EXAMPLE_TEXT, 'character', settings())?.interactive, false);
+  const interactive = settings([rule({ interactive: true })]);
+  assert.deepEqual(validateChatRegex(JSON.parse(JSON.stringify(interactive))), interactive);
+  assert.equal(renderChatRegex(REGEX_EXAMPLE_TEXT, 'character', interactive)?.interactive, true);
+  assert.throws(() => validateChatRegex(settings([rule({ interactive: 'true' as unknown as boolean })])), /交互开关/);
 });
