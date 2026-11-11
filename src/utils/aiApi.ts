@@ -1,7 +1,8 @@
 import { readSetting, SETTINGS_KEYS } from './settings';
 import { withGlobalWorldBooks } from './worldBookPrompt';
 import { parseImageReference } from './imageReference';
-import { apiTemperature, textApiConfig } from './textApiConfig';
+import { apiTemperature, apiOutputLimit, textApiConfig } from './textApiConfig';
+import { readAiTextResponse } from './aiTextResponse';
 import { CHINESE_OUTPUT_RULES } from './chatLanguage';
 
 export interface ApiConnection {
@@ -9,6 +10,8 @@ export interface ApiConnection {
   apiKey: string;
   model?: string;
   temperature?: number;
+  maxTokens?: number;
+  stream?: boolean;
 }
 
 interface ApiPreset extends ApiConnection {
@@ -43,21 +46,6 @@ export const getActiveApiPreset = () => {
   return preset;
 };
 
-const readOpenAiContent = (payload: unknown) => {
-  if (!payload || typeof payload !== 'object') return '';
-  const choices = (payload as { choices?: Array<{ message?: { content?: unknown } }> }).choices;
-  const content = choices?.[0]?.message?.content;
-  if (typeof content === 'string') return content;
-  if (Array.isArray(content)) {
-    return content.flatMap((part) =>
-      part && typeof part === 'object' && typeof (part as { text?: unknown }).text === 'string'
-        ? [(part as { text: string }).text]
-        : []
-    ).join('');
-  }
-  return '';
-};
-
 export const requestConfiguredAiText = async (
   systemPrompt: string,
   userPrompt: string,
@@ -81,6 +69,7 @@ export const requestConfiguredAiText = async (
   }
   const connection = textApiConfig(preset);
   const temperature = options.temperature ?? apiTemperature(preset.temperature);
+  const maxTokens = apiOutputLimit(preset.maxTokens, options.maxTokens);
   let response: Response;
   let responseText = '';
   const images = (options.imageUrls ?? []).filter(url => /^data:image\/(png|jpeg|webp);base64,/i.test(url)).slice(-4);
@@ -99,23 +88,18 @@ export const requestConfiguredAiText = async (
           })),
           { role: 'user', parts: [{ text: userPrompt }, ...images.map(url => ({ inlineData: { mimeType: url.slice(5, url.indexOf(';')), data: url.slice(url.indexOf(',') + 1) } }))] },
         ],
-        ...(options.json || temperature !== undefined || options.maxTokens !== undefined
+        ...(options.json || temperature !== undefined || maxTokens !== undefined
           ? {
               generationConfig: {
                 ...(options.json ? { responseMimeType: 'application/json' } : {}),
                 ...(temperature !== undefined ? { temperature } : {}),
-                ...(options.maxTokens !== undefined ? { maxOutputTokens: options.maxTokens } : {}),
+                ...(maxTokens !== undefined ? { maxOutputTokens: maxTokens } : {}),
               },
             }
           : {}),
       }),
     });
-    if (!response.ok) throw new Error(`AI 请求失败（HTTP ${response.status}）：${await response.text()}`);
-    const payload: unknown = await response.json();
-    const candidate = (payload as {
-      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-    }).candidates?.[0];
-    responseText = candidate?.content?.parts?.map((part) => part.text ?? '').join('') ?? '';
+    responseText = await readAiTextResponse(response, true, options.signal);
   } else {
     response = await fetch(connection.url, {
       method: 'POST',
@@ -130,11 +114,11 @@ export const requestConfiguredAiText = async (
         ],
         ...(options.json ? { response_format: { type: 'json_object' } } : {}),
         ...(temperature !== undefined ? { temperature } : {}),
-        ...(options.maxTokens !== undefined ? { max_tokens: options.maxTokens } : {}),
+        ...(maxTokens !== undefined ? { max_tokens: maxTokens } : {}),
+        ...(preset.stream === true ? { stream: true } : {}),
       }),
     });
-    if (!response.ok) throw new Error(`AI 请求失败（HTTP ${response.status}）：${await response.text()}`);
-    responseText = readOpenAiContent(await response.json());
+    responseText = await readAiTextResponse(response, false, options.signal);
   }
 
   options.signal?.throwIfAborted();

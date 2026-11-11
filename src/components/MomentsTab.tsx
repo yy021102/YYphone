@@ -1,14 +1,9 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Camera,
   ChevronLeft,
-  Heart,
   Link2,
-  Lock,
-  MapPin,
-  MessageCircle,
   Pencil,
-  Plus,
   RefreshCw,
   Send,
   Sparkles,
@@ -35,7 +30,9 @@ import {
   generateMomentInteractions,
   MomentGenerationMode,
 } from '../utils/momentsAi';
-import { MomentMediaGrid, MomentMediaItem, TextImageCard } from './MomentCards';
+import { MomentMediaItem, TextImageCard } from './MomentCards';
+import { MomentFeedPost } from './MomentFeedPost';
+import './moments.css';
 import { MomentComposer, MomentComposerResult } from './MomentComposer';
 
 interface MomentsTabContact {
@@ -117,6 +114,16 @@ export const MomentsTab: React.FC<MomentsTabProps> = ({ userName, userAvatarUrl,
   const [generatingId, setGeneratingId] = useState('');
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
+  const [cameraMenuOpen, setCameraMenuOpen] = useState(false);
+  const [interactionId, setInteractionId] = useState('');
+  const [actionTarget, setActionTarget] = useState<{ postId: string; commentId?: string } | null>(null);
+  const actionPost = posts.find(post => post.id === actionTarget?.postId);
+  const actionComment = actionPost?.comments.find(comment => comment.id === actionTarget?.commentId);
+  useEffect(() => {
+    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') { setActionTarget(null); setInteractionId(''); setCameraMenuOpen(false); } };
+    window.addEventListener('keydown', escape);
+    return () => window.removeEventListener('keydown', escape);
+  }, []);
   const coverFileRef = useRef<HTMLInputElement>(null);
 
   const resolveAuthor = (post: MomentPost) => {
@@ -297,7 +304,7 @@ export const MomentsTab: React.FC<MomentsTabProps> = ({ userName, userAvatarUrl,
         )
       );
       setNotice(addedLikes + addedComments > 0
-        ? `已生成 ${addedLikes} 个点赞、${addedComments} 条评论。`
+        ? '互动已更新'
         : '当前没有可新增的互动，可能角色已被拉黑。');
     } catch (err) {
       console.error('Could not generate moment interactions.', err);
@@ -363,241 +370,54 @@ export const MomentsTab: React.FC<MomentsTabProps> = ({ userName, userAvatarUrl,
     'w-full rounded-xl bg-slate-100/80 border border-slate-200 px-3 py-2 text-xs outline-none focus:border-sky-400';
 
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col">
-      <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar pb-2">
-        <div className="relative">
-          <button
-            type="button"
-            onClick={() => { setCoverOpen(true); setError(''); }}
-            aria-label="更换朋友圈背景"
-            className="block h-64 w-full cursor-pointer bg-gradient-to-br from-sky-200 via-pink-100 to-blue-200 bg-cover bg-center"
-            style={cover ? { backgroundImage: `url("${cover}")` } : undefined}
-          />
-          <button
-            type="button"
-            onClick={onBack}
-            aria-label="返回发现"
-            className="absolute left-3 top-[calc(env(safe-area-inset-top,0px)+12px)] z-10 flex h-9 w-9 items-center justify-center text-white [filter:drop-shadow(0_1px_3px_rgba(0,0,0,0.45))]"
-          >
-            <ChevronLeft className="h-7 w-7" />
-          </button>
-          <div className="absolute right-3 top-[calc(env(safe-area-inset-top,0px)+12px)] z-10 flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => { setRefreshOpen(true); setError(''); }}
-              aria-label="AI 生成朋友圈"
-              className="flex h-9 w-9 items-center justify-center rounded-full bg-black/20 text-white backdrop-blur-sm cursor-pointer active:scale-95"
-            >
-              <Sparkles className="h-5 w-5" />
-            </button>
-            <button
-              type="button"
-              onClick={() => openComposer()}
-              aria-label="我要发圈"
-              className="flex h-9 w-9 items-center justify-center rounded-full bg-black/20 text-white backdrop-blur-sm cursor-pointer active:scale-95"
-            >
-              <Plus className="h-6 w-6" />
-            </button>
-          </div>
-          <span className="absolute bottom-2 right-[88px] max-w-[55%] truncate text-sm font-bold text-white [text-shadow:0_1px_4px_rgba(0,0,0,0.45)]">
-            {userName}
-          </span>
-          <Avatar
-            src={userAvatarUrl}
-            name={userName}
-            className="absolute -bottom-6 right-4 h-[60px] w-[60px] rounded-2xl border-2 border-white shadow-md"
-          />
+    <div className="moments-root" onClick={() => { setInteractionId(''); setCameraMenuOpen(false); }}>
+      <header className="moments-header">
+        <button type="button" data-swipe-back aria-label="返回发现" onClick={onBack}><ChevronLeft size={26}/></button>
+        <h2>朋友圈</h2>
+        <button type="button" aria-label="发布与生成朋友圈" aria-expanded={cameraMenuOpen} onClick={event => { event.stopPropagation(); setCameraMenuOpen(open => !open); setInteractionId(''); }}><Camera size={23}/></button>
+        {cameraMenuOpen && <div role="menu" aria-label="发布朋友圈" className="moments-camera-menu">
+          <button type="button" role="menuitem" onClick={() => openComposer()}><Pencil size={17}/>发表朋友圈</button>
+          <button type="button" role="menuitem" aria-label="AI 生成朋友圈" onClick={() => { setRefreshOpen(true); setError(''); }}><Sparkles size={17}/>生成朋友圈</button>
+        </div>}
+      </header>
+      <div className="moments-scroll no-scrollbar" onScroll={() => { setInteractionId(''); setCameraMenuOpen(false); }}>
+        <div className="moments-profile">
+          <button type="button" aria-label="更换朋友圈背景" className="moments-cover" onClick={() => { setCoverOpen(true); setError(''); }} style={cover ? { backgroundImage: `url("${cover}")` } : undefined}/>
+          <span className="moments-profile-name">{userName}</span>
+          <Avatar src={userAvatarUrl} name={userName} className="moments-profile-avatar"/>
         </div>
-        <p className="min-h-[38px] truncate pr-[88px] pt-1.5 text-right text-[11px] text-slate-500">
-          {typeof signature === 'string' ? signature : ''}
-        </p>
-
-        <div className="pb-2" />
-
-        {(notice || error) && (
-          <p
-            role={error ? 'alert' : 'status'}
-            className={`mx-3 mb-2 rounded-xl px-3 py-2 text-[11px] font-semibold ${
-              error ? 'bg-rose-50 text-rose-500' : 'bg-sky-50 text-sky-600'
-            }`}
-          >
-            {error || notice}
-          </p>
-        )}
-
-        <div className="space-y-3 px-3">
-          {posts.length === 0 && (
-            <p className="glass-card rounded-2xl px-4 py-8 text-center text-xs text-slate-400">
-              还没有朋友圈，发一条或点“刷新朋友圈”试试吧。
-            </p>
-          )}
-          {posts.map((post) => {
-            const author = resolveAuthor(post);
-            const liked = post.likes.some((like) => like.id === MOMENT_USER_ID);
-            const label = visibilityLabel(post);
-            const commenting = commentTarget?.postId === post.id;
-            return (
-              <article key={post.id} className="glass-card rounded-2xl p-3" aria-label={`${author.name} 的朋友圈`}>
-                <div className="flex gap-2.5">
-                  <Avatar src={author.avatar} name={author.name} className="h-10 w-10 shrink-0 rounded-xl" />
-                  <div className="min-w-0 flex-1 space-y-1.5">
-                    <h4 className="text-xs font-bold text-[#5B7A9A]">
-                      {author.name}
-                      {post.authorType === 'npc' && (
-                        <span className="ml-1 rounded bg-pink-100 px-1 py-px text-[9px] font-semibold text-pink-400">NPC</span>
-                      )}
-                    </h4>
-                    {post.content && (
-                      <p className="whitespace-pre-wrap break-words text-xs leading-relaxed text-[#2C4A5C]">{post.content}</p>
-                    )}
-                    <MomentMediaGrid images={post.images} cards={post.textImageCards} onOpen={setLightbox} />
-                    {post.location && (
-                      <p className="inline-flex items-center gap-0.5 text-[10px] text-[#5B7A9A]">
-                        <MapPin className="w-3 h-3" />{post.location}
-                      </p>
-                    )}
-                    <div className="flex items-center gap-2 text-[10px] text-slate-400">
-                      <span>{formatRelativeTime(post.createdAt)}</span>
-                      {post.updatedAt && <span>已编辑</span>}
-                      {label && (
-                        <span className="inline-flex min-w-0 items-center gap-0.5 truncate">
-                          <Lock className="w-2.5 h-2.5 shrink-0" />{label}
-                        </span>
-                      )}
-                      <span className="ml-auto flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => openComposer(post)}
-                          aria-label="编辑朋友圈"
-                          className="inline-flex items-center gap-0.5 text-sky-500 cursor-pointer"
-                        >
-                          <Pencil className="w-3 h-3" />编辑
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => deletePost(post)}
-                          aria-label="删除朋友圈"
-                          className="inline-flex items-center gap-0.5 text-rose-400 cursor-pointer"
-                        >
-                          <Trash2 className="w-3 h-3" />删除
-                        </button>
-                      </span>
-                    </div>
-
-                    {(post.likes.length > 0 || post.comments.length > 0) && (
-                      <div className="space-y-1 rounded-lg bg-sky-50/80 p-2 text-[11px] leading-relaxed">
-                        {post.likes.length > 0 && (
-                          <p className="flex items-start gap-1 text-[#5B7A9A]">
-                            <Heart className="mt-0.5 h-3 w-3 shrink-0 fill-pink-300 text-pink-300" />
-                            <span className="break-words">{post.likes.map((like) => like.name).join('、')}</span>
-                          </p>
-                        )}
-                        {post.likes.length > 0 && post.comments.length > 0 && <hr className="border-white/80" />}
-                        {post.comments.map((comment) => {
-                          const isOwn = comment.authorId === MOMENT_USER_ID;
-                          return (
-                            <div key={comment.id} className="flex items-start gap-1">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setCommentTarget({ postId: post.id, ...(isOwn ? {} : { replyToName: comment.authorName }) });
-                                  setCommentDraft('');
-                                }}
-                                className="min-w-0 flex-1 text-left break-words text-[#2C4A5C] cursor-pointer"
-                              >
-                                <span className="font-semibold text-[#5B7A9A]">{comment.authorName}</span>
-                                {comment.replyToName && (
-                                  <>
-                                    <span className="mx-0.5 text-slate-400">回复</span>
-                                    <span className="font-semibold text-[#5B7A9A]">{comment.replyToName}</span>
-                                  </>
-                                )}
-                                ：{comment.content}
-                              </button>
-                              <button
-                                type="button"
-                                aria-label={`删除评论 ${comment.content.slice(0, 10)}`}
-                                onClick={() => deleteComment(post.id, comment.id)}
-                                className="mt-0.5 shrink-0 text-slate-300 hover:text-rose-400 cursor-pointer"
-                              >
-                                <X className="w-3 h-3" />
-                              </button>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-
-                    {commenting && (
-                      <div className="flex gap-1.5">
-                        <input
-                          autoFocus
-                          value={commentDraft}
-                          onChange={(event) => setCommentDraft(event.target.value)}
-                          onKeyDown={(event) => { if (event.key === 'Enter') submitComment(); }}
-                          maxLength={300}
-                          placeholder={commentTarget?.replyToName ? `回复 @${commentTarget.replyToName}` : '评论'}
-                          aria-label="评论内容"
-                          className="min-w-0 flex-1 rounded-full bg-white/90 border border-slate-200 px-3 py-1.5 text-[11px] outline-none focus:border-sky-400"
-                        />
-                        <button
-                          type="button"
-                          onClick={submitComment}
-                          disabled={!commentDraft.trim()}
-                          aria-label="发送评论"
-                          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-r from-sky-400 to-pink-400 text-white disabled:opacity-40 cursor-pointer"
-                        >
-                          <Send className="w-3 h-3" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setCommentTarget(null)}
-                          aria-label="取消评论"
-                          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-400 cursor-pointer"
-                        >
-                          <X className="w-3 h-3" />
-                        </button>
-                      </div>
-                    )}
-
-                    <div className="flex items-center gap-3 border-t border-white/70 pt-1.5 text-[11px] text-slate-500">
-                      <button
-                        type="button"
-                        onClick={() => toggleLike(post)}
-                        aria-pressed={liked}
-                        className={`inline-flex items-center gap-1 cursor-pointer ${liked ? 'text-pink-400' : ''}`}
-                      >
-                        <Heart className={`w-3.5 h-3.5 ${liked ? 'fill-pink-300' : ''}`} />{liked ? '已赞' : '点赞'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setCommentTarget(commenting ? null : { postId: post.id });
-                          setCommentDraft('');
-                        }}
-                        className="inline-flex items-center gap-1 cursor-pointer"
-                      >
-                        <MessageCircle className="w-3.5 h-3.5" />评论
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void generateInteractions(post)}
-                        disabled={!!generatingId}
-                        title="生成评论"
-                        aria-label="生成评论"
-                        className="ml-auto inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-sky-100 to-pink-100 px-2.5 py-1 font-bold text-[#587589] disabled:opacity-50 cursor-pointer"
-                      >
-                        <Sparkles className="w-3 h-3" />{generatingId === post.id ? '…' : ''}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </article>
-            );
-          })}
-        </div>
+        <p className="moments-signature">{typeof signature === 'string' ? signature : ''}</p>
+        {(notice || error) && <p role={error ? 'alert' : 'status'} className={`mx-5 mb-2 text-[11px] ${error ? 'text-rose-500' : 'text-slate-400'}`}>{error || notice}</p>}
+        {posts.length === 0 && <p className="py-12 text-center text-xs text-slate-400">还没有朋友圈</p>}
+        {posts.map(post => <MomentFeedPost key={post.id} post={post} author={resolveAuthor(post)} time={formatRelativeTime(post.createdAt)} visibility={visibilityLabel(post)}
+          interactionOpen={interactionId === post.id} generating={generatingId === post.id} onOpenMedia={setLightbox}
+          onManage={() => { setActionTarget({ postId: post.id }); setInteractionId(''); setCameraMenuOpen(false); }}
+          onManageComment={comment => { setActionTarget({ postId: post.id, commentId: comment.id }); setInteractionId(''); }}
+          onToggleInteraction={() => { setInteractionId(current => current === post.id ? '' : post.id); setCameraMenuOpen(false); }}
+          onLike={() => { toggleLike(post); setInteractionId(''); }}
+          onComment={() => { setCommentTarget({ postId: post.id }); setCommentDraft(''); setInteractionId(''); }}
+          onReply={comment => { setCommentTarget({ postId: post.id, ...(comment.authorId === MOMENT_USER_ID ? {} : { replyToName: comment.authorName }) }); setCommentDraft(''); }}
+          commentEditor={commentTarget?.postId === post.id ? <form className="moment-comment-editor mt-2 flex items-center gap-2" onSubmit={event => { event.preventDefault(); submitComment(); }}>
+            <input autoFocus aria-label="评论内容" value={commentDraft} onChange={event => setCommentDraft(event.target.value)} maxLength={300} placeholder={commentTarget.replyToName ? `回复 ${commentTarget.replyToName}` : '评论'} className="min-w-0 flex-1 rounded border border-slate-200 bg-white px-2 py-2 text-xs text-slate-800 outline-none"/>
+            <button type="submit" aria-label="发送评论" disabled={!commentDraft.trim()} className="rounded bg-[#07c160] p-2 text-white disabled:opacity-40"><Send size={15}/></button>
+            <button type="button" aria-label="取消评论" onClick={() => setCommentTarget(null)} className="p-1 text-slate-400"><X size={17}/></button>
+          </form> : undefined}
+        />)}
       </div>
-
+      {actionTarget && actionPost && (!actionTarget.commentId || actionComment) && <div className="moments-actions" onClick={() => setActionTarget(null)}>
+        <section role="dialog" aria-modal="true" aria-label={actionComment ? '评论操作' : '朋友圈操作'} className="moments-action-sheet" onClick={event => event.stopPropagation()}>
+          <h3>{actionComment ? actionComment.authorName : resolveAuthor(actionPost).name}</h3>
+          {actionComment ? <>
+            <button type="button" onClick={() => { setCommentTarget({ postId: actionPost.id, ...(actionComment.authorId === MOMENT_USER_ID ? {} : { replyToName: actionComment.authorName }) }); setCommentDraft(''); setActionTarget(null); }}>回复</button>
+            <button type="button" className="is-danger" onClick={() => { deleteComment(actionPost.id, actionComment.id); setActionTarget(null); }}>删除评论</button>
+          </> : <>
+            <button type="button" onClick={() => { openComposer(actionPost); setActionTarget(null); }}><Pencil size={17}/>编辑</button>
+            <button type="button" disabled={!!generatingId} onClick={() => { setActionTarget(null); void generateInteractions(actionPost); }}><Sparkles size={17}/>生成评论</button>
+            <button type="button" className="is-danger" onClick={() => { setActionTarget(null); deletePost(actionPost); }}><Trash2 size={17}/>删除</button>
+          </>}
+          <button type="button" data-swipe-back onClick={() => setActionTarget(null)}>取消</button>
+        </section>
+      </div>}
       {composerOpen && (
         <MomentComposer
           key={editing?.id ?? 'new'}

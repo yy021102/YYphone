@@ -85,23 +85,22 @@ export const MomentMediaGrid: React.FC<MomentMediaGridProps> = ({ images = [], c
     ...cards.map((value): MomentMediaItem => ({ type: 'card', value })),
   ];
   if (items.length === 0) return null;
-  const columns = items.length === 1 ? 1 : items.length === 2 || items.length === 4 ? 2 : 3;
-  const widthClass = columns === 1 ? 'w-[58%]' : columns === 2 ? 'w-[72%]' : 'w-full';
+  const columns = items.length === 1 ? 1 : items.length === 4 ? 2 : 3;
 
   return (
-    <div className={`grid gap-1 ${widthClass}`} style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}>
+    <div className={`moment-media-grid${items.length === 1 ? ' is-single' : ''}`} style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`, ...(items.length === 4 ? { maxWidth: 194 } : {}) }}>
       {items.map((item, index) => (
         <button
           key={`${item.type}-${index}`}
           type="button"
           onClick={() => onOpen(item)}
           aria-label={item.type === 'image' ? '查看图片' : '查看文字图'}
-          className="aspect-square overflow-hidden rounded-md cursor-pointer active:opacity-80"
+          className="cursor-pointer active:opacity-80"
         >
           {item.type === 'image' ? (
             <img src={item.value} alt="" className="h-full w-full object-cover" loading="lazy" />
           ) : (
-            <TextImageCard text={item.value} />
+            <div className="moment-text-image h-full w-full"><TextImageCard text={item.value} /></div>
           )}
         </button>
       ))}

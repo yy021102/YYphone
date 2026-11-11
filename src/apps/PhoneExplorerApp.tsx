@@ -188,7 +188,7 @@ const readRealUserMessagesForChar = (
 
 const readLinkedNpcsForChar = (charId: string): { id: string; name: string; persona: string }[] => {
   try {
-    const raw = localStorage.getItem('yyphone:character-npcs');
+    const raw = readStorageString('yyphone:character-npcs');
     if (raw) {
       const list = JSON.parse(raw);
       if (Array.isArray(list)) {
@@ -207,7 +207,7 @@ const readLinkedNpcsForChar = (charId: string): { id: string; name: string; pers
 
 const getUserWeChatName = () => {
   try {
-    const raw = localStorage.getItem('yyphone:wechat-profile');
+    const raw = readStorageString('yyphone:wechat-profile');
     if (raw) {
       const parsed = JSON.parse(raw);
       if (parsed?.name) return String(parsed.name);

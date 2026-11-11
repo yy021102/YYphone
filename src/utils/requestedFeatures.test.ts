@@ -38,6 +38,7 @@ import { WEATHER_CACHE_KEY, writeWeatherSettings } from './weatherData';
 import { getUserRealName } from './userPersona';
 import { toGeminiContents, toOpenAiMessages } from './chatVision';
 import { requestChatReply, validateChatSpeakerPrefix, withChatResponseFormat } from './chatReply';
+import { CHINESE_OUTPUT_RULES, chatLanguageInstructions } from './chatLanguage';
 import { buildGroupPrivateContext, describeChatSource } from './chatHistory';
 import {
   buildGroupJournalInjection, deleteGroupJournal, deleteGroupJournalEntry, editGroupJournalEntry,
@@ -406,6 +407,37 @@ const paperFixture = () => {
   ]);
 };
 const paperDate = () => new Date(2026, 9, 18, 20);
+test('group generation continues the latest member turn without re-sending the old player message; new inputs and direct chats remain replies', () => {
+  paperFixture();
+  const chats = JSON.parse(readStorageString(WECHAT_CHATS_STORAGE_KEY)!);
+  const group = chats.find((chat: { id: string }) => chat.id === 'chat-group');
+  group.participantIds = ['paper-a', 'paper-b'];
+  group.messages = [
+    { id: 'u', senderId: 'user', text: '旧玩家话题', createdAt: '2026-11-12T12:00:00Z' },
+    { id: 'a', senderId: 'paper-a', text: '甲提出新的问题', createdAt: '2026-11-12T12:01:00Z' },
+    { id: 'b', senderId: 'paper-b', text: '乙回应甲的新问题', createdAt: '2026-11-12T12:02:00Z' },
+  ];
+  saveSetting(WECHAT_CHATS_STORAGE_KEY, chats);
+  for (const currentInput of [undefined, '', '旧玩家话题']) {
+    const prompt = buildPrompt({ chatId: group.id, currentInput, timeAwarenessEnabled: false, structuredHistory: true });
+    assert.match(prompt.at(-1)!.content, /群聊自然续聊指令/);
+    assert.doesNotMatch(prompt.at(-1)!.content, /旧玩家话题/);
+    const history = prompt.filter(turn => turn.tokenCategory === 'history').map(turn => turn.content).join('\n');
+    assert.match(history, /旧玩家话题/); assert.match(history, /甲提出新的问题/); assert.match(history, /乙回应甲的新问题/);
+  }
+  assert.match(buildPrompt({ chatId: group.id, currentInput: '明确的新任务' }).at(-1)!.content, /明确的新任务/);
+  group.messages.push({ id: 'new', senderId: 'user', text: '新的玩家发言', createdAt: '2026-11-12T12:03:00Z' });
+  saveSetting(WECHAT_CHATS_STORAGE_KEY, chats);
+  const reply = buildPrompt({ chatId: group.id, currentInput: '新的玩家发言' }).at(-1)!.content;
+  assert.match(reply, /新的玩家发言/); assert.doesNotMatch(reply, /群聊自然续聊指令/);
+  group.messages.push({ id: 'narration', senderId: 'narrator', source: 'user-narration', text: '玩家发出的旁白', createdAt: '2026-11-12T12:04:00Z' });
+  saveSetting(WECHAT_CHATS_STORAGE_KEY, chats);
+  assert.match(buildPrompt({ chatId: group.id }).at(-1)!.content, /玩家发出的旁白/);
+  const direct = chats.find((chat: { id: string }) => chat.id === 'chat-paper-a');
+  direct.messages = group.messages.slice(0, 3);
+  saveSetting(WECHAT_CHATS_STORAGE_KEY, chats);
+  assert.match(buildPrompt({ chatId: direct.id }).at(-1)!.content, /旧玩家话题/);
+});
 const questionPaper = async (): Promise<PaperContent> => ({ kind: 'question', content: '今天看海时，你最喜欢哪个瞬间？' });
 
 const testApi = () => saveSetting(SETTINGS_KEYS.apiPresets, [{
@@ -1122,7 +1154,7 @@ test('home profile edit sits beside paper notes and custom grid and dock icons r
   assert.match(html, /title="编辑资料" class="[^"]*from-\[#DCEEFF\][^"]*to-white/);
   assert.match(html, /title="编辑资料"[^]*?<\/button><button[^]*?aria-label="小纸条"/);
   assert.match(html, /<img src="grid-icon.png" alt="" class="absolute inset-0 h-full w-full object-cover"/);
-  assert.match(html, /<img src="dock-icon.png" alt="" class="absolute inset-0 h-full w-full object-cover"/);
+  assert.match(html, /home-system-icon has-custom-icon home-custom-icon"><img src="dock-icon.png" alt=""/);
   assert.ok(html.includes('>3</span>'), 'app badges remain outside the image tile');
   for (const color of [MAIN_GRID_APPS[0].color, DOCK_APPS[0].color]) {
     assert.ok(!html.includes(color), 'custom tiles must not retain the default gradient overlay');
@@ -1959,7 +1991,7 @@ test('phone chat display keeps only five latest real messages independently of A
     assert.equal(readDirectMessages('display-char', { configuredHistory: true }).length, Math.min(count, 21));
   }
   const wechat = readFileSync(resolve('src', 'apps', 'WeChatApp.tsx'), 'utf8');
-  assert.match(wechat, /const HISTORY_PAGE_SIZE = 15/);
+  assert.match(wechat, /const HISTORY_PAGE_SIZE = [^\n]+configuredDisplayCount : 15/);
   assert.match(wechat, /setVisibleMessageCount\(\(count\) => count \+ HISTORY_PAGE_SIZE\)/);
   assert.match(wechat, /slice\(-visibleMessageCount\)/);
   assert.doesNotMatch(source, /查看历史消息/);
@@ -2394,7 +2426,7 @@ test('shared AI helper supports isolated Little P history on OpenAI and Gemini w
   for (const endpoint of ['https://test.invalid/v1', 'https://generativelanguage.googleapis.com']) {
     await requestConfiguredAiText('ONLY_LITTLE_P', '这次输入', { api: { endpoint, apiKey: 'test', model: 'mock' }, history, includeGlobalWorldBooks: false });
   }
-  assert.deepEqual(bodies[0].messages, [{ role: 'system', content: 'ONLY_LITTLE_P' }, ...history, { role: 'user', content: '这次输入' }]);
+  assert.deepEqual(bodies[0].messages, [{ role: 'system', content: `ONLY_LITTLE_P\n${CHINESE_OUTPUT_RULES}` }, ...history, { role: 'user', content: '这次输入' }]);
   assert.deepEqual(bodies[1].contents, [
     { role: 'user', parts: [{ text: '旧消息' }] }, { role: 'model', parts: [{ text: '上次回答' }] }, { role: 'user', parts: [{ text: '这次输入' }] },
   ]);
@@ -2799,7 +2831,7 @@ test('both chat APIs correct format once, preserve photos and optional actions, 
     assert.deepEqual(await requestChatReply(messages, { endpoint, apiKey: 'test' }, (value) => usage.push(value)), valid);
     assert.equal(requests.length, 2);
     assert.equal(usage.length, 2);
-    assert.equal(usage[0].input, estimatePromptTokens(messages));
+    assert.equal(usage[0].input, estimatePromptTokens([...messages.slice(0, -1), { role: 'system', content: chatLanguageInstructions() }, ...messages.slice(-1)]));
     assert.equal(usage[0].output, estimateTextTokens('{"kind":"question","content":"错误地写成了纸条"}'));
     assert.ok(usage[1].input > usage[0].input * 2);
     assert.equal(usage[1].output, usage[0].output + estimateTextTokens(JSON.stringify(valid)));

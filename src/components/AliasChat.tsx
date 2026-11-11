@@ -46,7 +46,7 @@ export function AliasChat({ thread, state, onBack, wallpaper, userColor, charact
     setRemembering(messageId ? [...new Set([...fresh, messageId])] : fresh);
     setMenu(false); setExtras(''); setMessageMenu(''); setNotice('');
   };
-  const timestamp = (value: string, key: string) => <div key={key} className="yy-chat-timestamp alias-chat-timestamp">{formatChatTimestamp(value, effectiveChatTimeZone(timeZone))}</div>;
+  const timestamp = (value: string, key: string) => <div key={key} className="yy-chat-timestamp alias-chat-timestamp"><span className="yy-chat-system-tag">{formatChatTimestamp(value, effectiveChatTimeZone(timeZone))}</span></div>;
   const send = (value = text, kind: 'text' | 'image' = 'text') => {
     try { sendAliasMessage(thread.id, value, kind); if (kind === 'text') setText(''); else setImageDraft(null); setExtras(''); setError(''); return true; } catch (e) { setError(errorText(e)); return false; }
   };

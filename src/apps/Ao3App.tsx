@@ -114,6 +114,7 @@ export function Ao3App({ onBack, userName = 'user' }: { onBack: () => void; user
   const [error, setError] = useState(''), [notice, setNotice] = useState(''), [deleteId, setDeleteId] = useState('');
   const [sharing, setSharing] = useState(false);
   const [continuing, setContinuing] = useState(false);
+  const [continuationOpen, setContinuationOpen] = useState(false), [continuationDirection, setContinuationDirection] = useState('');
   const continuationRequest = useRef<AbortController | null>(null);
   const scroller = useRef<HTMLDivElement>(null), comments = useRef<HTMLElement>(null);
   const listing = useRef<{ page: Page; scroll: number }>({ page: 'browse', scroll: 0 });
@@ -121,6 +122,7 @@ export function Ao3App({ onBack, userName = 'user' }: { onBack: () => void; user
   const work = state.works.find(w => w.id === workId);
   useEffect(() => {
     setContinuing(false);
+    setContinuationOpen(false); setContinuationDirection('');
     return () => { continuationRequest.current?.abort(); continuationRequest.current = null; };
   }, [page, workId]);
   useLayoutEffect(() => {
@@ -161,12 +163,13 @@ export function Ao3App({ onBack, userName = 'user' }: { onBack: () => void; user
       saveDraft(null); setWorkId(published.id); setChapter(0); setEntire(false); navigate('reader'); setNotice('作品已发布');
     } catch (cause) { setError(cause instanceof Error ? cause.message : '请检查作品内容。'); }
   };
-  const continueWork = async () => {
+  const continueWork = async (direction = '') => {
     if (!work || continuationRequest.current) return;
+    setContinuationOpen(false);
     const controller = new AbortController();
     continuationRequest.current = controller; setContinuing(true); setError(''); setNotice('');
     try {
-      const next = await generateAo3ChapterUpdate(work, controller.signal);
+      const next = await generateAo3ChapterUpdate(work, controller.signal, direction);
       if (controller.signal.aborted || continuationRequest.current !== controller) return;
       if (!commit({ type: 'continue', work, ...next, now: new Date().toISOString() })) return;
       selectChapter(work.chapters.length); setNotice(`第 ${work.chapters.length + 1} 章已更新`);
@@ -178,7 +181,7 @@ export function Ao3App({ onBack, userName = 'user' }: { onBack: () => void; user
   };
   const continuationButton = work && (continuing ?
     <button className="ao3-button" onClick={() => { continuationRequest.current?.abort(); continuationRequest.current = null; setContinuing(false); setNotice('已停止追更，原文未改动'); }}><Square size={12}/>停止追更</button> :
-    <button className="ao3-button ao3-primary" disabled={work.chapters.length >= 100} onClick={() => void continueWork()}>追更</button>);
+    <button className="ao3-button ao3-primary" disabled={work.chapters.length >= 100} onClick={() => setContinuationOpen(true)}>追更</button>);
   const libraryWorks = shelf === 'works' ? state.works.filter(w => w.owned) : shelf === 'history' ? state.history.flatMap(h => state.works.find(w => w.id === h.workId) ?? []) :
     state[shelf === 'bookmarks' ? 'bookmarks' : 'later'].slice().reverse().flatMap(id => state.works.find(w => w.id === id) ?? []);
   const visible = page === 'library' ? libraryWorks : filterAo3Works(state.works, filters);
@@ -250,6 +253,14 @@ export function Ao3App({ onBack, userName = 'user' }: { onBack: () => void; user
       </div>
     </div>
     {notice && <div className="ao3-toast" aria-hidden="true">{notice}</div>}
+    {continuationOpen && work && <div className="ao3-dialog-shade" onClick={() => setContinuationOpen(false)}>
+      <form className="ao3-dialog" role="dialog" aria-modal="true" aria-label="追更" onClick={e => e.stopPropagation()} onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); setContinuationOpen(false); } }} onSubmit={e => { e.preventDefault(); void continueWork(continuationDirection); }}>
+        <h3>追更</h3>
+        <label>希望的后续走向（可选）<textarea autoFocus aria-label="希望的后续走向" rows={5} maxLength={8000} value={continuationDirection} onChange={e => setContinuationDirection(e.target.value)} placeholder="想看的情节、人物互动或情绪走向……" /></label>
+        <p className="ao3-help">留空则自然续写。</p>
+        <div className="ao3-actions"><button type="button" className="ao3-button" onClick={() => setContinuationOpen(false)}>取消</button><button type="submit" className="ao3-button ao3-primary" disabled={continuing}>开始追更</button></div>
+      </form>
+    </div>}
     {sharing && work && <div className="ao3-dialog-shade" onClick={() => setSharing(false)}><section className="ao3-dialog" role="dialog" aria-modal="true" aria-label="分享给角色" onClick={e => e.stopPropagation()}><h3>分享给角色</h3><div className="ao3-share-recipients">{readAo3Characters().map(c => <button key={c.id} className="ao3-button" onClick={() => {
       try { shareAo3Work(work, c.id); setSharing(false); setNotice(`已分享给${c.name}`); }
       catch (cause) { setSharing(false); setError(cause instanceof Error ? cause.message : '分享失败，请重试。'); }

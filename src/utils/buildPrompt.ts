@@ -25,9 +25,11 @@ import { buildAliasMemoryContext, canReadAliasExperience } from './aliasAccounts
 import { CHAT_COMMUNICATION_RULES } from './chatCommunication';
 import { chatGiftAvailable } from './chatFeaturePrompt';
 import { CHINESE_OUTPUT_RULES, messageTranslation, type ChatTranslation } from './chatLanguage';
+import { recallContext, type ChatRecall } from './chatRecall';
 import { imageDescriptionText, photoPromptFields, type ChatImageDescription, type ImageDescriptionTarget } from './imageDescriptions';
 
 export interface PromptChatMessage {
+  recall?: ChatRecall;
   chatTranslation?: ChatTranslation;
   externalUrl?: string;
   id: string;
@@ -384,6 +386,7 @@ export const toMessageContent = (message: PromptChatMessage) => {
 };
 
 const toBaseMessageContent = (message: PromptChatMessage) => {
+  if (message.kind === 'recalled') return '[一条消息已撤回]';
   if (message.kind === 'context-note') {
     if (message.source === 'phone-proxy-send') return [
       '【玩家使用角色手机代发消息 · 已发生的记录】',
@@ -867,11 +870,21 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
   }
 
   // 6. Recent history, then mounted chat records, merged in chronological order.
-  const requestedInput = currentInput ?? [...chat.messages].reverse().find((message) => message.senderId === 'user' || message.source === 'user-narration')?.text ?? '';
-  const latestUserMessage = [...chat.messages].reverse().find(
+  const previousUserInput = [...chat.messages].reverse().find(message => message.senderId === 'user' || message.source === 'user-narration')?.text ?? '';
+  const latestGroupTurn = chat.type !== 'direct' ? [...chat.messages].reverse().find(message =>
+    message.kind !== 'thought' && message.kind !== 'context-note' &&
+    (message.senderId !== 'narrator' || message.source === 'user-narration')
+  ) : undefined;
+  // The generate button is not a fresh copy of the player's last message.
+  // Explicit task inputs (games and other background tasks) remain independent.
+  const continueGroup = chat.type !== 'direct' &&
+    (!latestGroupTurn || latestGroupTurn.senderId !== 'user' && latestGroupTurn.source !== 'user-narration') &&
+    (currentInput === undefined || !currentInput.trim() || currentInput === previousUserInput);
+  const requestedInput = continueGroup ? '' : currentInput ?? previousUserInput;
+  const latestUserMessage = continueGroup ? undefined : [...chat.messages].reverse().find(
     (message) => (message.senderId === 'user' || message.source === 'user-narration') && message.text === requestedInput
   );
-  const input = latestUserMessage?.source === 'user-narration' ? toMessageContent(latestUserMessage) : latestUserMessage?.kind === 'forum-forward' &&
+  const input = latestUserMessage?.kind === 'recalled' ? recallContext(latestUserMessage, chat.participantIds) : latestUserMessage?.source === 'user-narration' ? toMessageContent(latestUserMessage) : latestUserMessage?.kind === 'forum-forward' &&
     !canReadForumForward(latestUserMessage, chat, chat)
     ? ''
     : latestUserMessage &&
@@ -980,11 +993,12 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
     const prefix = item.conversation.id !== chat.id
       ? `【挂载${source.label}·记录${attachedIds.indexOf(item.conversation.id) + 1}】`
       : chat.type !== 'direct' ? `【当前${source.label}】` : '';
-    const isContextNote = item.message.kind === 'context-note';
+    const isContextNote = item.message.kind === 'context-note' || item.message.kind === 'recalled';
+    const messageContent = item.message.kind === 'recalled' ? recallContext(item.message, chat.participantIds) : toMessageContent(item.message);
     const speakerLabel = item.conversation.type !== 'direct' && item.message.senderId !== 'narrator'
       ? `${speaker}（ID：${item.message.senderId}）`
       : speaker;
-    const content = `${prefix}${isContextNote ? '' : `${speakerLabel}：`}${toMessageContent(item.message)}`;
+    const content = `${prefix}${isContextNote ? '' : `${speakerLabel}：`}${messageContent}`;
     messages.push({
       role: isContextNote || item.message.senderId === 'narrator' ? 'system'
         : item.message.senderId === 'user' ? 'user' : 'assistant',
@@ -1047,7 +1061,9 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
     tokenCategory: 'currentInput',
     content: [
       ...(chat.type !== 'direct' ? [`【当前${currentSource.label}】`] : []),
-      latestUserMessage?.kind === 'image' ? toMessageContent(latestUserMessage) : input,
+      continueGroup
+        ? '【群聊自然续聊指令，不是玩家发言】玩家本轮没有发送新消息，只是让群聊继续。请从当前群聊历史末尾接着聊，优先承接最近一位成员的新话、问题、玩笑或尚未展开的话题，让成员彼此回应、追问、分享自己的想法或自然延伸。此前玩家的话已经属于历史，不要再次当作刚收到的新消息逐个回应，也不要重复上一轮的结论、安慰或提问。根据人设、关系和谁确实有话要说来安排发言，不要求所有人轮流表态，不把每句话都转向玩家；话题已经聊完时可自然带出相近的新话题，不突然跳题、不替玩家发言、不编造玩家的新回应。仍严格遵守本轮 JSON、发言者身份、消息条数与心声要求。'
+        : latestUserMessage?.kind === 'image' ? toMessageContent(latestUserMessage) : input,
     ].join('\n'),
     ...(latestUserMessage ? photoPromptFields(latestUserMessage, chat) : {}),
   });

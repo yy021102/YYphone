@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { beforeEach, afterEach, mock, test } from 'node:test';
-import { apiTemperature, textApiConfig } from './textApiConfig';
+import { apiTemperature, apiMaxTokens, apiOutputLimit, textApiConfig } from './textApiConfig';
+import { readAiTextResponse } from './aiTextResponse';
 import { requestConfiguredAiText, getActiveApiPreset } from './aiApi';
 import { requestChatReply } from './chatReply';
 import { clearDbStorage } from './dbStorage';
@@ -102,4 +103,75 @@ test('both Gemini generation paths apply temperature in generationConfig and lea
   await requestConfiguredAiText('测试', '你好', { api: { ...api, temperature: undefined }, includeGlobalWorldBooks: false });
   assert.equal(bodies[0].generationConfig.temperature, .6); assert.equal(bodies[1].generationConfig.temperature, .6);
   assert(!Object.hasOwn(bodies[2].generationConfig ?? {}, 'temperature'));
+});
+
+const sse = (events: unknown[], suffix = 'data: [DONE]\r\n\r\n') => {
+  const bytes = new TextEncoder().encode(': keepalive\r\n\r\n' + events.map(event => `data: ${JSON.stringify(event)}\r\n\r\n`).join('') + suffix);
+  let position = 0;
+  return new Response(new ReadableStream({ pull(controller) {
+    if (position === bytes.length) { controller.close(); return; }
+    controller.enqueue(bytes.slice(position, ++position)); // Splits UTF-8 and CRLF across network chunks.
+  } }), { headers: { 'Content-Type': 'text/event-stream; charset=utf-8' } });
+};
+
+test('output limits accept positive safe integers, cap task limits and preserve unset defaults', () => {
+  assert.equal(apiMaxTokens(1), 1); assert.equal(apiMaxTokens(65536), 65536);
+  for (const value of [0, -1, 1.5, Infinity, NaN, '1024', Number.MAX_SAFE_INTEGER + 1]) assert.equal(apiMaxTokens(value), undefined);
+  assert.equal(apiOutputLimit(1000, 2000), 1000); assert.equal(apiOutputLimit(4000, 2000), 2000);
+  assert.equal(apiOutputLimit(undefined, 1500), 1500); assert.equal(apiOutputLimit(undefined), undefined);
+});
+
+test('chat and content generation use streaming and saved output limits on both API protocols', async () => {
+  for (const google of [false, true]) {
+    const api = { ...connection, ...(google ? { endpoint: 'https://gemini.invalid/v1beta', model: 'gemini-test' } : {}), maxTokens: 3000, stream: true };
+    let calls = 0;
+    mock.method(globalThis, 'fetch', async (url: unknown, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)); calls++;
+      if (google) {
+        assert.equal(new URL(String(url)).pathname, '/v1beta/models/gemini-test:streamGenerateContent');
+        assert.equal(new URL(String(url)).searchParams.get('alt'), 'sse');
+        assert.equal(body.generationConfig.maxOutputTokens, calls === 1 ? 3000 : 1000);
+        return sse([{ candidates: [{ content: { parts: [{ text: '不可展示的推理', thought: true }, { text: '{"reply":[' }] } }] },
+          { candidates: [{ content: { parts: [{ text: '"你好呀"]}' }] }, finishReason: 'STOP' }] }], '');
+      }
+      assert.equal(body.stream, true); assert.equal(body.max_tokens, calls === 1 ? 3000 : 1000);
+      return sse([{ choices: [{ index: 0, delta: { role: 'assistant', reasoning_content: '不应展示的推理' } }] },
+        { choices: [{ index: 0, delta: { content: '{"reply":[' } }] },
+        { choices: [{ index: 0, delta: { content: '"你好呀"]}' }, finish_reason: 'stop' }] }]);
+    });
+    assert.deepEqual((await requestChatReply(messages, api, () => {})).reply, ['你好呀']);
+    assert.equal(await requestConfiguredAiText('测试', '你好', { api, maxTokens: 1000, includeGlobalWorldBooks: false }), '{"reply":["你好呀"]}');
+    assert.equal(calls, 2); mock.restoreAll();
+  }
+});
+
+test('stream errors, truncation and early disconnection never trigger a paid format retry or return partial replies', async () => {
+  for (const events of [
+    [{ choices: [{ delta: { content: '{"reply":[' } }] }, { error: { message: '网关生成失败' } }],
+    [{ choices: [{ delta: { content: '{"reply":["半句"]}' }, finish_reason: 'length' }] }],
+    [{ choices: [{ delta: { content: '{"reply":["未完成"]}' } }] }],
+  ]) {
+    const fetch = mock.method(globalThis, 'fetch', async () => sse(events, ''));
+    await assert.rejects(requestChatReply(messages, { ...connection, stream: true }, () => {}), /失败|Token|提前结束/);
+    assert.equal(fetch.mock.callCount(), 1); mock.restoreAll();
+  }
+  await assert.rejects(readAiTextResponse(sse([{ candidates: [{ finishReason: 'MAX_TOKENS' }] }], ''), true), /Token/);
+});
+
+test('stopping a waiting stream cancels its reader and never commits usage or triggers retry', async () => {
+  const controller = new AbortController(); let cancelled = false, usage = 0;
+  const fetch = mock.method(globalThis, 'fetch', async () => new Response(new ReadableStream({
+    start(stream) { stream.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"partial"}}]}\n\n')); setTimeout(() => controller.abort(), 10); },
+    cancel() { cancelled = true; },
+  }), { headers: { 'Content-Type': 'text/event-stream' } }));
+  await assert.rejects(requestChatReply(messages, { ...connection, stream: true }, () => usage++, undefined, { signal: controller.signal }), { name: 'AbortError' });
+  assert.equal(cancelled, true); assert.equal(usage, 0); assert.equal(fetch.mock.callCount(), 1);
+});
+
+test('streaming gracefully accepts a gateway JSON response and non-streaming retains content arrays', async () => {
+  mock.method(globalThis, 'fetch', async () => response());
+  assert.deepEqual((await requestChatReply(messages, { ...connection, stream: true, maxTokens: 3000 }, () => {})).reply, ['你好']);
+  assert.equal(await readAiTextResponse(Response.json({ choices: [{ message: { content: [{ type: 'text', text: '文字' }, { type: 'text', text: '内容' }] } }] }), false), '文字内容');
+  const url = new URL(textApiConfig({ ...connection, endpoint: 'https://google.invalid/v1beta/models/gemini-test:streamGenerateContent?alt=sse' }).url);
+  assert.equal(url.pathname, '/v1beta/models/gemini-test:generateContent'); assert.equal(url.searchParams.has('alt'), false);
 });

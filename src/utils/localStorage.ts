@@ -1,12 +1,13 @@
 import {
   getCachedStorageItem,
   setCachedStorageItem,
+  resolvedStorageKey,
 } from './dbStorage';
 
 export function readStorageString(key: string): string | null {
   const cached = getCachedStorageItem(key);
   if (cached.found) return JSON.stringify(cached.value) ?? 'null';
-  return window.localStorage.getItem(key);
+  return window.localStorage.getItem(resolvedStorageKey(key));
 }
 
 export function writeStorageString(key: string, value: string): void {
@@ -26,7 +27,7 @@ export function readStoredValue<T>(
 ): T {
   try {
     const cached = getCachedStorageItem(key);
-    const storedValue = cached.found ? undefined : window.localStorage.getItem(key);
+    const storedValue = cached.found ? undefined : window.localStorage.getItem(resolvedStorageKey(key));
     if (!cached.found && storedValue === null) return fallback;
 
     const parsedValue: unknown = cached.found

@@ -3,6 +3,7 @@ import { imageDescriptionText } from './imageDescriptions';
 import { readWechatChatsRaw } from './memoryData';
 import { archiveCursorsForWrite, readArchiveCursors, readArchiveRecords, writeArchiveRecords } from './memoryArchives';
 import { resolveChatHistoryCount } from './chatHistory';
+import { recallContext, type RecallMessage } from './chatRecall';
 
 export const JOURNAL_ENTRIES_KEY = 'yyphone:memory-journal';
 export const GROWTH_NOTES_KEY = 'yyphone:memory-growth';
@@ -192,7 +193,7 @@ export const readDirectMessages = (
       ...(typeof m.id === 'string' ? { id: m.id } : {}),
       createdAt: m.createdAt as string,
       senderId: typeof m.senderId === 'string' ? m.senderId : '',
-      text: describeForSummary(m, options.fullText ? Infinity : 300),
+      text: m.kind === 'recalled' ? recallContext(m as unknown as RecallMessage, [charId]) : describeForSummary(m, options.fullText ? Infinity : 300),
       note: m.kind === 'context-note',
     }))
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt));

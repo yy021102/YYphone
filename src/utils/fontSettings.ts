@@ -14,7 +14,7 @@ export interface FontSettings {
 }
 
 export const MAX_FONT_BYTES = 30 * 1024 * 1024;
-const isFontFile = (value: unknown): value is NonNullable<FontSettings['file']> => !!value && typeof value === 'object' &&
+export const isFontFile = (value: unknown): value is NonNullable<FontSettings['file']> => !!value && typeof value === 'object' &&
   typeof (value as any).name === 'string' && typeof (value as any).dataUrl === 'string' &&
   (value as any).dataUrl.length <= Math.ceil(MAX_FONT_BYTES / 3) * 4 + 64 &&
   /^data:font\/(?:ttf|otf|woff2?);base64,[A-Za-z0-9+/]+={0,2}$/.test((value as any).dataUrl);

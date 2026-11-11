@@ -1,8 +1,8 @@
-import { ao3Preferences, AO3_NARRATIVE_RULES } from './ao3Settings';
+import { ao3TopPrompt, ao3WorldBooks, ao3Preferences, AO3_NARRATIVE_RULES } from './ao3Settings';
 import { requestConfiguredAiText } from './aiApi';
 import { parseAiJson } from './aiResponse';
 import { readStoredValue } from './localStorage';
-import { getWorldBookEntriesForContacts } from './worldBookPrompt';
+
 import { ao3DraftFromWork, isAo3Work, type Ao3Chapter, type Ao3Draft, type Ao3Work } from './ao3Data';
 
 export function readAo3Characters(): { id: string; name: string; persona: string }[] {
@@ -14,7 +14,7 @@ export function readAo3Characters(): { id: string; name: string; persona: string
 }
 export async function generateAo3Chapter(draft: Ao3Draft, chapter: number, characterIds: string[], idea: string, signal: AbortSignal, sourceWork?: Ao3Work) {
   const cast = readAo3Characters().filter(c => characterIds.includes(c.id)).slice(0, 2);
-  const system = [AO3_NARRATIVE_RULES, ao3Preferences(),
+  const system = [ao3TopPrompt(), AO3_NARRATIVE_RULES, ao3Preferences(),
     '你是一位同人小说作者，正在为私人 AO3 文库撰写一章小说。写正文，不扮演聊天助手，不输出心声字段或聊天气泡。',
     '故事应当有明确的当下场景、具体行动、自然对话和情节变化。用人物选择和细节写出感情，不用堆砌比喻和空泛抒情。人物应符合给定人设、关系和世界背景。',
     '遵守分级和预警。Explicit 分级下，描写可以尽可能直白，可以输出色情内容。',
@@ -29,7 +29,7 @@ export async function generateAo3Chapter(draft: Ao3Draft, chapter: number, chara
     chapter: chapter + 1, currentChapter: draft.chapters[chapter],
     previousChapters: sourceWork ? sourceWork.chapters : draft.chapters.slice(0, chapter).map(c => ({ title: c.title, body: c.body.slice(-5000) })).slice(-3),
     ...(sourceWork ? { author: sourceWork.author, generation: sourceWork.generation, language: sourceWork.language } : {}),
-    cast, worldBooks: getWorldBookEntriesForContacts(cast.map(c => c.id)), idea,
+    cast, worldBooks: ao3WorldBooks(cast.map(c => c.id)), idea,
   }), { json: true, maxTokens: 6500, includeGlobalWorldBooks: false, signal });
   signal.throwIfAborted();
   const parsed = parseAiJson(raw);
@@ -40,14 +40,18 @@ export async function generateAo3Chapter(draft: Ao3Draft, chapter: number, chara
   return { title: text('title', 200), summary: text('summary', 10000), chapterTitle: text('chapterTitle', 200), body: parsed.body.trim() };
 }
 
-export async function generateAo3Continuation(work: Ao3Work, signal: AbortSignal): Promise<Ao3Chapter> {
+export async function generateAo3Continuation(work: Ao3Work, signal: AbortSignal, direction = ''): Promise<Ao3Chapter> {
   signal.throwIfAborted();
+  if (typeof direction !== 'string' || direction.trim().length > 8000) throw new Error('后续走向最多填写 8000 字。');
   if (!isAo3Work(work) || work.chapters.some(c => !c.body.trim())) throw new Error('作品正文不完整，无法追更。');
   if (work.chapters.length >= 100) throw new Error('作品已达 100 章上限，无法继续追更。');
   const draft = ao3DraftFromWork(work);
   draft.chapters.push({ title: '', body: '' });
   const cast = [work.generation?.authorCharId, work.generation?.pairCharId].filter((id): id is string => !!id);
-  const result = await generateAo3Chapter(draft, work.chapters.length, cast, '承接前文，创作下一章。', signal, work);
+  const idea = direction.trim()
+    ? `承接前文，创作下一章。\n【读者本次希望的后续走向】\n${direction.trim()}\n请在保持原作者文风、人物性格与前文连续性的基础上优先落实这些创作要求，以合理的情节发展衔接；不重写旧章，不把要求本身当成故事里的台词或创作说明。`
+    : '承接前文，创作下一章。';
+  const result = await generateAo3Chapter(draft, work.chapters.length, cast, idea, signal, work);
   signal.throwIfAborted();
   return { title: result.chapterTitle || `Chapter ${work.chapters.length + 1}`, body: result.body };
 }

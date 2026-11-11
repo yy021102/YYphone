@@ -13,6 +13,7 @@
 @import "./components/desktopPages.css";
 @import "./components/homeSystemDock.css";
 @import "./components/freeDesktop.css";
+@import "./components/customAppIcons.css";
 @import "./components/littlePLauncher.css";
 @import "./components/pastDiaryHall.css";
 @import "./components/externalLink.css";
@@ -253,6 +254,8 @@ body {
 
 .yy-chat-surface .yy-chat-message-row { gap: 12px; }
 .yy-chat-history { background-image: var(--yy-chat-wallpaper, none); background-size: cover; background-position: center; background-attachment: scroll; overscroll-behavior-y: contain; }
+.yy-chat-system-tag { display: inline-block; max-width: 100%; padding: 2px 6px; border-radius: 4px; background: var(--yy-chat-system-background, rgb(237 237 237 / .86)); color: var(--yy-chat-system-color, #999); line-height: 1.5; overflow-wrap: anywhere; }
+.wechat-app[data-wechat-theme="dark"] .yy-chat-system-tag { background: rgb(17 17 17 / .9); color: #888; }
 .yy-chat-surface .yy-chat-message-content { max-width: calc(100% - var(--yy-chat-avatar-size, 40px) - var(--yy-chat-avatar-size, 40px) - 24px); }
 .yy-chat-surface .yy-chat-message-bubble { color: #111; overflow-wrap: anywhere; }
 .yy-chat-surface .yy-chat-message-bubble:has(.yy-regex-message) {

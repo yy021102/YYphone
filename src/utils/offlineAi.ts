@@ -1,6 +1,6 @@
 import { requestConfiguredAiText } from './aiApi';
 import { resolveOfflineApi } from './offlineApi';
-import { readStorageString } from './localStorage';
+import { offlineWechatBackground } from './offlineWechat';
 import {
   currentVersionText,
   OfflineContact,
@@ -15,38 +15,6 @@ import {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === 'object' && !Array.isArray(value);
-
-const readWechatBackground = (story: OfflineStory, contacts: OfflineContact[], userName: string) => {
-  if (story.wechatContextCount <= 0) return '';
-  let chats: unknown;
-  try {
-    chats = JSON.parse(readStorageString('yyphone:wechat-chats') ?? '[]');
-  } catch {
-    return '';
-  }
-  if (!Array.isArray(chats)) return '';
-  const blocks = story.characterIds.flatMap((charId) => {
-    const contact = contacts.find((item) => item.id === charId);
-    const chat = chats.find(
-      (item) =>
-        isRecord(item) &&
-        item.type === 'direct' &&
-        Array.isArray(item.participantIds) &&
-        item.participantIds.length === 1 &&
-        item.participantIds[0] === charId
-    );
-    if (!isRecord(chat) || !Array.isArray(chat.messages)) return [];
-    const lines = chat.messages
-      .filter((m): m is Record<string, unknown> => isRecord(m) && m.senderId !== 'narrator')
-      .slice(-story.wechatContextCount)
-      .map((m) => {
-        const text = typeof m.text === 'string' && m.text ? m.text : typeof m.title === 'string' ? `[${m.title}]` : '[消息]';
-        return `${m.senderId === 'user' ? userName : contact?.name ?? '角色'}：${text.slice(0, 200)}`;
-      });
-    return lines.length > 0 ? [`与「${contact?.name ?? '角色'}」的微信：\n${lines.join('\n')}`] : [];
-  });
-  return blocks.join('\n\n');
-};
 
 export interface OfflinePromptContext {
   contacts: OfflineContact[];
@@ -63,7 +31,7 @@ const buildSystem = (story: OfflineStory, preset: OfflinePreset | undefined, wit
     .map((id) => contacts.find((c) => c.id === id))
     .filter((c): c is OfflineContact => !!c);
   const books = readSelectedWorldBookText(story.worldBookIds);
-  const wechat = readWechatBackground(story, contacts, userName);
+  const wechat = offlineWechatBackground(story, contacts, userName);
   const pastMemories = readOfflineMemories()
     .filter((m) => m.storyId !== story.id && m.characterIds.some((id) => story.characterIds.includes(id)))
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
@@ -79,7 +47,7 @@ const buildSystem = (story: OfflineStory, preset: OfflinePreset | undefined, wit
       : '（未选择角色，请根据剧情自行安排合理的人物）'}`,
     books.middle && `【世界观设定】\n${books.middle}`,
     `【玩家角色】\n${persona?.text ?? '（未设置玩家人设）'}`,
-    wechat && `【线上背景：双方最近的微信聊天（仅作为关系与近况的背景参考，剧情中的角色记得这些，但不要逐句复述）】\n${wechat}`,
+    wechat && `【线上背景：对话补充与所选微信记录（仅作为关系与近况背景，不逐句复述；群聊中不同成员的言行分别归属其本人，不把别人的经历当作登场角色的经历，也不把群聊当作当前线下场景）】\n${wechat}`,
     pastMemories.length > 0 && `【过往线下经历摘要（角色亲身记得）】\n${pastMemories.map((m) => `《${m.storyTitle}》：${m.summary}`).join('\n')}`,
     entries.length > 0 && `【写作要求】\n${entries.map((e, i) => `${i + 1}. ${e.title}：${e.content}`).join('\n')}`,
     `【篇幅】每次生成的正文约 ${words} 字（可上下浮动 20%）。`,

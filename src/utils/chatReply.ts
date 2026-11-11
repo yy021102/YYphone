@@ -3,7 +3,8 @@ import { parseChatResponse } from './aiResponse';
 import { appendPromptContent, type OpenAiMessage } from './buildPrompt';
 import { estimatePromptTokens, estimateTextTokens } from './chatTokens';
 import { toGeminiContents, toOpenAiMessages } from './chatVision';
-import { apiTemperature, textApiConfig } from './textApiConfig';
+import { apiTemperature, apiOutputLimit, textApiConfig } from './textApiConfig';
+import { readAiTextResponse } from './aiTextResponse';
 import { pendingImageTargets, validateImageDescriptions, saveImageDescriptions, withImageDescriptionRequest } from './imageDescriptions';
 import { chatLanguageInstructions, validateChatLanguage, type ChatLanguage } from './chatLanguage';
 import { validatePhoneProxyAcknowledgement } from './phoneProxy';
@@ -80,6 +81,7 @@ export const withChatResponseFormat = (
 const requestChatText = async (messages: OpenAiMessage[], api: ApiConnection, signal?: AbortSignal): Promise<string> => {
   signal?.throwIfAborted();
   const connection = textApiConfig(api), temperature = apiTemperature(api.temperature);
+  const maxTokens = apiOutputLimit(api.maxTokens);
   if (connection.google) {
     const response = await fetch(connection.url, {
       method: 'POST',
@@ -90,14 +92,10 @@ const requestChatText = async (messages: OpenAiMessage[], api: ApiConnection, si
           parts: [{ text: messages.filter((message) => message.role === 'system').map((message) => message.content).join('\n\n') }],
         },
         contents: toGeminiContents(messages),
-        generationConfig: { responseMimeType: 'application/json', ...(temperature !== undefined ? { temperature } : {}) },
+        generationConfig: { responseMimeType: 'application/json', ...(temperature !== undefined ? { temperature } : {}), ...(maxTokens !== undefined ? { maxOutputTokens: maxTokens } : {}) },
       }),
     });
-    if (!response.ok) throw new Error(`AI 请求失败（${response.status}）：${await response.text()}`);
-    const data: unknown = await response.json();
-    signal?.throwIfAborted();
-    const candidate = (data as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> }).candidates?.[0];
-    return candidate?.content?.parts?.map((part) => part.text ?? '').join('') ?? '';
+    return readAiTextResponse(response, true, signal);
   }
   const response = await fetch(connection.url, {
     method: 'POST',
@@ -106,21 +104,13 @@ const requestChatText = async (messages: OpenAiMessage[], api: ApiConnection, si
     body: JSON.stringify({
       model: connection.model,
       ...(temperature !== undefined ? { temperature } : {}),
+      ...(maxTokens !== undefined ? { max_tokens: maxTokens } : {}),
+      ...(api.stream === true ? { stream: true } : {}),
       messages: toOpenAiMessages(messages),
       response_format: { type: 'json_object' },
     }),
   });
-  if (!response.ok) throw new Error(`AI 请求失败（${response.status}）：${await response.text()}`);
-  const data: unknown = await response.json();
-  signal?.throwIfAborted();
-  const content = (data as { choices?: Array<{ message?: { content?: unknown } }> }).choices?.[0]?.message?.content;
-  if (typeof content === 'string') return content;
-  if (Array.isArray(content)) {
-    return content.flatMap((part) =>
-      part && typeof part === 'object' && 'text' in part && typeof part.text === 'string' ? [part.text] : []
-    ).join('');
-  }
-  return '';
+  return readAiTextResponse(response, false, signal);
 };
 
 export const requestChatReply = async (

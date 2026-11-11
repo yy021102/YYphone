@@ -21,6 +21,9 @@ import {
 } from 'lucide-react';
 import { AppHeader } from '../components/AppHeader';
 import { OfflineApiSettings } from '../components/OfflineApiSettings';
+import { OfflineFontSettings } from '../components/OfflineFontSettings';
+import { FONT_FAMILIES } from '../utils/fontSettings';
+import { readOfflineGroupChats } from '../utils/offlineWechat';
 import { ColorWheel, hexToRgba } from '../components/ColorWheel';
 import { compressImageFile } from '../utils/imageFile';
 import { showYyError } from '../components/ErrorDialog';
@@ -58,7 +61,7 @@ interface OfflineModeAppProps {
 type View = 'list' | 'play' | 'presets';
 type StoryDraft = Pick<
   OfflineStory,
-  'title' | 'characterIds' | 'personaId' | 'worldBookIds' | 'presetId' | 'wechatContextCount' | 'contextMessages' | 'autoChoices'
+  'title' | 'characterIds' | 'personaId' | 'worldBookIds' | 'presetId' | 'wechatContextCount' | 'groupChatIds' | 'contextMessages' | 'autoChoices'
 >;
 
 const downloadJson = (fileName: string, data: unknown) => {
@@ -92,6 +95,7 @@ const StoryForm: React.FC<StoryFormProps> = ({ draft, onChange, contacts, person
   const toggle = (list: string[], id: string) => (list.includes(id) ? list.filter((item) => item !== id) : [...list, id]);
   const localBooks = books.filter((book) => !book.isGlobal);
   const globalBooks = books.filter((book) => book.isGlobal);
+  const groups = readOfflineGroupChats();
   return (
     <div className="space-y-3 text-xs">
       <label className="block space-y-1">
@@ -159,14 +163,15 @@ const StoryForm: React.FC<StoryFormProps> = ({ draft, onChange, contacts, person
 
       <div className="grid grid-cols-2 gap-2">
         <label className="block space-y-1">
-          <span className="font-semibold text-slate-600">带入微信聊天（条）</span>
+          <span className="font-semibold text-slate-600">每个对话带入微信（条）</span>
           <input
             type="number"
+            aria-label="线下微信记录条数"
             min={0}
             max={200}
             className={inputClass}
             value={draft.wechatContextCount}
-            onChange={(e) => onChange({ ...draft, wechatContextCount: Math.max(0, Math.min(200, Number(e.target.value) || 0)) })}
+            onChange={(e) => onChange({ ...draft, wechatContextCount: Math.max(0, Math.min(200, Math.floor(Number(e.target.value) || 0))) })}
           />
           <span className="text-[10px] text-slate-400">0 = 不带入</span>
         </label>
@@ -184,6 +189,11 @@ const StoryForm: React.FC<StoryFormProps> = ({ draft, onChange, contacts, person
         </label>
       </div>
 
+      <fieldset className="space-y-2 rounded-2xl border border-white bg-white/60 p-3">
+        <legend className="px-1 font-semibold text-slate-600">挂载群聊记录</legend>
+        <p className="text-[10px] text-slate-400">角色私聊与对话补充会自动参考；勾选的群聊按上方条数分别带入。</p>
+        <div className="max-h-36 space-y-2 overflow-y-auto">{groups.length ? groups.map(group => <label key={group.id} className="flex items-center gap-2 text-slate-600"><input type="checkbox" checked={draft.groupChatIds?.includes(group.id) ?? false} onChange={() => onChange({ ...draft, groupChatIds: toggle(draft.groupChatIds ?? [], group.id) })}/><span className="min-w-0 break-words">{group.name}</span></label>) : <p className="text-[11px] text-slate-400">暂无群聊</p>}</div>
+      </fieldset>
       <label className="flex items-center gap-2 text-slate-600">
         <input type="checkbox" checked={draft.autoChoices} onChange={(e) => onChange({ ...draft, autoChoices: e.target.checked })} />
         <span>每次生成剧情时顺带给出 3 个行动建议（和剧情同一次请求，不额外消耗额度）</span>
@@ -206,6 +216,7 @@ export const OfflineModeApp: React.FC<OfflineModeAppProps> = ({ onBack }) => {
   const [draft, setDraft] = useState<StoryDraft | null>(null);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState<'' | 'send' | 'choices' | 'summary'>('');
+  const [regeneratingId, setRegeneratingId] = useState('');
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
   const [openingHint, setOpeningHint] = useState('');
   const [manualOpening, setManualOpening] = useState('');
@@ -214,11 +225,19 @@ export const OfflineModeApp: React.FC<OfflineModeAppProps> = ({ onBack }) => {
   const [notice, setNotice] = useState('');
   const [style, setStyle] = useState<OfflineStyle>(() => readOfflineStyle());
   const [styleOpen, setStyleOpen] = useState(false);
-  const [styleTab, setStyleTab] = useState<'wallpaper' | 'ai' | 'user'>('wallpaper');
+  const [styleTab, setStyleTab] = useState<'wallpaper' | 'ai' | 'user' | 'font'>('wallpaper');
   const wallpaperInputRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const storyImportRef = useRef<HTMLInputElement>(null);
   const presetImportRef = useRef<HTMLInputElement>(null);
+  const fontSource = style.fontFile?.dataUrl;
+  useEffect(() => {
+    if (!fontSource) return;
+    let alive = true;
+    const face = new FontFace('YYphoneOffline', `url(${JSON.stringify(fontSource)})`);
+    void face.load().then(loaded => { if (alive) document.fonts.add(loaded); }).catch(() => { if (alive) showYyError('线下字体加载失败，请重新上传字体文件。'); });
+    return () => { alive = false; document.fonts.delete(face); };
+  }, [fontSource]);
 
   useEffect(() => {
     writeOfflineStyle(style);
@@ -253,6 +272,7 @@ export const OfflineModeApp: React.FC<OfflineModeAppProps> = ({ onBack }) => {
     worldBookIds: [],
     presetId: presets[0]?.id ?? '',
     wechatContextCount: 20,
+    groupChatIds: [],
     contextMessages: 30,
     autoChoices: false,
   });
@@ -319,6 +339,7 @@ export const OfflineModeApp: React.FC<OfflineModeAppProps> = ({ onBack }) => {
     if (!story || busy) return;
     const index = story.messages.findIndex((m) => m.id === message.id);
     if (index < 0) return;
+    setRegeneratingId(message.id);
     setBusy('send');
     try {
       const { text, choices } = await generateOfflineText(
@@ -335,6 +356,7 @@ export const OfflineModeApp: React.FC<OfflineModeAppProps> = ({ onBack }) => {
     } catch (error) {
       showYyError(error instanceof Error ? error.message : String(error), '线下剧情生成失败');
     } finally {
+      setRegeneratingId('');
       setBusy('');
     }
   };
@@ -457,12 +479,19 @@ export const OfflineModeApp: React.FC<OfflineModeAppProps> = ({ onBack }) => {
 
   // ==================== 渲染 ====================
   const lastMessage = story?.messages[story.messages.length - 1];
+  const readingStyle: React.CSSProperties = {
+    fontFamily: style.fontFile ? `"YYphoneOffline", ${FONT_FAMILIES.system.value}` : style.fontFamily && style.fontFamily !== 'inherit' ? FONT_FAMILIES[style.fontFamily].value : undefined,
+    fontSize: style.fontSize ? `${style.fontSize}px` : undefined,
+    lineHeight: style.lineHeight,
+  };
   const aiBubbleStyle: React.CSSProperties = {
+    ...readingStyle,
     backgroundColor: hexToRgba(style.aiBubbleColor, style.aiBubbleOpacity),
     color: style.aiTextColor,
     backdropFilter: 'blur(12px)',
   };
   const userBubbleStyle: React.CSSProperties = {
+    ...readingStyle,
     backgroundColor: hexToRgba(style.userBubbleColor, style.userBubbleOpacity),
     color: style.userTextColor,
     backdropFilter: 'blur(12px)',
@@ -632,6 +661,7 @@ export const OfflineModeApp: React.FC<OfflineModeAppProps> = ({ onBack }) => {
             )}
 
             {story.messages.map((message, index) => {
+              if (message.id === regeneratingId) return <div key={message.id} role="status" aria-label="剧情重新生成" className={`${cardClass} flex items-center justify-center gap-2 p-6 text-xs text-slate-400`}><RefreshCw size={15} className="animate-spin"/>正在重新书写…</div>;
               const isLast = index === story.messages.length - 1;
               const text = currentVersionText(message);
               const isEditing = editing?.id === message.id;
@@ -701,7 +731,7 @@ export const OfflineModeApp: React.FC<OfflineModeAppProps> = ({ onBack }) => {
               );
             })}
 
-            {busy && (
+            {busy && !regeneratingId && (
               <p className="text-center text-[11px] text-slate-400">
                 {busy === 'send' ? '正在书写剧情…' : busy === 'choices' ? '正在想行动建议…' : '正在整理剧情摘要…'}
               </p>
@@ -910,7 +940,7 @@ export const OfflineModeApp: React.FC<OfflineModeAppProps> = ({ onBack }) => {
       {/* ---------- 新建 / 编辑故事 ---------- */}
       {formMode && draft && (
         <div className="absolute inset-0 z-40 flex items-end justify-center bg-slate-900/25 backdrop-blur-xs">
-          <div className="flex max-h-[88%] w-full max-w-md flex-col rounded-t-[28px] border border-white bg-gradient-to-b from-white to-[#F6F8FC] p-4 shadow-2xl">
+          <div role="dialog" aria-modal="true" aria-label={formMode === 'create' ? '新故事' : '故事设置'} className="flex max-h-[88%] w-full max-w-md flex-col rounded-t-[28px] border border-white bg-gradient-to-b from-white to-[#F6F8FC] p-4 shadow-2xl">
             <div className="mb-3 flex items-center justify-between">
               <h3 className="text-sm font-bold text-[#4A5A6A]">{formMode === 'create' ? '新故事' : '故事设置'}</h3>
               <button type="button" aria-label="关闭" onClick={() => { setFormMode(null); setDraft(null); }} className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 text-slate-400"><X className="h-4 w-4" /></button>
@@ -928,14 +958,14 @@ export const OfflineModeApp: React.FC<OfflineModeAppProps> = ({ onBack }) => {
       {/* ---------- 外观 ---------- */}
       {styleOpen && (
         <div className="absolute inset-0 z-50 flex items-end justify-center bg-slate-900/25 backdrop-blur-xs">
-          <div className="flex max-h-[88%] w-full max-w-md flex-col rounded-t-[28px] border border-white bg-gradient-to-b from-white to-[#F6F8FC] p-4 shadow-2xl">
+          <div role="dialog" aria-modal="true" aria-label="线下外观" className="flex max-h-[88%] w-full max-w-md flex-col rounded-t-[28px] border border-white bg-gradient-to-b from-white to-[#F6F8FC] p-4 shadow-2xl">
             <div className="mb-3 flex items-center justify-between">
               <h3 className="text-sm font-bold text-[#4A5A6A]">线下外观</h3>
               <button type="button" aria-label="关闭" onClick={() => setStyleOpen(false)} className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 text-slate-400"><X className="h-4 w-4" /></button>
             </div>
 
-            <div className="mb-3 grid grid-cols-3 rounded-2xl bg-white/70 p-1 text-xs">
-              {([['wallpaper', '壁纸'], ['ai', '剧情气泡'], ['user', '我的气泡']] as const).map(([key, label]) => (
+            <div className="mb-3 grid grid-cols-4 rounded-2xl bg-white/70 p-1 text-xs">
+              {([['wallpaper', '壁纸'], ['ai', '剧情气泡'], ['user', '我的气泡'], ['font', '字体']] as const).map(([key, label]) => (
                 <button
                   key={key}
                   type="button"
@@ -979,7 +1009,8 @@ export const OfflineModeApp: React.FC<OfflineModeAppProps> = ({ onBack }) => {
                 </div>
               )}
 
-              {styleTab !== 'wallpaper' && (
+              {styleTab === 'font' && <><div style={{ ...aiBubbleStyle }} className="mb-3 rounded-2xl border border-white px-4 py-3 text-[13px] leading-[1.85]">风从窗边吹过，故事还在继续。<br/>Aa 123 · 字体预览</div><OfflineFontSettings value={style} onChange={setStyle}/></>}
+              {(styleTab === 'ai' || styleTab === 'user') && (
                 <div className="space-y-3 text-xs">
                   <div
                     className="rounded-2xl border border-white/80 px-4 py-3 text-[13px] leading-[1.8]"

@@ -170,7 +170,7 @@ export function FreeDesktopHome({ value, onSave, page, onPageChange, profile, ap
   };
   const appButton = (app: AppMetadata) => <button type="button" className={`free-app${appIcons[app.id] ? ' has-custom-icon' : ''}`}
     aria-label={app.name} onClick={() => editing ? setMoveId(`app:${app.id}`) : onOpenApp(app.id)}>
-    <span className={`free-app-icon${appIcons[app.id] ? '' : ` home-default-icon bg-gradient-to-br ${app.color}`}`}>{appIcons[app.id] ? <img src={appIcons[app.id]} alt="" draggable={false}/> : renderIcon(app.iconName, `free-app-glyph ${app.textColor ?? ''}`)}</span><span>{app.name}</span>
+    <span className={`free-app-icon${appIcons[app.id] ? ' home-custom-icon' : ` home-default-icon bg-gradient-to-br ${app.color}`}`}>{appIcons[app.id] ? <img src={appIcons[app.id]} alt="" draggable={false}/> : renderIcon(app.iconName, `free-app-glyph ${app.textColor ?? ''}`)}</span><span>{app.name}</span>
   </button>;
   const style = { '--free-row': `${row}px` } as CSSProperties;
   const rows = Math.min(DESKTOP_MAX_ROWS, Math.max(4, ...layout.pages[page].map(item => item.y + item.h)) + (editing ? 2 : 0));
@@ -213,7 +213,7 @@ export function FreeDesktopHome({ value, onSave, page, onPageChange, profile, ap
     })}</nav>
     <DesktopPageNavigation page={page} onChange={onPageChange}/>
     {drag && <div className="free-drag-ghost" data-kind={dragItem?.kind ?? 'app'} aria-hidden="true" style={{ left: drag.x - (root.current?.getBoundingClientRect().left ?? 0), top: drag.y - (root.current?.getBoundingClientRect().top ?? 0) }}>
-      {dragApp ? <><span className={`free-app-icon bg-gradient-to-br ${dragApp.color}`}>{appIcons[dragApp.id] ? <img src={appIcons[dragApp.id]} alt="" draggable={false}/> : renderIcon(dragApp.iconName, `free-app-glyph ${dragApp.textColor ?? ''}`)}</span><small>{dragApp.name}</small></> : <><span>{itemName(drag.id)}</span><Move size={18}/></>}
+      {dragApp ? <><span className={`free-app-icon${appIcons[dragApp.id] ? ' home-custom-icon' : ` bg-gradient-to-br ${dragApp.color}`}`}>{appIcons[dragApp.id] ? <img src={appIcons[dragApp.id]} alt="" draggable={false}/> : renderIcon(dragApp.iconName, `free-app-glyph ${dragApp.textColor ?? ''}`)}</span><small>{dragApp.name}</small></> : <><span>{itemName(drag.id)}</span><Move size={18}/></>}
     </div>}
     {library && <DesktopOverlay title="小组件收藏夹" onClose={() => setLibrary(false)}><p className="free-help">挑一个喜欢的，可以重复添加。内置造型由本机原创绘制，换图、填字就能用，不需要写代码。</p>
       <h3 className="free-library-heading">内置造型 · 换图即用</h3><div className="free-widget-library free-template-library">{DESKTOP_WIDGET_TEMPLATES.map(template =>

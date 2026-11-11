@@ -5,17 +5,29 @@ export function apiTemperature(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 2 ? value : undefined;
 }
 
+export function apiMaxTokens(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : undefined;
+}
+
+export function apiOutputLimit(configured: unknown, taskLimit?: number): number | undefined {
+  const limit = apiMaxTokens(configured), task = apiMaxTokens(taskLimit);
+  return limit !== undefined && task !== undefined ? Math.min(limit, task) : limit ?? task;
+}
+
 /** Share routing and authentication between normal chat, content generation and connection tests. */
-export function textApiConfig(api: { endpoint: string; apiKey: string; model?: string }) {
+export function textApiConfig(api: { endpoint: string; apiKey: string; model?: string; stream?: boolean }) {
   const url = parseApiEndpoint(api.endpoint), model = api.model?.trim() || 'gpt-4o-mini';
   const google = url.hostname === 'generativelanguage.googleapis.com' || /\/v1beta(?:\/|$)/i.test(url.pathname);
   const path = url.pathname.replace(/\/+$/, '');
   url.hash = '';
   if (google) {
-    if (!/:generateContent$/i.test(path)) {
+    if (!/:(?:streamGenerateContent|generateContent)$/i.test(path)) {
       const base = path.replace(/\/models$/i, '');
       url.pathname = `${/\/v1beta$/i.test(base) ? base : `${base}/v1beta`}/models/${encodeURIComponent(model.replace(/^models\//, ''))}:generateContent`;
     }
+    url.pathname = url.pathname.replace(/:(?:streamGenerateContent|generateContent)$/i, api.stream === true ? ':streamGenerateContent' : ':generateContent');
+    if (api.stream === true) url.searchParams.set('alt', 'sse');
+    else if (url.searchParams.get('alt') === 'sse') url.searchParams.delete('alt');
     if (!api.apiKey.trim()) throw new Error('请填写 API Key。');
     url.searchParams.set('key', api.apiKey.trim());
   } else {

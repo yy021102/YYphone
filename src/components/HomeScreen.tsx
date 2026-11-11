@@ -135,7 +135,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     >
       <div className="relative">
         <div className={`w-[clamp(44px,12.5vw,62px)] h-[clamp(44px,12.5vw,62px)] rounded-[clamp(14px,3.6vw,20px)] shadow-[0_4px_16px_rgba(180,210,230,0.35)] flex items-center justify-center relative overflow-hidden transition-all group-hover:shadow-[0_8px_24px_rgba(180,210,230,0.5)] ${
-          appIcons[app.id] ? '' : 'home-default-icon ' + 'bg-white/50 backdrop-blur-xl border border-white/80 group-hover:bg-white/70'
+          appIcons[app.id] ? 'home-custom-icon' : 'home-default-icon ' + 'bg-white/50 backdrop-blur-xl border border-white/80 group-hover:bg-white/70'
         }`}>
           {appIcons[app.id] ? (
             <img src={appIcons[app.id]} alt="" className="absolute inset-0 h-full w-full object-cover" />

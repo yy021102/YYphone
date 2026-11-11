@@ -2,6 +2,7 @@ import { readStorageString, readStoredValue, writeStoredValue } from './localSto
 import { readSetting, SETTINGS_KEYS } from './settings';
 import { WORLD_BOOKS_STORAGE_KEY } from './worldBookPrompt';
 import { removeContextNote, upsertContextNote } from './chatNotes';
+import { FONT_FAMILIES, isFontFile, type FontSettings } from './fontSettings';
 
 export const OFFLINE_STORIES_KEY = 'yyphone:offline-stories';
 export const OFFLINE_PRESETS_KEY = 'yyphone:offline-presets';
@@ -41,6 +42,7 @@ export interface OfflineStory {
   presetId: string;
   /** 带入微信最近聊天的条数，0 为不带入 */
   wechatContextCount: number;
+  groupChatIds?: string[];
   autoChoices: boolean;
   /** 每次生成时带入的最近剧情条数 */
   contextMessages: number;
@@ -202,6 +204,7 @@ export const normalizeStory = (value: unknown): OfflineStory | null => {
     worldBookIds: Array.isArray(value.worldBookIds) ? value.worldBookIds.filter((id): id is string => typeof id === 'string') : [],
     presetId: typeof value.presetId === 'string' ? value.presetId : '',
     wechatContextCount: Number.isFinite(Number(value.wechatContextCount)) ? Math.max(0, Math.min(200, Number(value.wechatContextCount))) : 20,
+    groupChatIds: Array.isArray(value.groupChatIds) ? [...new Set(value.groupChatIds.filter((id): id is string => typeof id === 'string' && !!id))] : [],
     autoChoices: value.autoChoices === true,
     contextMessages: Number.isFinite(Number(value.contextMessages)) ? Math.max(4, Math.min(100, Number(value.contextMessages))) : 30,
     ended: false,
@@ -306,6 +309,10 @@ export const readSelectedWorldBookText = (bookIds: string[]) => {
 export const OFFLINE_STYLE_KEY = 'yyphone:offline-style';
 
 export interface OfflineStyle {
+  fontSize?: number;
+  fontFamily?: 'inherit' | keyof typeof FONT_FAMILIES;
+  fontFile?: FontSettings['file'];
+  lineHeight?: number;
   wallpaperUrl: string;
   aiBubbleColor: string;
   aiBubbleOpacity: number;
@@ -326,11 +333,15 @@ export const DEFAULT_OFFLINE_STYLE: OfflineStyle = {
 };
 
 export const readOfflineStyle = (): OfflineStyle =>
-  readStoredValue(
+  ({ ...DEFAULT_OFFLINE_STYLE, ...readStoredValue(
     OFFLINE_STYLE_KEY,
     DEFAULT_OFFLINE_STYLE,
-    (value): value is OfflineStyle => isRecord(value) && typeof value.aiBubbleColor === 'string'
-  );
+    (value): value is OfflineStyle => isRecord(value) && typeof value.aiBubbleColor === 'string' &&
+      (value.fontSize === undefined || typeof value.fontSize === 'number' && value.fontSize >= 10 && value.fontSize <= 30) &&
+      (value.lineHeight === undefined || typeof value.lineHeight === 'number' && value.lineHeight >= 1.3 && value.lineHeight <= 2.5) &&
+      (value.fontFamily === undefined || value.fontFamily === 'inherit' || typeof value.fontFamily === 'string' && Object.hasOwn(FONT_FAMILIES, value.fontFamily)) &&
+      (value.fontFile === undefined || isFontFile(value.fontFile))
+  ) });
 
 export const writeOfflineStyle = (style: OfflineStyle) => writeStoredValue(OFFLINE_STYLE_KEY, style);
 

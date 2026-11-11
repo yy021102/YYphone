@@ -171,7 +171,7 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
     setProcessing(`icon:${appId}`);
     setError('');
     try {
-      const image = await compressImageFile(file, { preserveTransparency: appId === 'little-p' });
+      const image = await compressImageFile(file, { preserveTransparency: true });
       setIconDraft((current) => ({ ...current, [appId]: image }));
       setStatus('');
     } catch (uploadError) {
@@ -532,7 +532,7 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
           </summary>
           <div className="mt-3 space-y-2.5">
             <p className="px-1 text-[10px] text-slate-500">
-              支持图片链接和本地图片；App 图标居中裁切，保留圆角。小P支持透明素材，完整显示图片。上传会压缩图片，清除后恢复默认图标。
+              支持图片链接和本地图片。透明素材完整显示，不添加底色；清除后恢复默认图标。
             </p>
             <div className="space-y-2">
               {[...ALL_APPS, { id: 'little-p' as const, name: '小P' }].map((app) => (

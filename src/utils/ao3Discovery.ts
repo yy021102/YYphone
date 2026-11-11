@@ -1,4 +1,4 @@
-import { ao3Preferences, AO3_NARRATIVE_RULES, lockAo3PenName, readAo3PenName } from './ao3Settings';
+import { ao3TopPrompt, ao3WorldBooks, ao3Preferences, AO3_NARRATIVE_RULES, lockAo3PenName, readAo3PenName } from './ao3Settings';
 import { requestConfiguredAiText } from './aiApi';
 import { parseAiJson } from './aiResponse';
 import { readAo3Characters } from './ao3Generation';
@@ -7,7 +7,7 @@ import { AO3_COMMENT_RULES, assertAo3CommentParticipants, createAo3CommentPlan, 
 import { readStoredValue } from './localStorage';
 import { activeMemoryArchive } from './memoryArchives';
 import { describeForSummary } from './journalData';
-import { getWorldBookEntriesForContacts } from './worldBookPrompt';
+
 
 export interface Ao3DiscoveryOptions {
   authorType: 'passerby' | 'character'; topic: 'fandom' | 'couple'; charId: string;
@@ -77,13 +77,13 @@ export async function generateAo3Discovery(options: Ao3DiscoveryOptions, userNam
   const existing = readAo3State().works;
   const knownPenName = options.authorType === 'character' ? readAo3PenName(character!.id) ||
     existing.find(w => w.generation?.authorType === 'character' && w.generation.authorCharId === character?.id)?.author : undefined;
-  const raw = await requestConfiguredAiText([AO3_DISCOVERY_PROMPT, AO3_NARRATIVE_RULES, ao3Preferences(),
+  const raw = await requestConfiguredAiText([ao3TopPrompt(), AO3_DISCOVERY_PROMPT, AO3_NARRATIVE_RULES, ao3Preferences(),
     'knownPenName 已提供时必须原样用于作者署名，它来自已锁定笔名或角色设定的论坛名，不因匿名写作要求另起笔名。角色作者的评论回复也使用此署名。',
   ].join('\n\n'), JSON.stringify({
     authorType: options.authorType, topic: options.topic, character, player,
     fandom: text(options.fandom, 200), direction: text(options.direction, 8000), tone: text(options.tone, 100), rating: options.rating,
-    knownPenName, worldBooks: character ? getWorldBookEntriesForContacts([character.id]).join('\n\n').slice(0, 12000) : '',
-    ...(!character && commentCharacterIds.length ? { commentWorldBooks: getWorldBookEntriesForContacts(commentCharacterIds).join('\n\n').slice(0, 12000) } : {}),
+    knownPenName, worldBooks: ao3WorldBooks(character ? [character.id] : []).join('\n\n').slice(0, 12000),
+    ...(!character && commentCharacterIds.length ? { commentWorldBooks: ao3WorldBooks(commentCharacterIds).join('\n\n').slice(0, 12000) } : {}),
     relationshipSupplement: text(relationshipSupplement, 6000),
     continuity: options.tone === '平行世界 AU' ? 'independent' : options.continuity ?? 'auto',
     experiences, avoidTitles: existing.slice(0, 15).map(w => w.title), commentPlan,

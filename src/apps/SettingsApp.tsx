@@ -4,7 +4,7 @@ import { McpSettingsPanel } from '../components/McpSettingsPanel';
 import { GithubBackup } from '../components/GithubBackup';
 import { ApiModelPicker } from '../components/ApiModelPicker';
 import { ChatApiConnectionTest } from '../components/ChatApiConnectionTest';
-import { apiTemperature } from '../utils/textApiConfig';
+import { apiTemperature, apiMaxTokens } from '../utils/textApiConfig';
 import { normalizeApiEndpoint } from '../utils/apiEndpoint';
 import { bearerApiKey } from '../utils/apiAuthentication';
 import { getActiveApiPreset } from '../utils/aiApi';
@@ -74,6 +74,8 @@ interface ApiPreset {
   apiKey: string;
   model?: string;
   temperature?: number;
+  maxTokens?: number;
+  stream?: boolean;
 }
 
 const isApiPresetList = (value: unknown): value is ApiPreset[] =>
@@ -176,6 +178,8 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
   const [apiKey, setApiKey] = useState(() => initialApiPreset?.apiKey ?? '');
   const [apiModel, setApiModel] = useState(() => initialApiPreset?.model ?? 'gpt-4o-mini');
   const [temperature, setTemperature] = useState<number | undefined>(() => apiTemperature(initialApiPreset?.temperature));
+  const [maxTokens, setMaxTokens] = useState(() => String(apiMaxTokens(initialApiPreset?.maxTokens) ?? ''));
+  const [stream, setStream] = useState(() => initialApiPreset?.stream === true);
   const [showApiKey, setShowApiKey] = useState(false);
   const [saveApiAsOpen, setSaveApiAsOpen] = useState(false);
   const [apiCopyName, setApiCopyName] = useState('');
@@ -238,6 +242,9 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
   };
 
   const handleSaveApiPreset = (asNew = false, copyName = '') => {
+    if (maxTokens.trim() && (!/^\d+$/.test(maxTokens.trim()) || apiMaxTokens(Number(maxTokens)) === undefined)) {
+      setApiError('最大输出 Token 数请填写正整数，或留空使用默认值。'); setApiMessage(''); return;
+    }
     const name = (asNew ? copyName : apiName).trim();
     if (!name) {
       setApiError('请填写预设名称。');
@@ -251,6 +258,8 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
       apiKey,
       model: apiModel.trim() || 'gpt-4o-mini',
       ...(temperature !== undefined ? { temperature } : {}),
+      ...(maxTokens.trim() ? { maxTokens: Number(maxTokens) } : {}),
+      stream,
     };
     const nextPresets = selectedApiPresetId && !asNew
       ? apiPresets.map((item) => (item.id === selectedApiPresetId ? preset : item))
@@ -272,6 +281,8 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
     setApiKey(preset?.apiKey ?? '');
     setApiModel(preset?.model ?? 'gpt-4o-mini');
     setTemperature(apiTemperature(preset?.temperature));
+    setMaxTokens(String(apiMaxTokens(preset?.maxTokens) ?? ''));
+    setStream(preset?.stream === true);
     setSaveApiAsOpen(false);
     if (preset) saveSetting(SETTINGS_KEYS.activeApiPreset, id);
     setApiMessage('');
@@ -297,6 +308,8 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
     setApiKey(nextPreset?.apiKey ?? '');
     setApiModel(nextPreset?.model ?? 'gpt-4o-mini');
     setTemperature(apiTemperature(nextPreset?.temperature));
+    setMaxTokens(String(apiMaxTokens(nextPreset?.maxTokens) ?? ''));
+    setStream(nextPreset?.stream === true);
     setSaveApiAsOpen(false);
     if (nextPreset) saveSetting(SETTINGS_KEYS.activeApiPreset, nextPreset.id);
     else removeSetting(SETTINGS_KEYS.activeApiPreset);
@@ -589,7 +602,19 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
               </label> : <p className="text-[10px] text-slate-400">使用模型默认温度</p>}
               <p className="text-[10px] text-slate-400">较低更稳定，较高更多变化。随预设保存。</p>
             </div>
-            <ChatApiConnectionTest connection={{ endpoint: apiEndpoint, apiKey, model: apiModel, temperature }} />
+            <div className="space-y-3 rounded-xl border border-white/80 bg-white/40 p-3">
+              <label className="block text-[11px] font-semibold text-[#2C4A5C]">
+                最大输出 Token 数
+                <input type="number" inputMode="numeric" min={1} step={1} aria-label="最大输出 Token 数" value={maxTokens} onChange={event => setMaxTokens(event.target.value)} placeholder="留空使用默认值" className="mt-1 w-full rounded-xl border border-white bg-white/70 px-3 py-2 text-xs outline-none" />
+              </label>
+              <p className="text-[10px] text-slate-400">限制单次输出上限，非回复字数；不能超过模型支持的范围。随预设保存。</p>
+              <label className="flex items-center justify-between gap-3 text-[11px] font-semibold text-[#2C4A5C]">
+                流式输出
+                <input type="checkbox" checked={stream} onChange={event => setStream(event.target.checked)} />
+              </label>
+              <p className="text-[10px] text-slate-400">分段接收，完整校验后显示。接口需支持流式输出。</p>
+            </div>
+            <ChatApiConnectionTest connection={{ endpoint: apiEndpoint, apiKey, model: apiModel, temperature, maxTokens: maxTokens.trim() ? Number(maxTokens) : undefined, stream }} />
             <div className="flex gap-2">
               <button
                 type="button"

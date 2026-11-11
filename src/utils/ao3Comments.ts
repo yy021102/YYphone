@@ -1,9 +1,9 @@
-import { ao3Preferences } from './ao3Settings';
+import { ao3TopPrompt, ao3WorldBooks, ao3Preferences } from './ao3Settings';
 import { requestConfiguredAiText } from './aiApi';
 import { parseAiJson } from './aiResponse';
 import { generateAo3Continuation, readAo3Characters } from './ao3Generation';
 import { readCharacterNpcs } from './characterNpcs';
-import { getWorldBookEntriesForContacts } from './worldBookPrompt';
+
 import { ao3ChapterComments, isAo3Comments, isAo3Work, type Ao3Comment, type Ao3Work } from './ao3Data';
 
 interface CommentParticipant {
@@ -113,12 +113,12 @@ export async function generateAo3Comments(work: Ao3Work, mode: 'extra' | 'reply'
   if (mode === 'reply' && !existing.some(c => c.id === replyTo && c.identity?.type === 'user')) throw new Error('找不到你的留言，请确认留言属于本章并重新打开作品。');
   const plan = { ...createAo3CommentPlan(work, mode === 'chapter' ? 5 : 3, mode === 'extra', mode === 'reply' ? replyTo : undefined), chapter };
   const characterIds = plan.participants.filter(p => p.identity.type === 'character').map(p => p.identity.id);
-  const raw = await requestConfiguredAiText(`你正在模拟私人 AO3 文库的评论区，只生成评论，不改写作品。\n${AO3_COMMENT_RULES}\n只返回 {"comments":[评论对象]}。\n${ao3Preferences()}`,
+  const raw = await requestConfiguredAiText(`${ao3TopPrompt()}\n你正在模拟私人 AO3 文库的评论区，只生成评论，不改写作品。\n${AO3_COMMENT_RULES}\n只返回 {"comments":[评论对象]}。\n${ao3Preferences()}`,
     JSON.stringify({ work: { title: work.title, author: work.author, fandom: work.fandom, relationship: work.relationship,
       characters: work.characters, tags: work.tags, rating: work.rating, warning: work.warning, summary: work.summary,
       notes: work.notes, chapters: work.chapters.slice(0, chapter + 1), generation: work.generation },
     currentChapter: { number: chapter + 1, ...work.chapters[chapter] },
-    comments: existing, commentPlan: plan, worldBooks: getWorldBookEntriesForContacts(characterIds) }),
+    comments: existing, commentPlan: plan, worldBooks: ao3WorldBooks(characterIds) }),
     { json: true, maxTokens: 3000, includeGlobalWorldBooks: false, signal });
   signal.throwIfAborted();
   assertAo3CommentParticipants(plan);
@@ -126,8 +126,8 @@ export async function generateAo3Comments(work: Ao3Work, mode: 'extra' | 'reply'
   return parseAo3Comments(row(result) ? result.comments : undefined, plan, existing, work.author);
 }
 
-export async function generateAo3ChapterUpdate(work: Ao3Work, signal: AbortSignal) {
-  const chapter = await generateAo3Continuation(work, signal);
+export async function generateAo3ChapterUpdate(work: Ao3Work, signal: AbortSignal, direction = '') {
+  const chapter = await generateAo3Continuation(work, signal, direction);
   const next = { ...work, chapters: [...work.chapters, chapter] };
   const comments = await generateAo3Comments(next, 'chapter', signal, undefined, work.chapters.length);
   signal.throwIfAborted();

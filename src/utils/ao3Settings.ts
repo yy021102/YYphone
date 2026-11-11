@@ -1,12 +1,23 @@
 import { readStoredValue, writeStoredValue } from './localStorage';
 import { setStorageItemsAtomically } from './dbStorage';
+import { getWorldBookEntriesForContacts, readWorldBookOptions } from './worldBookPrompt';
 import { AO3_KEY, AO3_DRAFT_KEY, isAo3State, isAo3Draft, readAo3State, readAo3Draft, type Ao3State } from './ao3Data';
 export const AO3_SETTINGS_KEY = 'yyphone:ao3-settings';
-interface Ao3Settings { prompt: string; penNames?: Record<string, string> }
+interface Ao3Settings { prompt: string; topPrompt?: string; worldBookIds?: string[]; penNames?: Record<string, string> }
 const valid = (v: unknown): v is Ao3Settings => !!v && typeof v === 'object' && 'prompt' in v && typeof v.prompt === 'string' && v.prompt.length <= 20000 &&
+  (!('topPrompt' in v) || typeof v.topPrompt === 'string' && v.topPrompt.length <= 20000) &&
+  (!('worldBookIds' in v) || Array.isArray(v.worldBookIds) && v.worldBookIds.every(id => typeof id === 'string' && !!id && id.length <= 200)) &&
   (!('penNames' in v) || !!v.penNames && typeof v.penNames === 'object' && !Array.isArray(v.penNames) &&
     Object.entries(v.penNames).every(([id, name]) => !!id && id.length <= 200 && typeof name === 'string' && !!name.trim() && name.length <= 200));
 export const readAo3Settings = (): Ao3Settings => readStoredValue(AO3_SETTINGS_KEY, { prompt: '' }, valid);
+export const readAo3WorldBookIds = () => readAo3Settings().worldBookIds ?? readWorldBookOptions().filter(book => book.isGlobal).map(book => book.id);
+export const ao3WorldBooks = (contactIds: string[]) => getWorldBookEntriesForContacts(contactIds, readAo3WorldBookIds());
+export const ao3TopPrompt = () => readAo3Settings().topPrompt?.trim() || '';
+export function saveAo3GenerationSettings(settings: Pick<Ao3Settings, 'prompt' | 'topPrompt' | 'worldBookIds'>) {
+  const next = { ...readAo3Settings(), ...settings };
+  if (!valid(next)) throw new Error('提示词最多 20000 字，请检查设置。');
+  writeStoredValue(AO3_SETTINGS_KEY, next);
+}
 export function readAo3PenName(charId: string): string | undefined {
   const contacts = readStoredValue<unknown[]>('pocketos:wechat-contacts', [], (value): value is unknown[] => Array.isArray(value));
   const contact = contacts.find(value => !!value && typeof value === 'object' && 'id' in value && value.id === charId);

@@ -1,4 +1,5 @@
 import { clearAudioBlobs } from './audioStorage';
+import { PERSONA_COLLECTION_KEY, PERSONA_RECORDS_KEY, isPersonaRecordKey, parsePersonaRecordSpaces, personaStorageKey } from './personaStorage';
 
 const DATABASE_NAME = 'yyphone_db';
 const STORE_NAME = 'store';
@@ -10,6 +11,18 @@ interface StorageRecord {
 }
 
 const memoryCache = new Map<string, unknown>();
+let personaRecordSpace: string | undefined;
+export function activePersonaRecordSpace(): string {
+  if (personaRecordSpace !== undefined) return personaRecordSpace;
+  const raw = (key: string) => memoryCache.has(key) ? memoryCache.get(key) : parseLocalStorageValue(window.localStorage.getItem(key) ?? 'null');
+  const collection = raw(PERSONA_COLLECTION_KEY) as { activeProfileId?: string } | null;
+  const records = parsePersonaRecordSpaces(raw(PERSONA_RECORDS_KEY));
+  // Freeze this document's scope: in-flight old requests can never write into the newly selected identity.
+  const id = collection?.activeProfileId ?? '';
+  personaRecordSpace = Object.hasOwn(records.profiles, id) ? records.profiles[id] : 'legacy';
+  return personaRecordSpace;
+}
+export const resolvedStorageKey = (key: string) => isPersonaRecordKey(key) ? personaStorageKey(key, activePersonaRecordSpace()) : key;
 let databasePromise: Promise<IDBDatabase | null> | undefined;
 let initialized = false;
 let indexedDbAvailable = typeof window !== 'undefined' && 'indexedDB' in window;
@@ -121,6 +134,7 @@ export async function initializeDbStorage(): Promise<void> {
     memoryCache.clear();
     readLegacyEntries().forEach(({ key, value }) => memoryCache.set(key, value));
     initialized = true;
+    personaRecordSpace = undefined;
     return;
   }
 
@@ -135,6 +149,7 @@ export async function initializeDbStorage(): Promise<void> {
       }
     });
     initialized = true;
+    personaRecordSpace = undefined;
   } catch (error) {
     console.error('Could not migrate local data to IndexedDB; using localStorage fallback.', error);
     indexedDbAvailable = false;
@@ -143,11 +158,13 @@ export async function initializeDbStorage(): Promise<void> {
     memoryCache.clear();
     readLegacyEntries().forEach(({ key, value }) => memoryCache.set(key, value));
     initialized = true;
+    personaRecordSpace = undefined;
   }
 }
 
 export async function getStorageItem(key: string, options: { fresh?: boolean } = {}): Promise<any> {
   await initializeDbStorage();
+  key = resolvedStorageKey(key);
   if (!options.fresh && memoryCache.has(key)) return memoryCache.get(key);
   if (options.fresh) memoryCache.delete(key);
   const database = await openDatabase();
@@ -173,6 +190,7 @@ export async function getStorageItem(key: string, options: { fresh?: boolean } =
 }
 
 export async function setStorageItem(key: string, value: any): Promise<void> {
+  key = resolvedStorageKey(key);
   await initializeDbStorage();
   memoryCache.set(key, value);
   const database = await openDatabase();
@@ -191,6 +209,7 @@ export async function setStorageItem(key: string, value: any): Promise<void> {
 }
 
 export async function removeStorageItem(key: string): Promise<void> {
+  key = resolvedStorageKey(key);
   await initializeDbStorage();
   memoryCache.delete(key);
   const database = await openDatabase();
@@ -209,6 +228,7 @@ export async function removeStorageItem(key: string): Promise<void> {
 }
 
 export function getCachedStorageItem(key: string): { found: boolean; value?: unknown } {
+  key = resolvedStorageKey(key);
   return memoryCache.has(key)
     ? { found: true, value: memoryCache.get(key) }
     : { found: false };
@@ -216,8 +236,9 @@ export function getCachedStorageItem(key: string): { found: boolean; value?: unk
 
 /** Update related settings and content in one transaction, without replacing other apps' data. */
 export async function setStorageItemsAtomically(values: Record<string, unknown>): Promise<void> {
+  const scopedValues = Object.fromEntries(Object.entries(values).map(([key, value]) => [resolvedStorageKey(key), value]));
   await initializeDbStorage();
-  const entries = Object.entries(values);
+  const entries = Object.entries(scopedValues);
   const database = await openDatabase();
   if (database) {
     const transaction = database.transaction(STORE_NAME, 'readwrite');
@@ -236,6 +257,7 @@ export async function setStorageItemsAtomically(values: Record<string, unknown>)
 }
 
 export function setCachedStorageItem(key: string, value: unknown): void {
+  key = resolvedStorageKey(key);
   memoryCache.set(key, value);
   void setStorageItem(key, value).catch((error: unknown) => {
     console.error(`Could not persist storage key "${key}".`, error);
@@ -243,6 +265,7 @@ export function setCachedStorageItem(key: string, value: unknown): void {
 }
 
 export function removeCachedStorageItem(key: string): void {
+  key = resolvedStorageKey(key);
   memoryCache.delete(key);
   void removeStorageItem(key).catch((error: unknown) => {
     console.error(`Could not remove storage key "${key}".`, error);
@@ -260,6 +283,7 @@ export function getAllCachedStorageItems(): Record<string, string> {
 export async function clearDbStorage(): Promise<void> {
   await initializeDbStorage();
   memoryCache.clear();
+  personaRecordSpace = undefined;
   window.localStorage.clear();
   const database = await openDatabase();
   if (!database) return;
@@ -274,10 +298,12 @@ export async function clearDbStorage(): Promise<void> {
 export async function replaceDbStorage(values: Record<string, unknown>): Promise<void> {
   await initializeDbStorage();
   memoryCache.clear();
+  personaRecordSpace = undefined;
   window.localStorage.clear();
   const database = await openDatabase();
   if (!database) {
-    Object.entries(values).forEach(([key, value]) => {
+    Object.entries(values).forEach(([key, rawValue]) => {
+      const value = typeof rawValue === 'string' ? parseLocalStorageValue(rawValue) : rawValue;
       memoryCache.set(key, value);
       window.localStorage.setItem(key, JSON.stringify(value));
     });
