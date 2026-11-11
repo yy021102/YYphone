@@ -20,7 +20,6 @@
 .home-system-dock[data-dock-style="halloween"] .home-system-icon { width:42px;height:42px;border-radius:14px;background:#473747;border-color:#705363;box-shadow:inset 0 0 0 3px #3a2e3e; }
 .home-system-dock[data-dock-style="halloween"] .home-system-glyph { width:22px;height:22px;stroke-width:1.6; }
 .home-system-dock[data-dock-style="halloween"] .home-system-name { font-size:calc(10px * var(--font-scale,1)); }
-.home-system-dock .home-system-icon.has-custom-icon { background:transparent;border:0;box-shadow:none; }
 /* The second page has horizontal padding; cancel it so both docks share the same bounds. */
 .leisure-home > .home-system-dock { margin-left:0;margin-right:0; }
 .leisure-home > .home-system-dock[data-dock-style="minimal"] { margin-left:-16px;margin-right:-16px; }

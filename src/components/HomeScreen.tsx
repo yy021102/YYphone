@@ -134,8 +134,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       className="flex flex-col items-center justify-center group cursor-pointer active:scale-92 transition-transform p-1 w-full"
     >
       <div className="relative">
-        <div className={`w-[clamp(44px,12.5vw,62px)] h-[clamp(44px,12.5vw,62px)] rounded-[clamp(14px,3.6vw,20px)] shadow-[0_4px_16px_rgba(180,210,230,0.35)] flex items-center justify-center relative overflow-hidden transition-all group-hover:shadow-[0_8px_24px_rgba(180,210,230,0.5)] ${
-          appIcons[app.id] ? 'home-custom-icon' : 'home-default-icon ' + 'bg-white/50 backdrop-blur-xl border border-white/80 group-hover:bg-white/70'
+        <div className={`w-[clamp(44px,12.5vw,62px)] h-[clamp(44px,12.5vw,62px)] rounded-[clamp(14px,3.6vw,20px)] shadow-[0_4px_16px_rgba(180,210,230,0.35)] flex items-center justify-center relative overflow-hidden transition-all group-hover:shadow-[0_8px_24px_rgba(180,210,230,0.5)] bg-white/50 backdrop-blur-xl border border-white/80 group-hover:bg-white/70 ${
+          appIcons[app.id] ? 'home-custom-icon' : 'home-default-icon'
         }`}>
           {appIcons[app.id] ? (
             <img src={appIcons[app.id]} alt="" className="absolute inset-0 h-full w-full object-cover" />

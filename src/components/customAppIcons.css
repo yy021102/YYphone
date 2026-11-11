@@ -1,5 +1,4 @@
-/* Uploaded artwork supplies its own shape and alpha in every desktop theme. */
-.home-custom-icon.home-custom-icon {
+[data-transparent-app-icons] .home-custom-icon.home-custom-icon {
   background: transparent !important;
   border: 0 !important;
   border-radius: 0 !important;
@@ -7,7 +6,10 @@
   backdrop-filter: none !important;
   overflow: visible;
 }
-.home-custom-icon.home-custom-icon > img {
+[data-transparent-app-icons] .home-custom-icon.home-custom-icon > img {
   object-fit: contain !important;
   border-radius: 0 !important;
+}
+.home-custom-icon > img {
+  border-radius: inherit;
 }

@@ -124,6 +124,7 @@ export interface BeautySettings {
   wallpaperId: string;
   wallpapers: CustomWallpapers;
   appIcons: AppIconOverrides;
+  transparentAppIcons?: boolean;
   homeAppearance?: HomeAppearance;
   lockScreenAppearance?: LockScreenAppearance;
 }

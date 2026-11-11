@@ -77,6 +77,7 @@ const DEFAULT_BEAUTY_SETTINGS: BeautySettings = {
     homeScreen: '',
   },
   appIcons: {},
+  transparentAppIcons: false,
 };
 
 const DEFAULT_LOCK_SETTINGS: LockSettings = { mode: 'none', password: '' };
@@ -105,6 +106,7 @@ const isBeautySettings = (value: unknown): value is BeautySettings => {
     !!settings.appIcons &&
     typeof settings.appIcons === 'object' &&
     Object.values(settings.appIcons).every((url) => typeof url === 'string') &&
+    (settings.transparentAppIcons === undefined || typeof settings.transparentAppIcons === 'boolean') &&
     (settings.homeAppearance === undefined || isHomeAppearance(settings.homeAppearance)) &&
     (settings.lockScreenAppearance === undefined || isLockScreenAppearance(settings.lockScreenAppearance))
   );
@@ -605,8 +607,8 @@ export default function App() {
   const handleSaveCustomWallpapers = (wallpapers: CustomWallpapers): boolean =>
     handleSaveBeautySettings({ ...beautySettings, wallpapers });
 
-  const handleSaveAppIcons = (appIcons: BeautySettings['appIcons']): boolean =>
-    handleSaveBeautySettings({ ...beautySettings, appIcons });
+  const handleSaveAppIcons = (appIcons: BeautySettings['appIcons'], transparentAppIcons: boolean): boolean =>
+    handleSaveBeautySettings({ ...beautySettings, appIcons, transparentAppIcons });
 
   const handleSelectTheme = (themeId: string): boolean => {
     return handleSaveBeautySettings({ ...beautySettings, themeId });
@@ -660,6 +662,7 @@ export default function App() {
       */}
       <div
         data-phone-canvas
+        data-transparent-app-icons={beautySettings.transparentAppIcons ? '' : undefined}
         data-home-wallpaper={beautySettings.wallpapers.homeScreen ? '' : undefined}
         data-desktop-color={!activeApp && !isLocked && beautySettings.desktopAppearance?.textColor ? '' : undefined}
         data-desktop-panels={!activeApp && !isLocked && beautySettings.desktopAppearance?.panelOpacity !== undefined ? '' : undefined}

@@ -29,7 +29,6 @@
 .moonlit-home .minimal-app-glyph { color:#a18eb3; width:24px; height:24px; stroke-width:1.4; filter:drop-shadow(0 1px 0 #fff); }
 .moonlit-home .minimal-app:nth-child(3n+2) .minimal-app-glyph { color:#b68caa; }
 .moonlit-home .minimal-app:nth-child(3n) .minimal-app-glyph { color:#8ca0b8; }
-.moonlit-home .minimal-app-tile.has-custom-icon { background:transparent; border:0; box-shadow:none; }
 .moonlit-home .minimal-music { order:5; margin-top:24px; border:1px solid #fff9; border-radius:16px; background:#ffffff40; box-shadow:0 4px 14px #9e8bae0a; padding:0 13px; }
 .moonlit-home .minimal-music summary { color:#aa91b3; padding:13px 0; }
 .moonlit-home .minimal-music-indicator { color:#b1a0bc; }

@@ -45,7 +45,6 @@
 .hw-market-app-icon { position:relative; flex-shrink:0; display:grid; place-items:center; width:39px; height:45px; border:1px solid #f3e5cb94; border-radius:20px 20px 7px 7px; background:linear-gradient(135deg,#e8d1b9,#cdb6c5); color:#775a75; box-shadow:0 4px 8px #1f152829,inset 0 0 0 3px #fff5e31c; }
 .hw-market-glyph { width:20px; height:20px; stroke-width:1.45; }
 .hw-market-app-icon img { width:100%; height:100%; object-fit:cover; border-radius:inherit; }
-.hw-market-app.has-custom-icon .hw-market-app-icon { border:0; background:transparent; box-shadow:none; }
 .hw-market-badge { position:absolute; right:-3px; top:-4px; font-size:8px; color:#443145; background:#e6b69c; border:1px solid #f5d4b6; min-width:14px; line-height:13px; padding:0 3px; border-radius:9px; text-align:center; }
 .hw-market-tools .hw-market-app { flex-direction:column; gap:5px; font-size:8px; text-align:center; padding:6px 0; }
 .hw-market-tools .hw-market-app-icon { width:27px; height:27px; color:#d0b7ca; background:transparent; border:0; box-shadow:none; border-radius:8px; }
@@ -56,7 +55,6 @@
 .hw-market-shelves .hw-market-app:nth-child(4n+2) .hw-market-app-icon { transform:rotate(5deg); background:linear-gradient(145deg,#c9b7d6,#b8a8cd); border-radius:13px 13px 6px 6px; }
 .hw-market-shelves .hw-market-app:nth-child(4n+3) .hw-market-app-icon { transform:rotate(-5deg); background:linear-gradient(145deg,#d7c9b8,#b5c2bb); border-radius:13px 13px 6px 6px; }
 .hw-market-shelves .hw-market-app:nth-child(4n) .hw-market-app-icon { background:linear-gradient(145deg,#e5bfa9,#c6a7b3); }
-.hw-market-shelves .hw-market-app.has-custom-icon .hw-market-app-icon { background:transparent; transform:none; }
 .hw-market-app:active .hw-market-app-icon { scale:.93; }
 .hw-market-music { margin-top:20px; border-top:1px dashed #cfb3c333; border-bottom:1px dashed #cfb3c333; }
 .hw-market-music > summary { display:flex; justify-content:space-between; align-items:center; cursor:pointer; list-style:none; padding:12px 3px; font-size:10px; color:#dec3ce; }

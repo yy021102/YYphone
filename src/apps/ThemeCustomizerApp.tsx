@@ -42,7 +42,7 @@ interface ThemeCustomizerAppProps {
   customWallpapers: CustomWallpapers;
   onSaveCustomWallpapers: (wallpapers: CustomWallpapers) => boolean;
   appIcons: AppIconOverrides;
-  onSaveAppIcons: (appIcons: AppIconOverrides) => boolean;
+  onSaveAppIcons: (appIcons: AppIconOverrides, transparentAppIcons: boolean) => boolean;
   onApplyPreset: (settings: BeautySettings) => boolean;
   currentSettings: BeautySettings;
 }
@@ -68,6 +68,7 @@ const isBeautySettings = (value: unknown): value is BeautySettings => {
     Object.entries(settings.appIcons).every(
       ([id, url]) => (id === 'little-p' || id === 'games' || ALL_APPS.some((app) => app.id === id)) && typeof url === 'string'
     ) &&
+    (settings.transparentAppIcons === undefined || typeof settings.transparentAppIcons === 'boolean') &&
     (settings.homeAppearance === undefined || isHomeAppearance(settings.homeAppearance)) &&
     (settings.lockScreenAppearance === undefined || isLockScreenAppearance(settings.lockScreenAppearance))
   );
@@ -110,6 +111,7 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
     return () => window.removeEventListener(HALLOWEEN_CHANGE, refresh);
   }, []);
   const [iconDraft, setIconDraft] = useState<AppIconOverrides>(appIcons);
+  const [transparentIconsDraft, setTransparentIconsDraft] = useState(currentSettings.transparentAppIcons ?? false);
   const [lockAppearanceDraft, setLockAppearanceDraft] = useState(currentSettings.lockScreenAppearance ?? DEFAULT_LOCK_APPEARANCE);
   const [presets, setPresets] = useState(() =>
     readSetting(SETTINGS_KEYS.beautyPresets, DEFAULT_PRESETS, isBeautyPresetList)
@@ -125,6 +127,7 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
     ...normalizeWallpaper(currentSettings),
     wallpapers: wallpaperDraft,
     appIcons: iconDraft,
+    transparentAppIcons: transparentIconsDraft,
     lockScreenAppearance: lockAppearanceDraft,
   };
 
@@ -135,6 +138,9 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
   useEffect(() => {
     setIconDraft(appIcons);
   }, [appIcons]);
+  useEffect(() => {
+    setTransparentIconsDraft(currentSettings.transparentAppIcons ?? false);
+  }, [currentSettings.transparentAppIcons]);
   useEffect(() => {
     setLockAppearanceDraft(currentSettings.lockScreenAppearance ?? DEFAULT_LOCK_APPEARANCE);
   }, [currentSettings.lockScreenAppearance]);
@@ -532,8 +538,18 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
           </summary>
           <div className="mt-3 space-y-2.5">
             <p className="px-1 text-[10px] text-slate-500">
-              支持图片链接和本地图片。透明素材完整显示，不添加底色；清除后恢复默认图标。
+              支持图片链接和本地图片；清除后恢复默认图标。
             </p>
+            <label className="flex items-center justify-between gap-3 rounded-2xl border border-white/80 bg-white/55 p-3">
+              <span className="text-[11px] text-[#2C4A5C]">
+                <span className="block font-semibold">启用透明底图标</span>
+                <span className="mt-1 block text-[10px] text-slate-500">开启后完整显示素材且不添加底色；关闭后裁切成默认图标形状。</span>
+              </span>
+              <input type="checkbox" role="switch" aria-label="启用透明底图标"
+                checked={transparentIconsDraft}
+                onChange={(event) => { setTransparentIconsDraft(event.target.checked); clearFeedback(); }}
+                className="h-4 w-4 shrink-0 accent-sky-600" />
+            </label>
             <div className="space-y-2">
               {[...ALL_APPS, { id: 'little-p' as const, name: '小P' }].map((app) => (
                 <div key={app.id} className="glass-card rounded-2xl p-3 space-y-2">
@@ -588,7 +604,7 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
             <button
               type="button"
               onClick={() => {
-                if (!onSaveAppIcons(iconDraft)) {
+                if (!onSaveAppIcons(iconDraft, transparentIconsDraft)) {
                   setError('图标保存失败，本地存储空间可能不足。');
                   return;
                 }

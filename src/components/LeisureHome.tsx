@@ -9,7 +9,7 @@ export function LeisureHome({ homeStyle = 'classic', appIcons, dockApps, onOpenA
 }) {
   const appButton = (app: AppMetadata) => <button type="button" key={app.id}
     className={`leisure-app${appIcons[app.id] ? ' has-custom-icon' : ''}`} onClick={() => onOpenApp(app.id)}>
-    <span className={`leisure-app-icon${appIcons[app.id] ? ' home-custom-icon' : homeStyle === 'classic' ? ` bg-gradient-to-br ${app.color}` : ''}`}>
+    <span className={`leisure-app-icon${appIcons[app.id] ? ' home-custom-icon' : ''}${homeStyle === 'classic' ? ` bg-gradient-to-br ${app.color}` : ''}`}>
       {appIcons[app.id] ? <img src={appIcons[app.id]} alt="" /> : renderIcon(app.iconName, `leisure-app-glyph ${homeStyle === 'classic' ? app.textColor ?? '' : ''}`)}
     </span><span>{app.name}</span>
   </button>;
