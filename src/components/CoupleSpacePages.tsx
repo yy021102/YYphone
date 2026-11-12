@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { BookHeart, CalendarDays, ChevronLeft, Heart, Inbox, Mail, MessageCircle, Pencil, Plus, Send, Sparkles, StickyNote, Trash2, X } from 'lucide-react';
 import { AppHeader } from './AppHeader';
+import { CoupleDateField } from './CoupleDateField';
 import type { CharacterCoupleSpace, DiaryEntry } from '../apps/CoupleSpaceApp';
 import { appendDiaryAnnotation, coupleRecordDate, diaryAnnotations, removeDiaryAnnotation, type CoupleRecordEdit } from '../utils/coupleRecords';
 import { localDateString } from '../utils/coupleSpaceData';
@@ -88,7 +89,7 @@ export function CoupleSpacePages({ page, space, user, character, busy, message, 
     <div className="couple-page-scroll" key={`${composing}-${diary?.id || question?.id || 'list'}`}>
       {message && <div className="couple-page-message" role="status"><span>{message}</span><button type="button" aria-label="关闭提示" onClick={onDismiss}><X size={14} /></button></div>}
       {composing ? <div className={`couple-page-compose ${page === 'sticky' ? 'is-stationery' : ''}`}>
-        {(page === 'anniversary' || page === 'diary') && <><input aria-label={page === 'anniversary' ? '纪念日名称' : '日记标题'} placeholder={page === 'anniversary' ? '纪念日名称' : '标题'} maxLength={80} value={title} onChange={event => setTitle(event.target.value)} /><input type="date" aria-label="记录日期" value={date} onChange={event => setDate(event.target.value)} /></>}
+        {(page === 'anniversary' || page === 'diary') && <><input aria-label={page === 'anniversary' ? '纪念日名称' : '日记标题'} placeholder={page === 'anniversary' ? '纪念日名称' : '标题'} maxLength={80} value={title} onChange={event => setTitle(event.target.value)} /><CoupleDateField value={date} onChange={setDate} /></>}
         {page === 'anniversary' ? <div className="couple-segment">{([['countdown', '倒数日'], ['elapsed', '正数日']] as const).map(([value, label]) => <button type="button" key={value} aria-pressed={anniversaryType === value} onClick={() => setAnniversaryType(value)}>{label}</button>)}</div>
           : <textarea aria-label={page === 'diary' ? '日记正文' : page === 'qa' ? '问题' : '便签内容'} placeholder={page === 'qa' ? '想问什么？' : '写点什么…'} rows={page === 'diary' ? 12 : 5} maxLength={page === 'diary' ? 10000 : page === 'qa' ? 1000 : 2000} value={content} onChange={event => setContent(event.target.value)} />}
         {page === 'sticky' && <div className="couple-note-colors">{colors.map((value, index) => <button type="button" key={value} aria-label={`便签颜色${index + 1}`} aria-pressed={value === color} style={{ backgroundColor: value }} onClick={() => setColor(value)} />)}</div>}

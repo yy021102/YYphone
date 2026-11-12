@@ -3,6 +3,7 @@ import { ChevronDown, Type } from 'lucide-react';
 import { DEFAULT_FONT_SETTINGS, FONT_FAMILIES, type FontSettings, normalizeFontUrl, readFontFile } from '../utils/fontSettings';
 import { setStorageItemsAtomically } from '../utils/dbStorage';
 import { SETTINGS_KEYS } from '../utils/settings';
+import { createFontPreset, FONT_PRESETS_KEY, readFontPresets } from '../utils/fontPresets';
 
 export function GlobalFontSettings({ fontSettings, onSaveFontSettings }: {
   fontSettings: FontSettings; onSaveFontSettings: (settings: FontSettings) => boolean;
@@ -10,13 +11,24 @@ export function GlobalFontSettings({ fontSettings, onSaveFontSettings }: {
   const [fontUrlDraft, setFontUrlDraft] = useState(fontSettings.url ?? '');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [presets, setPresets] = useState(readFontPresets);
+  const [presetName, setPresetName] = useState('');
+  const [selectedPreset, setSelectedPreset] = useState('');
+  const [status, setStatus] = useState('');
   const alive = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   useEffect(() => setFontUrlDraft(fontSettings.url ?? ''), [fontSettings.url]);
   const save = (settings: FontSettings) => {
     const saved = onSaveFontSettings(settings);
-    if (saved) setError('');
+    if (saved) { setError(''); setStatus(''); setSelectedPreset(''); }
     return saved;
+  };
+  const presetTask = async (task: () => Promise<void>) => {
+    if (busy) return;
+    setBusy(true); setError(''); setStatus('');
+    try { await task(); }
+    catch (cause) { if (alive.current) setError(cause instanceof Error ? cause.message : '字体预设保存失败，请重试。'); }
+    finally { if (alive.current) setBusy(false); }
   };
   return <>
         <details className="glass-card group rounded-2xl p-3 space-y-3">
@@ -56,7 +68,7 @@ export function GlobalFontSettings({ fontSettings, onSaveFontSettings }: {
                 // durable write so a storage failure leaves the current font intact.
                 await setStorageItemsAtomically({ [SETTINGS_KEYS.font]: next });
                 if (!onSaveFontSettings(next)) throw new Error('字体文件保存失败，请检查存储空间。');
-                if (alive.current) { setError(''); setFontUrlDraft(''); }
+                if (alive.current) { setError(''); setStatus(''); setSelectedPreset(''); setFontUrlDraft(''); }
               } catch (cause) { if (alive.current) setError(cause instanceof Error ? cause.message : '字体文件无法加载。'); }
               finally { if (alive.current) setBusy(false); }
             })();
@@ -101,10 +113,46 @@ export function GlobalFontSettings({ fontSettings, onSaveFontSettings }: {
             </select>
           </label>
           <p className="text-sm">预览：今天也要好好生活 Aa 123</p>
+          <section className="space-y-2 border-t border-white/80 pt-3" aria-label="字体预设">
+            <h4 className="text-xs font-semibold text-[#2C4A5C]">字体预设</h4>
+            <div className="flex min-w-0 gap-2">
+              <input aria-label="字体预设名称" maxLength={40} value={presetName} onChange={event => setPresetName(event.target.value)} placeholder="预设名称" className="min-w-0 flex-1 rounded-xl border border-white bg-white/70 px-3 py-2 text-xs" />
+              <button type="button" disabled={!presetName.trim()} className="shrink-0 rounded-xl bg-sky-100 px-3 py-2 text-xs font-semibold text-sky-700 disabled:opacity-40" onClick={() => void presetTask(async () => {
+                const current = readFontPresets();
+                const preset = createFontPreset(presetName, fontSettings, current);
+                const next = [...current, preset];
+                await setStorageItemsAtomically({ [FONT_PRESETS_KEY]: next });
+                if (alive.current) { setPresets(next); setSelectedPreset(preset.id); setPresetName(''); setStatus('字体预设已保存。'); }
+              })}>存为预设</button>
+            </div>
+            <div className="flex min-w-0 gap-2">
+              <select aria-label="选择字体预设" value={selectedPreset} className="min-w-0 flex-1 rounded-xl border border-white bg-white/70 px-3 py-2 text-xs" onChange={event => {
+                const id = event.target.value;
+                if (!id) { setSelectedPreset(''); return; }
+                void presetTask(async () => {
+                  const preset = readFontPresets().find(item => item.id === id);
+                  if (!preset) throw new Error('字体预设不存在，请重新打开字体设置。');
+                  await setStorageItemsAtomically({ [SETTINGS_KEYS.font]: preset.settings });
+                  if (!alive.current) return;
+                  if (!onSaveFontSettings(preset.settings)) throw new Error('字体预设应用失败，请重试。');
+                  setSelectedPreset(id); setFontUrlDraft(preset.settings.url ?? ''); setStatus(`已切换为「${preset.name}」。`);
+                });
+              }}>
+                <option value="">选择已保存的字体预设</option>
+                {presets.map(preset => <option key={preset.id} value={preset.id}>{preset.name}</option>)}
+              </select>
+              <button type="button" disabled={!selectedPreset} className="shrink-0 px-2 text-xs text-rose-500 disabled:opacity-40" onClick={() => void presetTask(async () => {
+                const next = readFontPresets().filter(item => item.id !== selectedPreset);
+                await setStorageItemsAtomically({ [FONT_PRESETS_KEY]: next });
+                if (alive.current) { setPresets(next); setSelectedPreset(''); setStatus('预设已删除，当前字体保留。'); }
+              })}>删除</button>
+            </div>
+          </section>
           <button type="button" className="text-xs font-semibold text-sky-600" onClick={() => {
             if (!save(DEFAULT_FONT_SETTINGS)) setError('全局字体恢复失败，请重试。');
             else setFontUrlDraft('');
           }}>恢复默认字体</button>
+          {status && <p role="status" className="text-xs text-sky-600">{status}</p>}
           </fieldset>
         </details>
 {error && <p role="alert" className="text-xs text-rose-500">{error}</p>}

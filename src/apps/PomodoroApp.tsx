@@ -49,7 +49,8 @@ import {
   TOTAL_GROWTH_DROPS,
 } from '../utils/plantData';
 import { requestConfiguredAiText } from '../utils/aiApi';
-import { readCharacterBrief } from '../utils/coupleSpaceData';
+import { localDateString, readCharacterBrief } from '../utils/coupleSpaceData';
+import { refreshDailyTasks } from '../utils/pomodoroTasks';
 import { upsertContextNote } from '../utils/chatNotes';
 import { generateFocusRank } from '../utils/pomodoroAi';
 
@@ -82,6 +83,8 @@ export interface PomoTask {
   restMinutes: number;
   completedCount: number;
   isDoneToday: boolean;
+  lastCompletedDate?: string;
+  endedAt?: string;
   bgImageUrl?: string;
 }
 
@@ -177,7 +180,7 @@ const DEFAULT_POMO_PRESET: PomoThemePreset = {
   customCss: '/* 可在此自定义番茄钟附加样式 */',
 };
 
-const todayDateStr = () => new Date().toISOString().slice(0, 10);
+const todayDateStr = () => localDateString();
 
 const POMODORO_STORAGE_KEYS = {
   tasks: 'yyphone:pomodoro-tasks',
@@ -204,7 +207,9 @@ const isTaskList = (value: unknown): value is PomoTask[] =>
     typeof item.focusMinutes === 'number' &&
     typeof item.restMinutes === 'number' &&
     typeof item.completedCount === 'number' &&
-    typeof item.isDoneToday === 'boolean'
+    typeof item.isDoneToday === 'boolean' &&
+    (item.lastCompletedDate === undefined || typeof item.lastCompletedDate === 'string') &&
+    (item.endedAt === undefined || typeof item.endedAt === 'string')
   );
 
 const isRecordList = (value: unknown): value is PomoSessionRecord[] =>
@@ -327,7 +332,8 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
 
   // ==================== 5. 任务列表状态 ====================
   const [taskFilter, setTaskFilter] = useState<'daily' | 'temp'>('daily');
-  const [tasks, setTasks] = useState<PomoTask[]>(() => readStoredValue(POMODORO_STORAGE_KEYS.tasks, [
+  const [taskDay, setTaskDay] = useState(todayDateStr);
+  const [tasks, setTasks] = useState<PomoTask[]>(() => refreshDailyTasks(readStoredValue(POMODORO_STORAGE_KEYS.tasks, [
     {
       id: 'task-1',
       title: '沉浸阅读 / 背单词 25 分钟',
@@ -346,7 +352,10 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
       completedCount: 0,
       isDoneToday: false,
     },
-  ], isTaskList));
+  ], isTaskList), readStoredValue(POMODORO_STORAGE_KEYS.records, [] as PomoSessionRecord[], isRecordList), todayDateStr()));
+  useEffect(() => {
+    setTasks(current => refreshDailyTasks(current, readStoredValue(POMODORO_STORAGE_KEYS.records, [] as PomoSessionRecord[], isRecordList), taskDay));
+  }, [taskDay]);
 
   const [showTaskModal, setShowTaskModal] = useState(false);
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
@@ -678,6 +687,7 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
     };
     const refresh = () => {
       try {
+        setTaskDay(todayDateStr());
         applyTimerSnapshot(processPomodoroDeadline());
       } catch (error) {
         console.error('Could not refresh the Pomodoro timer.', error);
@@ -705,7 +715,7 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
             : `专注完成，再累计专注 ${DEW_MINUTES - (latestGreenhouse.dewProgress ?? 0)} 分钟可得 1 滴露水。`
         );
         setRecords(readStoredValue(POMODORO_STORAGE_KEYS.records, [] as PomoSessionRecord[], isRecordList));
-        setTasks(readStoredValue(POMODORO_STORAGE_KEYS.tasks, [] as PomoTask[], isTaskList));
+        setTasks(refreshDailyTasks(readStoredValue(POMODORO_STORAGE_KEYS.tasks, [] as PomoTask[], isTaskList), readStoredValue(POMODORO_STORAGE_KEYS.records, [] as PomoSessionRecord[], isRecordList), todayDateStr()));
         setGreenhouse(latestGreenhouse);
       } else if (previousPhase === 'rest' && detail.snapshot.phase === 'focus') {
         setCompanionBubble('休息结束，可以开始下一轮专注。');
@@ -714,9 +724,13 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
     refresh();
     const interval = window.setInterval(refresh, 500);
     window.addEventListener('yyphone:pomodoro-runtime', handleRuntimeEvent);
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refresh);
     return () => {
       window.clearInterval(interval);
       window.removeEventListener('yyphone:pomodoro-runtime', handleRuntimeEvent);
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', refresh);
     };
   }, []);
 
@@ -980,6 +994,7 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
   };
 
   const handleSelectTaskToFocus = (task: PomoTask) => {
+    if (task.endedAt) return;
     const current = readPomodoroTimer();
     savePomodoroTimer({
       ...current,
@@ -1002,6 +1017,20 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
     setRemainingSeconds(task.focusMinutes * 60);
     setActiveTab('timer');
     setCompanionBubble(`已切换到任务「${task.title}」。`);
+  };
+
+  const toggleTaskEnded = (task: PomoTask) => {
+    const timer = readPomodoroTimer();
+    if (!task.endedAt && timer.activeTaskId === task.id && timer.isRunning) {
+      setNoticeBanner('请先暂停或结束当前专注，再结束这项计划。'); return;
+    }
+    if (!task.endedAt && timer.activeTaskId === task.id) {
+      savePomodoroTimer({ ...timer, activeTaskId: '' }); setActiveTaskId('');
+    }
+    const endedAt = task.endedAt ? undefined : new Date().toISOString();
+    setTasks(current => refreshDailyTasks(current.map(item => item.id === task.id ? { ...item, endedAt } : item), readStoredValue(POMODORO_STORAGE_KEYS.records, [] as PomoSessionRecord[], isRecordList), todayDateStr()));
+    setShowTaskModal(false);
+    setNoticeBanner(endedAt ? '计划已结束，记录会保留。' : '计划已重新启用。');
   };
 
   // ==================== 11. 角色专注排行榜生成与互动 ====================
@@ -1557,27 +1586,32 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
             <div className="space-y-2.5">
               {tasks
                 .filter((t) => t.category === taskFilter)
-                .map((task) => (
+                .sort((a, b) => Number(!!a.endedAt) - Number(!!b.endedAt))
+                .map((task, index, list) => (
+                  <React.Fragment key={task.id}>
+                  {task.endedAt && (index === 0 || !list[index - 1].endedAt) && <h4 className="px-1 pt-3 text-[11px] font-semibold text-slate-400">已结束</h4>}
                   <div
                     key={task.id}
+                    data-pomo-task-id={task.id}
+                    data-task-ended={!!task.endedAt}
                     style={{
-                      background: task.bgImageUrl
+                      background: task.endedAt ? '#eeeeF2' : task.bgImageUrl
                         ? `linear-gradient(rgba(255,255,255,0.78), rgba(255,255,255,0.78)), url(${task.bgImageUrl}) center / cover no-repeat`
                         : currentTheme.cardBg,
                       borderRadius: currentTheme.cardRadius,
                     }}
-                    className="backdrop-blur-xl border border-white/90 p-4 flex items-center justify-between gap-3 shadow-2xs"
+                    className={`backdrop-blur-xl border border-white/90 p-4 flex flex-col gap-3 shadow-2xs ${task.endedAt ? 'text-slate-400 grayscale opacity-75' : ''}`}
                   >
-                    <div className="min-w-0 flex-1 space-y-1">
+                    <div className="w-full min-w-0 space-y-1">
                       <div className="flex items-center gap-1.5">
                         <span className="text-xs font-extrabold truncate">{task.title}</span>
-                        {task.isDoneToday && (
+                        {task.endedAt ? <span className="shrink-0 rounded-full bg-slate-200 px-1.5 text-[9px] text-slate-500">已结束</span> : task.isDoneToday && (
                           <span className="text-[9px] bg-emerald-50 text-emerald-600 px-1.5 py-0.2 rounded-full font-bold shrink-0">
-                            ✓ 今日已打卡
+                            {task.category === 'daily' ? '✓ 今日已打卡' : '✓ 已完成'}
                           </span>
                         )}
                       </div>
-                      <div className="flex items-center gap-2 text-[10px] opacity-65">
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] opacity-65">
                         <span>🍅 专注 {task.focusMinutes} 分钟</span>
                         <span>·</span>
                         <span>☕ 休息 {task.restMinutes} 分钟</span>
@@ -1586,28 +1620,32 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-1.5 shrink-0">
+                    <div className="flex w-full items-center justify-end gap-1.5">
                       <button
+                        aria-label={`编辑任务：${task.title}`}
                         onClick={() => openEditTask(task)}
                         className="p-1.5 rounded-xl bg-white/80 text-slate-400 hover:text-sky-500 cursor-pointer"
                       >
                         <Pencil className="w-3.5 h-3.5" />
                       </button>
                       <button
+                        aria-label={`删除任务：${task.title}`}
                         onClick={() => setTasks((prev) => prev.filter((i) => i.id !== task.id))}
                         className="p-1.5 rounded-xl bg-white/80 text-slate-400 hover:text-rose-400 cursor-pointer"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
+                      {!task.endedAt && <button type="button" onClick={() => toggleTaskEnded(task)} className="rounded-xl bg-white/70 px-2.5 py-1.5 text-[11px] text-slate-400">结束计划</button>}
                       <button
-                        onClick={() => handleSelectTaskToFocus(task)}
-                        style={{ background: currentTheme.primaryGradient }}
+                        onClick={() => task.endedAt ? toggleTaskEnded(task) : handleSelectTaskToFocus(task)}
+                        style={{ background: task.endedAt ? '#c3c6ce' : currentTheme.primaryGradient }}
                         className="px-3 py-1.5 rounded-xl text-white text-[11px] font-bold cursor-pointer shadow-2xs"
                       >
-                        去专注
+                        {task.endedAt ? '重新启用' : '去专注'}
                       </button>
                     </div>
                   </div>
+                  </React.Fragment>
                 ))}
             </div>
           </div>
@@ -2148,12 +2186,13 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
       {/* ==================== 弹窗 3：新建 / 编辑任务弹窗 ==================== */}
       {showTaskModal && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-900/30 p-4 backdrop-blur-xs">
-          <div className="w-full max-w-sm bg-white/95 backdrop-blur-2xl border border-white rounded-3xl p-5 shadow-xl space-y-3 text-slate-700">
+          <div role="dialog" aria-label={editingTaskId ? '编辑任务' : '新建专注任务'} aria-modal="true" className="max-h-[90%] w-full max-w-sm overflow-y-auto bg-white/95 backdrop-blur-2xl border border-white rounded-3xl p-5 shadow-xl space-y-3 text-slate-700">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-extrabold">
                 {editingTaskId ? '编辑任务' : '新建专注任务'}
               </h3>
               <button
+                aria-label="关闭任务设置"
                 onClick={() => setShowTaskModal(false)}
                 className="w-7 h-7 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 cursor-pointer"
               >
@@ -2243,6 +2282,7 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
             >
               保存任务
             </button>
+            {editingTaskId && tasks.find(task => task.id === editingTaskId) && <button type="button" onClick={() => toggleTaskEnded(tasks.find(task => task.id === editingTaskId)!)} className="w-full py-2 text-xs text-slate-400">{tasks.find(task => task.id === editingTaskId)?.endedAt ? '重新启用计划' : '结束这项计划'}</button>}
           </div>
         </div>
       )}
@@ -2478,7 +2518,7 @@ export const PomodoroApp: React.FC<PomodoroAppProps> = ({ onBack }) => {
                       reader.onload = (ev) => {
                         try {
                           const data = JSON.parse(String(ev.target?.result));
-                          if (Array.isArray(data.tasks)) setTasks(data.tasks);
+                          if (isTaskList(data.tasks)) setTasks(refreshDailyTasks(data.tasks, isRecordList(data.records) ? data.records : records, todayDateStr()));
                           if (Array.isArray(data.records)) setRecords(data.records);
                           if (data.greenhouse) setGreenhouse(data.greenhouse);
                           if (Array.isArray(data.rankList)) setRankList(data.rankList);

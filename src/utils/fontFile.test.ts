@@ -3,6 +3,8 @@ import { beforeEach, test } from 'node:test';
 import { clearDbStorage, setStorageItemsAtomically } from './dbStorage';
 import { readFontFile, readFontSettings, MAX_FONT_BYTES } from './fontSettings';
 import { SETTINGS_KEYS } from './settings';
+import { createFontPreset, FONT_PRESETS_KEY, isFontPresetList, readFontPresets } from './fontPresets';
+import { personaStorageKey } from './personaStorage';
 
 const values = new Map<string, string>();
 Object.defineProperty(globalThis, 'window', { configurable: true, value: { localStorage: {
@@ -25,4 +27,31 @@ test('font imports reject empty, oversized or renamed non-font files before chan
   await assert.rejects(readFontFile(new File(['font'], 'wrong.txt')), /请选择/);
   await assert.rejects(readFontFile({ name: 'big.ttf', size: MAX_FONT_BYTES + 1 } as File), /30 MB/);
   assert.equal(readFontSettings().file, undefined);
+});
+
+test('font presets snapshot file, URL, family and size and survive switching and deletion', async () => {
+  const imported = await readFontFile(new File([Uint8Array.of(0, 1, 0, 0)], '本地.ttf'));
+  const settings = { family: 'rounded' as const, scale: 1.15, file: imported };
+  const local = createFontPreset(' 本地圆体 ', settings, []);
+  imported.name = '已修改.ttf';
+  assert.equal(local.settings.file?.name, '本地.ttf');
+  const online = createFontPreset('链接字体', { family: 'serif', scale: .9, url: 'https://example.com/font.woff2' }, [local]);
+  await setStorageItemsAtomically({ [FONT_PRESETS_KEY]: [local, online] });
+  assert.deepEqual(readFontPresets(), [local, online]);
+  for (const preset of readFontPresets()) {
+    await setStorageItemsAtomically({ [SETTINGS_KEYS.font]: preset.settings });
+    assert.deepEqual(readFontSettings(), preset.settings);
+  }
+  await setStorageItemsAtomically({ [FONT_PRESETS_KEY]: [local] });
+  assert.deepEqual(readFontSettings(), online.settings, 'deleting a library entry does not remove active font');
+  assert.equal(personaStorageKey(FONT_PRESETS_KEY, 'other-user'), FONT_PRESETS_KEY, 'font library stays shared across personas');
+});
+
+test('invalid or duplicate font presets cannot be saved', () => {
+  const preset = createFontPreset('默认', { family: 'system', scale: 1 }, []);
+  assert.throws(() => createFontPreset('默认', preset.settings, [preset]), /同名/);
+  assert.throws(() => createFontPreset('  ', preset.settings, []), /名称/);
+  assert.throws(() => createFontPreset('大字', { family: 'system', scale: 9 }, []), /设置无效/);
+  assert.equal(isFontPresetList([{ ...preset, settings: { family: 'system', scale: 1, file: { name: 'fake', dataUrl: 'javascript:alert(1)' } } }]), false);
+  assert.equal(isFontPresetList([preset, preset]), false);
 });

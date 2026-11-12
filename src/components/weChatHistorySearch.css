@@ -1,0 +1,23 @@
+.yy-chat-search { --search-surface:#fff; --search-ink:#333; --search-muted:#999; --search-line:#eee; background:var(--search-surface); color:var(--search-ink); text-align:left; }
+.yy-chat-search mark { background:transparent; color:#079b58; }
+.yy-search-summary { margin:0; padding:14px 16px 8px; color:var(--search-muted); font-size:12px; }
+.yy-search-conversation { display:flex; align-items:center; gap:12px; width:100%; padding:15px 16px; border-bottom:1px solid var(--search-line); text-align:left; }
+.yy-search-avatar { display:flex; align-items:center; justify-content:center; flex:0 0 40px; height:40px; overflow:hidden; border-radius:5px; background:#e6edf0; color:#788c9a; font-size:15px; }
+.yy-search-avatar img { width:100%; height:100%; object-fit:cover; }
+.yy-search-copy { flex:1; min-width:0; display:grid; gap:5px; }
+.yy-search-copy strong { font-size:14px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.yy-search-copy small { color:var(--search-muted); font-size:11px; }
+.yy-search-copy > span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--search-muted); font-size:12px; }
+.yy-search-conversation > svg { flex-shrink:0; color:var(--search-muted); }
+.yy-chat-search > header { display:flex; align-items:center; gap:8px; padding:14px 12px; border-bottom:1px solid var(--search-line); }
+.yy-chat-search > header button { padding:5px; flex-shrink:0; }
+.yy-chat-search > header strong { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; }
+.yy-chat-search > header > span { font-size:10px; color:var(--search-muted); }
+.yy-search-message { display:block; width:100%; padding:15px 16px; border-bottom:1px solid var(--search-line); text-align:left; }
+.yy-search-byline { display:flex; gap:10px; align-items:center; margin-bottom:8px; }
+.yy-search-byline strong { min-width:0; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; font-weight:600; }
+.yy-search-byline time { flex-shrink:0; color:var(--search-muted); font-size:10px; }
+.yy-search-excerpt { display:block; white-space:pre-wrap; overflow-wrap:anywhere; font-size:14px; line-height:1.6; }
+.yy-search-more,.yy-search-empty { display:block; width:100%; margin:0; padding:25px 12px; text-align:center; color:var(--search-muted); font-size:12px; }
+[data-wechat-theme=dark] .yy-chat-search { --search-surface:#1d1d1d; --search-ink:#ddd; --search-muted:#888; --search-line:#303030; }
+[data-search-highlight=true] { outline:2px solid #91c8aa; outline-offset:4px; border-radius:6px; scroll-margin-block:90px; }

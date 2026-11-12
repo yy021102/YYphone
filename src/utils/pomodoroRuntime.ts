@@ -24,6 +24,9 @@ interface StoredTask {
   title: string;
   completedCount: number;
   isDoneToday: boolean;
+  category?: 'daily' | 'temp';
+  lastCompletedDate?: string;
+  endedAt?: string;
 }
 
 interface StoredSession {
@@ -134,7 +137,7 @@ export function processPomodoroDeadline(now = Date.now()): PomodoroTimerSnapshot
       if (task) {
         writeStoredValue(POMODORO_TASKS_KEY, tasks.map((item) =>
           item.id === task.id
-            ? { ...item, completedCount: item.completedCount + 1, isDoneToday: true }
+            ? { ...item, completedCount: item.completedCount + 1, lastCompletedDate: localDate(completedAt), isDoneToday: !item.endedAt && (item.category !== 'daily' || localDate(completedAt) === localDate(new Date(now))) }
             : item
         ));
       }

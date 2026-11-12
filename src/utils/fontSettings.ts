@@ -33,8 +33,7 @@ export async function readFontFile(file: File): Promise<NonNullable<FontSettings
 
 export const DEFAULT_FONT_SETTINGS: FontSettings = { scale: 1, family: 'system' };
 
-export const readFontSettings = (): FontSettings =>
-  readSetting(SETTINGS_KEYS.font, DEFAULT_FONT_SETTINGS, (value): value is FontSettings => {
+export const isFontSettings = (value: unknown): value is FontSettings => {
     if (!value || typeof value !== 'object') return false;
     const settings = value as Partial<FontSettings>;
     return typeof settings.scale === 'number' && Number.isFinite(settings.scale) &&
@@ -42,7 +41,10 @@ export const readFontSettings = (): FontSettings =>
       typeof settings.family === 'string' && Object.hasOwn(FONT_FAMILIES, settings.family) &&
       (settings.file === undefined || isFontFile(settings.file)) && (settings.url === undefined || (typeof settings.url === 'string' &&
         (!settings.url || /^https?:\/\//i.test(settings.url))));
-  });
+  };
+
+export const readFontSettings = (): FontSettings =>
+  readSetting(SETTINGS_KEYS.font, DEFAULT_FONT_SETTINGS, isFontSettings);
 
 export const normalizeFontUrl = (input: string): string => {
   if (!input.trim()) return '';

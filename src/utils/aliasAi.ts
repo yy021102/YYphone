@@ -1,5 +1,6 @@
 import { chatReplyPacing, CHAT_THOUGHT_STYLE } from './chatReplyPacing';
 import { requestConfiguredAiText } from './aiApi';
+import { buildChatRegexPrompt } from './chatRegex';
 import { activeMemoryArchive, guardMemoryArchive } from './memoryArchives';
 import { readMemories } from './memoryData';
 import { getWorldBookEntriesForContacts } from './worldBookPrompt';
@@ -117,7 +118,7 @@ export async function generateAliasReply(id: string, signal?: AbortSignal): Prom
     if (!thread || thread.status !== 'accepted' || thread.blocked || thread.removedByCharacterAt) throw new Error('当前不能生成此账号的回复。');
     const assertCurrent = guardThread(thread);
     const ownDisguise = thread.characterAccountId !== 'main';
-    const references = identityReferences(thread.charId), prompt = buildAliasPrompt(thread);
+    const references = identityReferences(thread.charId), prompt = [buildAliasPrompt(thread), buildChatRegexPrompt()].filter(Boolean).join('\n\n');
     const allowDelete = !ownDisguise && thread.userAccountId !== 'main' && thread.requester === 'user';
     const task = `接续当前账号对话。${chatReplyPacing({ min: 1, max: 5 })}${thread.messages.at(-1)?.from !== 'user' ? '对方没有新发言，你可以继续当前话题或自然主动开口，不虚构对方刚刚说过话。' : '回应对方最新的话。'}只返回 {"reply":["短句"],"thought":"第一人称独立心声，必须非空","identityEvidence":[]${ownDisguise ? ',"revealSelf":false' : ''}}。想分享画面时，可以把对应一条写成 {"kind":"image","text":"具体图片描述"}，这是文字图，不编造图片URL，不必每轮发图。${allowDelete ? '你可以依照人设、关系与真实互动决定是否删除当前聊天的联系人，例如被冒犯、被持续打扰或确实不愿继续来往；不因普通闲聊或单纯陌生就机械删除，不影响主号好友关系。不删除时省略动作；确实决定删除时返回 "deleteContact":true，心声中说明你的真实想法，可以先说一句告别，也可以静默删除（此时reply可为空数组）。这是只删除当前小号的好友关系，不清空聊天记录。' : '本轮禁止deleteContact，不操作其他账号的好友关系。'}${ownDisguise ? 'revealSelf只有当你在本轮消息中明确坦白自己真实身份时才为true，不强制坦白。' : '你不能修改或确认对方真实身份。只有具体独家记忆或独特口头禅才能怀疑，identityEvidence填写最多3项 {"messageId":"当前对方消息ID","quote":"该消息的线索原话","referenceQuote":"你已知道的对应细节原话","kind":"shared-memory或signature-phrase"}；必须来自实际记录，否则保持空数组，台词和心声都不凭空说对方熟悉或猜身份。'}`;
     let result: Record<string, any> = {}, evidence: AliasIdentityEvidence[] = [], parts: Array<{ kind: 'text' | 'image'; text: string }> = [], thought = '', problem = '';

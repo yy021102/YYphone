@@ -543,6 +543,9 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [tempProfile, setTempProfile] = useState<PlayerForumProfile>(currentProfile);
   const [editingAltAccountId, setEditingAltAccountId] = useState<string | null>(null);
+  const [creatingAltAccount, setCreatingAltAccount] = useState(false);
+  const [profileError, setProfileError] = useState('');
+  const profileEditSession = useRef(0);
 
   // 转发帖子给微信角色弹窗
   const [forwardingPost, setForwardingPost] = useState<ForumPost | null>(null);
@@ -592,6 +595,30 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
     setActivePlayerAccounts((previous) => ({ ...previous, [activeBoardId]: accountId }));
   };
 
+  const closeProfileModal = () => {
+    profileEditSession.current++;
+    setShowProfileModal(false);
+    setEditingAltAccountId(null);
+    setCreatingAltAccount(false);
+    setProfileError('');
+  };
+
+  useEffect(() => {
+    if (!showProfileModal) return;
+    const dismiss = (event: KeyboardEvent) => { if (event.key === 'Escape') { event.preventDefault(); closeProfileModal(); } };
+    window.addEventListener('keydown', dismiss);
+    return () => window.removeEventListener('keydown', dismiss);
+  }, [showProfileModal]);
+
+  const handleDeleteAltAccount = (accountId: string) => {
+    const account = (playerAccounts[activeBoardId] ?? []).find(item => item.id === accountId);
+    if (!account || !window.confirm(`删除论坛小号「${account.nickname}」？已发布的帖子和评论会保留。`)) return;
+    setPlayerAccounts(previous => ({ ...previous, [activeBoardId]: (previous[activeBoardId] ?? []).filter(item => item.id !== accountId) }));
+    setActivePlayerAccounts(previous => previous[activeBoardId] === accountId ? { ...previous, [activeBoardId]: '' } : previous);
+    closeProfileModal();
+    setNoticeBanner('小号已删除');
+  };
+
   const handleCreateAltAccount = () => {
     const account: PlayerForumAccount = {
       id: `alt-${Date.now()}-${randomHashId().toLowerCase()}`,
@@ -600,11 +627,10 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
       avatarUrl: '',
       bio: '',
     };
-    setPlayerAccounts((previous) => ({
-      ...previous,
-      [activeBoardId]: [...(previous[activeBoardId] ?? []), account],
-    }));
-    setActivePlayerAccounts((previous) => ({ ...previous, [activeBoardId]: account.id }));
+    // A new identity stays a draft until explicitly saved; cancelling creates nothing.
+    profileEditSession.current++;
+    setCreatingAltAccount(true);
+    setProfileError('');
     setEditingAltAccountId(account.id);
     setTempProfile(account);
     setShowProfileModal(true);
@@ -616,24 +642,29 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
     try {
       handleId = normalizeForumHandle(tempProfile.handleId);
     } catch (error) {
-      setNoticeBanner(error instanceof Error ? error.message : '论坛 ID 格式无效。');
+      setProfileError(error instanceof Error ? error.message : '论坛 ID 格式无效。');
       return;
     }
     if (!nickname || !handleId) {
-      setNoticeBanner('论坛昵称和账号 ID 不能为空。');
+      setProfileError('论坛昵称和账号 ID 不能为空。');
       return;
     }
     const savedProfile = { ...tempProfile, nickname, handleId, bio: tempProfile.bio.trim() };
     if (editingAltAccountId) {
+      if (!creatingAltAccount && !(playerAccounts[activeBoardId] ?? []).some(account => account.id === editingAltAccountId)) {
+        setProfileError('这个小号已不存在，请关闭后重新选择。'); return;
+      }
       setPlayerAccounts((previous) => ({
         ...previous,
-        [activeBoardId]: (previous[activeBoardId] ?? []).map((account) =>
-          account.id === editingAltAccountId ? { ...savedProfile, id: editingAltAccountId } : account),
+        [activeBoardId]: creatingAltAccount
+          ? [...(previous[activeBoardId] ?? []), { ...savedProfile, id: editingAltAccountId }]
+          : (previous[activeBoardId] ?? []).map((account) => account.id === editingAltAccountId ? { ...savedProfile, id: editingAltAccountId } : account),
       }));
+      if (creatingAltAccount) setActivePlayerAccounts(previous => ({ ...previous, [activeBoardId]: editingAltAccountId }));
     } else {
       setPlayerProfiles((previous) => ({ ...previous, [activeBoardId]: savedProfile }));
     }
-    setShowProfileModal(false);
+    closeProfileModal();
   };
 
   const handleLocalImageUpload = async (
@@ -1373,6 +1404,9 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
               </div>
               <button
                 onClick={() => {
+                  profileEditSession.current++;
+                  setCreatingAltAccount(false);
+                  setProfileError('');
                   setTempProfile(currentProfile);
                   setEditingAltAccountId(currentProfileIsAlt ? activePlayerAccount?.id ?? null : null);
                   setShowProfileModal(true);
@@ -1399,6 +1433,7 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
                 className="shrink-0 rounded-xl bg-sky-50 px-3 py-2 text-[10px] font-bold text-sky-600">
                 + 创建小号
               </button>
+              {activePlayerAccount && <button type="button" aria-label="删除当前论坛小号" onClick={() => handleDeleteAltAccount(activePlayerAccount.id)} className="shrink-0 rounded-xl bg-rose-50 px-2.5 py-2 text-rose-400"><Trash2 size={14} /></button>}
             </div>
           </div>
         ) : (
@@ -2158,11 +2193,12 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
 
       {/* ==================== 弹窗 3：非匿名论坛玩家个人资料设定 ==================== */}
       {showProfileModal && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-900/30 p-4 backdrop-blur-xs">
-          <div className="w-full max-w-sm bg-white/95 backdrop-blur-2xl border border-white rounded-3xl p-5 shadow-xl space-y-3 text-slate-700">
-            <h3 className="text-sm font-extrabold">
-              {editingAltAccountId ? '设置论坛小号' : `我在「${activeBoard.name}」的个人资料`}
-            </h3>
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-900/30 p-4 backdrop-blur-xs" onClick={event => { if (event.target === event.currentTarget) closeProfileModal(); }}>
+          <div role="dialog" aria-modal="true" aria-label={creatingAltAccount ? '创建论坛小号' : editingAltAccountId ? '设置论坛小号' : '论坛个人资料'} className="max-h-[90%] w-full max-w-sm overflow-y-auto bg-white/95 backdrop-blur-2xl border border-white rounded-3xl p-5 shadow-xl space-y-3 text-slate-700">
+            <header className="flex items-center justify-between gap-3">
+              <h3 className="text-sm font-extrabold">{creatingAltAccount ? '创建论坛小号' : editingAltAccountId ? '设置论坛小号' : `我在「${activeBoard.name}」的个人资料`}</h3>
+              <button type="button" aria-label="关闭论坛资料设置" onClick={closeProfileModal} className="shrink-0 p-1 text-slate-400"><X size={18} /></button>
+            </header>
             {editingAltAccountId && (
               <p className="text-[10px] leading-relaxed text-slate-500">
                 小号仅用于当前论坛板块。发帖和评论会以普通网友身份呈现，不会向角色标记为玩家本人。
@@ -2205,21 +2241,25 @@ export const ForumApp: React.FC<ForumAppProps> = ({ onBack }) => {
                   type="file"
                   accept="image/*"
                   className="hidden"
-                  onChange={(e) =>
-                    handleLocalImageUpload(e, (b64) =>
-                      setTempProfile({ ...tempProfile, avatarUrl: b64 })
-                    )
-                  }
+                  onChange={(e) => {
+                    const session = profileEditSession.current;
+                    void handleLocalImageUpload(e, b64 => { if (profileEditSession.current === session) setTempProfile(profile => ({ ...profile, avatarUrl: b64 })); });
+                  }}
                 />
               </label>
             </div>
-            <button
+            {profileError && <p role="alert" className="text-xs text-rose-500">{profileError}</p>}
+            <div className="flex gap-2">
+            <button type="button" onClick={closeProfileModal} className="rounded-2xl bg-slate-100 px-4 py-2.5 text-xs font-bold text-slate-500">取消</button>
+            <button type="button"
               onClick={handleSavePlayerProfile}
               style={{ background: currentTheme.primaryGradient }}
-              className="w-full py-2.5 rounded-2xl text-white text-xs font-bold cursor-pointer"
+              className="flex-1 py-2.5 rounded-2xl text-white text-xs font-bold cursor-pointer"
             >
-              保存资料
+              {creatingAltAccount ? '创建小号' : '保存资料'}
             </button>
+            </div>
+            {editingAltAccountId && !creatingAltAccount && <button type="button" onClick={() => handleDeleteAltAccount(editingAltAccountId)} className="w-full py-2 text-xs text-rose-400">删除此小号</button>}
           </div>
         </div>
       )}

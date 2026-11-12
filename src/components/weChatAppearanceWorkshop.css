@@ -19,6 +19,7 @@
 .workshop-card { min-width: 0; border: 1px solid var(--workshop-line); background: var(--workshop-card); border-radius: 19px; padding: 14px; display: flex; flex-direction: column; gap: 12px; }
 .workshop-card h3 { margin: 0; font-size: 12px; font-weight: 600; }
 .workshop-card-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.workshop-code-actions { display: flex; align-items: center; gap: 14px; }
 .workshop-card-heading button,.workshop-text-button { display: flex; align-items: center; gap: 4px; padding: 0; background: transparent; border: 0; color: var(--workshop-muted); font-size: 10px !important; }
 .workshop-card textarea { width: 100%; max-width: 100%; min-width: 0; resize: vertical; border: 1px solid #a6b3c82b; border-radius: 11px; padding: 10px; background: var(--workshop-input); color: var(--workshop-ink); font: 11px/1.8 Consolas,monospace; outline: none; tab-size: 2; }
 .workshop-card input:not([type=file]):not([type=range]):not([type=color]),.workshop-card select { width: 100%; min-width: 0; background: var(--workshop-input); color: var(--workshop-ink); border: 1px solid #a6b3c82b; border-radius: 10px; padding: 9px 10px; outline: none; font-size: 11px; }

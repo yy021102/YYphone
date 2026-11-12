@@ -50,3 +50,16 @@ test('invalid new settings are rejected and dark mode completely disables all cu
   assert.throws(() => compileChatAppearance({ ...a, bubbleMode: 'follow', bubbleOverride: { ...a.bubbleOverride!, userBubbleColor: '#bad' } }), /设置/);
   assert.equal(compileChatAppearance(a, true), '');
 });
+
+test('page, bubble and combination exports retain the matching preset name', () => {
+  let a = appearance();
+  a = { ...a, pagePresets: [{ id: 'page-a', name: 'a', ...captureChatPage(a) }], bubblePresets: [{ id: 'bubble-a', name: '气泡a', ...independentBubbles(a) }], presets: [{ id: 'all-a', name: '整套a', ...captureChatCombination(a) }] };
+  for (const part of ['page', 'bubbles', 'all'] as const) {
+    const expected = part === 'page' ? 'a' : part === 'bubbles' ? '气泡a' : '整套a';
+    const file = JSON.parse(JSON.stringify(exportChatAppearance(a, part)));
+    assert.equal(file.name, expected);
+    assert.equal(file.version, 1);
+  }
+  const changed = { ...a, backgroundUrl: 'different.png' };
+  assert.equal(exportChatAppearance(changed, 'page', 'page-a').name, undefined, 'changed style cannot borrow the selected preset name');
+});

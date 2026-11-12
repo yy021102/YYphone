@@ -1,7 +1,7 @@
 import { readStoredValue, writeStoredValue } from './localStorage';
 export const CHAT_REGEX_KEY = 'yyphone:chat-regex';
 export const CHAT_REGEX_EVENT = 'yyphone:chat-regex-change';
-export interface ChatRegexRule { id: string; name: string; enabled: boolean; pattern: string; flags: string; replacement: string; target: 'character' | 'user' | 'both'; interactive?: boolean }
+export interface ChatRegexRule { id: string; name: string; enabled: boolean; pattern: string; flags: string; replacement: string; target: 'character' | 'user' | 'both'; interactive?: boolean; testText?: string; prompt?: string; promptEnabled?: boolean }
 export interface ChatRegexSettings { enabled: boolean; rules: ChatRegexRule[] }
 export const EMPTY_CHAT_REGEX: ChatRegexSettings = { enabled: true, rules: [] };
 export const REGEX_EXAMPLE = {
@@ -23,8 +23,15 @@ export function validateChatRegex(value: unknown): ChatRegexSettings {
   const rules = v.rules.map(rule => {
     if (!rule || typeof rule.id !== 'string' || !rule.id || ids.has(rule.id) || typeof rule.name !== 'string' || !rule.name.trim() || rule.name.length > 80 || typeof rule.enabled !== 'boolean' || typeof rule.pattern !== 'string' || typeof rule.flags !== 'string' || typeof rule.replacement !== 'string' || !rule.replacement.trim() || rule.replacement.length > 40000 || !['character', 'user', 'both'].includes(rule.target)) throw new Error('规则名称、匹配表达式或 HTML 模板不完整。');
     if (rule.interactive !== undefined && typeof rule.interactive !== 'boolean') throw new Error('卡片交互开关格式无效。');
+    if (rule.testText !== undefined && (typeof rule.testText !== 'string' || rule.testText.length > 20000)) throw new Error('测试消息最多 20000 字符。');
+    if (rule.prompt !== undefined && (typeof rule.prompt !== 'string' || rule.prompt.length > 20000)) throw new Error('正则提示词最多 20000 字符。');
+    if (rule.promptEnabled !== undefined && typeof rule.promptEnabled !== 'boolean') throw new Error('提示词注入开关格式无效。');
     ids.add(rule.id); regexExpression(rule.pattern, rule.flags);
-    return { id: rule.id, name: rule.name.trim(), enabled: rule.enabled, pattern: rule.pattern, flags: rule.flags, replacement: rule.replacement, target: rule.target, ...(rule.interactive !== undefined ? { interactive: rule.interactive } : {}) };
+    return { id: rule.id, name: rule.name.trim(), enabled: rule.enabled, pattern: rule.pattern, flags: rule.flags, replacement: rule.replacement, target: rule.target, ...(rule.interactive !== undefined ? { interactive: rule.interactive } : {}),
+      ...(rule.testText !== undefined ? { testText: rule.testText } : {}),
+      ...(rule.prompt !== undefined ? { prompt: rule.prompt } : {}),
+      ...(rule.promptEnabled !== undefined ? { promptEnabled: rule.promptEnabled } : {}),
+    };
   });
   return { enabled: v.enabled, rules };
 }
@@ -35,6 +42,21 @@ export function readChatRegex(): ChatRegexSettings {
 export function saveChatRegex(value: ChatRegexSettings) {
   writeStoredValue(CHAT_REGEX_KEY, validateChatRegex(value));
   window.dispatchEvent(new Event(CHAT_REGEX_EVENT));
+}
+export function exportChatRegex(settings: ChatRegexSettings, ruleId?: string) {
+  const valid = validateChatRegex(settings);
+  const rules = ruleId === undefined ? valid.rules : valid.rules.filter(rule => rule.id === ruleId);
+  if (ruleId !== undefined && !rules.length) throw new Error('要导出的正则不存在。');
+  return { format: 'yyphone-chat-regex', version: 1, settings: { ...valid, rules } };
+}
+
+export function buildChatRegexPrompt(settings = readChatRegex()): string {
+  if (!settings.enabled) return '';
+  const rules = settings.rules.filter(rule => rule.enabled && rule.promptEnabled !== false && rule.prompt?.trim());
+  if (!rules.length) return '';
+  return ['【已启用正则的输出约定】以下是用户为 HTML 展示配置的消息格式与写作要求。根据约定在合适情境使用，不为了展示卡片每轮触发。保持本轮 JSON 回复协议：格式文本写在一条普通 text 消息内，不直接返回 HTML，也不把模板、测试消息或心声当作台词。',
+    ...rules.map(rule => `【${rule.name}】\n${rule.target === 'user' ? '该规则只美化用户消息，不据此代替用户发言。\n' : ''}${rule.prompt!.trim()}`),
+  ].join('\n\n');
 }
 export const escapeRegexHtml = (text: string) => text.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 const captureHtml = (text: string) => escapeRegexHtml(text).replace(/\r?\n/g, '<br>');

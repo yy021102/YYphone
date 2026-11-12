@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { AndroidFullscreenControl } from '../components/AndroidFullscreenControl';
 import { McpSettingsPanel } from '../components/McpSettingsPanel';
 import { GithubBackup } from '../components/GithubBackup';
+import { backupFilename } from '../utils/backupFilename';
 import { ApiModelPicker } from '../components/ApiModelPicker';
 import { ChatApiConnectionTest } from '../components/ChatApiConnectionTest';
 import { apiTemperature, apiMaxTokens } from '../utils/textApiConfig';
@@ -188,6 +189,9 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
   useErrorDialog(apiError, 'API 配置出错了');
   const [backupMessage, setBackupMessage] = useState('');
   const [backupError, setBackupError] = useState('');
+  const [backupDateNaming, setBackupDateNaming] = useState(() =>
+    readSetting(SETTINGS_KEYS.backupDateNaming, false, (value): value is boolean => typeof value === 'boolean')
+  );
   useErrorDialog(backupError, '备份出错了');
   const [statusBarError, setStatusBarError] = useState('');
   useErrorDialog(statusBarError);
@@ -402,15 +406,16 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
     try {
       await initializeDbStorage();
       const data = getAllCachedStorageItems();
+      const exportedAt = new Date();
       const content = JSON.stringify(
-        { format: 'yyphone-backup', version: 1, exportedAt: new Date().toISOString(), data },
+        { format: 'yyphone-backup', version: 1, exportedAt: exportedAt.toISOString(), data },
         null,
         2
       );
       const url = URL.createObjectURL(new Blob([content], { type: 'application/json' }));
       const anchor = document.createElement('a');
       anchor.href = url;
-      anchor.download = 'yyphone-backup.json';
+      anchor.download = backupFilename(backupDateNaming, exportedAt);
       anchor.click();
       window.setTimeout(() => URL.revokeObjectURL(url), 0);
       setBackupError('');
@@ -998,6 +1003,16 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
             <p className="text-[10px] text-slate-500 leading-relaxed">
               导出整机本地数据为 JSON 文件，或从备份文件恢复。导入会替换当前浏览器中的全部本地数据。
             </p>
+            <label className="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-white bg-white/60 px-3 py-2.5 text-xs text-[#2C4A5C]">
+              <span>本地备份文件名附加日期和时间</span>
+              <input aria-label="备份文件名附加日期和时间" type="checkbox" checked={backupDateNaming} onChange={event => {
+                try {
+                  saveSetting(SETTINGS_KEYS.backupDateNaming, event.target.checked);
+                  setBackupDateNaming(event.target.checked); setBackupError('');
+                } catch { setBackupError('备份命名设置保存失败，请重试。'); }
+              }} />
+            </label>
+            <p className="break-all text-[10px] text-slate-400">文件名：{backupDateNaming ? 'yyphone-backup-年-月-日_时-分-秒.json' : 'yyphone-backup.json'}</p>
             <div className="flex gap-2">
               <button
                 type="button"

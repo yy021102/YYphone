@@ -1,5 +1,7 @@
 export interface ReplyPacingRange { min: number; max: number }
 
+export const GROUP_TURN_TAKING = '【群聊消息顺序】直接构思一条正在发生的群聊时间线，不要先分别写完每人的整段回复再拼接。每写一条，重新判断谁会先接这句话；另一人可在话还没说完时插话，前一人稍后接着说，也可以转向第三人。多人有话时优先形成 A→B→A 或 A→B→C→A 这样的来回；避免惯性排成 A→A→B→B，尤其不要每位成员固定两句。这里的字母只是顺序说明，不输出到正文。交错必须有内容上的承接，例如一人提出疑问，另一人先反应，前者再解释；不要把已写好的连续发言硬打乱而让答案跑到问题前面。一人确需连续解释、别人离场或本轮只需一条时，保留自然顺序；不强求全员开口，不为交错增加条数。';
+
 /** Bounds are chosen by the player; the model chooses the actual count, never a random quota. */
 export function chatReplyPacing(range: ReplyPacingRange, group = false) {
   const quantity = range.min === range.max ? `恰好 ${range.min} 条` : `${range.min}～${range.max} 条`;

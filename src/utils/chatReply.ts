@@ -118,7 +118,7 @@ export const requestChatReply = async (
   api: ApiConnection,
   onUsage: (usage: { input: number; output: number }) => void,
   speakers?: ChatSpeakerContext,
-  options: { retryOnFormatError?: boolean; requireThought?: boolean; groupChat?: boolean; normalizeVoice?: boolean; signal?: AbortSignal; chatLanguage?: ChatLanguage; chineseThoughts?: boolean; phoneProxyTargets?: string[] } = {}
+  options: { retryOnFormatError?: boolean; requireThought?: boolean; groupChat?: boolean; normalizeVoice?: boolean; signal?: AbortSignal; chatLanguage?: ChatLanguage; chineseThoughts?: boolean; phoneProxyTargets?: string[]; validateResult?: (result: Record<string, unknown>) => void } = {}
 ): Promise<Record<string, unknown>> => {
   messages = withImageDescriptionRequest(messages);
   const languageInstructions = chatLanguageInstructions(options.chatLanguage);
@@ -144,6 +144,7 @@ export const requestChatReply = async (
       options.chatLanguage, options.chineseThoughts
     );
     validatePhoneProxyAcknowledgement(languageValidated, options.phoneProxyTargets ?? [], !!options.chatLanguage);
+    options.validateResult?.(languageValidated);
     const descriptions = validateImageDescriptions(languageValidated, imageTargets);
     return { result: languageValidated, descriptions };
   };
@@ -172,6 +173,7 @@ export const requestChatReply = async (
       content: [
         `【仅纠正上一份回复的格式】校验错误：${formatError}`,
         '上一份回复尚未展示，也未执行任何动作。请将其整理为本轮要求的完整 JSON 对象；保留可辨认的原意、心声、发言者及合法可选动作，不新增或重复动作，不改成纸条、日记或其他任务。若上一份为空，则按原聊天请求生成。',
+        ...(options.validateResult ? ['若错误指出台词已明确承诺本轮私聊却漏了动作，可补全该发送者原本承诺的私聊正文和动作字段，或去掉尚未履行的承诺；不创造新的发送意图、不更换发送者。'] : []),
         FORMAT_REMINDER,
       ].join('\n'),
     },

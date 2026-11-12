@@ -14,7 +14,7 @@ function Avatar({ name, url }: { name: string; url?: string }) {
 }
 const errorText = (error: unknown) => error instanceof Error ? error.message : '操作失败，请重试。';
 
-export function AliasChat({ thread, state, onBack, wallpaper, userColor, characterColor, timeZone, autoReplyOnEnter = false }: { thread: AliasThread; state: AliasState; onBack: () => void; wallpaper?: string; userColor: string; characterColor: string; timeZone?: string; autoReplyOnEnter?: boolean }) {
+export function AliasChat({ thread, state, onBack, wallpaper, userColor, characterColor, timeZone, autoReplyOnEnter = false, initialMessageId = '' }: { thread: AliasThread; state: AliasState; onBack: () => void; wallpaper?: string; userColor: string; characterColor: string; timeZone?: string; autoReplyOnEnter?: boolean; initialMessageId?: string }) {
   const [text, setText] = useState(''), [acting, setBusy] = useState(false), [localError, setError] = useState('');
   const generationKey = `alias-reply:${thread.id}`;
   const chatRegex = useChatRegex();
@@ -26,6 +26,7 @@ export function AliasChat({ thread, state, onBack, wallpaper, userColor, charact
   const [imageDraft, setImageDraft] = useState<string | null>(null), [imagePreview, setImagePreview] = useState<AliasMessage | null>(null);
   const [remembering, setRemembering] = useState<string[] | null>(null), [notice, setNotice] = useState('');
   const bottom = useRef<HTMLDivElement>(null), alive = useRef(true);
+  const initialJumpDone = useRef(false), lastHistoryLength = useRef(thread.messages.length);
   const press = useRef<ReturnType<typeof setTimeout> | null>(null), pressed = useRef(false);
   const pressStart = useRef({ x: 0, y: 0 });
   const peer = aliasPeer(thread, state), self = aliasSelf(thread, state);
@@ -34,7 +35,10 @@ export function AliasChat({ thread, state, onBack, wallpaper, userColor, charact
   useEffect(() => { alive.current = true; return () => { alive.current = false; stopPress(); }; }, []);
   useEffect(() => {
     const history = bottom.current?.parentElement;
-    history?.scrollTo({ top: history.scrollHeight });
+    const target = initialMessageId ? Array.from(history?.querySelectorAll<HTMLElement>('[data-message-id]') ?? []).find(element => element.dataset.messageId === initialMessageId) : undefined;
+    if (target && !initialJumpDone.current) { target.scrollIntoView({ block: 'center' }); initialJumpDone.current = true; }
+    else if (!initialMessageId || lastHistoryLength.current !== thread.messages.length) history?.scrollTo({ top: history.scrollHeight });
+    lastHistoryLength.current = thread.messages.length;
     if (thread.unread) { const next = readAliasState(); writeAliasState({ ...next, threads: next.threads.map(t => t.id === thread.id ? { ...t, unread: 0 } : t) }); }
   }, [thread.id, thread.messages.length, thread.unread]);
   const activity = useRef(0), working = useRef(false);
@@ -64,7 +68,7 @@ export function AliasChat({ thread, state, onBack, wallpaper, userColor, charact
       {thread.requestReply && <p className="alias-chat-notice">{thread.requestReply}</p>}
       {thread.messages.map((m, index) => <Fragment key={m.id}>
         {shouldShowTimestamp(thread.messages[index - 1]?.createdAt || thread.createdAt, m.createdAt) && timestamp(m.createdAt, `time-${m.id}`)}
-        {m.from === 'system' ? <p className="alias-chat-notice">{m.text}{m.thought && <button type="button" className="alias-system-thought" onClick={() => setThought(m.thought!)}>心声</button>}</p> : <div data-message-id={m.id} className={`yy-chat-message-row alias-message ${m.from === 'user' ? 'is-user' : 'is-character'}`}>
+        {m.from === 'system' ? <p className="alias-chat-notice">{m.text}{m.thought && <button type="button" className="alias-system-thought" onClick={() => setThought(m.thought!)}>心声</button>}</p> : <div data-message-id={m.id} data-search-highlight={initialMessageId === m.id ? 'true' : undefined} className={`yy-chat-message-row alias-message ${m.from === 'user' ? 'is-user' : 'is-character'}`}>
         {m.from === 'character' ? <button type="button" className="alias-avatar-button" aria-label={`查看${peer.name}的心声`} onClick={() => { setExtras(''); setMessageMenu(''); setThought(aliasRoundThought(m, thread.messages) || '这轮消息没有记录角色心声。'); }}><Avatar name={peer.name} url={peer.avatarUrl} /></button> : <Avatar name={self.name} url={self.avatarUrl} />}
         <div className="yy-chat-message-content">
           <div role="button" tabIndex={0} aria-label={m.kind === 'image' ? '查看文字图' : `${m.from === 'user' ? '我' : peer.name}的消息：${m.text.slice(0, 30)}`} className={`yy-chat-message-bubble ${m.kind === 'image' ? 'alias-message-image' : 'is-plain'} ${m.from === 'user' ? 'is-user' : 'is-character'}`}

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { X } from 'lucide-react';
 import type { CoupleRecordEdit } from '../utils/coupleRecords';
+import { CoupleDateField } from './CoupleDateField';
 
 interface Props {
   initial: CoupleRecordEdit;
@@ -32,7 +33,7 @@ export const CoupleRecordEditor: React.FC<Props> = ({ initial, onSave, onClose, 
           <h3 className="text-sm font-bold text-slate-700">编辑情侣空间记录</h3>
           <button type="button" onClick={onClose} aria-label="关闭记录编辑"><X className="h-4 w-4 text-slate-500" /></button>
         </header>
-        {field('记录日期', draft.date, (date) => setDraft({ ...draft, date }), 'date')}
+        <CoupleDateField value={draft.date} onChange={date => setDraft({ ...draft, date })} />
         {draft.kind === 'mood' && (
           <>
             <label className="block text-xs text-slate-600">

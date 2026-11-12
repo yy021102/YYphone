@@ -5,6 +5,7 @@ export const SETTINGS_KEYS = {
   userProfile: 'pocketos:user-profile',
   beauty: 'yyphone:beauty-settings',
   font: 'yyphone:font-settings',
+  backupDateNaming: 'yyphone:backup-date-naming',
   chatRuntime: 'yyphone:chat-runtime',
   lock: 'yyphone:lock-settings',
   statusBarVisible: 'yyphone:show-status-bar',

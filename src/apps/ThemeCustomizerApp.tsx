@@ -27,7 +27,8 @@ import {
 } from '../types';
 import { compressImageFile, compressWallpaper } from '../utils/imageFile';
 import { readSetting, saveSetting, SETTINGS_KEYS } from '../utils/settings';
-import { isHomeAppearance, isDesktopAppearance, portableHomeBeauty } from '../utils/homeAppearance';
+import { isHomeAppearance, isDesktopAppearance, portableHomeBeauty, homeBeautyPresetName } from '../utils/homeAppearance';
+import { appearanceFilename } from '../utils/appearanceName';
 import { DEFAULT_LOCK_APPEARANCE, isLockScreenAppearance } from '../utils/lockAppearance';
 import { isFreeDesktopLayout } from '../utils/freeDesktop';
 
@@ -285,10 +286,11 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
   };
 
   const handleExport = () => {
+    const name = homeBeautyPresetName(normalizeWallpaper(currentSettings), presets, selectedPresetId);
     const exportPresets: BeautyPreset[] = [
       {
         id: 'current-design',
-        name: '当前搭配',
+        name: name || '当前搭配',
         settings: portableHomeBeauty(normalizeWallpaper(currentSettings)),
       },
     ];
@@ -300,7 +302,7 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
     const url = URL.createObjectURL(new Blob([content], { type: 'application/json' }));
     const anchor = document.createElement('a');
     anchor.href = url;
-    anchor.download = 'yyphone-beauty.json';
+    anchor.download = appearanceFilename('yyphone-beauty', name);
     anchor.click();
     URL.revokeObjectURL(url);
     setStatus('当前已应用的美化已导出为 JSON 文件，不包含其他预设或未保存修改。');

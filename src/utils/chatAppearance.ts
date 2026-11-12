@@ -1,5 +1,6 @@
 import { isAvatarFrame, type AvatarFrameStyle } from './avatarFrame';
 import { compileWeChatTheme, DEFAULT_WECHAT_THEME_CSS } from './wechatTheme';
+import { sameAppearance } from './appearanceName';
 
 export interface BubbleStyle {
   css: string; userBubbleColor: string; characterBubbleColor: string;
@@ -161,16 +162,23 @@ export function compileChatAppearance(a: ChatAppearance, dark = false): string {
 }
 
 export type AppearancePart = 'page' | 'bubbles' | 'all';
-export function exportChatAppearance(a: ChatAppearance, part: AppearancePart) {
+export function exportChatAppearance(a: ChatAppearance, part: AppearancePart, preferredId = '') {
+  const matches = part === 'bubbles'
+    ? (a.bubblePresets ?? []).filter(preset => sameAppearance(independentBubbles(applyBubblePreset(a, preset)), independentBubbles(a)))
+    : (part === 'page' ? a.pagePresets ?? [] : a.presets).filter(preset => sameAppearance(
+      part === 'page' ? captureChatPage(applyChatPage(a, preset)) : captureChatCombination(applyChatCombination(a, preset)),
+      part === 'page' ? captureChatPage(a) : captureChatCombination(a)));
+  const name = (matches.find(preset => preset.id === preferredId) ?? matches[0])?.name;
   if (part === 'bubbles') {
     if (a.bubbleMode !== 'custom') throw new Error('请先选择独立气泡，再导出气泡预设。');
-    const bubbleStyle = independentBubbles(a); return { format: 'yyphone-chat-bubble-css', version: 1, bubbleCss: bubbleStyle.css, bubbleStyle };
+    const bubbleStyle = independentBubbles(a); return { format: 'yyphone-chat-bubble-css', version: 1, name, bubbleCss: bubbleStyle.css, bubbleStyle };
   }
-  return { format: part === 'page' ? 'yyphone-chat-page' : 'yyphone-chat-appearance', version: 1,
+  return { format: part === 'page' ? 'yyphone-chat-page' : 'yyphone-chat-appearance', version: 1, name,
     style: part === 'page' ? captureChatPage(a) : captureChatCombination(a) };
 }
 export function importChatAppearance(a: ChatAppearance, raw: unknown, part: AppearancePart): ChatAppearance {
   if (!record(raw) || raw.version !== 1) throw new Error('美化文件格式不正确。');
+  if (raw.name !== undefined && (typeof raw.name !== 'string' || !raw.name.trim() || raw.name.length > 80)) throw new Error('美化预设名称无效。');
   let next: ChatAppearance;
   if (part === 'bubbles') {
     if (raw.format !== 'yyphone-chat-bubble-css' || typeof raw.bubbleCss !== 'string' || (raw.bubbleStyle !== undefined && !isBubbleStyle(raw.bubbleStyle))) throw new Error('气泡预设文件无效。');
@@ -180,5 +188,11 @@ export function importChatAppearance(a: ChatAppearance, raw: unknown, part: Appe
     next = part === 'page' ? applyChatPage(a, raw.style as unknown as ChatAppearancePreset) : applyChatCombination(a, raw.style as unknown as ChatAppearancePreset);
   }
   compileChatAppearance(next);
+  if (typeof raw.name === 'string') {
+    const identity = { id: `style-${crypto.randomUUID()}`, name: raw.name.trim() };
+    if (part === 'bubbles') next = { ...next, bubblePresets: [...(next.bubblePresets ?? []), { ...identity, ...independentBubbles(next) }] };
+    else if (part === 'page') next = { ...next, pagePresets: [...(next.pagePresets ?? []), { ...identity, ...captureChatPage(next) }] };
+    else next = { ...next, presets: [...next.presets, { ...identity, ...captureChatCombination(next) }] };
+  }
   return next;
 }

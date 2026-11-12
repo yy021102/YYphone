@@ -6,6 +6,7 @@ import { compressImageFile, compressWallpaper } from '../utils/imageFile';
 import { AvatarFrameEditor } from './AvatarFrameEditor';
 import { WeChatAppearancePreview } from './WeChatAppearancePreview';
 import './weChatAppearanceWorkshop.css';
+import { appearanceFilename } from '../utils/appearanceName';
 
 type Tab = 'page' | 'bubbles' | 'preview';
 interface Props { appearance: ChatAppearance; userName: string; userAvatar?: string; characterAvatar?: string; characterName?: string; onSave: (next: ChatAppearance) => Promise<void> }
@@ -72,8 +73,9 @@ export function WeChatAppearanceWorkshop({ appearance, userName, userAvatar, cha
   const download = () => {
     try {
       compileChatAppearance(draft);
-      const url = URL.createObjectURL(new Blob([JSON.stringify(exportChatAppearance(draft, part), null, 2)], { type: 'application/json' }));
-      const a = document.createElement('a'); a.href = url; a.download = `yyphone-chat-${part === 'all' ? 'appearance' : part}.json`; a.click();
+      const exported = exportChatAppearance(draft, part, selected[part]);
+      const url = URL.createObjectURL(new Blob([JSON.stringify(exported, null, 2)], { type: 'application/json' }));
+      const a = document.createElement('a'); a.href = url; a.download = appearanceFilename(`yyphone-chat-${part === 'all' ? 'appearance' : part}`, exported.name); a.click();
       window.setTimeout(() => URL.revokeObjectURL(url), 0);
     } catch (cause) { setError(cause instanceof Error ? cause.message : '导出失败。'); }
   };
@@ -82,7 +84,12 @@ export function WeChatAppearanceWorkshop({ appearance, userName, userAvatar, cha
     setBusy(true); setError('');
     try {
       const next = importChatAppearance(draft, JSON.parse(await file.text()), part);
-      if (mounted.current) { setDraft(next); setMessage('已载入美化，可预览后应用。'); setSelected(current => ({ ...current, [part]: '' })); }
+      if (mounted.current) {
+        const library = part === 'bubbles' ? next.bubblePresets : part === 'page' ? next.pagePresets : next.presets;
+        const previousCount = (part === 'bubbles' ? draft.bubblePresets : part === 'page' ? draft.pagePresets : draft.presets)?.length ?? 0;
+        setDraft(next); setMessage('已载入美化，可预览后应用。');
+        setSelected(current => ({ ...current, [part]: (library?.length ?? 0) > previousCount ? library!.at(-1)!.id : '' }));
+      }
     } catch (cause) { if (mounted.current) setError(cause instanceof Error ? cause.message : '导入失败。'); }
     finally { if (mounted.current) setBusy(false); }
   };
@@ -132,7 +139,7 @@ export function WeChatAppearanceWorkshop({ appearance, userName, userAvatar, cha
     <fieldset disabled={busy} className="workshop-fields" id="workshop-panel" role="tabpanel" aria-labelledby={`workshop-tab-${tab}`}>
       {tab === 'page' && <>
         <section className="workshop-card">
-          <div className="workshop-card-heading"><h3>页面 CSS</h3><button onClick={() => void copyCss()}><Copy size={13} />复制</button></div>
+          <div className="workshop-card-heading"><h3>页面 CSS</h3><div className="workshop-code-actions"><button aria-label="清空页面 CSS" disabled={!draft.themeCss} onClick={() => edit({ themeCss: '' })}>清空</button><button onClick={() => void copyCss()}><Copy size={13} />复制</button></div></div>
           <p className="workshop-note">可修改背景、标题栏、头像、输入栏与页面原配气泡。代码可复制给 AI 修改。</p>
           <textarea aria-label="页面 CSS" value={draft.themeCss ?? ''} onChange={e => edit({ themeCss: e.target.value })} rows={12} maxLength={WECHAT_THEME_CSS_LIMIT} spellCheck={false} autoCapitalize="off" autoCorrect="off" />
           <div className="workshop-inline">{cssUpload('page')}<button className="workshop-text-button" onClick={() => edit({ themeCss: DEFAULT_WECHAT_THEME_CSS })}>填入默认 CSS</button></div>
@@ -150,7 +157,9 @@ export function WeChatAppearanceWorkshop({ appearance, userName, userAvatar, cha
         </div></details>
         <details className="workshop-card"><summary>兼容旧版 CSS</summary><div className="workshop-detail-body">
           <label>旧版气泡 CSS<textarea aria-label="旧版气泡 CSS" rows={5} value={draft.bubbleCss ?? ''} onChange={e => edit({ bubbleCss: e.target.value })} maxLength={20000} spellCheck={false} /></label>
+          <button className="workshop-text-button" aria-label="清空旧版气泡 CSS" disabled={!draft.bubbleCss} onClick={() => edit({ bubbleCss: '' })}>清空代码</button>
           <label>旧版布局 CSS<textarea aria-label="旧版布局 CSS" rows={5} value={draft.layoutCss ?? ''} onChange={e => edit({ layoutCss: e.target.value })} maxLength={20000} spellCheck={false} /></label>
+          <button className="workshop-text-button" aria-label="清空旧版布局 CSS" disabled={!draft.layoutCss} onClick={() => edit({ layoutCss: '' })}>清空代码</button>
         </div></details>
       </>}
       {tab === 'bubbles' && <>
@@ -166,7 +175,7 @@ export function WeChatAppearanceWorkshop({ appearance, userName, userAvatar, cha
               <label className="workshop-note">透明度 {Math.round(bubbles[alpha] * 100)}%<input aria-label={`${label}透明度`} type="range" min={0} max={100} value={bubbles[alpha] * 100} onChange={e => editBubbles({ [alpha]: Number(e.target.value) / 100 })} /></label>
             </div>)}
           </div></section>
-          <section className="workshop-card"><div className="workshop-card-heading"><h3>气泡 CSS</h3><button onClick={() => void copyCss()}><Copy size={13} />复制</button></div><p className="workshop-note">默认代码已标注主体、尖角和语音，可交给 AI 改写。支持图片与动画。</p>
+          <section className="workshop-card"><div className="workshop-card-heading"><h3>气泡 CSS</h3><div className="workshop-code-actions"><button aria-label="清空气泡 CSS" disabled={!bubbles.css} onClick={() => editBubbles({ css: '' })}>清空</button><button onClick={() => void copyCss()}><Copy size={13} />复制</button></div></div><p className="workshop-note">默认代码已标注主体、尖角和语音，可交给 AI 改写。支持图片与动画。</p>
             <textarea aria-label="气泡 CSS" value={bubbles.css} onChange={e => editBubbles({ css: e.target.value })} rows={12} maxLength={WECHAT_THEME_CSS_LIMIT} spellCheck={false} autoCapitalize="off" autoCorrect="off" />
             <button className="workshop-text-button" onClick={() => editBubbles({ css: DEFAULT_BUBBLE_STYLE.css })}>填入默认气泡 CSS</button>
           </section>

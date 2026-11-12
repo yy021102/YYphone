@@ -1,5 +1,6 @@
 import { HomeAppearance, UserProfile, WidgetAppearance } from '../types';
 import { readWidgetAppearance } from './widgetAppearance';
+import { sameAppearance } from './appearanceName';
 
 export const CALENDAR_APPEARANCE_KEY = 'yyphone:calendar-appearance';
 export const MUSIC_APPEARANCE_KEY = 'yyphone:music-appearance';
@@ -44,6 +45,17 @@ export const portableHomeBeauty = <T extends import('../types').BeautySettings>(
   const { avatarUrl: _avatar, ...profile } = settings.homeAppearance.profile;
   return { ...settings, homeAppearance: { ...settings.homeAppearance, profile } };
 };
+
+export function homeBeautyPresetName(settings: import('../types').BeautySettings, presets: import('../types').BeautyPreset[], preferredId = ''): string | undefined {
+  const comparable = (value: import('../types').BeautySettings) => {
+    const result = { ...portableHomeBeauty(value), homeStyle: value.homeStyle ?? 'classic', transparentAppIcons: value.transparentAppIcons ?? false };
+    if (result.homeStyle !== 'free') delete result.freeDesktop;
+    return result;
+  };
+  const current = comparable(settings);
+  const matches = presets.filter(preset => sameAppearance(comparable(preset.settings), current));
+  return (matches.find(preset => preset.id === preferredId) ?? matches[0])?.name;
+}
 export const isDesktopAppearance = (value: unknown): value is import('../types').DesktopAppearance =>
   isRecord(value) && (value.textColor === undefined || typeof value.textColor === 'string' && /^#[0-9a-f]{6}$/i.test(value.textColor)) &&
   ['iconOpacity', 'panelOpacity', 'widgetOpacity'].every(key => value[key] === undefined || typeof value[key] === 'number' && Number.isFinite(value[key]) && value[key] >= 0 && value[key] <= 1);
