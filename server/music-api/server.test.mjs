@@ -3,7 +3,51 @@ import { test } from 'node:test';
 import { createMusicServer } from './server.mjs';
 import { createPlatformMusicHandler } from './platform.mjs';
 import http from 'node:http';
-import { createUpstreamAdapter } from './upstream.mjs';
+import { createUpstreamAdapter, initializeMusicRuntime } from './upstream.mjs';
+import { mkdtemp, readFile, writeFile, unlink, rmdir } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+async function runtimeDirectory(work) {
+  const directory = await mkdtemp(join(tmpdir(), 'yyphone-music-startup-'));
+  try { await work(directory); }
+  finally {
+    for (const file of ['yyphone-music-device.json', 'xeapi_public_key']) await unlink(join(directory, file)).catch(() => {});
+    await rmdir(directory);
+  }
+}
+
+test('startup initializes SDK encryption before guest login, keeps guest state, and never shares a personal account', async () => {
+  await runtimeDirectory(async directory => {
+    await writeFile(join(directory, 'xeapi_public_key'), JSON.stringify({ version: 'old', sk: 'existing-client-key' }));
+    const calls = [];
+    const guest = await initializeMusicRuntime({
+      register_xeapikey: async params => { calls.push('configuration'); assert.equal(params.currentKeyVersion, 'old'); assert.match(params.deviceId, /^[A-F0-9]{52}$/); return { body: { version: 'new' } }; },
+      register_anonimous: async params => {
+        calls.push('guest'); assert.equal(params.cookie, '');
+        assert.equal(JSON.parse(await readFile(join(directory, 'xeapi_public_key'), 'utf8')).sk, 'existing-client-key');
+        return { body: { code: 200 }, cookie: ['MUSIC_A=guest; Max-Age=3600', 'NMTID=guest-device; Path=/', 'MUSIC_U=must-not-share', 'MUSIC_R=must-not-share'] };
+      },
+    }, { directory });
+    assert.deepEqual(calls, ['configuration', 'guest']);
+    assert.equal(guest, 'MUSIC_A=guest; NMTID=guest-device');
+    const seen = [];
+    const adapter = createUpstreamAdapter({ login_status: async params => { seen.push(params.cookie); return { body: { code: 200 } }; } }, guest);
+    await adapter.login_status({ cookie: '' }); await adapter.login_status({ cookie: 'MUSIC_U=my-account' }); await adapter.login_status({ cookie: '' });
+    assert.deepEqual(seen, [guest, 'MUSIC_U=my-account', guest]);
+  });
+});
+
+test('startup errors do not trigger guest retries or change transport after a verification challenge', async () => {
+  await runtimeDirectory(async directory => {
+    const challenge = { body: { code: -462 } };
+    let calls = 0;
+    await assert.rejects(initializeMusicRuntime({ register_xeapikey: async () => { calls++; throw challenge; }, register_anonimous: async () => assert.fail('must not continue initialization after challenge') }, { directory }), error => error === challenge);
+    const adapter = createUpstreamAdapter({ login_qr_key: async () => assert.fail('must not make another upstream request after startup challenge') }, '', challenge);
+    await assert.rejects(adapter.login_qr_key({ cookie: '' }), error => error === challenge);
+    assert.equal(calls, 1);
+  });
+});
 
 test('QR adapter preserves original verification errors instead of SDK ReferenceError', async () => {
   const error = { status: 400, body: { code: -462, data: { url: 'https://st.music.163.com/encrypt-pages?test=1' } } };
