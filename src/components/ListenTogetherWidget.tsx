@@ -11,6 +11,8 @@ import { NeteaseMusicPanel } from './NeteaseMusicPanel';
 import { VinylRecord } from './DesktopTemplateArt';
 import { DEFAULT_LISTENING_CAPTION, MusicListeningStage } from './MusicListeningStage';
 import { readWeChatUserProfile } from '../utils/coupleSpaceData';
+import { MusicDecorationSettings } from './MusicDecorationSettings';
+import { normalizeMusicDecoration } from '../utils/musicDecoration';
 
 interface CompanionOption {
   id: string;
@@ -50,6 +52,7 @@ export const ListenTogetherWidget: React.FC<{
   const player = useMusicPlayer();
   const { appearance, patch } = useWidgetAppearance(MUSIC_APPEARANCE_KEY);
   const background = backgroundImage || appearance.background;
+  const decoration = normalizeMusicDecoration(appearance.musicDecoration);
   const [panelOpen, setPanelOpen] = useState(false);
   const [drawer, setDrawer] = useState<'settings' | 'library' | null>(null);
   const [userProfile, setUserProfile] = useState(readWeChatUserProfile);
@@ -300,9 +303,9 @@ export const ListenTogetherWidget: React.FC<{
           aria-modal={fullScreen ? undefined : true}
           aria-label="一起听"
           className={`music-app ${fullScreen ? 'relative flex-1 min-h-0' : 'absolute inset-0 z-50'}`}
-          style={background ? { backgroundImage: `linear-gradient(#211a2677,#211a26aa),url(${JSON.stringify(background)})` } : undefined}
+          style={background ? { backgroundImage: `${decoration.darkenBackground ? 'linear-gradient(#211a2677,#211a26aa),' : ''}url(${JSON.stringify(background)})` } : undefined}
         >
-          <MusicListeningStage player={player} user={userProfile} companion={companion} disc={appearance.disc} caption={appearance.note} onBack={closePanel} onSettings={() => setDrawer('settings')} onLibrary={() => setDrawer('library')}/>
+          <MusicListeningStage player={player} user={userProfile} companion={companion} disc={appearance.disc} caption={appearance.note} decoration={appearance.musicDecoration} onBack={closePanel} onSettings={() => setDrawer('settings')} onLibrary={() => setDrawer('library')}/>
           {drawer && <div className="music-drawer-backdrop" onClick={event => { if (event.target === event.currentTarget) setDrawer(null); }}>
           <section className="music-drawer" role="dialog" aria-modal="true" aria-label={drawer === 'settings' ? '一起听设置' : '播放列表'}>
           <header className="music-drawer-header"><div><button type="button" aria-pressed={drawer === 'library'} onClick={() => setDrawer('library')}>音乐</button><button type="button" aria-pressed={drawer === 'settings'} onClick={() => setDrawer('settings')}>设置</button></div><button type="button" data-swipe-back aria-label="关闭面板" onClick={() => setDrawer(null)}><X size={20}/></button></header>
@@ -351,6 +354,7 @@ export const ListenTogetherWidget: React.FC<{
             </section>
 
             <WidgetImagePicker label="唱片图案" value={appearance.disc} square round maxSize={1000} onChange={value => patch({ disc: value })}/>
+            <MusicDecorationSettings value={appearance.musicDecoration} onChange={musicDecoration => patch({ musicDecoration })}/>
             <WidgetImagePicker label="播放器背景" value={appearance.background} maxSize={1920} onChange={value => patch({ background: value })}/>
             </>}
             <div hidden={drawer !== 'library'}>

@@ -14,6 +14,28 @@ const read = (k: string) => JSON.parse(readStorageString(k) || 'null');
 beforeEach(async () => { failKey = ''; await clearDbStorage(); writeStoredValue('yyphone:api-presets', [{ id: 'main', endpoint: 'MAIN_UNCHANGED' }]); });
 afterEach(() => mock.restoreAll());
 
+test('9:16 is saved in presets and reaches every provider in portrait orientation', async () => {
+  let body: any;
+  mock.method(globalThis, 'fetch', async (_url: unknown, init?: RequestInit) => {
+    body = JSON.parse(String(init?.body));
+    return new Response('mock rejection after inspecting request', { status: 400 });
+  });
+  for (const provider of ['openai', 'novelai', 'gemini', 'imagen'] as const) {
+    const dimensions = imageDimensions(provider, 'tallscreen');
+    assert.equal(dimensions.width / dimensions.height, 9 / 16);
+    assert.equal(dimensions.aspectRatio, '9:16');
+    assert(imageSizeOptions(provider).some(option => option.value === 'tallscreen' && option.label.includes('9:16')));
+    await assert.rejects(generateImage('竖屏壁纸', { provider, endpoint: 'https://mock.invalid', apiKey: 'key', model: 'image-model', size: 'tallscreen' }));
+    if (provider === 'openai') assert.equal(body.size, '864x1536');
+    if (provider === 'novelai') assert.deepEqual([body.parameters.width, body.parameters.height], [576, 1024]);
+    if (provider === 'gemini') assert.equal(body.generationConfig.imageConfig.aspectRatio, '9:16');
+    if (provider === 'imagen') assert.equal(body.parameters.aspectRatio, '9:16');
+  }
+  const preset = await saveImageGenerationPreset('竖屏', { ...config, size: 'tallscreen' });
+  assert.equal((await selectImageGenerationPreset(preset.id)).size, 'tallscreen');
+  assert.equal(imageDimensions('openai', 'widescreen').aspectRatio, '16:9');
+});
+
 test('16:9 reaches each image provider using its own size parameter', async () => {
   let body: any;
   mock.method(globalThis, 'fetch', async (_url: unknown, init?: RequestInit) => {

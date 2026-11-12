@@ -97,6 +97,14 @@ export interface WidgetAppearance {
   background: string;
   disc: string;
   note: string;
+  musicDecoration?: MusicDecoration;
+}
+
+export interface MusicDecoration {
+  discMode: 'vinyl' | 'image';
+  darkenBackground: boolean;
+  userBubble: { text: string; color: string; opacity: number };
+  companionBubble: { text: string; color: string; opacity: number };
 }
 
 export interface HomeAppearance {

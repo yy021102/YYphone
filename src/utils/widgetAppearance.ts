@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { readStoredValue, writeStoredValue } from './localStorage';
 import { WidgetAppearance } from '../types';
+import { normalizeMusicDecoration } from './musicDecoration';
 
 export type { WidgetAppearance } from '../types';
 
@@ -15,6 +16,7 @@ export const readWidgetAppearance = (key: string): WidgetAppearance => {
     background: typeof stored.background === 'string' ? stored.background : '',
     disc: typeof stored.disc === 'string' ? stored.disc : '',
     note: typeof stored.note === 'string' ? stored.note : '',
+    ...(stored.musicDecoration ? { musicDecoration: normalizeMusicDecoration(stored.musicDecoration) } : {}),
   };
 };
 
