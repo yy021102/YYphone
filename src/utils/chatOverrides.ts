@@ -1,7 +1,21 @@
 import type { ApiConnection } from './aiApi';
 import { textApiConfig } from './textApiConfig';
+import { applyChatCombination, applyChatPage, isChatAppearance, type ChatAppearance, type ChatAppearancePreset } from './chatAppearance';
 
-export interface ChatOverrides { backgroundUrl?: string; secondaryApi?: ApiConnection }
+export interface ChatOverrides {
+  backgroundUrl?: string; secondaryApi?: ApiConnection;
+  customAppearanceEnabled?: boolean;
+  appearancePreset?: { scope: 'page' | 'all'; preset: ChatAppearancePreset };
+}
+
+/** Store a snapshot so editing or deleting the global library doesn't alter another conversation. */
+export function conversationAppearance(global: ChatAppearance, chat?: ChatOverrides): ChatAppearance {
+  const selected = chat?.appearancePreset;
+  if (!chat?.customAppearanceEnabled || !selected || !['page', 'all'].includes(selected.scope)) return global;
+  const candidate = { ...global, ...selected.preset };
+  if (!isChatAppearance(candidate)) return global;
+  return selected.scope === 'all' ? applyChatCombination(global, selected.preset) : applyChatPage(global, selected.preset);
+}
 
 /** Empty means inherit; partial configuration must never silently send to a different API. */
 export function chatSecondaryApi(chat: ChatOverrides): ApiConnection | undefined {

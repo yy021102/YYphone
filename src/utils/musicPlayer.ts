@@ -10,6 +10,7 @@ import {
   MUSIC_TRACKS_KEY,
   MusicPlaybackSnapshot,
   MusicTrack,
+  MusicTrackDetails,
   readMusicPlaybackSnapshot,
 } from './musicPlayback';
 
@@ -22,6 +23,7 @@ export interface MusicPlayerState {
   currentTime: number;
   duration: number;
   error: string;
+  playbackMode: 'list' | 'single' | 'shuffle';
 }
 
 const SNAPSHOT_INTERVAL_MS = 5000;
@@ -35,6 +37,7 @@ let state: MusicPlayerState = {
   currentTime: 0,
   duration: 0,
   error: '',
+  playbackMode: 'list',
 };
 let loaded = false;
 let audio: HTMLAudioElement | null = null;
@@ -82,6 +85,7 @@ const saveSettings = () => {
     currentTrackId: state.currentTrackId,
     companionId: state.companionId,
     togetherEnabled: state.togetherEnabled,
+    playbackMode: state.playbackMode,
   });
 };
 
@@ -108,6 +112,7 @@ const ensureLoaded = () => {
       : '',
     companionId: settings.companionId,
     togetherEnabled: settings.togetherEnabled,
+    playbackMode: settings.playbackMode === 'single' || settings.playbackMode === 'shuffle' ? settings.playbackMode : 'list',
   };
   // 页面重新载入后音频不会继续播放，清除上次遗留的“正在播放”状态。
   const previous = readMusicPlaybackSnapshot();
@@ -130,7 +135,7 @@ const getAudio = () => {
     // 列表循环：播完自动下一首；只有一首时重新播放这一首。
     const tracks = state.tracks;
     if (tracks.length === 0) return;
-    if (tracks.length === 1) {
+    if (tracks.length === 1 || state.playbackMode === 'single') {
       element.currentTime = 0;
       void element.play().catch(() => undefined);
       return;
@@ -268,13 +273,28 @@ export const musicPlayer = {
     ensureLoaded();
     if (state.tracks.length === 0) return;
     const index = state.tracks.findIndex((track) => track.id === state.currentTrackId);
-    void playTrack(state.tracks[(index + 1) % state.tracks.length]);
+    const nextIndex = state.playbackMode === 'shuffle' && state.tracks.length > 1
+      ? (Math.max(index, 0) + 1 + Math.floor(Math.random() * (state.tracks.length - 1))) % state.tracks.length
+      : (index + 1) % state.tracks.length;
+    void playTrack(state.tracks[nextIndex]);
+  },
+  previous() {
+    ensureLoaded();
+    if (!state.tracks.length) return;
+    const index = state.tracks.findIndex(track => track.id === state.currentTrackId);
+    void playTrack(state.tracks[(Math.max(index, 0) - 1 + state.tracks.length) % state.tracks.length]);
+  },
+  setPlaybackMode(playbackMode: MusicPlayerState['playbackMode']) {
+    ensureLoaded();
+    if (!['list', 'single', 'shuffle'].includes(playbackMode)) return;
+    setState({ playbackMode });
+    saveSettings();
   },
   seek(ratio: number) {
     if (!audio || !Number.isFinite(audio.duration) || audio.duration <= 0) return;
     audio.currentTime = Math.min(Math.max(ratio, 0), 1) * audio.duration;
   },
-  addUrlTrack(rawUrl: string, rawTitle: string) {
+  addUrlTrack(rawUrl: string, rawTitle: string, details: Partial<MusicTrackDetails> = {}) {
     ensureLoaded();
     let parsed: URL;
     try {
@@ -288,7 +308,9 @@ export const musicPlayer = {
     const fallbackTitle = deriveTitle(decodeURIComponent(parsed.pathname.split('/').filter(Boolean).pop() ?? ''));
     const track: MusicTrack = {
       id: newId(),
-      title: rawTitle.trim() || fallbackTitle,
+      title: rawTitle.trim().slice(0, 120) || fallbackTitle,
+      artists: (details.artists || '').trim().slice(0, 120),
+      mood: (details.mood || '').trim().slice(0, 600),
       source: 'url',
       url: parsed.toString(),
       createdAt: Date.now(),
@@ -300,14 +322,16 @@ export const musicPlayer = {
     }
     return track;
   },
-  async addFileTrack(file: File) {
+  async addFileTrack(file: File, details: Partial<MusicTrackDetails> = {}) {
     ensureLoaded();
     if (!file.type.startsWith('audio/') && !/\.(mp3|m4a|wav|ogg|flac|aac)$/i.test(file.name)) {
       throw new Error('请选择音频文件（如 MP3）。');
     }
     const track: MusicTrack = {
       id: newId(),
-      title: deriveTitle(file.name),
+      title: details.title?.trim().slice(0, 120) || deriveTitle(file.name),
+      artists: (details.artists || '').trim().slice(0, 120),
+      mood: (details.mood || '').trim().slice(0, 600),
       source: 'file',
       fileName: file.name,
       createdAt: Date.now(),
@@ -325,6 +349,13 @@ export const musicPlayer = {
     const nextTitle = title.trim();
     if (!nextTitle) return;
     saveTracks(state.tracks.map((track) => (track.id === id ? { ...track, title: nextTitle } : track)));
+    if (id === state.currentTrackId) saveSnapshot();
+  },
+  updateTrackDetails(id: string, details: MusicTrackDetails) {
+    ensureLoaded();
+    const title = details.title.trim().slice(0, 120);
+    if (!title) return;
+    saveTracks(state.tracks.map(track => track.id === id ? { ...track, title, artists: details.artists.trim().slice(0, 120), mood: details.mood.trim().slice(0, 600) } : track));
     if (id === state.currentTrackId) saveSnapshot();
   },
   removeTrack(id: string) {

@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
-import { beforeEach, test } from 'node:test';
+import { afterEach, beforeEach, mock, test } from 'node:test';
 import { clearDbStorage } from './dbStorage';
 import { readStorageString, writeStoredValue } from './localStorage';
 import { ACTIVE_IMAGE_PRESET_KEY, deleteImageGenerationPreset, IMAGE_PRESETS_KEY, readImageGenerationPresets, saveImageGenerationPreset, selectImageGenerationPreset } from './imageGenerationPresets';
-import { resolveImageApi, type ImageGenerationSettings } from './imageGeneration';
+import { generateImage, resolveImageApi, imageDimensions, imageSizeOptions, type ImageGenerationSettings } from './imageGeneration';
 const values = new Map<string, string>(); let failKey = '';
 Object.defineProperty(globalThis, 'window', { configurable: true, value: { localStorage: {
   getItem: (k: string) => values.get(k) ?? null, setItem: (k: string, v: string) => { if (k === failKey) { failKey = ''; throw Error('QUOTA_TEST'); } values.set(k, v); },
@@ -12,6 +12,34 @@ Object.defineProperty(globalThis, 'window', { configurable: true, value: { local
 const config: ImageGenerationSettings = { provider: 'openai', endpoint: 'https://image.invalid/v1', apiKey: 'image-key', model: 'custom-image', size: 'landscape' };
 const read = (k: string) => JSON.parse(readStorageString(k) || 'null');
 beforeEach(async () => { failKey = ''; await clearDbStorage(); writeStoredValue('yyphone:api-presets', [{ id: 'main', endpoint: 'MAIN_UNCHANGED' }]); });
+afterEach(() => mock.restoreAll());
+
+test('16:9 reaches each image provider using its own size parameter', async () => {
+  let body: any;
+  mock.method(globalThis, 'fetch', async (_url: unknown, init?: RequestInit) => {
+    body = JSON.parse(String(init?.body));
+    return new Response('mock rejection after inspecting request', { status: 400 });
+  });
+  for (const provider of ['openai', 'novelai', 'gemini', 'imagen'] as const) {
+    await assert.rejects(generateImage('花园', { provider, endpoint: 'https://mock.invalid', apiKey: 'key', model: 'image-model', size: 'widescreen' }));
+    if (provider === 'openai') assert.equal(body.size, '1536x864');
+    if (provider === 'novelai') assert.deepEqual([body.parameters.width, body.parameters.height], [1024, 576]);
+    if (provider === 'gemini') assert.equal(body.generationConfig.imageConfig.aspectRatio, '16:9');
+    if (provider === 'imagen') assert.equal(body.parameters.aspectRatio, '16:9');
+  }
+});
+
+test('16:9 is an exact provider ratio and survives preset save/select without changing older dimensions', async () => {
+  for (const provider of ['openai', 'novelai', 'gemini', 'imagen'] as const) {
+    const dimensions = imageDimensions(provider, 'widescreen');
+    assert.equal(dimensions.aspectRatio, '16:9'); assert.equal(dimensions.width / dimensions.height, 16 / 9);
+    assert(imageSizeOptions(provider).some(option => option.value === 'widescreen' && option.label.includes('16:9')));
+    if (provider === 'novelai') { assert.equal(dimensions.width % 64, 0); assert.equal(dimensions.height % 64, 0); }
+  }
+  const preset = await saveImageGenerationPreset('宽屏', { ...config, size: 'widescreen' });
+  assert.equal((await selectImageGenerationPreset(preset.id)).size, 'widescreen');
+  assert.equal(imageDimensions('openai', 'landscape').size, '1536x1024');
+});
 test('saving and selecting presets restores provider, endpoint, key, model and size without modifying the main API', async () => {
   const a = await saveImageGenerationPreset('横图', config); const b = await saveImageGenerationPreset('谷歌', { provider: 'gemini', endpoint: 'https://google.invalid', apiKey: 'google-key', model: 'gemini-image', size: 'square' });
   assert.equal(readImageGenerationPresets().length, 2); assert.equal(read(ACTIVE_IMAGE_PRESET_KEY), b.id);

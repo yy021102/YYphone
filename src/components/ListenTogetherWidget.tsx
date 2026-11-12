@@ -2,27 +2,40 @@ import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link2, Music2, Pause, Pencil, Play, SkipForward, Trash2, Upload, X } from 'lucide-react';
 import { musicPlayer, useMusicPlayer } from '../utils/musicPlayer';
-import { formatMusicTime } from '../utils/musicPlayback';
+import { formatMusicTime, type MusicTrackDetails } from '../utils/musicPlayback';
 import { readStoredValue } from '../utils/localStorage';
 import { useWidgetAppearance } from '../utils/widgetAppearance';
 import { MUSIC_APPEARANCE_KEY } from '../utils/homeAppearance';
 import { WidgetImagePicker } from './WidgetImagePicker';
 import { NeteaseMusicPanel } from './NeteaseMusicPanel';
 import { VinylRecord } from './DesktopTemplateArt';
+import { DEFAULT_LISTENING_CAPTION, MusicListeningStage } from './MusicListeningStage';
+import { readWeChatUserProfile } from '../utils/coupleSpaceData';
 
 interface CompanionOption {
   id: string;
   name: string;
+  avatarUrl?: string;
 }
 
 const CONTACTS_STORAGE_KEY = 'pocketos:wechat-contacts';
+const emptyTrackDetails: MusicTrackDetails = { title: '', artists: '', mood: '' };
+
+function TrackDetailsFields({ value, onChange, disabled = false, editing = false }: { value: MusicTrackDetails; onChange: (value: MusicTrackDetails) => void; disabled?: boolean; editing?: boolean }) {
+  const fieldClass = 'mt-1 w-full min-w-0 rounded-xl bg-white border border-slate-200 px-3 py-2 text-xs font-normal outline-none focus:border-sky-400';
+  return <div className="grid grid-cols-2 gap-2 text-[11px] font-semibold text-slate-500">
+    <label>歌名<input value={value.title} disabled={disabled} maxLength={120} autoFocus={editing} placeholder="留空自动填写" aria-label={editing ? '编辑歌名' : '添加歌名'} onChange={event => onChange({ ...value, title: event.target.value })} className={fieldClass}/></label>
+    <label>歌手<input value={value.artists} disabled={disabled} maxLength={120} placeholder="歌手名字" aria-label={editing ? '编辑歌手' : '添加歌手'} onChange={event => onChange({ ...value, artists: event.target.value })} className={fieldClass}/></label>
+    <label className="col-span-2">歌曲氛围<textarea value={value.mood} disabled={disabled} maxLength={600} rows={2} placeholder="例如：轻柔的钢琴，像雨天里安静的陪伴" aria-label={editing ? '编辑歌曲氛围' : '添加歌曲氛围'} onChange={event => onChange({ ...value, mood: event.target.value })} className={`${fieldClass} resize-none`}/></label>
+  </div>;
+}
 
 const readCompanionOptions = (): CompanionOption[] =>
   readStoredValue(CONTACTS_STORAGE_KEY, [] as CompanionOption[], (value): value is CompanionOption[] =>
     Array.isArray(value)
   ).flatMap((contact) =>
     contact && typeof contact.id === 'string' && typeof contact.name === 'string'
-      ? [{ id: contact.id, name: contact.name }]
+      ? [{ id: contact.id, name: contact.name, avatarUrl: typeof contact.avatarUrl === 'string' ? contact.avatarUrl : '' }]
       : []
   );
 
@@ -31,18 +44,22 @@ function MusicPanelLayer({ container, children }: { container?: HTMLElement; chi
 }
 
 export const ListenTogetherWidget: React.FC<{
+  fullScreen?: boolean; onOpen?: () => void; onClose?: () => void;
   modalContainer?: HTMLElement; backgroundImage?: string; variant?: 'vinyl' | 'disc'; artwork?: string; title?: string; note?: string; vinylColor?: string; vinylOpacity?: number;
-}> = ({ modalContainer, backgroundImage, variant, artwork, title, note, vinylColor, vinylOpacity }) => {
+}> = ({ fullScreen = false, onOpen, onClose, modalContainer, backgroundImage, variant, artwork, title, note, vinylColor, vinylOpacity }) => {
   const player = useMusicPlayer();
   const { appearance, patch } = useWidgetAppearance(MUSIC_APPEARANCE_KEY);
   const background = backgroundImage || appearance.background;
   const [panelOpen, setPanelOpen] = useState(false);
+  const [drawer, setDrawer] = useState<'settings' | 'library' | null>(null);
+  const [userProfile, setUserProfile] = useState(readWeChatUserProfile);
   const [companions, setCompanions] = useState<CompanionOption[]>([]);
   const [urlDraft, setUrlDraft] = useState('');
+  const [newDetails, setNewDetails] = useState<MusicTrackDetails>(emptyTrackDetails);
   const [panelError, setPanelError] = useState('');
   const [uploading, setUploading] = useState(false);
   const [editingId, setEditingId] = useState('');
-  const [editingTitle, setEditingTitle] = useState('');
+  const [editingDetails, setEditingDetails] = useState<MusicTrackDetails>(emptyTrackDetails);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const track = player.tracks.find((item) => item.id === player.currentTrackId);
@@ -51,18 +68,34 @@ export const ListenTogetherWidget: React.FC<{
   const hasTracks = player.tracks.length > 0;
 
   useEffect(() => {
-    setCompanions(readCompanionOptions());
-  }, [panelOpen]);
+    const refresh = () => { setCompanions(readCompanionOptions()); setUserProfile(readWeChatUserProfile()); };
+    refresh();
+    window.addEventListener('focus', refresh);
+    window.addEventListener('storage', refresh);
+    return () => { window.removeEventListener('focus', refresh); window.removeEventListener('storage', refresh); };
+  }, [panelOpen, fullScreen]);
+
+  useEffect(() => {
+    if (!drawer) return;
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { event.stopPropagation(); setDrawer(null); }
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [drawer]);
 
   const openPanel = () => {
+    if (onOpen) { onOpen(); return; }
     setPanelError('');
     setPanelOpen(true);
   };
+  const closePanel = () => { if (onClose) onClose(); else setPanelOpen(false); };
 
   const handleAddUrl = () => {
     try {
-      const added = musicPlayer.addUrlTrack(urlDraft, '');
+      const added = musicPlayer.addUrlTrack(urlDraft, newDetails.title, newDetails);
       setUrlDraft('');
+      setNewDetails(emptyTrackDetails);
       setPanelError('');
       musicPlayer.selectTrack(added.id);
     } catch (error) {
@@ -74,7 +107,8 @@ export const ListenTogetherWidget: React.FC<{
     if (!file) return;
     setUploading(true);
     try {
-      const added = await musicPlayer.addFileTrack(file);
+      const added = await musicPlayer.addFileTrack(file, newDetails);
+      setNewDetails(emptyTrackDetails);
       setPanelError('');
       musicPlayer.selectTrack(added.id);
     } catch (error) {
@@ -86,7 +120,9 @@ export const ListenTogetherWidget: React.FC<{
   };
 
   const commitRename = () => {
-    if (editingId) musicPlayer.renameTrack(editingId, editingTitle);
+    if (!editingDetails.title.trim()) { setPanelError('请填写歌名。'); return; }
+    if (editingId) musicPlayer.updateTrackDetails(editingId, editingDetails);
+    setPanelError('');
     setEditingId('');
   };
 
@@ -102,7 +138,7 @@ export const ListenTogetherWidget: React.FC<{
 
   return (
     <>
-      {variant === 'disc' ? <div className="free-disc-widget" data-desktop-widget>
+      {!fullScreen && (variant === 'disc' ? <div className="free-disc-widget" data-desktop-widget>
         <button type="button" className="free-disc-open" aria-label={`管理唱片音乐${title ? `：${title}` : ''}`} onClick={openPanel}
           title={title || track?.title || '添加或管理音乐'}>
           <VinylRecord artwork={artwork || backgroundImage || appearance.disc} color={vinylColor} opacity={vinylOpacity} playing={player.isPlaying} fullArtwork/>
@@ -128,6 +164,7 @@ export const ListenTogetherWidget: React.FC<{
         </div>
       </div> : <div
         data-desktop-widget
+        onClick={event => { if (!(event.target as HTMLElement).closest('button,input,[role="slider"]')) openPanel(); }}
         style={background ? { backgroundImage: `url(${JSON.stringify(background)})` } : undefined}
         className={`rounded-[clamp(20px,4.8vw,28px)] p-[clamp(9px,2.4vw,13px)] aspect-square flex flex-col justify-between overflow-hidden relative shadow-sm bg-cover bg-center ${
           background ? 'border border-white/70' : 'glass-card'
@@ -243,12 +280,12 @@ export const ListenTogetherWidget: React.FC<{
             </span>
           </div>
         </div>
-      </div>}
+      </div>)}
 
       <input
         ref={fileInputRef}
         type="file"
-        accept="audio/*,.mp3"
+        accept="audio/*,.mp3,.flac,.m4a,.wav,.ogg,.aac"
         className="hidden"
         onChange={(event) => {
           void handleFile(event.target.files?.[0]);
@@ -256,29 +293,25 @@ export const ListenTogetherWidget: React.FC<{
         }}
       />
 
-      {panelOpen && <MusicPanelLayer container={modalContainer}>
+      {(fullScreen || panelOpen) && <MusicPanelLayer container={fullScreen ? undefined : modalContainer}>
         <div
           data-no-desktop-swipe
-          role="dialog"
-          aria-modal="true"
-          aria-label="音乐管理"
-          className="absolute inset-0 z-50 flex items-center justify-center bg-slate-900/30 backdrop-blur-xs p-4"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setPanelOpen(false);
-          }}
+          role={fullScreen ? undefined : 'dialog'}
+          aria-modal={fullScreen ? undefined : true}
+          aria-label="一起听"
+          className={`music-app ${fullScreen ? 'relative flex-1 min-h-0' : 'absolute inset-0 z-50'}`}
+          style={background ? { backgroundImage: `linear-gradient(#211a2677,#211a26aa),url(${JSON.stringify(background)})` } : undefined}
         >
-          <div className="w-full max-w-sm max-h-[88%] overflow-y-auto rounded-3xl bg-white/90 backdrop-blur-2xl border border-white p-4 shadow-2xl space-y-3.5 text-slate-700">
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-extrabold text-[#2C4A5C]">一起听</h2>
-              <button
-                aria-label="关闭"
-                onClick={() => setPanelOpen(false)}
-                className="w-7 h-7 rounded-full flex items-center justify-center text-slate-500 bg-slate-100 hover:bg-slate-200 cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
+          <MusicListeningStage player={player} user={userProfile} companion={companion} disc={appearance.disc} caption={appearance.note} onBack={closePanel} onSettings={() => setDrawer('settings')} onLibrary={() => setDrawer('library')}/>
+          {drawer && <div className="music-drawer-backdrop" onClick={event => { if (event.target === event.currentTarget) setDrawer(null); }}>
+          <section className="music-drawer" role="dialog" aria-modal="true" aria-label={drawer === 'settings' ? '一起听设置' : '播放列表'}>
+          <header className="music-drawer-header"><div><button type="button" aria-pressed={drawer === 'library'} onClick={() => setDrawer('library')}>音乐</button><button type="button" aria-pressed={drawer === 'settings'} onClick={() => setDrawer('settings')}>设置</button></div><button type="button" data-swipe-back aria-label="关闭面板" onClick={() => setDrawer(null)}><X size={20}/></button></header>
+          <div className="music-app-scroll space-y-3.5 text-slate-700">
+            {drawer === 'settings' && <>
+            <section className="space-y-2 rounded-2xl bg-sky-50/60 border border-white/80 p-3">
+              <div className="flex items-center justify-between gap-2"><label htmlFor="music-listening-caption" className="text-xs font-bold text-[#2C4A5C]">头像下方文字</label><button type="button" className="rounded-full bg-white px-2.5 py-1 text-[10px] font-bold text-slate-500 disabled:opacity-40" disabled={!appearance.note} onClick={() => patch({ note: '' })}>恢复默认</button></div>
+              <textarea id="music-listening-caption" rows={2} maxLength={120} value={appearance.note} placeholder={DEFAULT_LISTENING_CAPTION} onChange={event => patch({ note: event.target.value })} className="w-full resize-none rounded-xl bg-white border border-slate-200 px-3 py-2 text-xs outline-none focus:border-sky-400"/>
+            </section>
             <section className="space-y-2 rounded-2xl bg-sky-50/60 border border-white/80 p-3">
               <div className="flex items-center justify-between gap-2">
                 <span className="text-xs font-bold text-[#2C4A5C]">和 TA 一起听</span>
@@ -317,10 +350,17 @@ export const ListenTogetherWidget: React.FC<{
               </p>
             </section>
 
+            <WidgetImagePicker label="唱片图案" value={appearance.disc} square round maxSize={1000} onChange={value => patch({ disc: value })}/>
+            <WidgetImagePicker label="播放器背景" value={appearance.background} maxSize={1920} onChange={value => patch({ background: value })}/>
+            </>}
+            <div hidden={drawer !== 'library'}>
             <NeteaseMusicPanel />
+            </div>
+            {drawer === 'library' && <>
 
             <section className="space-y-2">
               <p className="text-xs font-bold text-[#2C4A5C]">添加音乐</p>
+              <TrackDetailsFields value={newDetails} onChange={setNewDetails} disabled={uploading}/>
               <div className="flex gap-2">
                 <input
                   value={urlDraft}
@@ -333,7 +373,7 @@ export const ListenTogetherWidget: React.FC<{
                 <button
                   type="button"
                   onClick={handleAddUrl}
-                  disabled={!urlDraft.trim()}
+                  disabled={!urlDraft.trim() || uploading}
                   className="shrink-0 inline-flex items-center gap-1 rounded-xl bg-gradient-to-r from-sky-400 to-pink-400 px-3 py-2 text-[11px] font-bold text-white disabled:opacity-40 cursor-pointer"
                 >
                   <Link2 className="w-3 h-3" />添加
@@ -345,7 +385,7 @@ export const ListenTogetherWidget: React.FC<{
                 disabled={uploading}
                 className="w-full inline-flex items-center justify-center gap-1.5 rounded-xl bg-white border border-dashed border-sky-300 px-3 py-2.5 text-xs font-bold text-sky-600 disabled:opacity-50 cursor-pointer"
               >
-                <Upload className="w-3.5 h-3.5" />{uploading ? '正在保存…' : '选择本地音频文件（MP3）'}
+                <Upload className="w-3.5 h-3.5" />{uploading ? '正在保存…' : '选择本地音频文件'}
               </button>
               {panelError && <p role="alert" className="text-[11px] font-bold text-rose-500">{panelError}</p>}
             </section>
@@ -367,19 +407,10 @@ export const ListenTogetherWidget: React.FC<{
                     }`}
                   >
                     {editingId === item.id ? (
-                      <input
-                        autoFocus
-                        value={editingTitle}
-                        onChange={(event) => setEditingTitle(event.target.value)}
-                        onBlur={commitRename}
-                        onKeyDown={(event) => {
-                          if (event.key === 'Enter') commitRename();
-                          if (event.key === 'Escape') setEditingId('');
-                        }}
-                        maxLength={80}
-                        aria-label="音乐标题"
-                        className="min-w-0 flex-1 rounded-lg bg-white border border-sky-300 px-2 py-1 text-xs font-bold outline-none"
-                      />
+                      <div className="min-w-0 flex-1 space-y-2">
+                        <TrackDetailsFields value={editingDetails} onChange={setEditingDetails} editing/>
+                        <div className="flex justify-end gap-2"><button type="button" onClick={() => setEditingId('')} className="rounded-full px-3 py-1.5 text-xs text-slate-400">取消</button><button type="button" onClick={commitRename} className="rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-sky-600">保存歌曲信息</button></div>
+                      </div>
                     ) : (
                       <button
                         type="button"
@@ -396,16 +427,16 @@ export const ListenTogetherWidget: React.FC<{
                           <span className="truncate">{item.title}</span>
                         </span>
                         <span className="block truncate pl-[18px] text-[10px] text-slate-400">
-                          {item.source === 'netease' ? `${item.artists || '网易云音乐'}` : item.source === 'file' ? item.fileName || '本地文件' : item.url}
+                          {item.artists || (item.source === 'netease' ? '网易云音乐' : item.source === 'file' ? item.fileName || '本地文件' : '音频链接')}
                         </span>
                       </button>
                     )}
-                    <button
+                    {editingId !== item.id && <><button
                       type="button"
-                      aria-label={`修改标题 ${item.title}`}
+                      aria-label={`编辑歌曲 ${item.title}`}
                       onClick={() => {
                         setEditingId(item.id);
-                        setEditingTitle(item.title);
+                        setEditingDetails({ title: item.title, artists: item.artists || '', mood: item.mood || '' });
                       }}
                       className="shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-slate-400 hover:bg-slate-100 cursor-pointer"
                     >
@@ -421,28 +452,22 @@ export const ListenTogetherWidget: React.FC<{
                     >
                       <Trash2 className="w-3 h-3" />
                     </button>
+                    </>}
                   </div>
                 );
               })}
             </section>
 
-            <WidgetImagePicker
-              label="唱片图案"
-              value={appearance.disc}
-              square
-              round
-              maxSize={240}
-              onChange={(value) => patch({ disc: value })}
-            />
-            <WidgetImagePicker
-              label="播放器背景"
-              value={appearance.background}
-              maxSize={900}
-              onChange={(value) => patch({ background: value })}
-            />
+            </>}
           </div>
+          </section>
+          </div>}
         </div>
       </MusicPanelLayer>}
     </>
   );
 };
+
+export function MusicApp({ onBack }: { onBack: () => void }) {
+  return <ListenTogetherWidget fullScreen onClose={onBack}/>;
+}

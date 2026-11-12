@@ -159,6 +159,10 @@ const scenes: Record<IllustratedApp, { title: string; caption: string; eyebrow: 
       <g className="every-opening-bob"><rect x="84" y="98" width="37" height="49" rx="4" transform="rotate(-19 84 98)" fill="#fffaf2" stroke="#fff" strokeWidth="2"/><path d="m92 112 21-7m-18 15 16-5" stroke="#d8c6b7" strokeWidth="2" strokeLinecap="round"/><path d="M222 146c-13-20-15-40-7-60m-1 28c-14-1-20-10-18-18 13 2 18 9 18 18Zm3 17c15-4 22-13 20-22-13 4-20 12-20 22Z" stroke="#b7c8b5" strokeWidth="1.5"/></g>
     </>,
   },
+  music: {
+    title: '一起听', caption: '把此刻，调到喜欢的频道。', eyebrow: 'OUR LITTLE PLAYLIST', footer: '这一首，和你一起听',
+    art: <g className="every-opening-float"><rect x="65" y="90" width="190" height="170" rx="25" fill="#e9dce8" stroke="#fff" strokeWidth="2"/><circle cx="157" cy="167" r="65" fill="#c1bfd7" stroke="#f9f5fc" strokeWidth="3"/>{[48,36,23].map(r=><circle key={r} cx="157" cy="167" r={r} fill="none" stroke="#e8e5f3" strokeWidth="1"/>)}<circle cx="157" cy="167" r="15" fill="#e9cfdd"/><circle cx="157" cy="167" r="3" fill="#fff"/><path d="M225 110v67l-21 25" fill="none" stroke="#a6b8cd" strokeWidth="7" strokeLinecap="round"/><path d="M99 239h116" stroke="#fff9" strokeWidth="3" strokeLinecap="round"/></g>,
+  },
   calendar: {
     title: '日历', caption: '给平常的一天，留一点期待。', eyebrow: 'A DAY TO REMEMBER', footer: '慢慢来，日子都有回响',
     art: <>

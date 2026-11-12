@@ -11,7 +11,7 @@ const valid = (v: unknown): v is Ao3Settings => !!v && typeof v === 'object' && 
     Object.entries(v.penNames).every(([id, name]) => !!id && id.length <= 200 && typeof name === 'string' && !!name.trim() && name.length <= 200));
 export const readAo3Settings = (): Ao3Settings => readStoredValue(AO3_SETTINGS_KEY, { prompt: '' }, valid);
 export const readAo3WorldBookIds = () => readAo3Settings().worldBookIds ?? readWorldBookOptions().filter(book => book.isGlobal).map(book => book.id);
-export const ao3WorldBooks = (contactIds: string[]) => getWorldBookEntriesForContacts(contactIds, readAo3WorldBookIds());
+export const ao3WorldBooks = (contactIds: string[]) => getWorldBookEntriesForContacts(contactIds, readAo3WorldBookIds(), undefined, { includeLinkedBooks: true });
 export const ao3TopPrompt = () => readAo3Settings().topPrompt?.trim() || '';
 export function saveAo3GenerationSettings(settings: Pick<Ao3Settings, 'prompt' | 'topPrompt' | 'worldBookIds'>) {
   const next = { ...readAo3Settings(), ...settings };

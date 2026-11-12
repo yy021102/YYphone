@@ -16,7 +16,8 @@ export type AppId =
   | 'world_book'
   | 'memory'
   | 'inventory'
-  | 'calendar';
+  | 'calendar'
+  | 'music';
 
 export interface AppMetadata {
   id: AppId;

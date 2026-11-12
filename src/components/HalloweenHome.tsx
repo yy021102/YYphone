@@ -34,7 +34,7 @@ export function HalloweenHome({ userProfile, apps, dockApps, appIcons, wallpaper
       <section className="hw-market-cabinet">
         <nav className="hw-market-shelves" aria-label="日常应用">{apps.map(appButton)}</nav>
       </section>
-      <details className="hw-market-music"><summary><span>♫ 一起听</span><small>掀开音乐盒 <i>＋</i></small></summary><div><ListenTogetherWidget/></div></details>
+      <details className="hw-market-music"><summary><span>♫ 一起听</span><small>掀开音乐盒 <i>＋</i></small></summary><div><ListenTogetherWidget onOpen={() => onOpenApp('music')}/></div></details>
       <footer className="hw-market-footer"><span>{userProfile.location} · {userProfile.mood}</span><span>{userProfile.stats.moments} 动态 / {userProfile.stats.notes} 随笔</span></footer>
     </div>
     <HomeSystemDock homeStyle="halloween" apps={dockApps} appIcons={appIcons} onOpenApp={onOpenApp} renderIcon={renderIcon}/>

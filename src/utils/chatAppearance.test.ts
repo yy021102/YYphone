@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { conversationAppearance, chatBackground } from './chatOverrides';
 import { applyBubblePreset, applyChatCombination, applyChatPage, captureChatCombination, captureChatPage, compileChatAppearance, DEFAULT_BUBBLE_STYLE, DEFAULT_CHAT_APPEARANCE, exportChatAppearance, independentBubbles, isChatAppearance, resetChatAppearance, type ChatAppearance } from './chatAppearance';
 
 const appearance = (): ChatAppearance => ({ ...structuredClone(DEFAULT_CHAT_APPEARANCE), backgroundUrl: 'https://example.invalid/garden.jpg',
@@ -7,6 +8,32 @@ const appearance = (): ChatAppearance => ({ ...structuredClone(DEFAULT_CHAT_APPE
   userAvatarFrame: { enabled: true, color1: '#123456', color2: '#abcdef', width: 2, angle: 90 },
   bubbleMode: 'custom', bubbleOverride: { ...DEFAULT_BUBBLE_STYLE, css: '.yy-chat-message-bubble{border-radius:12px}', userBubbleColor: '#abcdef', userBubbleOpacity: .5 },
   pagePresets: [{ id: 'page', name: '页面收藏', backgroundUrl: 'page.jpg' }], bubblePresets: [{ id: 'bubble', name: '气泡收藏', css: 'div{color:red}' }], presets: [{ id: 'set', name: '整套收藏', backgroundUrl: 'set.jpg' }],
+});
+
+test('conversation presets follow global by default; page snapshots keep independent bubbles and never mutate libraries', () => {
+  const global = appearance(), before = structuredClone(global);
+  assert.equal(conversationAppearance(global), global);
+  const selected = { scope: 'page' as const, preset: structuredClone(global.pagePresets![0]) };
+  assert.equal(conversationAppearance(global, { appearancePreset: selected }), global);
+  const chat = { customAppearanceEnabled: true, appearancePreset: selected };
+  assert.equal(conversationAppearance(global, chat).backgroundUrl, 'page.jpg');
+  assert.deepEqual(conversationAppearance(global, chat).bubbleOverride, global.bubbleOverride);
+  global.pagePresets![0].backgroundUrl = 'edited.jpg';
+  const next = conversationAppearance(global, chat);
+  assert.equal(next.backgroundUrl, 'page.jpg', 'saved snapshots survive library edits');
+  assert.equal(chatBackground({ backgroundUrl: 'private.jpg' }, next.backgroundUrl, false), 'private.jpg');
+  assert.equal(chatBackground(chat, next.backgroundUrl, true), '');
+  assert.equal(compileChatAppearance(next, true), '');
+  assert.equal(conversationAppearance(global, { ...chat, customAppearanceEnabled: false }), global);
+  assert.equal(before.backgroundUrl, global.backgroundUrl); assert.deepEqual(before.bubbleOverride, global.bubbleOverride);
+});
+
+test('conversation complete presets restore their own bubbles while other conversations still follow global', () => {
+  const global = appearance();
+  const next = conversationAppearance(global, { customAppearanceEnabled: true, appearancePreset: { scope: 'all', preset: { id: 'set', name: '单聊', ...captureChatCombination({ ...global, backgroundUrl: 'local.jpg', bubbleMode: 'follow', bubbleOverride: undefined }) } } });
+  assert.equal(next.backgroundUrl, 'local.jpg'); assert.equal(next.bubbleMode, 'follow'); assert.equal(next.bubbleOverride, undefined);
+  assert.equal(conversationAppearance(global, {}).backgroundUrl, global.backgroundUrl);
+  assert.equal(global.bubbleMode, 'custom');
 });
 test('switching pages changes only the page and preserves the exact independent bubbles and libraries', () => {
   const a = appearance(), next = applyChatPage(a, { backgroundUrl: 'new.jpg', themeCss: '.yy-chat-history{background:blue}', userBubbleColor: '#555555' });

@@ -45,7 +45,7 @@ export function photoPromptFields(message: PhotoMessage, conversation: PhotoConv
 export function pendingImageTargets(messages: OpenAiMessage[]): ImageDescriptionTarget[] {
   return [...new Map(messages.flatMap(m => m.images?.length ? m.imageTargets ?? [] : []).map(t => [t.imageId, t])).values()];
 }
-/** Same multimodal chat request, with a small hidden output field; never a separate vision call. */
+/** Default main-API path: record a small hidden description field in the same multimodal reply. */
 export function withImageDescriptionRequest(messages: OpenAiMessage[]): OpenAiMessage[] {
   if (!pendingImageTargets(messages).length || messages.some(m => m.imageDescriptionProtocol)) return messages;
   let imageIndex = 0;

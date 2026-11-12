@@ -19,7 +19,7 @@ Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: s
 beforeEach(async () => { await clearDbStorage(); values.clear(); mock.method(Math, 'random', () => 0.9); });
 afterEach(() => mock.restoreAll());
 const now = '2026-11-05T12:00:00.000Z';
-test('AO3 defaults to global books but explicit selections, including none, survive backups without automatic role books', async () => {
+test('AO3 merges bound role books with explicit selections, deduplicates them, and keeps global deselection through backups', async () => {
   const entry = (content: string) => [{ id: content, title: content, content, depth: 'front' }];
   writeStoredValue('yyphone:world-books', [
     { id: 'global', name: '全局书', isGlobal: true, entries: entry('全局内容') },
@@ -28,18 +28,38 @@ test('AO3 defaults to global books but explicit selections, including none, surv
   writeStoredValue('pocketos:wechat-contacts', [{ id: 'a', worldBooks: [{ bookId: 'optional' }] }]);
   assert.deepEqual(readAo3WorldBookIds(), ['global']);
   assert.match(ao3WorldBooks(['a']).join(''), /全局内容/);
-  assert.doesNotMatch(ao3WorldBooks(['a']).join(''), /可选内容/);
+  assert.match(ao3WorldBooks(['a']).join(''), /可选内容/);
   saveAo3GenerationSettings({ prompt: '文风', topPrompt: '置顶要求', worldBookIds: ['optional'] });
   assert.doesNotMatch(ao3WorldBooks(['a']).join(''), /全局内容/);
   assert.match(ao3WorldBooks([]).join(''), /可选内容/);
+  assert.equal(ao3WorldBooks(['a', 'a']).length, 1, 'a selected and role-bound book is only read once');
   const backup = exportAo3Data();
   saveAo3GenerationSettings({ prompt: '', topPrompt: '', worldBookIds: [] });
-  assert.deepEqual(ao3WorldBooks(['a']), []);
+  assert.equal(ao3WorldBooks(['a']).length, 1);
+  assert.match(ao3WorldBooks(['a'])[0], /可选内容/);
+  assert.deepEqual(ao3WorldBooks([]), []);
   await importAo3Data(backup);
   assert.equal(ao3TopPrompt(), '置顶要求');
   assert.deepEqual(readAo3WorldBookIds(), ['optional']);
   await assert.rejects(importAo3Data({ ...backup, settings: { ...backup.settings, worldBookIds: [false] } }), /格式不支持/);
   assert.deepEqual(readAo3WorldBookIds(), ['optional']);
+});
+
+test('AO3 honors bound entry ranges, excludes unrelated roles and inactive entries, and only expands books when explicitly selected', () => {
+  const entry = (id: string, extra = {}) => ({ id, title: id, content: `CONTENT_${id}`, depth: 'front', ...extra });
+  writeStoredValue('yyphone:world-books', [
+    { id: 'role', name: '角色背景', entries: [entry('bound'), entry('unbound'), entry('off', { activation: 'disabled' })] },
+    { id: 'other', name: '他人背景', entries: [entry('private')] },
+  ]);
+  writeStoredValue('pocketos:wechat-contacts', [
+    { id: 'a', worldBooks: [{ bookId: 'role', entryId: 'bound' }] },
+    { id: 'b', worldBooks: [{ bookId: 'role', entryId: 'bound' }] },
+    { id: 'c', worldBooks: [{ bookId: 'other' }] },
+  ]);
+  saveAo3GenerationSettings({ prompt: '', worldBookIds: [] });
+  assert.deepEqual(ao3WorldBooks(['a', 'b']), ['【角色背景 / bound】\nCONTENT_bound']);
+  saveAo3GenerationSettings({ prompt: '', worldBookIds: ['role', 'role'] });
+  assert.deepEqual(ao3WorldBooks(['a', 'b']), ['【角色背景 / bound】\nCONTENT_bound', '【角色背景 / unbound】\nCONTENT_unbound']);
 });
 const original: Ao3Comment = { id: 'original', author: '纸船', body: '喜欢初章的结尾。', createdAt: now };
 function setup(authorType: 'passerby' | 'character' = 'passerby'): Ao3Work {
@@ -286,7 +306,8 @@ test('other-CP discovery generates random contact comments without making that c
     const body = JSON.parse(String(options?.body)), input = JSON.parse(body.messages.at(-1).content);
     assert.equal(input.character, undefined); assert.equal(input.experiences, undefined);
     assert.match(input.worldBooks, /只供评论使用的角色背景/);
-    assert.match(input.commentWorldBooks, /只供评论使用的角色背景/);
+    assert.match(input.worldBooks + input.commentWorldBooks, /只供评论使用的角色背景/);
+    assert.equal((JSON.stringify(input).match(/只供评论使用的角色背景/g) ?? []).length, 1);
     assert.ok(body.messages[0].content.startsWith('本次前置要求'));
     assert.match(body.messages[0].content, /只是偶然读到作品的读者/);
     assert.equal(input.commentPlan.requiredSpeakerId, 'character:a');
@@ -389,7 +410,12 @@ test('earlier chapter AI comments never receive future text or another chapter d
 
 test('追更 produces a new chapter and five independent comments, then commits them together without replacing old discussions', async () => {
   const work = setup('character'); let calls = 0;
-  writeStoredValue('yyphone:world-books', [{ id: 'global', name: '未勾选全局书', isGlobal: true, entries: [{ id: 'g', title: '背景', content: '不该自动注入的全局内容', depth: 'front' }] }]);
+  writeStoredValue('yyphone:world-books', [
+    { id: 'global', name: '未勾选全局书', isGlobal: true, entries: [{ id: 'g', title: '背景', content: '不该自动注入的全局内容', depth: 'front' }] },
+    { id: 'bound', name: '绑定书', entries: [{ id: 'b', title: '角色背景', content: '角色绑定背景默认读取', depth: 'middle' }] },
+  ]);
+  const contacts = JSON.parse(readStorageString('pocketos:wechat-contacts')!);
+  writeStoredValue('pocketos:wechat-contacts', contacts.map((contact: any) => contact.id === 'a' ? { ...contact, worldBooks: [{ bookId: 'bound' }] } : contact));
   saveAo3GenerationSettings({ prompt: '', topPrompt: '优先前置要求', worldBookIds: [] });
   mock.method(Math, 'random', () => 0.1);
   mock.method(globalThis, 'fetch', async (_url: unknown, options?: RequestInit) => {
@@ -398,7 +424,7 @@ test('追更 produces a new chapter and five independent comments, then commits 
     const input = JSON.parse(request.messages.at(-1).content);
     assert.ok(request.messages[0].content.startsWith('优先前置要求'));
     assert.doesNotMatch(JSON.stringify(request), /不该自动注入的全局内容/);
-    assert.deepEqual(input.worldBooks, []);
+    assert.deepEqual(input.worldBooks, ['【绑定书 / 角色背景】\n角色绑定背景默认读取']);
     if (calls === 1) {
       assert.equal(input.chapter, 3);
       assert.match(input.idea, /希望两人一起去海边，先把误会说清楚/);

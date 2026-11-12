@@ -71,6 +71,9 @@ export async function generateAo3Discovery(options: Ao3DiscoveryOptions, userNam
     ...(options.topic === 'couple' ? { pairCharId: character!.id, pairCharName: character!.name.slice(0, 200), playerName: player.name } : {}) };
   const commentPlan = createAo3CommentPlan({ generation, characters: [], comments: [] }, 5);
   const commentCharacterIds = commentPlan.participants.filter(p => p.identity.type === 'character').map(p => p.identity.id);
+  const storyWorldBooks = ao3WorldBooks(character ? [character.id] : []);
+  const storyBookEntries = new Set(storyWorldBooks);
+  const commentWorldBooks = !character ? ao3WorldBooks(commentCharacterIds).filter(entry => !storyBookEntries.has(entry)) : [];
   const experiences = character && options.topic === 'couple' && options.includeExperiences ? pairingExperiences(character.id) : undefined;
   const relationshipSupplement = character ? rows('yyphone:wechat-chats').find(c => c.type === 'direct' && Array.isArray(c.participantIds) && c.participantIds.length === 1 && c.participantIds[0] === character.id)?.context : undefined;
   const archive = character ? activeMemoryArchive(character.id) : undefined;
@@ -82,8 +85,8 @@ export async function generateAo3Discovery(options: Ao3DiscoveryOptions, userNam
   ].join('\n\n'), JSON.stringify({
     authorType: options.authorType, topic: options.topic, character, player,
     fandom: text(options.fandom, 200), direction: text(options.direction, 8000), tone: text(options.tone, 100), rating: options.rating,
-    knownPenName, worldBooks: ao3WorldBooks(character ? [character.id] : []).join('\n\n').slice(0, 12000),
-    ...(!character && commentCharacterIds.length ? { commentWorldBooks: ao3WorldBooks(commentCharacterIds).join('\n\n').slice(0, 12000) } : {}),
+    knownPenName, worldBooks: storyWorldBooks.join('\n\n').slice(0, 12000),
+    ...(!character && commentCharacterIds.length ? { commentWorldBooks: commentWorldBooks.join('\n\n').slice(0, 12000) } : {}),
     relationshipSupplement: text(relationshipSupplement, 6000),
     continuity: options.tone === '平行世界 AU' ? 'independent' : options.continuity ?? 'auto',
     experiences, avoidTitles: existing.slice(0, 15).map(w => w.title), commentPlan,

@@ -4,21 +4,21 @@ import { parseImageReference, referenceGuidance, referenceSimilarity } from './i
 import type { GenerationReference } from './userImageReference';
 
 export type ImageGenerationProvider = 'openai' | 'novelai' | 'imagen' | 'gemini';
-export type ImageSizePreset = 'square' | 'portrait' | 'landscape';
-export const isImageSizePreset = (value: unknown): value is ImageSizePreset => value === 'square' || value === 'portrait' || value === 'landscape';
+export type ImageSizePreset = 'square' | 'portrait' | 'landscape' | 'widescreen';
+export const isImageSizePreset = (value: unknown): value is ImageSizePreset => value === 'square' || value === 'portrait' || value === 'landscape' || value === 'widescreen';
 export const defaultImageSize = (provider: ImageGenerationProvider): ImageSizePreset => provider === 'novelai' ? 'portrait' : 'square';
 export function imageDimensions(provider: ImageGenerationProvider, size = defaultImageSize(provider)) {
   if (!isImageSizePreset(size)) throw new Error('图片尺寸选项无效，请重新选择。');
   const dimensions = provider === 'novelai'
-    ? { square: [1024, 1024], portrait: [832, 1216], landscape: [1216, 832] }
-    : { square: [1024, 1024], portrait: [1024, 1536], landscape: [1536, 1024] };
+    ? { square: [1024, 1024], portrait: [832, 1216], landscape: [1216, 832], widescreen: [1024, 576] }
+    : { square: [1024, 1024], portrait: [1024, 1536], landscape: [1536, 1024], widescreen: [1536, 864] };
   const [width, height] = dimensions[size];
-  const aspectRatio = { square: '1:1', portrait: '3:4', landscape: '4:3' }[size];
+  const aspectRatio = { square: '1:1', portrait: '3:4', landscape: '4:3', widescreen: '16:9' }[size];
   return { width, height, size: `${width}x${height}`, aspectRatio };
 }
-export const imageSizeOptions = (provider: ImageGenerationProvider) => (['square', 'portrait', 'landscape'] as const).map((value) => {
+export const imageSizeOptions = (provider: ImageGenerationProvider) => (['square', 'portrait', 'landscape', 'widescreen'] as const).map((value) => {
   const dimensions = imageDimensions(provider, value);
-  return { value, label: `${{ square: '正方形', portrait: '竖图', landscape: '横图' }[value]} · ${provider === 'gemini' || provider === 'imagen' ? dimensions.aspectRatio : `${dimensions.width} × ${dimensions.height}`}` };
+  return { value, label: `${{ square: '正方形', portrait: '竖图', landscape: '横图', widescreen: '宽屏 16:9' }[value]} · ${provider === 'gemini' || provider === 'imagen' ? dimensions.aspectRatio : `${dimensions.width} × ${dimensions.height}`}` };
 });
 
 export const IMAGE_PROVIDER_OPTIONS: Array<{ value: ImageGenerationProvider; label: string }> = [

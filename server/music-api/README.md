@@ -2,6 +2,14 @@
 
 前端入口在桌面「一起听 → 网易云音乐」。可以扫码登录、分页读取自己的歌单、搜索歌曲，将歌曲加入现有播放列表，与所选角色一起听。本地上传、音频链接继续可用。
 
+## 默认服务与自建切换
+
+前端不再内置第三方公共服务。主页保留「一起听」小组件，点开进入全屏音乐页面；上传本地音频、添加音频链接不需要部署网易云服务。
+
+地址优先级是：玩家在齿轮里保存的自建地址 → 作者构建时的 `VITE_NETEASE_API_URL`。两者都没有时提示填写，不请求任何公共服务。玩家可点「恢复默认服务」清除自己的覆盖地址；保存界面显示的默认地址不会将其固定成个人设置，之后仍跟随作者更新。更换实际服务地址会清除原服务的本机登录，不自动把凭证转发到新服务。
+
+作者以后部署好本目录的服务，在 GitHub Pages 工作流中配置仓库变量 `NETEASE_API_URL`；本地构建或 Cloudflare Pages 的构建环境中配置 `VITE_NETEASE_API_URL`，再重新构建即可。Cloudflare 直接上传 `dist` 时需要在上传前的本地构建中设置该变量。玩家仍可以填写自己的地址。
+
 本目录是独立服务，不参与小手机前端的依赖安装，不会改变 GitHub Pages 的部署流程。基于第三方开源项目 [NeteaseCloudMusicApi Enhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced)（MIT），固定依赖版本 4.41.1。它不是网易云官方开放平台。
 
 ## 本机启动
@@ -18,7 +26,23 @@ npm start
 
 ## 供 GitHub Pages / 手机长期使用
 
-GitHub Pages 只托管前端，不能运行本目录的 Node 服务。没有服务器时，推荐先用下面的 Vercel 方式，已经备好函数入口与配置，不需要复制另一个项目或自己购买服务器。
+GitHub Pages / Cloudflare Pages 继续托管小手机前端；本目录的 Node 音乐服务单独部署。已准备 Render 的部署配置，也保留 Vercel 的函数入口。
+
+### 当前方案：Render Free
+
+当前已部署的音乐服务：`https://yyphone-music.onrender.com`；健康检查：`https://yyphone-music.onrender.com/health`。GitHub 仓库的 `NETEASE_API_URL` 构建变量已配置为该地址。本机 `.env.local` 同样配置了 `VITE_NETEASE_API_URL`，本地重新构建及后续 GitHub Pages 构建会自动带入；播放器中的个人自建地址仍优先使用。
+
+仓库根目录 `render.yaml` 已配置一个 **Free** 音乐服务，使用现有 Dockerfile、Node 22、新加坡区域及 `/health` 健康检查。不会创建数据库或付费磁盘，也不随小手机的普通提交自动重建音乐服务。
+
+1. 将配置推送到自己的 GitHub 仓库后，用 GitHub 登录 [Render](https://dashboard.render.com/)。
+2. 使用 [Deploy to Render](https://render.com/deploy?repo=https%3A%2F%2Fgithub.com%2Fyy021102%2FYYphone) 或 **New → Blueprint**，选择本仓库。部署前核对只有一个 `yyphone-music` 服务，套餐为 **Free**。
+3. 已允许小手机当前的两个来源：`https://yyphone.pages.dev` 和 `https://yy021102.github.io`。如使用其他域名，在音乐服务的 Environment 修改 `ALLOWED_ORIGINS`，多个来源用英文逗号隔开，不带网页路径。
+4. 服务显示 Live 后，复制其 HTTPS 地址，打开 `/health` 应返回 `service: yyphone-music`。再填进小手机「一起听 → 网易云音乐 → 音乐服务设置」保存测试，实际扫码验证。
+5. 确认登录、歌单、播放可用后，按上方的 `VITE_NETEASE_API_URL` / `NETEASE_API_URL` 配置前端默认地址。
+
+如果手动创建 Web Service：Root Directory 填 `server/music-api`，Language 选 Docker，Dockerfile Path 填 `./Dockerfile`，套餐选 Free，环境变量同上，不要运行小手机的前端构建命令。
+
+免费实例 15 分钟无人访问会休眠，下一次启动约需一分钟（[Render 说明](https://render.com/docs/free)）。首次连接若超时，可以先打开音乐服务的 `/health` 等到返回结果，再回小手机重试。扫码和播放是否可用，仍需在该部署的网络环境下实测。
 
 ### 省事方式：Vercel
 

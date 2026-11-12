@@ -37,6 +37,11 @@ export function readMusicService(): string {
   const raw = [config.endpoint, import.meta.env?.VITE_NETEASE_API_URL?.trim() || ''].find(address => address.trim() && !removedPublicService(address)) || '';
   try { return raw ? musicServiceUrl(raw) : ''; } catch { return raw.trim(); }
 }
+// Only an explicit personal override belongs in an editable address field.
+export function readCustomMusicService(): string {
+  const endpoint = readMusicService();
+  return endpoint === defaultMusicService() ? '' : endpoint;
+}
 export function saveMusicService(raw: string) {
   const fallback = defaultMusicService();
   const custom = raw.trim() ? musicServiceUrl(raw) : '';

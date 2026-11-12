@@ -20,9 +20,9 @@ export function desktopDateDistance(date: string, now: Date): number | null {
   if (!date) return null;
   return Math.round((new Date(`${date}T00:00:00Z`).getTime() - Date.UTC(now.getFullYear(), now.getMonth(), now.getDate())) / 86_400_000);
 }
-export function FreeDesktopWidget({ widget, profile, characters, onCalendar, onProfile, onNotes, onInventory, musicPortal }: {
+export function FreeDesktopWidget({ widget, profile, characters, onCalendar, onMusic, onProfile, onNotes, onInventory, musicPortal }: {
   widget: DesktopWidgetItem; profile: UserProfile; characters: DesktopCharacter[];
-  onCalendar: () => void; onProfile: () => void; onNotes: () => void; onInventory: () => void; musicPortal?: HTMLElement;
+  onCalendar: () => void; onMusic?: () => void; onProfile: () => void; onNotes: () => void; onInventory: () => void; musicPortal?: HTMLElement;
 }) {
   const { settings, widgetType } = widget;
   const [now, setNow] = useState(() => new Date()), [photoIndex, setPhotoIndex] = useState(0);
@@ -40,7 +40,7 @@ export function FreeDesktopWidget({ widget, profile, characters, onCalendar, onP
   const avatar = (url: string, name: string) => <span className="free-person-avatar">{url ? <img src={url} alt={name} draggable={false}/> : name.slice(0, 1)}</span>;
   const photo = settings.images.length ? settings.images[photoIndex % settings.images.length] : undefined;
   if (widgetType === 'calendar') return <div className="free-widget-live"><CalendarWidget onOpen={onCalendar} backgroundImage={settings.backgroundImage}/></div>;
-  if (widgetType === 'music') return <div className="free-widget-live"><ListenTogetherWidget modalContainer={musicPortal} backgroundImage={settings.backgroundImage}
+  if (widgetType === 'music') return <div className="free-widget-live"><ListenTogetherWidget onOpen={onMusic} modalContainer={musicPortal} backgroundImage={settings.backgroundImage}
     variant={settings.template === 'vinyl' || settings.template === 'disc' ? settings.template : undefined} artwork={settings.images[0]} title={settings.title} note={settings.text}
     vinylColor={settings.vinylColor ?? (settings.template === 'disc' ? GLASS_DISC_APPEARANCE.color : undefined)}
     vinylOpacity={settings.vinylOpacity ?? (settings.template === 'disc' ? GLASS_DISC_APPEARANCE.opacity : undefined)}/></div>;

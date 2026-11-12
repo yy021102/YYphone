@@ -1,0 +1,38 @@
+.mines-game { --mine-ink:#6e7186; --mine-soft:#a0a0b4; width:100%; min-height:100%; padding:21px 18px calc(26px + env(safe-area-inset-bottom,0px)); color:var(--mine-ink); background:radial-gradient(ellipse at 0 10%,#f7e6ef,transparent 58%),radial-gradient(ellipse at 100% 78%,#e3edf7,transparent 65%),#f8f7fb; display:flex; flex-direction:column; align-items:stretch; gap:14px; }
+.mines-game button { -webkit-tap-highlight-color:transparent; cursor:pointer; }
+.mines-heading { display:flex; align-items:center; gap:11px; }
+.mines-mascot { width:51px; height:51px; flex-shrink:0; padding:5px; border-radius:19px; color:#c5b9d8; background:#fff8; border:1px solid #fffc; box-shadow:0 6px 18px #b8a8c31c; transform:rotate(-8deg); }
+.mine-fluffy { width:100%; height:100%; display:block; }
+.mines-eyebrow { font-size:8px; letter-spacing:1.6px; color:#b4a4b9; }
+.mines-heading h2 { font-size:21px; letter-spacing:2px; font-weight:600; margin:2px 0 0; }
+.mines-reset { margin-left:auto; display:flex; align-items:center; gap:5px; white-space:nowrap; padding:9px 10px; border:1px solid #fffd; border-radius:13px; background:#fff7; color:#9d8fa7; font-size:10px; }
+.mines-levels { display:flex; padding:4px; background:#e9e7f080; border:1px solid #fff9; border-radius:17px; }
+.mines-levels button { flex:1; display:flex; justify-content:center; align-items:center; gap:9px; padding:9px 5px; border:0; border-radius:12px; background:none; color:#a49aaa; font-size:12px; }
+.mines-levels small { font-size:9px; opacity:.65; }
+.mines-levels button[aria-pressed=true] { background:#fffd; color:#81788e; box-shadow:0 3px 10px #afa3bf18; }
+.mines-stats { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.mines-stats > div { display:flex; align-items:center; flex-wrap:wrap; gap:6px; padding:12px 11px; border:1px solid #fff; border-radius:17px; background:#ffffff7d; }
+.mines-stats svg { color:#b5a0b9; }
+.mines-stats span { color:var(--mine-soft); font-size:10px; }
+.mines-stats strong { font-size:18px; font-weight:500; margin-left:auto; font-variant-numeric:tabular-nums; }
+.mines-tools { display:flex; align-self:center; gap:8px; }
+.mines-tools button { display:flex; align-items:center; gap:6px; padding:7px 16px; border:1px solid #fff9; border-radius:99px; font-size:11px; color:#aaa3b5; background:#fff5; }
+.mines-tools button[aria-pressed=true] { color:#8f7c9f; background:#f3e7f1; border-color:#dfd0e2; box-shadow:0 3px 8px #bda6c216; }
+.mines-board-wrap { width:100%; max-width:430px; align-self:center; padding:10px; border:1px solid #fff; border-radius:22px; background:linear-gradient(145deg,#fdfafe,#eae9f2); box-shadow:0 10px 26px #b5a4c31a,inset 0 0 0 4px #ffffff50; }
+.mines-board { display:grid; gap:4px; touch-action:pan-y; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; }
+.mines-cell { display:flex; position:relative; align-items:center; justify-content:center; aspect-ratio:1; min-width:0; padding:2px; border:1px solid #fff9; border-radius:7px; color:#9e8db6; background:linear-gradient(145deg,#fff,#f0e9f5); box-shadow:0 2px 2px #c1b5cf4d,inset 0 1px 0 white; font-size:15px; line-height:1; font-weight:650; touch-action:pan-y; }
+.mines-cell:not(:disabled):active { transform:translateY(1px); }
+.mines-cell.is-open { background:#e7e5ef75; box-shadow:inset 0 1px 2px #b0a2bd12; border-color:#e3dfe955; }
+.mines-cell.is-flagged { color:#c79eb8; background:#fcf0f5; }
+.mines-cell.is-mine { color:#c9badb; background:#f7f0fa; }
+.mines-cell.is-hit { background:#efd7e5; box-shadow:inset 0 0 0 1px #dfb8cc; }
+.mines-cell[data-number="1"] { color:#708fae; }.mines-cell[data-number="2"] { color:#779e90; }.mines-cell[data-number="3"] { color:#bb809c; }.mines-cell[data-number="4"] { color:#8a7cab; }.mines-cell[data-number="5"],.mines-cell[data-number="6"],.mines-cell[data-number="7"],.mines-cell[data-number="8"] { color:#a47587; }
+.mines-cell-glint { width:4px; height:4px; border-radius:50%; background:#ded3e5aa; }
+.mines-empty-dot { width:2px; height:2px; border-radius:50%; background:#c8bfd33b; }
+.mines-message { display:flex; align-items:center; justify-content:center; flex-wrap:wrap; gap:7px; color:#a69bad; text-align:center; min-height:26px; font-size:10px; }
+.mines-message.is-result { padding:15px; border:1px solid #fff; border-radius:19px; background:#fff8; color:#a38da9; }
+.mines-message strong { font-size:15px; letter-spacing:1px; font-weight:550; }.mines-message.is-result span { flex-basis:100%; font-size:10px; color:#aaa0b2; }
+.mines-best { display:flex; align-items:center; justify-content:center; gap:7px; font-size:10px; color:#b0a4b6; }.mines-best strong { font-weight:500; color:#91859d; }
+.mines-rules { color:#aaa0b1; font-size:10px; text-align:center; }.mines-rules summary { cursor:pointer; }.mines-rules p { margin:9px 0 0; font-size:11px; line-height:1.9; text-align:left; }
+.mines-error { color:#b16f8f; font-size:11px; }
+@media(max-width:350px) { .mines-game { padding-inline:13px; gap:12px; }.mines-board-wrap { padding:8px; border-radius:18px; }.mines-board { gap:3px; }.mines-cell { font-size:13px; border-radius:6px; }.mines-stats > div { padding:10px 8px; }.mines-stats strong { font-size:16px; }.mines-heading h2 { font-size:19px; } }

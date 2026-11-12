@@ -3,6 +3,7 @@ import { buildChatRegexPrompt } from '../utils/chatRegex';
 import { WeChatHistorySearch } from '../components/WeChatHistorySearch';
 import { ImagePromptPresets } from '../components/ImagePromptPresets';
 import { Game2048 } from '../components/Game2048';
+import { Minesweeper } from '../components/Minesweeper';
 import { isGame2048 } from '../utils/game2048';
 import type { SearchConversation } from '../utils/chatSearch';
 import { chatFeatureInstructions, chatPendingTransferInstructions } from '../utils/chatFeaturePrompt';
@@ -12,7 +13,7 @@ import { shouldShowTimestamp, effectiveChatTimeZone, formatChatTimestamp } from 
 import { syncAliasExperiences } from '../utils/aliasExperiences';
 import { isChatSendKey } from '../utils/chatSendKey';
 import { BIRTHDAY_CHANGE } from '../utils/birthday';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { acknowledgeCouponRequests, assertCouponAvailable, coupleBlockProtection, coupleRewardContext, useCoupleCoupon, type CoupleProductId } from '../utils/coupleRewards';
 import { CoupleCorrespondence } from '../components/CoupleCorrespondence';
 import { AliasAccountSwitcher, AliasChat, AliasConversationList, AliasFriendRequests, AliasManager, useAliasAccounts } from '../components/WeChatAliases';
@@ -67,6 +68,7 @@ import {
   Heart,
   HeartHandshake,
   Sparkles,
+  Flower2,
   Gamepad2,
 } from 'lucide-react';
 import { AppHeader } from '../components/AppHeader';
@@ -111,7 +113,7 @@ import { ChatOverrideSettings } from '../components/ChatOverrideSettings';
 import { UserNpcSettings } from '../components/UserNpcSettings';
 import { ChatRegexSettings } from '../components/ChatRegexSettings';
 import { RegexMessage, useChatRegex } from '../components/RegexMessage';
-import { chatSecondaryApi, chatBackground, type ChatOverrides } from '../utils/chatOverrides';
+import { chatSecondaryApi, chatBackground, conversationAppearance, type ChatOverrides } from '../utils/chatOverrides';
 import { parseAiJson } from '../utils/aiResponse';
 import { withWorldBooksForContacts } from '../utils/worldBookPrompt';
 import { WerewolfGame } from '../components/WerewolfGame';
@@ -228,7 +230,6 @@ const isChatBanner = (value: unknown): value is ChatBanner => !!value && typeof 
   ((value as ChatBanner).showIcon === undefined || typeof (value as ChatBanner).showIcon === 'boolean');
 
 const WECHAT_GAMES = [
-  { id: '2048', name: '2048', description: '滑动合并，挑战更大的数字', icon: Grid3X3, color: 'bg-indigo-50 text-indigo-400' },
   { id: 'sudoku', name: '数独', description: '唯一解挑战', icon: Grid3X3, color: 'bg-emerald-50 text-emerald-700' },
   { id: 'gomoku', name: '五子棋', description: '黑白对弈，连成五子', icon: Grid3X3, color: 'bg-amber-50 text-amber-700' },
   { id: 'go', name: '围棋', description: '9 / 13 路棋盘，围地与提子', icon: Grid3X3, color: 'bg-orange-50 text-orange-800' },
@@ -242,6 +243,8 @@ const WECHAT_GAMES = [
   { id: 'script-mystery', name: '剧本杀', description: '搜集线索，揭开真相', icon: BookOpen, color: 'bg-teal-50 text-teal-700' },
   { id: 'turtle-soup', name: '海龟汤', description: '提问解谜，揭开汤底', icon: Lightbulb, color: 'bg-cyan-50 text-cyan-700' },
   { id: 'liars-bar', name: 'Liars Bar', description: '暗扣手牌，质疑谎言', icon: Dices, color: 'bg-stone-100 text-amber-800' },
+  { id: '2048', name: '2048', description: '滑动合并，挑战更大的数字', icon: Grid3X3, color: 'bg-indigo-50 text-indigo-400' },
+  { id: 'minesweeper', name: '扫雷', description: '翻开小花园，找到藏起来的小雷', icon: Flower2, color: 'bg-pink-50 text-pink-400' },
 ] as const;
 
 type DiscoverPage = 'home' | 'moments' | 'games' | 'divination' | 'little-sip' | 'kitchen' | 'channels' | 'text-adventure' | 'time-capsule' | 'wechat-reading' | 'character-perspective' | typeof WECHAT_GAMES[number]['id'];
@@ -833,7 +836,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
   const [personaError, setPersonaError] = useState('');
   useErrorDialog(personaError);
   const [presetNameDraft, setPresetNameDraft] = useState('');
-  const [chatAppearance, setChatAppearance] = useState(() => {
+  const [globalChatAppearance, setChatAppearance] = useState(() => {
     const stored = readSetting(SETTINGS_KEYS.chatAppearance, DEFAULT_CHAT_APPEARANCE, isChatAppearance);
     // 仅迁移旧默认配色，保留自定义颜色、透明度和 CSS。
     const migrateUser = ['#d1fae5', '#e3e6eb'].includes(stored.userBubbleColor.toLowerCase()) &&
@@ -900,6 +903,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
     }
   }, [chatError]);
   const [activeChatId, setActiveChatId] = useState('');
+  const chatAppearance = useMemo(() => conversationAppearance(globalChatAppearance, chats.find(chat => chat.id === activeChatId)), [globalChatAppearance, chats, activeChatId]);
   useEffect(() => {
     setActiveTab('chats');
     setDiscoverPage('home');
@@ -4227,7 +4231,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
           }
         }}
         rightAction={
-          !activeChat && activeTab === 'discover' && (discoverPage === 'games' || (selectedGame && discoverPage !== '2048')) ? <button type="button" aria-label="游戏设置" onClick={() => setGameApiSettingsOpen(true)} className="flex h-8 w-8 items-center justify-center rounded-full text-[#2C4A5C] hover:bg-black/5"><MoreVertical className="h-6 w-6 rotate-90" /></button> : activeTab === 'me' && mePage === 'favorites' ? <button type="button" aria-label="新建收藏" onClick={() => setFavoriteComposeOpen(true)} className="flex h-8 w-8 items-center justify-center rounded-full border border-current"><Plus className="h-6 w-6" /></button> : activeChat ? (
+          !activeChat && activeTab === 'discover' && (discoverPage === 'games' || (selectedGame && discoverPage !== '2048' && discoverPage !== 'minesweeper')) ? <button type="button" aria-label="游戏设置" onClick={() => setGameApiSettingsOpen(true)} className="flex h-8 w-8 items-center justify-center rounded-full text-[#2C4A5C] hover:bg-black/5"><MoreVertical className="h-6 w-6 rotate-90" /></button> : activeTab === 'me' && mePage === 'favorites' ? <button type="button" aria-label="新建收藏" onClick={() => setFavoriteComposeOpen(true)} className="flex h-8 w-8 items-center justify-center rounded-full border border-current"><Plus className="h-6 w-6" /></button> : activeChat ? (
             <button
               type="button"
               aria-label="对话设置"
@@ -4264,7 +4268,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
           ) : null
         }
       />}
-      {gameApiSettingsOpen && !activeChat && activeTab === 'discover' && (discoverPage === 'games' || (selectedGame && discoverPage !== '2048')) && <GameApiSettings onClose={() => setGameApiSettingsOpen(false)}/>}
+      {gameApiSettingsOpen && !activeChat && activeTab === 'discover' && (discoverPage === 'games' || (selectedGame && discoverPage !== '2048' && discoverPage !== 'minesweeper')) && <GameApiSettings onClose={() => setGameApiSettingsOpen(false)}/>}
       {personaRecordPending && <div className="absolute inset-0 z-[80] flex items-center justify-center bg-slate-900/25 p-5 backdrop-blur-sm">
         <section role="dialog" aria-modal="true" aria-label="选择人设记录" className="w-full max-w-sm space-y-3 rounded-3xl border border-white bg-white p-5 text-slate-700 shadow-xl">
           <h2 className="text-sm font-bold">这份人设使用哪套记录？</h2>
@@ -5856,6 +5860,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
             onBack={() => setDiscoverPage('home')}
           />
         )}
+        {activeTab === 'discover' && discoverPage === 'minesweeper' && <Minesweeper/>}
         {activeTab === 'discover' && discoverPage === '2048' && <Game2048 people={contacts.map(({ id, name }) => ({ id, name }))}
           onShare={(result, detail, recipients) => {
             if (!isGame2048(result) || result.status === 'playing') throw new Error('请先结束本局，再分享记录。');
@@ -6489,7 +6494,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
             }}
           />
         )}
-        {activeTab === 'discover' && selectedGame && discoverPage !== '2048' && discoverPage !== 'word-encounter' && discoverPage !== 'gomoku' && discoverPage !== 'go' && discoverPage !== 'reversi' && discoverPage !== 'sudoku' && discoverPage !== 'uno' && discoverPage !== 'guess-word' && discoverPage !== 'qna' && discoverPage !== 'werewolf' && discoverPage !== 'script-mystery' && discoverPage !== 'turtle-soup' && discoverPage !== 'liars-bar' && discoverPage !== 'zha-jin-hua' && (
+        {activeTab === 'discover' && selectedGame && discoverPage !== '2048' && discoverPage !== 'minesweeper' && discoverPage !== 'word-encounter' && discoverPage !== 'gomoku' && discoverPage !== 'go' && discoverPage !== 'reversi' && discoverPage !== 'sudoku' && discoverPage !== 'uno' && discoverPage !== 'guess-word' && discoverPage !== 'qna' && discoverPage !== 'werewolf' && discoverPage !== 'script-mystery' && discoverPage !== 'turtle-soup' && discoverPage !== 'liars-bar' && discoverPage !== 'zha-jin-hua' && (
           <section className="flex min-h-full flex-col items-center justify-center px-6 py-12 text-center">
             <div className={`flex h-20 w-20 items-center justify-center rounded-3xl ${selectedGame.color}`}>
               <selectedGame.icon className="h-10 w-10" />
@@ -6702,7 +6707,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
           </div>
         )}
         {activeTab === 'me' && mePage === 'beauty' && <WeChatAppearanceWorkshop
-          appearance={chatAppearance} userName={personaNickname} userAvatar={personaDraft.avatarUrl} characterAvatar={contacts[0]?.avatarUrl} characterName={contacts[0]?.name}
+          appearance={globalChatAppearance} userName={personaNickname} userAvatar={personaDraft.avatarUrl} characterAvatar={contacts[0]?.avatarUrl} characterName={contacts[0]?.name}
           onSave={async next => {
             compileChatAppearance(next);
             await setStorageItemsAtomically({ [SETTINGS_KEYS.chatAppearance]: next });
@@ -6815,7 +6820,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
               <label className="flex items-center justify-between gap-3 text-xs text-slate-600">允许角色撤回消息<input type="checkbox" aria-label="允许角色撤回消息" checked={chatSettingsDraft.allowCharacterRecall === true} onChange={event => setChatSettingsDraft({ ...chatSettingsDraft, allowCharacterRecall: event.target.checked })}/></label>
               <p className="text-[10px] text-slate-400">角色可按情境撤回自己的普通消息。撤回提示可点击查看原内容。</p>
             </section>
-            <ChatOverrideSettings key={chatSettingsDraft.id} value={chatSettingsDraft} onBusyChange={setChatWallpaperBusy}
+            <ChatOverrideSettings key={chatSettingsDraft.id} value={chatSettingsDraft} appearance={globalChatAppearance} onBusyChange={setChatWallpaperBusy}
               onChange={patch => setChatSettingsDraft(current => current?.id === chatSettingsDraft.id ? { ...current, ...patch } : current)}/>
             <section style={{ order: 6 }} className="space-y-2 rounded-2xl border border-sky-100 bg-gradient-to-br from-sky-50/80 to-pink-50/60 p-3">
               <label className="flex items-center justify-between gap-3 text-xs font-semibold text-[#2C4A5C]">

@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: yyphone-music
+    runtime: docker
+    plan: free
+    region: singapore
+    rootDir: server/music-api
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeployTrigger: off
+    envVars:
+      - key: ALLOWED_ORIGINS
+        value: https://yyphone.pages.dev,https://yy021102.github.io

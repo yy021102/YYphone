@@ -1,4 +1,5 @@
 import { type ApiConnection } from './aiApi';
+import { prepareChatVision } from './visionApi';
 import { parseChatResponse } from './aiResponse';
 import { appendPromptContent, type OpenAiMessage } from './buildPrompt';
 import { estimatePromptTokens, estimateTextTokens } from './chatTokens';
@@ -120,6 +121,7 @@ export const requestChatReply = async (
   speakers?: ChatSpeakerContext,
   options: { retryOnFormatError?: boolean; requireThought?: boolean; groupChat?: boolean; normalizeVoice?: boolean; signal?: AbortSignal; chatLanguage?: ChatLanguage; chineseThoughts?: boolean; phoneProxyTargets?: string[]; validateResult?: (result: Record<string, unknown>) => void } = {}
 ): Promise<Record<string, unknown>> => {
+  messages = await prepareChatVision(messages, options.signal);
   messages = withImageDescriptionRequest(messages);
   const languageInstructions = chatLanguageInstructions(options.chatLanguage);
   if (!messages.some(message => message.role === 'system' && message.content === languageInstructions)) {

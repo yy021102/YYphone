@@ -7,7 +7,7 @@ const SHARED = new Set([
   'yyphone:world-books', 'yyphone:character-npcs-library', 'yyphone:memory-settings',
   'yyphone:api-presets', 'yyphone:active-api-preset', 'yyphone:voice-model', 'yyphone:image-generation',
   'yyphone:image-generation-presets', 'yyphone:active-image-generation-preset', 'yyphone:mcp-settings',
-  'yyphone:image-prompt-presets',
+  'yyphone:image-prompt-presets', 'yyphone:vision-api',
   'yyphone:offline-api', 'yyphone:game-api', 'yyphone:offline-presets', 'yyphone:offline-style',
   'yyphone:beauty-settings', 'yyphone:beauty-presets', 'yyphone:font-settings', 'yyphone:font-presets', 'yyphone:chat-runtime',
   'yyphone:lock-settings', 'yyphone:show-status-bar', 'yyphone:follow-system-dark',
@@ -15,7 +15,7 @@ const SHARED = new Set([
   'yyphone:chat-stickers', 'yyphone:chat-sticker-categories', 'yyphone:chat-context-presets',
   'yyphone:calendar-appearance', 'yyphone:music-appearance', 'yyphone:birthday-settings',
   'yyphone:little-p-visible', 'yyphone:little-p-position',
-  'yyphone:backup-date-naming',
+  'yyphone:backup-date-naming', 'yyphone:netease-music',
 ]);
 export function isPersonaRecordKey(key: string): boolean {
   if (key.startsWith(PREFIX) || SHARED.has(key)) return false;

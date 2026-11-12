@@ -4,6 +4,8 @@
  */
 
 import React, { Suspense, lazy, useState, useEffect, useRef } from 'react';
+import './components/listenTogetherApp.css';
+import { MusicApp } from './components/ListenTogetherWidget';
 import { AppId, BeautySettings, CustomWallpapers, UserProfile } from './types';
 import {
   INITIAL_USER_PROFILE,
@@ -791,6 +793,7 @@ export default function App() {
                 <MemoryApp onBack={handleBackToHome} />
               )}
               {activeApp === 'calendar' && <CalendarApp onClose={handleBackToHome} />}
+              {activeApp === 'music' && <MusicApp onBack={handleBackToHome}/>}
               {activeApp === 'inventory' && (
                 <InventoryApp onBack={handleBackToHome} />
               )}

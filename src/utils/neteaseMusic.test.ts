@@ -6,7 +6,7 @@ import { checkMusicQr, clearMusicSession, createMusicQr, musicPlaylists, musicRe
 import { musicPlayer } from './musicPlayer';
 import { MusicVerificationError } from './neteaseMusic';
 import { isPersonaRecordKey } from './personaStorage';
-import { buildListenTogetherContext, isMusicTrackList, MUSIC_PLAYBACK_KEY, MUSIC_TRACKS_KEY, type MusicTrack } from './musicPlayback';
+import { buildListenTogetherContext, isMusicSettings, isMusicTrackList, MUSIC_PLAYBACK_KEY, MUSIC_SETTINGS_KEY, MUSIC_TRACKS_KEY, type MusicTrack } from './musicPlayback';
 
 const local = new Map<string, string>(), session = new Map<string, string>();
 const storage = (data: Map<string, string>) => ({ getItem: (k: string) => data.get(k) ?? null, setItem: (k: string, v: string) => data.set(k, v), removeItem: (k: string) => data.delete(k), clear: () => data.clear(), key: (i: number) => [...data.keys()][i] ?? null, get length() { return data.size; } });
@@ -28,8 +28,53 @@ const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 beforeEach(async () => {
   for (const t of tracks()) musicPlayer.removeTrack(t.id);
   clearMusicSession(); local.clear(); session.clear(); await clearDbStorage(); saveMusicService('https://music.invalid');
+  musicPlayer.setPlaybackMode('list');
 });
 afterEach(() => mock.restoreAll());
+
+test('custom song metadata persists and only the current shared song description enters character context', async () => {
+  const a = musicPlayer.addUrlTrack('https://audio.invalid/a.mp3', ' 雨后的窗 ', { artists: ' 小月亮 ', mood: ' 轻柔钢琴，安静的陪伴 ' });
+  const b = musicPlayer.addUrlTrack('https://audio.invalid/b.mp3', '清晨', { artists: '另一个歌手', mood: '轻快明亮' });
+  assert.equal(tracks()[0].artists, '小月亮'); assert.equal(tracks()[0].mood, '轻柔钢琴，安静的陪伴');
+  musicPlayer.setCompanion('a'); musicPlayer.setTogetherEnabled(true); musicPlayer.selectTrack(a.id); await tick();
+  const context = buildListenTogetherContext(['a'], () => '林渡')!;
+  assert.match(context, /小月亮/); assert.match(context, /轻柔钢琴/); assert(!context.includes('轻快明亮')); assert(!context.includes('audio.invalid'));
+  assert.equal(buildListenTogetherContext(['b'], () => '别人'), null);
+  musicPlayer.updateTrackDetails(a.id, { title: '夜雨', artists: '新歌手', mood: '慢一点，柔和一点' });
+  const updated = buildListenTogetherContext(['a'], () => '林渡')!;
+  assert.match(updated, /夜雨/); assert.match(updated, /新歌手/); assert.match(updated, /慢一点/); assert(!updated.includes('轻柔钢琴'));
+  await musicPlayer.togglePlay(); assert.equal(buildListenTogetherContext(['a'], () => '林渡'), null);
+  musicPlayer.selectTrack(b.id); await tick();
+  const switched = buildListenTogetherContext(['a'], () => '林渡')!;
+  assert.match(switched, /轻快明亮/); assert(!switched.includes('慢一点'));
+  musicPlayer.updateTrackDetails(b.id, { title: '清晨', artists: '', mood: '' });
+  assert(!buildListenTogetherContext(['a'], () => '林渡')!.includes('轻快明亮'));
+});
+
+test('play modes persist, single repeat retains the song, and manual skips still change songs', async () => {
+  const a = musicPlayer.addUrlTrack('https://audio.invalid/a.mp3', 'A');
+  const b = musicPlayer.addUrlTrack('https://audio.invalid/b.mp3', 'B');
+  const c = musicPlayer.addUrlTrack('https://audio.invalid/c.mp3', 'C');
+  musicPlayer.selectTrack(a.id); await tick();
+  musicPlayer.setPlaybackMode('single');
+  FakeAudio.current.currentTime = 60;
+  FakeAudio.current.dispatchEvent(new Event('ended')); await tick();
+  assert.equal(FakeAudio.current.src, a.url);
+  assert.equal(FakeAudio.current.currentTime, 0);
+  assert.equal(readStoredValue(MUSIC_SETTINGS_KEY, null, isMusicSettings)?.playbackMode, 'single');
+  musicPlayer.next(); await tick(); assert.equal(FakeAudio.current.src, b.url);
+  musicPlayer.previous(); await tick(); assert.equal(FakeAudio.current.src, a.url);
+  musicPlayer.setPlaybackMode('list');
+  musicPlayer.previous(); await tick(); assert.equal(FakeAudio.current.src, c.url);
+  FakeAudio.current.dispatchEvent(new Event('ended')); await tick(); assert.equal(FakeAudio.current.src, a.url);
+  musicPlayer.setPlaybackMode('shuffle');
+  for (let i = 0; i < 5; i++) {
+    const before = FakeAudio.current.src;
+    FakeAudio.current.dispatchEvent(new Event('ended')); await tick();
+    assert.notEqual(FakeAudio.current.src, before);
+  }
+  assert.equal(readStoredValue(MUSIC_SETTINGS_KEY, null, isMusicSettings)?.playbackMode, 'shuffle');
+});
 
 test('verification has an official link and profile retry retains the authorized cookie only in memory', async () => {
   let polls = 0, profiles = 0;

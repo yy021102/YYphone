@@ -172,6 +172,7 @@ export function Ao3App({ onBack, userName = 'user' }: { onBack: () => void; user
       const next = await generateAo3ChapterUpdate(work, controller.signal, direction);
       if (controller.signal.aborted || continuationRequest.current !== controller) return;
       if (!commit({ type: 'continue', work, ...next, now: new Date().toISOString() })) return;
+      setContinuationDirection('');
       selectChapter(work.chapters.length); setNotice(`第 ${work.chapters.length + 1} 章已更新`);
     } catch (cause) {
       if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : '追更失败，原文已保留，请重试。');

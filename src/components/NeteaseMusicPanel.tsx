@@ -2,13 +2,14 @@ import React, { useEffect, useRef, useState } from 'react';
 import { ChevronLeft, ChevronDown, ListMusic, LoaderCircle, LogOut, Music2, Play, Plus, QrCode, RefreshCw, Search, Settings2, X } from 'lucide-react';
 import { checkMusicQr, clearMusicSession, createMusicQr, musicPlaylists, musicProfile, musicRequest, playlistMusic, readMusicService, readMusicSession, saveMusicService, searchMusic, type NeteasePlaylist, type NeteaseSong } from '../utils/neteaseMusic';
 import { musicPlayer } from '../utils/musicPlayer';
-import { MusicVerificationError } from '../utils/neteaseMusic';
+import { defaultMusicService, MusicVerificationError, readCustomMusicService } from '../utils/neteaseMusic';
 
 const errorText = (e: unknown) => e instanceof Error ? e.message : '音乐服务暂时不可用。';
 export const NeteaseMusicPanel: React.FC = () => {
   const [expanded, setExpanded] = useState(false);
   const [endpoint, setEndpoint] = useState(readMusicService);
-  const [draft, setDraft] = useState(readMusicService);
+  const [draft, setDraft] = useState(readCustomMusicService);
+  const [serviceMode, setServiceMode] = useState<'builtin' | 'custom'>(() => readCustomMusicService() ? 'custom' : 'builtin');
   const [profile, setProfile] = useState(() => readMusicSession()?.profile ?? null);
   const [configOpen, setConfigOpen] = useState(() => !readMusicService());
   const [qr, setQr] = useState<Awaited<ReturnType<typeof createMusicQr>> | null>(null);
@@ -100,14 +101,16 @@ export const NeteaseMusicPanel: React.FC = () => {
     catch (e) { if (!controller.signal.aborted) { setError(errorText(e)); setQrStatus(''); } }
     finally { if (!controller.signal.aborted) setQrBusy(false); }
   }
-  async function connect(address = draft) {
+  async function connect(address?: string) {
+    if (address === undefined && serviceMode === 'custom' && !draft.trim()) { setError('请填写自己的音乐服务地址。'); return; }
+    const requested = address ?? (serviceMode === 'custom' ? draft : '');
     setVerificationUrl('');
     testController.current?.abort(); qrController.current?.abort(); browseController.current?.abort(); profileController.current?.abort();
     const controller = new AbortController(); testController.current = controller;
     setTestBusy(true); setError(''); setNotice(''); setQr(null); setQrBusy(false); setBusy(false);
     try {
       const previous = readMusicService();
-      const next = saveMusicService(address); setEndpoint(next); setDraft(next); setProfile(readMusicSession()?.profile ?? null);
+      const next = saveMusicService(requested); setEndpoint(next); setDraft(readCustomMusicService()); setServiceMode(readCustomMusicService() ? 'custom' : 'builtin'); setProfile(readMusicSession()?.profile ?? null);
       if (next !== previous) { setSongs([]); setPlaylists([]); setSelected(null); setMore(false); setSearched(''); }
       if (!next) { setConfigOpen(true); setNotice('请先填写你部署的音乐服务地址。'); return; }
       const result = await musicRequest('/login/qr/key', {}, { endpoint: next, cookie: '', signal: controller.signal });
@@ -139,12 +142,16 @@ export const NeteaseMusicPanel: React.FC = () => {
         <button type="button" aria-label="音乐服务设置" aria-expanded={configOpen} onClick={() => setConfigOpen(!configOpen)}><Settings2 size={16} /></button>
         {profile && <button type="button" aria-label="退出网易云" onClick={logout}><LogOut size={16} /></button>}
       </div>
+      {endpoint && <p className="nm-service-source">{endpoint === defaultMusicService() ? '内置服务' : '自定义服务'}</p>}
       {configOpen && <div className="nm-config">
-        <label htmlFor="netease-endpoint">音乐服务地址</label>
-        <input id="netease-endpoint" type="url" autoComplete="off" value={draft} placeholder="https://你的音乐服务地址" onChange={e => setDraft(e.target.value)} />
+        <div className="nm-service-options" role="group" aria-label="音乐服务来源">
+          <button type="button" className="nm-primary" aria-pressed={serviceMode === 'builtin'} onClick={() => setServiceMode('builtin')}>内置服务</button>
+          <button type="button" className="nm-primary" aria-pressed={serviceMode === 'custom'} onClick={() => setServiceMode('custom')}>自定义服务</button>
+        </div>
+        {serviceMode === 'custom' && <><label htmlFor="netease-endpoint">自己的音乐服务地址</label>
+        <input id="netease-endpoint" type="url" autoComplete="off" value={draft} placeholder="https://你的音乐服务地址" onChange={e => setDraft(e.target.value)} /></>}
         <button type="button" className="nm-primary" disabled={testBusy} onClick={() => void connect()}>{testBusy ? <LoaderCircle size={14} className="nm-spin" /> : <RefreshCw size={14} />}保存并测试</button>
-        <button type="button" className="nm-primary" disabled={testBusy} onClick={() => void connect('')}>恢复默认服务</button>
-        <p>可以填写自己部署的兼容 NeteaseCloudMusicApi 服务地址，与聊天 API 分开。</p>
+        <p>{serviceMode === 'builtin' ? '使用内置音乐服务。' : '填写自己部署的兼容网易云音乐服务地址。'}</p>
       </div>}
       {!profile && <div className="nm-login">
         {qr && <><img className="nm-qr" src={qr.image} alt="网易云音乐登录二维码" /><p role="status">{qrStatus}</p><small>手机上可截图，再从网易云扫一扫的相册识别。</small></>}

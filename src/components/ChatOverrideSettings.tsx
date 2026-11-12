@@ -5,9 +5,10 @@ import type { ChatOverrides } from '../utils/chatOverrides';
 import { compressWallpaper } from '../utils/imageFile';
 import { ApiModelPicker } from './ApiModelPicker';
 import { ChatApiConnectionTest } from './ChatApiConnectionTest';
+import { captureChatCombination, type ChatAppearance } from '../utils/chatAppearance';
 
-export function ChatOverrideSettings({ value, onChange, onBusyChange }: {
-  value: ChatOverrides; onChange: (patch: ChatOverrides) => void; onBusyChange: (busy: boolean) => void;
+export function ChatOverrideSettings({ value, onChange, onBusyChange, appearance }: {
+  value: ChatOverrides; onChange: (patch: ChatOverrides) => void; onBusyChange: (busy: boolean) => void; appearance?: ChatAppearance;
 }) {
   const [busy, setBusy] = useState(false), [error, setError] = useState('');
   const mounted = useRef(true);
@@ -22,6 +23,24 @@ export function ChatOverrideSettings({ value, onChange, onBusyChange }: {
     finally { if (mounted.current) { setBusy(false); onBusyChange(false); } }
   };
   return <>
+    {appearance && <section style={{ order: 3 }} className="space-y-2 rounded-2xl border border-pink-100 bg-pink-50/40 p-3">
+      <label className="flex items-center justify-between gap-3 text-xs font-semibold text-[#2C4A5C]">单独应用美化预设<input type="checkbox" aria-label="单独应用美化预设" checked={value.customAppearanceEnabled === true} onChange={event => onChange({
+        customAppearanceEnabled: event.target.checked,
+        ...(event.target.checked && !value.appearancePreset ? { appearancePreset: { scope: 'all', preset: { id: 'current', name: '当前美化', ...captureChatCombination(appearance) } } } : {}),
+      })}/></label>
+      {!value.customAppearanceEnabled ? <p className="text-[10px] text-slate-400">跟随美化工坊当前应用的页面。</p> : <>
+        <select aria-label="本对话美化预设" className="w-full rounded-xl border border-pink-100 bg-white px-3 py-2 text-xs" value="" onChange={event => {
+          const [scope, id] = JSON.parse(event.target.value) as ['page' | 'all', string];
+          const preset = (scope === 'page' ? appearance.pagePresets : appearance.presets)?.find(p => p.id === id);
+          if (preset) onChange({ appearancePreset: { scope, preset: structuredClone(preset) } });
+        }}>
+          <option value="">{value.appearancePreset?.preset.name ?? '选择美化预设'}</option>
+          <optgroup label="页面预设">{appearance.pagePresets?.map(p => <option key={p.id} value={JSON.stringify(['page', p.id])}>{p.name}</option>)}</optgroup>
+          <optgroup label="整套搭配">{appearance.presets.map(p => <option key={p.id} value={JSON.stringify(['all', p.id])}>{p.name}</option>)}</optgroup>
+        </select>
+        <p className="text-[10px] text-slate-400">保存设置后仅用于本对话。深色模式跟随系统。</p>
+      </>}
+    </section>}
     <details style={{ order: 3 }} className="rounded-2xl border border-sky-100 bg-sky-50/50 p-3">
       <summary className="cursor-pointer text-xs font-semibold text-[#2C4A5C]">本对话聊天背景</summary>
       <div className="mt-3 space-y-2">

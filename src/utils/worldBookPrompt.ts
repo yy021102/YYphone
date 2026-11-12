@@ -105,10 +105,11 @@ export const getAutomaticWorldBookIdsForContacts = (contactIds: string[]): strin
 export const getWorldBookEntriesForContacts = (
   contactIds: string[],
   selectedBookIds?: string[],
-  scanMessages: readonly string[] = readWorldBookScanMessages(contactIds)
+  scanMessages: readonly string[] = readWorldBookScanMessages(contactIds),
+  options: { includeLinkedBooks?: boolean } = {}
 ): string[] => {
   const books = readStoredWorldBooks();
-  if (selectedBookIds !== undefined) {
+  if (selectedBookIds !== undefined && !options.includeLinkedBooks) {
     const selected = new Set(selectedBookIds);
     return books
       .filter((book) => selected.has(book.id))
@@ -140,8 +141,9 @@ export const getWorldBookEntriesForContacts = (
 
   const seen = new Set<string>();
   const entries: string[] = [];
+  const selected = selectedBookIds === undefined ? undefined : new Set(selectedBookIds);
   for (const book of books) {
-    if (book.isGlobal) {
+    if (selected ? selected.has(book.id) : book.isGlobal) {
       for (const entry of book.entries) {
         const key = `${book.id}:${entry.id}`;
         if (!entry.content.trim() || seen.has(key) || !isWorldBookEntryActive(entry, scanMessages)) continue;

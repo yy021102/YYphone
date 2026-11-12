@@ -25,7 +25,7 @@ export function Ao3Settings({ onChanged }: { onChanged: () => void }) {
       <label>AO3 提示词<textarea aria-label="AO3 提示词" rows={10} maxLength={20000} value={prompt} placeholder="喜欢的文风、叙事节奏、评论区氛围、不想出现的内容……" onChange={e => { setPrompt(e.target.value); setStatus(''); }}/></label>
       <h3>绑定世界书</h3>
       <div className="ao3-world-books">{books.map(book => <label className="ao3-checkbox" key={book.id}><input type="checkbox" checked={worldBookIds.includes(book.id)} onChange={e => { setWorldBookIds(ids => e.target.checked ? [...new Set([...ids, book.id])] : ids.filter(id => id !== book.id)); setStatus(''); }}/><span>{book.name}{book.isGlobal ? '（全局）' : ''}</span></label>)}</div>
-      <p className="ao3-help">{books.length ? '只读取勾选的世界书；全不选则不读取。' : '暂无世界书，可先在世界书 App 中添加。'}</p>
+      <p className="ao3-help">{books.length ? '角色绑定的世界书默认读取，此处可额外勾选，重复条目只读一次。未勾选的全局书不额外读取。' : '暂无世界书，可先在世界书 App 中添加。'}</p>
       <p className="ao3-help">角色作者优先使用角色设定的论坛名；未填时独立锁定首次笔名，不因删除作品而重置。笔名随 AO3 备份导入导出，清空 AO3 数据时一起清除。</p>
       <p className="ao3-help">用于新作品、续章和评论生成，保存后生效。</p><button className="ao3-button" onClick={() => { try { saveAo3GenerationSettings({ prompt, topPrompt, worldBookIds }); setStatus('已保存'); setError(''); } catch (cause) { setError(cause instanceof Error ? cause.message : '保存失败'); } }}>保存设置</button></fieldset>
     <fieldset disabled={busy}><legend>数据管理</legend><button className="ao3-button" onClick={() => {

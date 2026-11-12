@@ -9,6 +9,7 @@ import { apiTemperature, apiMaxTokens } from '../utils/textApiConfig';
 import { normalizeApiEndpoint } from '../utils/apiEndpoint';
 import { bearerApiKey } from '../utils/apiAuthentication';
 import { getActiveApiPreset } from '../utils/aiApi';
+import { VisionApiSettings } from '../components/VisionApiSettings';
 import { ACTIVE_IMAGE_PRESET_KEY, deleteImageGenerationPreset, normalizeImageSettings, readImageGenerationPresets, saveImageGenerationPreset, selectImageGenerationPreset } from '../utils/imageGenerationPresets';
 import {
   Check,
@@ -655,6 +656,7 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
             </p>
           </div>
         </details>
+        <VisionApiSettings presets={apiPresets}/>
         <McpSettingsPanel />
         <details open={voiceConfigExpanded} onToggle={(event) => {
           const expanded = event.currentTarget.open;

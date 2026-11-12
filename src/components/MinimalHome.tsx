@@ -17,7 +17,7 @@ export function MinimalHome({ userProfile, apps, dockApps, appIcons, onOpenApp, 
       <section className="minimal-day"><div><button type="button" className="minimal-clock" aria-label="打开日历" onClick={() => onOpenApp('calendar')}>{now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })}</button><p>{now.toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' })}</p><span><MapPin size={11} />{userProfile.location}<i />{userProfile.mood}</span></div><button type="button" className="minimal-date-tile" aria-label="查看日历" onClick={() => onOpenApp('calendar')}><small>{now.toLocaleDateString('en', { month: 'short' }).toUpperCase()}</small><strong>{String(now.getDate()).padStart(2, '0')}</strong><ArrowUpRight size={14} /></button></section>
       <div className="minimal-section-label"><span>日常</span><small>01 — {String(apps.length).padStart(2, '0')}</small></div>
       <nav className="minimal-app-grid" aria-label="日常应用">{apps.map(appButton)}</nav>
-      <details className="minimal-music"><summary><span>一起听</span><span className="minimal-music-indicator">音乐与播放 <span>＋</span></span></summary><div><ListenTogetherWidget /></div></details>
+      <details className="minimal-music"><summary><span>一起听</span><span className="minimal-music-indicator">音乐与播放 <span>＋</span></span></summary><div><ListenTogetherWidget onOpen={() => onOpenApp('music')}/></div></details>
       <footer className="minimal-home-caption"><span>{userProfile.stats.moments} 动态 / {userProfile.stats.notes} 随笔</span><span>慢慢生活</span></footer>
     </div>
     <HomeSystemDock homeStyle={variant} apps={dockApps} appIcons={appIcons} onOpenApp={onOpenApp} renderIcon={renderIcon}/>

@@ -302,7 +302,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       {/* Home widgets and app groups retain the 2×2 phone home layout. */}
       <div className="classic-home-widgets grid grid-cols-2 gap-[clamp(10px,2.6vw,14px)] w-full my-auto shrink-0">
         {/* Music widget */}
-        <ListenTogetherWidget />
+        <ListenTogetherWidget onOpen={() => onOpenApp('music')}/>
 
         <div className="aspect-square grid grid-cols-2 grid-rows-2 items-center justify-items-center gap-1">
           {topRightApps.map(renderAppButton)}

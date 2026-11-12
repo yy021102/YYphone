@@ -7,6 +7,8 @@ import { requestChatReply, withChatResponseFormat } from './chatReply';
 import { imageDescriptionText, imageSourceKey, pendingImageTargets, validateImageDescriptions } from './imageDescriptions';
 import { toOpenAiMessages, toGeminiContents } from './chatVision';
 import { describeForSummary } from './journalData';
+import { saveVisionApi, VISION_API_KEY, EMPTY_VISION_API, readVisionApi } from './visionApi';
+import { isPersonaRecordKey } from './personaStorage';
 import { snapshotFavoriteMessage, favoriteShareContent } from './wechatFavorites';
 
 const values = new Map<string, string>();
@@ -28,6 +30,100 @@ beforeEach(async () => {
   writeStoredValue(key, [chat()]);
 });
 afterEach(() => mock.restoreAll());
+
+test('secondary vision isolates image bytes from chat API, caches descriptions, and does not receive persona/history', async () => {
+  saveVisionApi({ enabled: true, endpoint: 'https://secondary.invalid/v1', apiKey: 'secondary', model: 'eyes' });
+  const first = withChatResponseFormat(prompt(), 'PRIVATE_PERSONA_SENTINEL');
+  let calls = 0;
+  mock.method(globalThis, 'fetch', async (url: unknown, init?: RequestInit) => {
+    calls++; const body = JSON.parse(String(init?.body));
+    if (String(url).includes('secondary.invalid')) {
+      assert(JSON.stringify(body).includes('image_url'));
+      assert(!JSON.stringify(body).includes('PRIVATE_PERSONA_SENTINEL'));
+      assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer secondary');
+      return response({ imageDescriptions: descriptions(first) });
+    }
+    assert(!JSON.stringify(body).includes('image_url'));
+    assert(!JSON.stringify(body).includes('AQID'));
+    assert(!JSON.stringify(body).includes('首次图片内容记录'));
+    assert(JSON.stringify(body).includes('绿色的杯子'));
+    assert(JSON.stringify(body).includes('PRIVATE_PERSONA_SENTINEL'));
+    return response({ reply: ['它压着纸条呢'], thought: '有点可爱。', speakerId: 'a' });
+  });
+  await requestChatReply(first, api, () => {}, undefined, { requireThought: true });
+  assert.equal(calls, 2);
+  assert.match(imageDescriptionText(readChats()[0].messages[0]), /灰白色的猫/);
+  await requestChatReply(withChatResponseFormat(prompt(), 'PRIVATE_PERSONA_SENTINEL'), api, () => {}, undefined, { requireThought: true });
+  assert.equal(calls, 3, 'later turns must not call vision again');
+  assert.equal(isPersonaRecordKey(VISION_API_KEY), false);
+});
+
+test('Gemini secondary vision includes all five images and only descriptions go to the main API', async () => {
+  saveVisionApi({ enabled: true, endpoint: 'https://generativelanguage.googleapis.com', apiKey: 'secondary', model: 'gemini-eyes' });
+  const c = chat(); c.messages = Array.from({ length: 5 }, (_, i) => photo(`p${i}`)); writeStoredValue(key, [c]);
+  const first = prompt(); let calls = 0;
+  mock.method(globalThis, 'fetch', async (url: unknown, init?: RequestInit) => {
+    calls++; const body = JSON.parse(String(init?.body));
+    if (String(url).includes('generativelanguage')) {
+      assert.equal(body.contents[0].parts.filter((p: any) => p.inlineData).length, 5);
+      return Response.json({ candidates: [{ content: { parts: [{ text: JSON.stringify({ imageDescriptions: descriptions(first) }) }] } }] });
+    }
+    assert(!JSON.stringify(body).includes('inlineData')); assert(!JSON.stringify(body).includes('image_url'));
+    return response({ reply: ['这些都是猫咪'], speakerId: 'a' });
+  });
+  await requestChatReply(first, api, () => {});
+  assert.equal(calls, 2); assert(readChats()[0].messages.every(m => imageDescriptionText(m)));
+});
+
+test('secondary vision failures never fall back to sending images to main; disabled incomplete config remains harmless', async () => {
+  saveVisionApi({ ...EMPTY_VISION_API, endpoint: 'not configured' });
+  assert.equal(readVisionApi().enabled, false);
+  assert.throws(() => saveVisionApi({ ...readVisionApi(), enabled: true }), /补齐/);
+  saveVisionApi({ enabled: true, endpoint: 'https://secondary.invalid/v1', apiKey: 'key', model: 'eyes' });
+  let calls = 0;
+  mock.method(globalThis, 'fetch', async () => { calls++; return response({ imageDescriptions: [] }); });
+  await assert.rejects(requestChatReply(prompt(), api, () => {}), /图片/);
+  assert.equal(calls, 1); assert.equal(imageDescriptionText(readChats()[0].messages[0]), '');
+});
+
+test('successful secondary descriptions survive a failed chat reply and are reused on retry', async () => {
+  saveVisionApi({ enabled: true, endpoint: 'https://secondary.invalid/v1', apiKey: 'key', model: 'eyes' });
+  const first = prompt(); let calls = 0;
+  mock.method(globalThis, 'fetch', async (url: unknown) => {
+    calls++;
+    if (String(url).includes('secondary.invalid')) return response({ imageDescriptions: descriptions(first) });
+    return new Response('main temporarily unavailable', { status: 503 });
+  });
+  await assert.rejects(requestChatReply(first, api, () => {}), /503/);
+  assert.equal(calls, 2); assert.match(imageDescriptionText(readChats()[0].messages[0]), /灰白色的猫/);
+  mock.restoreAll(); mock.method(globalThis, 'fetch', async (url: unknown, init?: RequestInit) => {
+    assert(!String(url).includes('secondary.invalid'));
+    assert(!String(init?.body).includes('image_url'));
+    return response({ reply: ['绿色的杯子'], speakerId: 'a' });
+  });
+  await requestChatReply(prompt(), api, () => {});
+});
+
+test('abort or image replacement during secondary recognition prevents caching and the main chat request', async () => {
+  saveVisionApi({ enabled: true, endpoint: 'https://secondary.invalid/v1', apiKey: 'key', model: 'eyes' });
+  for (const action of ['abort', 'replace', 'archive', 'recall'] as const) {
+    writeStoredValue(key, [chat()]); const first = prompt(), controller = new AbortController(); let calls = 0;
+    mock.restoreAll(); mock.method(globalThis, 'fetch', async () => {
+      calls++;
+      if (action === 'abort') controller.abort();
+      else {
+        const cs = readChats();
+        if (action === 'replace') cs[0].messages[0].imageUrl = 'data:image/png;base64,BAUG';
+        if (action === 'archive') cs[0].archiveRevision = 2;
+        if (action === 'recall') cs[0].messages[0].kind = 'recalled';
+        writeStoredValue(key, cs);
+      }
+      return response({ imageDescriptions: descriptions(first) });
+    });
+    await assert.rejects(requestChatReply(first, api, () => {}, undefined, { signal: controller.signal }));
+    assert.equal(calls, 1); assert.equal(imageDescriptionText(readChats()[0].messages[0]), '');
+  }
+});
 
 test('one OpenAI reply describes the photo and persists hidden metadata; later history and regeneration are text-only', async () => {
   const first = prompt(); let calls = 0;
