@@ -3,6 +3,33 @@ import { test } from 'node:test';
 import { createMusicServer } from './server.mjs';
 import { createPlatformMusicHandler } from './platform.mjs';
 import http from 'node:http';
+import { createUpstreamAdapter } from './upstream.mjs';
+
+test('QR adapter preserves original verification errors instead of SDK ReferenceError', async () => {
+  const error = { status: 400, body: { code: -462, data: { url: 'https://st.music.163.com/encrypt-pages?test=1' } } };
+  const api = createUpstreamAdapter({ api: async params => {
+    assert.equal(params.uri, '/api/login/qrcode/client/login');
+    assert.deepEqual(params.data, { key: 'qr-key', type: 3 });
+    assert.equal(params.cookie, '');
+    throw error;
+  } });
+  await assert.rejects(api.login_qr_check({ key: 'qr-key', cookie: '' }), e => e === error);
+  const success = createUpstreamAdapter({ api: async () => ({ body: { code: 803 }, cookie: ['MUSIC_U=test', 'other=test'] }) });
+  assert.equal((await success.login_qr_check({ key: 'qr-key' })).body.cookie, 'MUSIC_U=test;other=test');
+});
+
+test('verification errors are explicit, sanitized and link only to official verification', async () => {
+  for (const url of ['https://st.music.163.com/encrypt-pages?test=1', 'https://evil.invalid/', 'javascript:alert(1)']) {
+    await service({ login_qr_check: async () => { throw { body: { code: -462, cookie: 'secret', data: { url } } }; } }, async post => {
+      const response = await post('/login/qr/check', { key: 'qr-key' });
+      assert.equal(response.status, 428);
+      const data = await response.json();
+      assert.equal(data.code, -462);
+      assert.equal(data.verificationUrl, url.includes('st.music.163.com') ? url : '');
+      assert(!JSON.stringify(data).includes('secret'));
+    });
+  }
+});
 
 async function service(api, work) {
   const server = createMusicServer(api, { allowedOrigins: ['https://phone.invalid'] });

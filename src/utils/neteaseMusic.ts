@@ -1,6 +1,11 @@
 import { readStoredValue, writeStoredValue } from './localStorage';
 
 const CONFIG_KEY = 'yyphone:netease-music';
+const removedPublicService = (address: string) => address.trim().replace(/\/+$/, '').toLowerCase() === 'https://zm.wwoyun.cn';
+export function defaultMusicService(): string {
+  const address = import.meta.env?.VITE_NETEASE_API_URL?.trim() || '';
+  return address && !removedPublicService(address) ? musicServiceUrl(address) : '';
+}
 const SESSION_KEY = 'yyphone:netease-session';
 export const NETEASE_SESSION_EVENT = 'yyphone:netease-session-change';
 export interface NeteaseProfile { userId: number; nickname: string; avatarUrl: string }
@@ -8,6 +13,13 @@ export interface NeteaseSong { id: number; name: string; artists: string; cover:
 export interface NeteasePlaylist { id: number; name: string; cover: string; count: number }
 interface MusicSession { endpoint: string; cookie: string; profile: NeteaseProfile }
 let volatileSession: MusicSession | null = null;
+let pendingLogin: { key: string; endpoint: string; cookie: string } | null = null;
+export class MusicVerificationError extends Error {
+  constructor(public verificationUrl: string) {
+    super('网易云要求额外安全验证。请完成验证后，点击继续确认登录。');
+    this.name = 'MusicVerificationError';
+  }
+}
 const record = (v: unknown): v is Record<string, any> => !!v && typeof v === 'object' && !Array.isArray(v);
 export function musicServiceUrl(raw: string): string {
   let url: URL;
@@ -22,13 +34,17 @@ export function musicServiceUrl(raw: string): string {
 }
 export function readMusicService(): string {
   const config = readStoredValue(CONFIG_KEY, { endpoint: '' }, (v): v is { endpoint: string } => record(v) && typeof v.endpoint === 'string');
-  const raw = config.endpoint || import.meta.env?.VITE_NETEASE_API_URL || '';
+  const raw = [config.endpoint, import.meta.env?.VITE_NETEASE_API_URL?.trim() || ''].find(address => address.trim() && !removedPublicService(address)) || '';
   try { return raw ? musicServiceUrl(raw) : ''; } catch { return raw.trim(); }
 }
 export function saveMusicService(raw: string) {
-  const endpoint = raw.trim() ? musicServiceUrl(raw) : '';
+  const fallback = defaultMusicService();
+  const custom = raw.trim() ? musicServiceUrl(raw) : '';
+  if (removedPublicService(custom)) throw new Error('已不再使用此前的公共服务，请填写自建音乐服务地址。');
+  const endpoint = custom || fallback;
   if (endpoint !== readMusicService()) clearMusicSession();
-  writeStoredValue(CONFIG_KEY, { endpoint });
+  // Saving the displayed default unchanged must still follow future author defaults.
+  writeStoredValue(CONFIG_KEY, { endpoint: custom === fallback ? '' : custom });
   return endpoint;
 }
 export function readMusicSession(): MusicSession | null {
@@ -53,6 +69,7 @@ export function saveMusicSession(endpoint: string, cookie: string, profile: Nete
 }
 export function clearMusicSession() {
   volatileSession = null;
+  pendingLogin = null;
   try { window.sessionStorage.removeItem(SESSION_KEY); } catch { /* No session storage. */ }
   if (typeof window !== 'undefined') window.dispatchEvent(new Event(NETEASE_SESSION_EVENT));
 }
@@ -71,6 +88,15 @@ export async function musicRequest(path: string, params: Record<string, unknown>
       body: JSON.stringify({ ...params, cookie: options.cookie ?? (readMusicSession()?.endpoint === endpoint ? readMusicSession()?.cookie : '') ?? '', timestamp: Date.now(), noCookie: true }),
     });
     if (response.status === 301 || response.status === 401) throw new Error('网易云登录已失效，请重新扫码。');
+    if (response.status === 428) {
+      const body = await response.json().catch(() => null);
+      let link = '';
+      try {
+        const url = new URL(body?.verificationUrl);
+        if (url.protocol === 'https:' && ['st.music.163.com', 'music.163.com'].includes(url.hostname) && !url.username && !url.password) link = url.href;
+      } catch { /* Only official HTTPS verification links are shown. */ }
+      if (body?.code === -462) throw new MusicVerificationError(link);
+    }
     if (!response.ok) throw new Error(`音乐服务连接失败（HTTP ${response.status}）。`);
     const data: unknown = await response.json();
     if (!record(data)) throw new Error('音乐服务返回了无效数据。');
@@ -85,6 +111,7 @@ export async function musicRequest(path: string, params: Record<string, unknown>
   } finally { clearTimeout(timer); options.signal?.removeEventListener('abort', abort); }
 }
 export async function createMusicQr(signal: AbortSignal) {
+  pendingLogin = null;
   const endpoint = musicServiceUrl(readMusicService());
   const keyResult = await musicRequest('/login/qr/key', {}, { endpoint, cookie: '', signal });
   const key = keyResult.data?.unikey;
@@ -95,15 +122,17 @@ export async function createMusicQr(signal: AbortSignal) {
   return { key, image, endpoint };
 }
 export async function checkMusicQr(key: string, endpoint: string, signal: AbortSignal) {
-  const result = await musicRequest('/login/qr/check', { key }, { endpoint, cookie: '', signal });
+  const previous = pendingLogin?.key === key && pendingLogin.endpoint === endpoint ? pendingLogin : null;
+  const result = previous ? { code: 803, cookie: previous.cookie } : await musicRequest('/login/qr/check', { key }, { endpoint, cookie: '', signal });
   const code = Number(result.code);
   if (![800, 801, 802, 803].includes(code)) throw new Error('无法确认扫码状态，请刷新二维码。');
   if (code === 803) {
     if (typeof result.cookie !== 'string' || !result.cookie) throw new Error('登录凭证未返回，请刷新二维码重试。');
+    if (!signal.aborted && endpoint === readMusicService()) pendingLogin = { key, endpoint, cookie: result.cookie };
     const status = await musicRequest('/login/status', {}, { endpoint, cookie: result.cookie, signal });
     const profile = parseProfile(status.data?.profile ?? status.profile);
     if (!profile) throw new Error('未能取得网易云账号信息，请重新扫码。');
-    if (!signal.aborted) saveMusicSession(endpoint, result.cookie, profile);
+    if (!signal.aborted) { saveMusicSession(endpoint, result.cookie, profile); pendingLogin = null; }
   }
   return code;
 }

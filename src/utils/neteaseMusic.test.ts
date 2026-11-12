@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import { beforeEach, afterEach, mock, test } from 'node:test';
 import { clearDbStorage, getAllCachedStorageItems } from './dbStorage';
-import { readStoredValue } from './localStorage';
+import { readStoredValue, readStorageString, writeStoredValue } from './localStorage';
 import { checkMusicQr, clearMusicSession, createMusicQr, musicPlaylists, musicRequest, musicServiceUrl, musicSongUrl, parseMusicSongs, playlistMusic, readMusicService, readMusicSession, saveMusicService, saveMusicSession, searchMusic } from './neteaseMusic';
 import { musicPlayer } from './musicPlayer';
+import { MusicVerificationError } from './neteaseMusic';
+import { isPersonaRecordKey } from './personaStorage';
 import { buildListenTogetherContext, isMusicTrackList, MUSIC_PLAYBACK_KEY, MUSIC_TRACKS_KEY, type MusicTrack } from './musicPlayback';
 
 const local = new Map<string, string>(), session = new Map<string, string>();
@@ -28,6 +30,60 @@ beforeEach(async () => {
   clearMusicSession(); local.clear(); session.clear(); await clearDbStorage(); saveMusicService('https://music.invalid');
 });
 afterEach(() => mock.restoreAll());
+
+test('verification has an official link and profile retry retains the authorized cookie only in memory', async () => {
+  let polls = 0, profiles = 0;
+  mock.method(globalThis, 'fetch', async (url: any, init: RequestInit) => {
+    if (String(url).endsWith('/login/qr/check')) {
+      polls++;
+      return Response.json({ code: 803, cookie: 'MUSIC_U=pending' });
+    }
+    assert.equal(JSON.parse(String(init.body)).cookie, 'MUSIC_U=pending');
+    profiles++;
+    return profiles === 1 ? Response.json({ code: -462, verificationUrl: 'https://st.music.163.com/encrypt-pages?test=1' }, { status: 428 }) : Response.json({ data: { profile } });
+  });
+  const signal = new AbortController().signal;
+  await assert.rejects(checkMusicQr('pending-key', readMusicService(), signal), e => e instanceof MusicVerificationError && e.verificationUrl.startsWith('https://st.music.163.com/'));
+  assert.equal(readMusicSession(), null);
+  assert(!JSON.stringify(getAllCachedStorageItems()).includes('MUSIC_U'));
+  assert(!JSON.stringify([...session]).includes('MUSIC_U'));
+  assert.equal(await checkMusicQr('pending-key', readMusicService(), signal), 803);
+  assert.equal(polls, 1);
+  assert.equal(profiles, 2);
+  assert.equal(readMusicSession()?.cookie, 'MUSIC_U=pending');
+});
+
+test('verification responses cannot supply an arbitrary navigation link', async () => {
+  mock.method(globalThis, 'fetch', async () => Response.json({ code: -462, verificationUrl: 'https://evil.invalid/' }, { status: 428 }));
+  await assert.rejects(musicRequest('/login/qr/check'), e => e instanceof MusicVerificationError && e.verificationUrl === '');
+});
+
+test('no public fallback is contacted; custom services and clearing configuration isolate previous login', async () => {
+  await clearDbStorage();
+  assert.equal(readMusicService(), '');
+  writeStoredValue('yyphone:netease-music', { endpoint: 'https://zm.wwoyun.cn/' });
+  assert.equal(readMusicService(), '', 'old public configuration must not keep contacting the retired default');
+  assert.throws(() => saveMusicService('https://zm.wwoyun.cn'), /自建/);
+  assert.equal(isPersonaRecordKey('yyphone:netease-music'), false);
+  assert.equal(saveMusicService(''), '');
+  assert.deepEqual(JSON.parse(readStorageString('yyphone:netease-music')!), { endpoint: '' });
+  saveMusicService('https://previous.invalid');
+  saveMusicSession(readMusicService(), 'previous-session', profile);
+  assert.equal(saveMusicService('https://own.invalid/api/'), 'https://own.invalid/api');
+  assert.equal(readMusicService(), 'https://own.invalid/api'); assert.equal(readMusicSession(), null);
+  saveMusicSession(readMusicService(), 'own-session', profile);
+  assert.equal(saveMusicService(''), '');
+  assert.equal(readMusicSession(), null); assert.deepEqual(JSON.parse(readStorageString('yyphone:netease-music')!), { endpoint: '' });
+  let called = false;
+  mock.method(globalThis, 'fetch', async (url: unknown, init: RequestInit) => {
+    called = true; assert.equal(String(url), 'https://new.invalid/login/qr/key');
+    assert.equal(JSON.parse(String(init.body)).cookie, '', 'previous service cookie cannot reach another host');
+    return Response.json({ code: 200, data: { unikey: 'anonymous-key' } });
+  });
+  await assert.rejects(musicRequest('/login/qr/key'), /填写/); assert.equal(called, false);
+  saveMusicService('https://new.invalid');
+  await musicRequest('/login/qr/key'); assert(called);
+});
 
 test('service normalization and tab-only credentials keep login out of device backup and clear it when service changes', () => {
   assert.equal(musicServiceUrl(' https://music.invalid/api/// '), 'https://music.invalid/api');

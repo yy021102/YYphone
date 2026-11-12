@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { ChevronLeft, ChevronDown, ListMusic, LoaderCircle, LogOut, Music2, Play, Plus, QrCode, RefreshCw, Search, Settings2, X } from 'lucide-react';
 import { checkMusicQr, clearMusicSession, createMusicQr, musicPlaylists, musicProfile, musicRequest, playlistMusic, readMusicService, readMusicSession, saveMusicService, searchMusic, type NeteasePlaylist, type NeteaseSong } from '../utils/neteaseMusic';
 import { musicPlayer } from '../utils/musicPlayer';
+import { MusicVerificationError } from '../utils/neteaseMusic';
 
 const errorText = (e: unknown) => e instanceof Error ? e.message : '音乐服务暂时不可用。';
 export const NeteaseMusicPanel: React.FC = () => {
@@ -16,6 +17,8 @@ export const NeteaseMusicPanel: React.FC = () => {
   const [testBusy, setTestBusy] = useState(false);
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
+  const [verificationUrl, setVerificationUrl] = useState('');
+  const [loginAttempt, setLoginAttempt] = useState(0);
   const [view, setView] = useState<'playlists' | 'search'>('playlists');
   const [playlists, setPlaylists] = useState<NeteasePlaylist[]>([]);
   const [selected, setSelected] = useState<NeteasePlaylist | null>(null);
@@ -59,11 +62,11 @@ export const NeteaseMusicPanel: React.FC = () => {
         }
         setQrStatus(code === 802 ? '已扫码，请在网易云确认登录' : '用网易云音乐 App 扫码');
         timer = setTimeout(poll, 3000);
-      } catch (e) { if (!controller.signal.aborted) { setError(errorText(e)); setQrStatus('请刷新二维码重试'); } }
+      } catch (e) { if (!controller.signal.aborted) { setError(errorText(e)); setVerificationUrl(e instanceof MusicVerificationError ? e.verificationUrl : ''); setQrStatus(e instanceof MusicVerificationError ? '等待网易云安全验证' : '登录确认中断，可以重试'); } }
     }
     timer = setTimeout(poll, 1800);
     return () => { clearTimeout(timer); controller.abort(); };
-  }, [qr, expanded]);
+  }, [qr, expanded, loginAttempt]);
 
   async function load(kind: 'playlists' | 'playlist' | 'search', append = false, target = selected, keywords = searched) {
     browseController.current?.abort();
@@ -88,6 +91,7 @@ export const NeteaseMusicPanel: React.FC = () => {
   }, [expanded, endpoint, profile?.userId, view, selected?.id]);
 
   async function startLogin() {
+    setVerificationUrl('');
     qrController.current?.abort(); profileController.current?.abort(); setQr(null); setError(''); setNotice('');
     if (!endpoint) { setConfigOpen(true); setError('请先设置音乐服务地址。'); return; }
     const controller = new AbortController(); qrController.current = controller;
@@ -96,15 +100,16 @@ export const NeteaseMusicPanel: React.FC = () => {
     catch (e) { if (!controller.signal.aborted) { setError(errorText(e)); setQrStatus(''); } }
     finally { if (!controller.signal.aborted) setQrBusy(false); }
   }
-  async function connect() {
+  async function connect(address = draft) {
+    setVerificationUrl('');
     testController.current?.abort(); qrController.current?.abort(); browseController.current?.abort(); profileController.current?.abort();
     const controller = new AbortController(); testController.current = controller;
     setTestBusy(true); setError(''); setNotice(''); setQr(null); setQrBusy(false); setBusy(false);
     try {
       const previous = readMusicService();
-      const next = saveMusicService(draft); setEndpoint(next); setDraft(next); setProfile(readMusicSession()?.profile ?? null);
+      const next = saveMusicService(address); setEndpoint(next); setDraft(next); setProfile(readMusicSession()?.profile ?? null);
       if (next !== previous) { setSongs([]); setPlaylists([]); setSelected(null); setMore(false); setSearched(''); }
-      if (!next) throw new Error('请填写音乐服务地址。');
+      if (!next) { setConfigOpen(true); setNotice('请先填写你部署的音乐服务地址。'); return; }
       const result = await musicRequest('/login/qr/key', {}, { endpoint: next, cookie: '', signal: controller.signal });
       if (typeof result.data?.unikey !== 'string' || !result.data.unikey) throw new Error('这个地址没有提供兼容的网易云音乐接口。');
       if (!controller.signal.aborted) { setNotice('连接成功，可以扫码登录。'); setConfigOpen(false); }
@@ -138,7 +143,8 @@ export const NeteaseMusicPanel: React.FC = () => {
         <label htmlFor="netease-endpoint">音乐服务地址</label>
         <input id="netease-endpoint" type="url" autoComplete="off" value={draft} placeholder="https://你的音乐服务地址" onChange={e => setDraft(e.target.value)} />
         <button type="button" className="nm-primary" disabled={testBusy} onClick={() => void connect()}>{testBusy ? <LoaderCircle size={14} className="nm-spin" /> : <RefreshCw size={14} />}保存并测试</button>
-        <p>填写兼容 NeteaseCloudMusicApi 的服务地址，与聊天 API 分开。</p>
+        <button type="button" className="nm-primary" disabled={testBusy} onClick={() => void connect('')}>恢复默认服务</button>
+        <p>可以填写自己部署的兼容 NeteaseCloudMusicApi 服务地址，与聊天 API 分开。</p>
       </div>}
       {!profile && <div className="nm-login">
         {qr && <><img className="nm-qr" src={qr.image} alt="网易云音乐登录二维码" /><p role="status">{qrStatus}</p><small>手机上可截图，再从网易云扫一扫的相册识别。</small></>}
@@ -164,7 +170,7 @@ export const NeteaseMusicPanel: React.FC = () => {
         {more && !busy && <button className="nm-more" type="button" onClick={() => void load(view === 'search' ? 'search' : selected ? 'playlist' : 'playlists', true)}>加载更多</button>}
         {selected && songs.length > 0 && <button className="nm-add-all" type="button" onClick={() => add(songs)}><Plus size={14} />加入已加载的歌曲</button>}
       </>}
-      {error && <div className="nm-error" role="alert"><span>{error}</span>{!qr && endpoint && <button type="button" disabled={busy} onClick={() => { if (view === 'playlists' && profile) void load(selected ? 'playlist' : 'playlists'); else if (searched) void load('search'); else void startLogin(); }}>重试</button>}</div>}
+      {error && <div className="nm-error" role="alert"><span>{error}</span>{verificationUrl && <a href={verificationUrl} target="_blank" rel="noopener noreferrer">完成网易云验证</a>}{qr && <button type="button" onClick={() => { setError(''); setVerificationUrl(''); setQrStatus('正在确认登录…'); setLoginAttempt(n => n + 1); }}>继续确认登录</button>}{!qr && endpoint && <button type="button" disabled={busy} onClick={() => { if (view === 'playlists' && profile) void load(selected ? 'playlist' : 'playlists'); else if (searched) void load('search'); else void startLogin(); }}>重试</button>}</div>}
       {notice && <p className="nm-notice" role="status">{notice}</p>}
     </div>}
   </section>;

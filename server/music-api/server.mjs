@@ -70,10 +70,20 @@ export function createMusicHandler(api, { allowedOrigins = [], allowNoOrigin = f
       if (pathname === '/song/url/v1') { params.level = 'standard'; params.unblock = 'false'; }
       const result = await api[method](params);
       if (!result?.body || typeof result.body !== 'object') return send(502, { code: 502 });
+      if (Number(result.body.code) === -462) throw result;
       // login_qr_check returns the new session in its JSON body; never set browser cookies.
       send(200, result.body);
     } catch (error) {
       const code = Number(error?.body?.code ?? error?.status);
+      console.warn('[music-upstream]', pathname, Number.isFinite(code) ? code : 'unknown');
+      if (code === -462) {
+        let verificationUrl = '';
+        try {
+          const url = new URL(error.body?.data?.url ?? error.body?.data?.verifyUrl ?? error.body?.data?.verify_url ?? error.body?.redirectUrl ?? error.body?.verifyUrl ?? error.body?.url ?? '');
+          if (url.protocol === 'https:' && ['st.music.163.com', 'music.163.com'].includes(url.hostname) && !url.username && !url.password) verificationUrl = url.href;
+        } catch { /* No official verification link was supplied. */ }
+        return send(428, { code: -462, message: '网易云要求额外安全验证，扫码授权尚未完成网页登录。请先完成网易云验证，再继续确认登录。', verificationUrl });
+      }
       if ([301, 401, 429].includes(code)) send(code === 301 ? 401 : code, { code });
       else send(502, { code: 502, message: '音乐服务暂时无法连接网易云，请稍后重试。' });
     }
