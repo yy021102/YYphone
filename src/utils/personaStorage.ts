@@ -13,9 +13,9 @@ const SHARED = new Set([
   'yyphone:lock-settings', 'yyphone:show-status-bar', 'yyphone:follow-system-dark',
   'yyphone:opening-animation', 'yyphone:opening-style', 'yyphone:chat-appearance', 'yyphone:chat-regex',
   'yyphone:chat-stickers', 'yyphone:chat-sticker-categories', 'yyphone:chat-context-presets',
-  'yyphone:calendar-appearance', 'yyphone:music-appearance', 'yyphone:birthday-settings',
+  'yyphone:calendar-appearance', 'yyphone:music-appearance', 'yyphone:music-player-appearance', 'yyphone:birthday-settings',
   'yyphone:little-p-visible', 'yyphone:little-p-position',
-  'yyphone:backup-date-naming', 'yyphone:netease-music',
+  'yyphone:backup-date-naming', 'yyphone:netease-music', 'yyphone:launcher-icon',
 ]);
 export function isPersonaRecordKey(key: string): boolean {
   if (key.startsWith(PREFIX) || SHARED.has(key)) return false;

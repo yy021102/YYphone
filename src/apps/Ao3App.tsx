@@ -6,7 +6,7 @@ import {
   type Ao3Action, type Ao3Draft, type Ao3Filters, type Ao3State, type Ao3Work,
 } from '../utils/ao3Data';
 import { generateAo3Chapter, readAo3Characters } from '../utils/ao3Generation';
-import { generateAo3ChapterUpdate } from '../utils/ao3Comments';
+import { generateAo3ChapterUpdate, regenerateAo3ChapterUpdate } from '../utils/ao3Comments';
 import { Ao3Discovery } from '../components/Ao3Discovery';
 import { Ao3Settings } from '../components/Ao3Settings';
 import { Ao3Comments } from '../components/Ao3Comments';
@@ -114,6 +114,10 @@ export function Ao3App({ onBack, userName = 'user' }: { onBack: () => void; user
   const [error, setError] = useState(''), [notice, setNotice] = useState(''), [deleteId, setDeleteId] = useState('');
   const [sharing, setSharing] = useState(false);
   const [continuing, setContinuing] = useState(false);
+  const [regeneratingChapter, setRegeneratingChapter] = useState<number | null>(null);
+  const [chapterAction, setChapterAction] = useState<{ type: 'regenerate' | 'delete'; index: number } | null>(null);
+  const [rewriteDirection, setRewriteDirection] = useState('');
+  const writing = continuing || regeneratingChapter !== null;
   const [continuationOpen, setContinuationOpen] = useState(false), [continuationDirection, setContinuationDirection] = useState('');
   const continuationRequest = useRef<AbortController | null>(null);
   const scroller = useRef<HTMLDivElement>(null), comments = useRef<HTMLElement>(null);
@@ -122,6 +126,7 @@ export function Ao3App({ onBack, userName = 'user' }: { onBack: () => void; user
   const work = state.works.find(w => w.id === workId);
   useEffect(() => {
     setContinuing(false);
+    setRegeneratingChapter(null); setChapterAction(null); setRewriteDirection('');
     setContinuationOpen(false); setContinuationDirection('');
     return () => { continuationRequest.current?.abort(); continuationRequest.current = null; };
   }, [page, workId]);
@@ -180,17 +185,43 @@ export function Ao3App({ onBack, userName = 'user' }: { onBack: () => void; user
       if (continuationRequest.current === controller) { continuationRequest.current = null; setContinuing(false); }
     }
   };
+  const stopWriting = () => {
+    continuationRequest.current?.abort(); continuationRequest.current = null;
+    setContinuing(false); setRegeneratingChapter(null); setNotice('已停止生成，原文与评论已保留');
+  };
+  const regenerateChapter = async (index: number) => {
+    if (!work || continuationRequest.current) return;
+    const snapshot = work, controller = new AbortController();
+    continuationRequest.current = controller; setRegeneratingChapter(index); setChapterAction(null); setError(''); setNotice('');
+    try {
+      const next = await regenerateAo3ChapterUpdate(snapshot, index, controller.signal, rewriteDirection);
+      if (controller.signal.aborted || continuationRequest.current !== controller) return;
+      if (!commit({ type: 'regenerate-chapter', work: snapshot, index, ...next, now: new Date().toISOString() })) return;
+      setRewriteDirection(''); setNotice(`第 ${index + 1} 章已重新生成`);
+    } catch (cause) {
+      if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : '重新生成失败，原章与评论已保留。');
+    } finally {
+      if (continuationRequest.current === controller) { continuationRequest.current = null; setRegeneratingChapter(null); }
+    }
+  };
+  const deleteChapter = (index: number) => {
+    if (!work || continuationRequest.current) return;
+    if (!commit({ type: 'delete-chapter', work, index, now: new Date().toISOString() })) return;
+    setChapterAction(null);
+    if (work.chapters.length === 1) { setWorkId(''); setChapter(0); returnToList(); setNotice('作品已移除'); return; }
+    setChapter(Math.min(chapter > index ? chapter - 1 : chapter, work.chapters.length - 2)); setNotice('本章已删除');
+  };
   const continuationButton = work && (continuing ?
-    <button className="ao3-button" onClick={() => { continuationRequest.current?.abort(); continuationRequest.current = null; setContinuing(false); setNotice('已停止追更，原文未改动'); }}><Square size={12}/>停止追更</button> :
-    <button className="ao3-button ao3-primary" disabled={work.chapters.length >= 100} onClick={() => setContinuationOpen(true)}>追更</button>);
+    <button className="ao3-button" onClick={stopWriting}><Square size={12}/>停止追更</button> :
+    <button className="ao3-button ao3-primary" disabled={writing || work.chapters.length >= 100} onClick={() => setContinuationOpen(true)}>追更</button>);
   const libraryWorks = shelf === 'works' ? state.works.filter(w => w.owned) : shelf === 'history' ? state.history.flatMap(h => state.works.find(w => w.id === h.workId) ?? []) :
     state[shelf === 'bookmarks' ? 'bookmarks' : 'later'].slice().reverse().flatMap(id => state.works.find(w => w.id === id) ?? []);
   const visible = page === 'library' ? libraryWorks : filterAo3Works(state.works, filters);
   const fandoms = [...new Set(state.works.map(w => w.fandom))];
   const filterCount = [filters.fandom, filters.rating, filters.category, filters.exclude, filters.complete !== 'all' ? filters.complete : ''].filter(Boolean).length;
-  const chapterControls = work && <div className="ao3-chapter-controls"><button className="ao3-button" disabled={chapter === 0 || entire} onClick={() => selectChapter(chapter - 1)}>上一章</button>
-    <label className="ao3-chapter-select"><span className="ao3-sr-only">选择章节</span><select aria-label="选择章节" value={chapter} disabled={entire} onChange={e => selectChapter(Number(e.target.value))}>{work.chapters.map((c, i) => <option key={i} value={i}>{i + 1}. {c.title}</option>)}</select></label>
-    <button className="ao3-button" disabled={entire || chapter === work.chapters.length - 1} onClick={() => selectChapter(chapter + 1)}>下一章</button></div>;
+  const chapterControls = work && <div className="ao3-chapter-controls"><button className="ao3-button" disabled={writing || chapter === 0 || entire} onClick={() => selectChapter(chapter - 1)}>上一章</button>
+    <label className="ao3-chapter-select"><span className="ao3-sr-only">选择章节</span><select aria-label="选择章节" value={chapter} disabled={writing || entire} onChange={e => selectChapter(Number(e.target.value))}>{work.chapters.map((c, i) => <option key={i} value={i}>{i + 1}. {c.title}</option>)}</select></label>
+    <button className="ao3-button" disabled={writing || entire || chapter === work.chapters.length - 1} onClick={() => selectChapter(chapter + 1)}>下一章</button></div>;
   return <main className="ao3-app" aria-label="AO3">
     <div className="ao3-app-bar"><button aria-label={page === 'reader' || page === 'editor' || page === 'generate' ? '返回作品列表' : '返回桌面'} onClick={() => page === 'reader' || page === 'editor' || page === 'generate' ? returnToList() : onBack()}><ArrowLeft size={19}/></button>
       <span>AO3 <span className="ao3-bar-divider">/</span> Archive of Our Own</span><span className="ao3-private">私人文库</span></div>
@@ -229,9 +260,10 @@ export function Ao3App({ onBack, userName = 'user' }: { onBack: () => void; user
           <div className="ao3-actions ao3-reader-actions"><button className="ao3-button" onClick={returnToList}>作品列表</button><button className="ao3-button" aria-pressed={entire} onClick={() => setEntire(!entire)}>{entire ? '分章阅读' : '整篇阅读'}</button>
             <button className="ao3-button" aria-pressed={state.later.includes(work.id)} onClick={() => { if (commit({ type: 'later', id: work.id })) setNotice(state.later.includes(work.id) ? '已移出稍后阅读' : '已加入稍后阅读'); }}>{state.later.includes(work.id) ? '已标记待阅' : '稍后阅读'}</button>
             {continuationButton}
-            {work.owned && <button className="ao3-button" disabled={continuing} onClick={() => startEditor(work)}>编辑</button>}{(work.owned || work.generation) && <button className="ao3-button" disabled={continuing} onClick={() => setDeleteId(work.id)}>删除</button>}</div>
+            {work.owned && <button className="ao3-button" disabled={writing} onClick={() => startEditor(work)}>编辑</button>}{(work.owned || work.generation) && <button className="ao3-button" disabled={writing} onClick={() => setDeleteId(work.id)}>删除</button>}</div>
           <p className="ao3-help">追更使用当前 API，追加下一章和该章五条新评论后一起保存，不覆盖原文或旧章评论。最多 100 章。旧版未标章节的评论保留在第一章。</p>
           {continuing && <p className="ao3-writing-status" role="status"><BookOpen size={24}/>正在生成第 {work.chapters.length + 1} 章及本章评论…</p>}
+          {regeneratingChapter !== null && <p className="ao3-writing-status" role="status"><BookOpen size={24}/>正在重新生成第 {regeneratingChapter + 1} 章及本章评论…</p>}
           <dl className="ao3-work-meta"><dt>Rating:</dt><dd>{work.rating}</dd><dt>Archive Warning:</dt><dd>{work.warning}</dd><dt>Category:</dt><dd>{work.category}</dd>
             <dt>Fandom:</dt><dd><button className="ao3-link" onClick={() => tagSearch(work.fandom)}>{work.fandom}</button></dd>{work.relationship && <><dt>Relationship:</dt><dd><button className="ao3-link" onClick={() => tagSearch(work.relationship)}>{work.relationship}</button></dd></>}
             {work.characters.length > 0 && <><dt>Characters:</dt><dd>{work.characters.join(', ')}</dd></>}{work.tags.length > 0 && <><dt>Additional Tags:</dt><dd>{work.tags.map((tag, i) => <span key={tag}>{i > 0 && ', '}<button className="ao3-link" onClick={() => tagSearch(tag)}>{tag}</button></span>)}</dd></>}
@@ -241,8 +273,12 @@ export function Ao3App({ onBack, userName = 'user' }: { onBack: () => void; user
           {!entire && chapterControls}
           {(entire ? work.chapters.map((c, i) => ({ ...c, index: i })) : [{ ...work.chapters[chapter], index: chapter }]).map(c => <section className="ao3-chapter" key={c.index}>
             <h2>Chapter {c.index + 1}{c.title ? `: ${c.title}` : ''}</h2><div className="ao3-prose">{c.body.split(/\n\s*\n/).map((paragraph, i) => <p key={i}>{paragraph}</p>)}</div>
+            {(work.owned || work.generation) && <div className="ao3-actions">
+              {regeneratingChapter === c.index ? <button type="button" className="ao3-button" onClick={stopWriting}><Square size={12}/>停止重新生成</button> : <button type="button" className="ao3-button" disabled={writing} onClick={() => { setContinuationOpen(false); setChapterAction({ type: 'regenerate', index: c.index }); }}>重新生成本章</button>}
+              <button type="button" className="ao3-button" disabled={writing} onClick={() => setChapterAction({ type: 'delete', index: c.index })}>删除本章</button>
+            </div>}
             <section ref={c.index === chapter ? comments : undefined} className="ao3-comments" aria-label={`第 ${c.index + 1} 章评论`}>
-              <Ao3Comments key={`${work.id}:${c.index}`} work={work} chapter={c.index} userName={userName} onAction={commit}/>
+              <Ao3Comments key={`${work.id}:${c.index}:${work.updatedAt}`} work={work} chapter={c.index} userName={userName} onAction={commit}/>
             </section></section>)}
           {!entire && chapterControls}
           <div className="ao3-actions ao3-reader-bottom"><button className="ao3-button" aria-pressed={state.kudosed.includes(work.id)} onClick={() => { if (commit({ type: 'kudos', id: work.id })) setNotice(state.kudosed.includes(work.id) ? '你已经为这篇作品留下过 Kudos 了。' : '感谢你留下 Kudos！'); }}><Heart size={13} fill={state.kudosed.includes(work.id) ? 'currentColor' : 'none'}/> Kudos ({work.kudos})</button>
@@ -254,6 +290,13 @@ export function Ao3App({ onBack, userName = 'user' }: { onBack: () => void; user
       </div>
     </div>
     {notice && <div className="ao3-toast" aria-hidden="true">{notice}</div>}
+    {chapterAction && work && <div className="ao3-dialog-shade" onClick={() => setChapterAction(null)}>
+      <section className="ao3-dialog" role="dialog" aria-modal="true" aria-label={chapterAction.type === 'regenerate' ? '重新生成本章' : '删除本章'} onClick={e => e.stopPropagation()} onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); setChapterAction(null); } }}>
+        <h3>{chapterAction.type === 'regenerate' ? '重新生成' : '删除'}第 {chapterAction.index + 1} 章？</h3>
+        {chapterAction.type === 'regenerate' ? <><p>成功后替换本章正文与评论，其他章节保留。失败或停止时保留原章。</p><label>重写要求（可选）<textarea autoFocus rows={4} maxLength={8000} aria-label="重写要求" value={rewriteDirection} onChange={e => setRewriteDirection(e.target.value)}/></label></> : <p>{work.chapters.length === 1 ? '作品仅剩这一章，删除后整篇作品、评论和书签也会移除。' : '本章和对应评论将被删除，后续章节会自动调整编号。'}</p>}
+        <div className="ao3-actions"><button type="button" className="ao3-button" onClick={() => setChapterAction(null)}>取消</button><button type="button" className="ao3-button ao3-primary" disabled={writing} onClick={() => chapterAction.type === 'regenerate' ? void regenerateChapter(chapterAction.index) : deleteChapter(chapterAction.index)}>{chapterAction.type === 'regenerate' ? '开始重新生成' : '确认删除本章'}</button></div>
+      </section>
+    </div>}
     {continuationOpen && work && <div className="ao3-dialog-shade" onClick={() => setContinuationOpen(false)}>
       <form className="ao3-dialog" role="dialog" aria-modal="true" aria-label="追更" onClick={e => e.stopPropagation()} onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); setContinuationOpen(false); } }} onSubmit={e => { e.preventDefault(); void continueWork(continuationDirection); }}>
         <h3>追更</h3>

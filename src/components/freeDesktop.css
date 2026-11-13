@@ -303,3 +303,5 @@
   .free-capsule-time small{display:none}
   .free-battery-widget{padding:8px 11px}
 }
+.free-desktop > .desktop-pager { flex:1;height:auto; }
+.free-desktop .desktop-page-pane > .free-scroll { height:100%; }

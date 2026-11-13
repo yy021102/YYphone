@@ -1,10 +1,10 @@
 import { ao3TopPrompt, ao3WorldBooks, ao3Preferences } from './ao3Settings';
 import { requestConfiguredAiText } from './aiApi';
 import { parseAiJson } from './aiResponse';
-import { generateAo3Continuation, readAo3Characters } from './ao3Generation';
+import { generateAo3Continuation, generateAo3Replacement, readAo3Characters } from './ao3Generation';
 import { readCharacterNpcs } from './characterNpcs';
 
-import { ao3ChapterComments, isAo3Comments, isAo3Work, type Ao3Comment, type Ao3Work } from './ao3Data';
+import { ao3ChapterComments, ao3CommentChapter, isAo3Comments, isAo3Work, type Ao3Comment, type Ao3Work } from './ao3Data';
 
 interface CommentParticipant {
   speakerId: string; identity: NonNullable<Ao3Comment['identity']>;
@@ -130,6 +130,14 @@ export async function generateAo3ChapterUpdate(work: Ao3Work, signal: AbortSigna
   const chapter = await generateAo3Continuation(work, signal, direction);
   const next = { ...work, chapters: [...work.chapters, chapter] };
   const comments = await generateAo3Comments(next, 'chapter', signal, undefined, work.chapters.length);
+  signal.throwIfAborted();
+  return { chapter, comments };
+}
+
+export async function regenerateAo3ChapterUpdate(work: Ao3Work, index: number, signal: AbortSignal, direction = '') {
+  const chapter = await generateAo3Replacement(work, index, signal, direction);
+  const next = { ...work, chapters: work.chapters.map((c, i) => i === index ? chapter : c), comments: work.comments.filter(c => ao3CommentChapter(c) !== index) };
+  const comments = await generateAo3Comments(next, 'chapter', signal, undefined, index);
   signal.throwIfAborted();
   return { chapter, comments };
 }

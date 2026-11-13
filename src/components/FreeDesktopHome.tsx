@@ -8,7 +8,7 @@ import {
   DESKTOP_WIDGET_TEMPLATES, moveDesktopItem, newDesktopTemplate, newDesktopWidget, putDesktopWidget, removeDesktopWidget, REQUIRED_WIDGET_TYPES, WIDGET_NAMES, WIDGET_TYPES,
   type DesktopDrop, type DesktopWidgetItem, type DesktopWidgetType, type FreeDesktopLayout,
 } from '../utils/freeDesktop';
-import { DesktopPageNavigation } from './DesktopPager';
+import { DesktopPager, DesktopPageNavigation } from './DesktopPager';
 import { DesktopOverlay, DesktopWidgetEditor } from './DesktopWidgetEditor';
 import { FreeDesktopWidget, readDesktopCharacters } from './FreeDesktopWidgets';
 import { DesktopTemplateThumbnail } from './DesktopTemplateArt';
@@ -194,8 +194,9 @@ export function FreeDesktopHome({ value, onSave, page, onPageChange, profile, ap
     </header>
     {(error || repairError) && <div role="alert" className="free-error free-desktop-error" data-desktop-action>{error || repairError}{error && <button type="button" aria-label="关闭桌面提示" onClick={() => setError('')}><X size={14}/></button>}</div>}
     {editing && <p className="free-help free-desktop-hint" data-desktop-action>资料卡、音乐和日历各保留一个；多余的可以移除。</p>}
-    <div className="free-scroll" ref={scroll}><div className="free-grid" ref={grid} style={{ gridTemplateRows: `repeat(${rows},var(--free-row))` }}>
-      {layout.pages[page].map(item => <section key={item.id} data-free-item={item.id} data-item-kind={item.kind}
+    <DesktopPager page={page} onChange={onPageChange} disabled={editing} pages={([0, 1] as const).map(index =>
+    <div key={index} className="free-scroll" ref={index === page ? scroll : undefined}><div className="free-grid" ref={index === page ? grid : undefined} style={{ gridTemplateRows: `repeat(${index === page ? rows : Math.min(DESKTOP_MAX_ROWS, Math.max(4, ...layout.pages[index].map(item => item.y + item.h)))},var(--free-row))` }}>
+      {layout.pages[index].map(item => <section key={item.id} data-free-item={item.id} data-item-kind={item.kind}
         className={`free-item free-item-${item.kind}${drag?.id === item.id ? ' is-dragged' : ''}`}
         aria-label={itemName(item.id)} style={{ gridColumn: `${item.x + 1} / span ${item.w}`, gridRow: `${item.y + 1} / span ${item.h}` }}>
         {item.kind === 'app' ? appButton(ALL_APPS.find(app => app.id === item.appId)!) : <>
@@ -205,8 +206,8 @@ export function FreeDesktopHome({ value, onSave, page, onPageChange, profile, ap
           {editing && <div className="free-widget-actions" data-desktop-action><button type="button" aria-label={`编辑组件：${itemName(item.id)}`} onClick={() => setWidgetDraft(item)}><Pencil size={13}/></button><button type="button" aria-label={`移动组件：${itemName(item.id)}`} onClick={() => setMoveId(item.id)}><Move size={13}/></button><button type="button" aria-label={`移除组件：${itemName(item.id)}`} disabled={!canRemoveDesktopWidget(layout, item.id)} title={canRemoveDesktopWidget(layout, item.id) ? '移除这一个组件' : '至少保留一个，可以移动或编辑'} onClick={() => setRemoveId(item.id)}><X size={13}/></button></div>}
         </>}
       </section>)}
-      {drop?.zone === 'page' && drop.page === page && <div className="free-drop-cell" aria-hidden="true" style={{ gridColumn: `${Math.min(drop.x, 4 - (dragItem?.w ?? 1)) + 1} / span ${dragItem?.w ?? 1}`, gridRow: `${drop.y + 1} / span ${dragItem?.h ?? 1}` }}/>}
-    </div></div>
+      {drop?.zone === 'page' && drop.page === index && <div className="free-drop-cell" aria-hidden="true" style={{ gridColumn: `${Math.min(drop.x, 4 - (dragItem?.w ?? 1)) + 1} / span ${dragItem?.w ?? 1}`, gridRow: `${drop.y + 1} / span ${dragItem?.h ?? 1}` }}/>}
+    </div></div>) as [ReactNode, ReactNode]}/>
     <nav className="free-dock" aria-label="系统应用" ref={dock}>{Array.from({ length: Math.max(layout.dock.length, editing ? 1 : 0) }, (_, index) => {
       const app = ALL_APPS.find(app => app.id === layout.dock[index]);
       return <div key={index} data-free-dock-index={index} data-free-item={app ? `app:${app.id}` : undefined} className={`free-dock-slot${drop?.zone === 'dock' && drop.index === index ? ' is-drop-target' : ''}`}>{app ? appButton(app) : editing && <span className="free-empty-dock">＋</span>}</div>;

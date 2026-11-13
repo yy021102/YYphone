@@ -10,8 +10,8 @@ const EMPTY: WidgetAppearance = { background: '', disc: '', note: '' };
 const isAppearance = (value: unknown): value is Partial<WidgetAppearance> =>
   typeof value === 'object' && value !== null;
 
-export const readWidgetAppearance = (key: string): WidgetAppearance => {
-  const stored = readStoredValue<Partial<WidgetAppearance>>(key, {}, isAppearance);
+export const readWidgetAppearance = (key: string, fallback: Partial<WidgetAppearance> = {}): WidgetAppearance => {
+  const stored = readStoredValue<Partial<WidgetAppearance>>(key, fallback, isAppearance);
   return {
     background: typeof stored.background === 'string' ? stored.background : '',
     disc: typeof stored.disc === 'string' ? stored.disc : '',
@@ -20,11 +20,11 @@ export const readWidgetAppearance = (key: string): WidgetAppearance => {
   };
 };
 
-export const useWidgetAppearance = (key: string) => {
-  const [appearance, setAppearance] = useState<WidgetAppearance>(() => readWidgetAppearance(key));
+export const useWidgetAppearance = (key: string, fallback?: WidgetAppearance) => {
+  const [appearance, setAppearance] = useState<WidgetAppearance>(() => readWidgetAppearance(key, fallback));
 
   useEffect(() => {
-    setAppearance(readWidgetAppearance(key));
+    setAppearance(readWidgetAppearance(key, fallback));
   }, [key]);
 
   const patch = useCallback(

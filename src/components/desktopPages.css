@@ -1,4 +1,8 @@
-.desktop-pager { width:100%;height:100%;min-height:0;display:flex;flex-direction:column;touch-action:pan-y; }
+.desktop-pager { position:relative;width:100%;height:100%;min-height:0;overflow:hidden;touch-action:pan-y; }
+.desktop-page-track { display:flex;width:100%;height:100%;transition:transform 360ms cubic-bezier(.22,.8,.25,1);will-change:transform; }
+.desktop-pager.is-dragging > .desktop-page-track { transition:none;user-select:none; }
+.desktop-page-pane { flex:0 0 100%;width:100%;height:100%;min-width:0;min-height:0; }
+@media (prefers-reduced-motion:reduce) { .desktop-page-track { transition-duration:0ms; } }
 .desktop-pager :is(.home-desktop,.leisure-scroll,.minimal-home-scroll,.hw-market-scroll) { touch-action:pan-y; }
 [data-home-page="1"] .little-p-launcher-zone .little-p-launcher { top:280px;bottom:auto; }
 .desktop-page-navigation { display:flex;align-items:center;justify-content:center;gap:2px;flex-shrink:0;position:relative;z-index:2;min-height:28px;padding-bottom:max(4px,env(safe-area-inset-bottom,0px));color:#7a8e9b; }

@@ -6,10 +6,10 @@ import { Ao3Comments } from '../components/Ao3Comments';
 import { clearDbStorage } from './dbStorage';
 import { readStorageString, writeStoredValue } from './localStorage';
 import { ao3ShareContent } from './ao3Share';
-import { createAo3CommentPlan, generateAo3ChapterUpdate, generateAo3Comments, parseAo3Comments, type Ao3CommentPlan } from './ao3Comments';
+import { createAo3CommentPlan, generateAo3ChapterUpdate, generateAo3Comments, regenerateAo3ChapterUpdate, parseAo3Comments, type Ao3CommentPlan } from './ao3Comments';
 import { exportAo3Data, importAo3Data, clearAo3Data, readAo3WorldBookIds, ao3WorldBooks, ao3TopPrompt, saveAo3GenerationSettings } from './ao3Settings';
 import { generateAo3Discovery } from './ao3Discovery';
-import { ao3ChapterComments, initialAo3State, isAo3Work, newAo3Draft, publishAo3Draft, readAo3State, updateAo3, writeAo3State, type Ao3Comment, type Ao3Work } from './ao3Data';
+import { ao3ChapterComments, initialAo3State, isAo3State, isAo3Work, newAo3Draft, publishAo3Draft, readAo3State, updateAo3, writeAo3State, type Ao3Comment, type Ao3Work } from './ao3Data';
 
 const values = new Map<string, string>();
 const storage = { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => values.set(key, value),
@@ -481,4 +481,72 @@ test('removing trailing chapters through the editor removes only their comments 
   const state = updateAo3({ ...initialAo3State(), works: [work] }, { type: 'publish', work: published });
   assert.ok(isAo3Work(state.works[0]));
   assert.deepEqual(state.works[0].comments, [original]);
+});
+
+test('regenerating a middle chapter excludes its old body, respects neighboring chapters, and atomically replaces its comments', async () => {
+  const source = setup();
+  const work = { ...source, chapters: [...source.chapters, { title: '最后的约定', body: '后章必须保留的事件。' }], comments: [...source.comments, { ...original, id: 'old-second-comment', body: '针对旧第二章的评论', chapter: 1 }] };
+  writeAo3State({ ...initialAo3State(), works: [work] });
+  let calls = 0;
+  mock.method(globalThis, 'fetch', async (_url: unknown, options?: RequestInit) => {
+    const request = JSON.parse(String(options?.body)), input = JSON.parse(request.messages.at(-1).content);
+    if (++calls === 1) {
+      assert.match(request.messages[0].content, /不是追更/);
+      assert.equal(input.chapter, 2); assert.equal(input.currentChapter.body, '');
+      assert.deepEqual(input.previousChapters, [work.chapters[0]]);
+      assert.deepEqual(input.followingChapters, [work.chapters[2]]);
+      assert.match(input.idea, /雨天重逢/);
+      assert(!JSON.stringify(input).includes(work.chapters[1].body));
+      return Response.json({ choices: [{ message: { content: JSON.stringify({ chapterTitle: '雨天重逢', body: '第二章的新故事。' }) } }] });
+    }
+    assert.equal(input.currentChapter.number, 2); assert.equal(input.currentChapter.body, '第二章的新故事。');
+    assert.deepEqual(input.comments, []); assert.equal(input.work.chapters.length, 2);
+    assert(!JSON.stringify(input).includes('后章必须保留的事件'));
+    return completion(generated(input.commentPlan));
+  });
+  const replacement = await regenerateAo3ChapterUpdate(work, 1, new AbortController().signal, '雨天重逢');
+  assert.deepEqual(readAo3State().works[0], work);
+  const latest = updateAo3(readAo3State(), { type: 'kudos', id: work.id });
+  const state = updateAo3(latest, { type: 'regenerate-chapter', work, index: 1, ...replacement, now });
+  const next = state.works[0]; assert.equal(next.chapters.length, 3);
+  assert.deepEqual(next.chapters[0], work.chapters[0]); assert.deepEqual(next.chapters[2], work.chapters[2]);
+  assert.equal(next.chapters[1].body, '第二章的新故事。'); assert.equal(next.kudos, 1);
+  assert.deepEqual(ao3ChapterComments(next, 0), [original]); assert.equal(ao3ChapterComments(next, 1).length, 5);
+  assert(!next.comments.some(c => c.id === 'old-second-comment')); assert(isAo3State(state));
+  const changed = updateAo3(latest, { type: 'comment', id: work.id, comment: { ...original, id: 'concurrent', chapter: 1 } });
+  assert.throws(() => updateAo3(changed, { type: 'regenerate-chapter', work, index: 1, ...replacement, now }), /已变化/);
+});
+
+test('failed or stopped replacement leaves the original chapter and comments untouched', async () => {
+  const work = setup(); let calls = 0;
+  mock.method(globalThis, 'fetch', async () => ++calls === 1 ? Response.json({ choices: [{ message: { content: '{"chapterTitle":"重写","body":"新正文"}' } }] }) : completion([]));
+  await assert.rejects(regenerateAo3ChapterUpdate(work, 0, new AbortController().signal), /五条评论/);
+  assert.deepEqual(readAo3State().works[0], work);
+  mock.restoreAll();
+  const controller = new AbortController();
+  mock.method(globalThis, 'fetch', async () => { controller.abort(); return Response.json({ choices: [{ message: { content: '{"body":"不应保存"}' } }] }); });
+  await assert.rejects(regenerateAo3ChapterUpdate(work, 0, controller.signal));
+  assert.deepEqual(readAo3State().works[0], work);
+});
+
+test('deleting a middle chapter renumbers following comments and history while preserving their reply threads', () => {
+  const source = setup();
+  const work = { ...source, chapters: [...source.chapters, { title: 'Chapter 3', body: '第三章正文' }], comments: [original,
+    { ...original, id: 'second-root', chapter: 1 }, { ...original, id: 'third-root', chapter: 2 }, { ...original, id: 'third-reply', chapter: 2, replyTo: 'third-root' }] };
+  const state = { ...initialAo3State(), works: [work], bookmarks: [work.id], history: [{ workId: work.id, chapter: 2, readAt: now }] };
+  const next = updateAo3(state, { type: 'delete-chapter', work, index: 1, now });
+  assert(isAo3State(next)); assert.equal(next.works[0].chapters.length, 2); assert.equal(next.works[0].chapters[1].title, 'Chapter 2');
+  assert.equal(next.works[0].comments.length, 3); assert(!next.works[0].comments.some(c => c.id === 'second-root'));
+  assert.deepEqual(ao3ChapterComments(next.works[0], 1).map(c => c.id), ['third-root', 'third-reply']);
+  assert.equal(next.works[0].comments[2].replyTo, 'third-root'); assert.equal(next.history[0].chapter, 1); assert.deepEqual(next.bookmarks, [work.id]);
+  assert.throws(() => updateAo3(next, { type: 'delete-chapter', work, index: 1, now }), /已变化/);
+  const firstDeleted = updateAo3(state, { type: 'delete-chapter', work, index: 0, now });
+  assert(!firstDeleted.works[0].comments.some(c => c.id === original.id)); assert(isAo3State(firstDeleted));
+});
+
+test('deleting the final remaining chapter removes its archive references', () => {
+  const source = setup(), work = { ...source, chapters: [source.chapters[0]] };
+  const state = { ...initialAo3State(), works: [work], bookmarks: [work.id], kudosed: [work.id], later: [work.id], history: [{ workId: work.id, chapter: 0, readAt: now }] };
+  const next = updateAo3(state, { type: 'delete-chapter', work, index: 0, now });
+  assert.deepEqual(next, initialAo3State()); assert(isAo3State(next));
 });

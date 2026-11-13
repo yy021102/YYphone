@@ -43,6 +43,17 @@ test('page controls expose two named keyboard-operable buttons and the current p
   }
 });
 
+test('desktop release distinguishes a quick flick, a slow short drag and vertical scrolling', () => {
+  assert.equal(desktopPageAfterSwipe(0, -35, 2, 390, 60), 1);
+  assert.equal(desktopPageAfterSwipe(1, 35, 2, 390, 60), 0);
+  assert.equal(desktopPageAfterSwipe(0, -35, 2, 390, 600), 0);
+  assert.equal(desktopPageAfterSwipe(0, -80, 2, 390, 600), 0);
+  assert.equal(desktopPageAfterSwipe(0, -90, 2, 390, 600), 1);
+  assert.equal(desktopPageAfterSwipe(0, -35, 40, 390, 60), 0);
+  assert.equal(desktopPageAfterSwipe(1, -120, 0, 820, 60), 1);
+  assert.equal(desktopPageAfterSwipe(0, 120, 0, 820, 60), 0);
+});
+
 test('all four leisure themes render second-page apps, a shared dock and replaceable custom icons without requiring new stored data', () => {
   for (const homeStyle of ['classic', 'minimal', 'moonlit', 'halloween'] as const) {
     const markup = renderToStaticMarkup(createElement(HomeScreen, {

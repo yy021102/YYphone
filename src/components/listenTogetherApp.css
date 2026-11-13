@@ -37,3 +37,4 @@
 .music-listening-vinyl[data-disc-mode=image] .free-vinyl-surface,.music-listening-vinyl[data-disc-mode=image] .music-listening-disc-shadow{display:none}
 .music-listening-vinyl[data-disc-mode=image] .free-vinyl-label{width:100%;height:100%;border:0;box-shadow:none}
 @media(max-height:690px){.music-listeners[data-bubbles] .music-listener-pair{margin-bottom:14px}.music-listeners[data-bubbles] .music-listener-wires{height:calc(100% + 12px)}.music-listener-bubble{min-height:29px;padding:5px 10px;font-size:10px;max-height:42px}.music-listener-bubbles{margin-bottom:5px}}
+.music-listener-bubble:nth-child(2):before{transform:scaleX(-1)}

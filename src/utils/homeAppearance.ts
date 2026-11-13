@@ -4,6 +4,7 @@ import { sameAppearance } from './appearanceName';
 
 export const CALENDAR_APPEARANCE_KEY = 'yyphone:calendar-appearance';
 export const MUSIC_APPEARANCE_KEY = 'yyphone:music-appearance';
+export const MUSIC_PLAYER_APPEARANCE_KEY = 'yyphone:music-player-appearance';
 
 export const captureHomeAppearance = (profile: UserProfile): HomeAppearance => ({
   calendar: readWidgetAppearance(CALENDAR_APPEARANCE_KEY),

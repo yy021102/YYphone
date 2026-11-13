@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { AppHeader } from '../components/AppHeader';
 import { DesktopAppearanceSettings } from '../components/DesktopAppearanceSettings';
+import { LauncherIconSettings } from '../components/LauncherIconSettings';
 import { GlobalFontSettings } from '../components/GlobalFontSettings';
 import { SpecialOpeningSettings } from '../components/SpecialOpeningSettings';
 import { HalloweenThemePreview } from '../components/HalloweenHomeArt';
@@ -532,6 +533,7 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
           </div>
         </details>
         <GlobalFontSettings fontSettings={fontSettings} onSaveFontSettings={onSaveFontSettings} />
+        <LauncherIconSettings/>
         <details className="glass-card group rounded-2xl p-3">
           <summary className="flex cursor-pointer list-none items-center gap-2 text-xs font-bold text-[#2C4A5C]">
             <LayoutGrid className="h-3.5 w-3.5 shrink-0 text-pink-500" />

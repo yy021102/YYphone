@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { AndroidFullscreenControl } from '../components/AndroidFullscreenControl';
 import { McpSettingsPanel } from '../components/McpSettingsPanel';
 import { GithubBackup } from '../components/GithubBackup';
+import { preserveLauncherIconOnImport } from '../utils/launcherIcons';
 import { backupFilename } from '../utils/backupFilename';
 import { ApiModelPicker } from '../components/ApiModelPicker';
 import { ChatApiConnectionTest } from '../components/ChatApiConnectionTest';
@@ -452,7 +453,7 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
       ) {
         throw new Error('备份文件中的数据内容无效。');
       }
-      const backupData = data as Record<string, string>;
+      const backupData = preserveLauncherIconOnImport(data as Record<string, string>);
       if (!window.confirm('导入将替换当前浏览器中本应用的全部本地数据，确定继续吗？')) return;
 
       await initializeDbStorage();

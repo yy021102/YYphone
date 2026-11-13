@@ -3,9 +3,9 @@ import { createPortal } from 'react-dom';
 import { Link2, Music2, Pause, Pencil, Play, SkipForward, Trash2, Upload, X } from 'lucide-react';
 import { musicPlayer, useMusicPlayer } from '../utils/musicPlayer';
 import { formatMusicTime, type MusicTrackDetails } from '../utils/musicPlayback';
-import { readStoredValue } from '../utils/localStorage';
-import { useWidgetAppearance } from '../utils/widgetAppearance';
-import { MUSIC_APPEARANCE_KEY } from '../utils/homeAppearance';
+import { readStoredValue, readStorageString } from '../utils/localStorage';
+import { readWidgetAppearance, useWidgetAppearance } from '../utils/widgetAppearance';
+import { MUSIC_APPEARANCE_KEY, MUSIC_PLAYER_APPEARANCE_KEY } from '../utils/homeAppearance';
 import { WidgetImagePicker } from './WidgetImagePicker';
 import { NeteaseMusicPanel } from './NeteaseMusicPanel';
 import { VinylRecord } from './DesktopTemplateArt';
@@ -51,8 +51,10 @@ export const ListenTogetherWidget: React.FC<{
 }> = ({ fullScreen = false, onOpen, onClose, modalContainer, backgroundImage, variant, artwork, title, note, vinylColor, vinylOpacity }) => {
   const player = useMusicPlayer();
   const { appearance, patch } = useWidgetAppearance(MUSIC_APPEARANCE_KEY);
+  const [playerFallback] = useState(() => readWidgetAppearance(MUSIC_APPEARANCE_KEY));
+  const { appearance: playerAppearance, patch: patchPlayer } = useWidgetAppearance(MUSIC_PLAYER_APPEARANCE_KEY, playerFallback);
   const background = backgroundImage || appearance.background;
-  const decoration = normalizeMusicDecoration(appearance.musicDecoration);
+  const decoration = normalizeMusicDecoration(playerAppearance.musicDecoration);
   const [panelOpen, setPanelOpen] = useState(false);
   const [drawer, setDrawer] = useState<'settings' | 'library' | null>(null);
   const [userProfile, setUserProfile] = useState(readWeChatUserProfile);
@@ -69,6 +71,11 @@ export const ListenTogetherWidget: React.FC<{
   const companion = companions.find((item) => item.id === player.companionId);
   const progress = player.duration > 0 ? Math.min(player.currentTime / player.duration, 1) : 0;
   const hasTracks = player.tracks.length > 0;
+
+  useEffect(() => {
+    // Snapshot the old shared appearance once, when the player is actually opened.
+    if ((fullScreen || panelOpen) && readStorageString(MUSIC_PLAYER_APPEARANCE_KEY) === null) patchPlayer({});
+  }, [fullScreen, panelOpen, patchPlayer]);
 
   useEffect(() => {
     const refresh = () => { setCompanions(readCompanionOptions()); setUserProfile(readWeChatUserProfile()); };
@@ -303,17 +310,17 @@ export const ListenTogetherWidget: React.FC<{
           aria-modal={fullScreen ? undefined : true}
           aria-label="一起听"
           className={`music-app ${fullScreen ? 'relative flex-1 min-h-0' : 'absolute inset-0 z-50'}`}
-          style={background ? { backgroundImage: `${decoration.darkenBackground ? 'linear-gradient(#211a2677,#211a26aa),' : ''}url(${JSON.stringify(background)})` } : undefined}
+          style={playerAppearance.background ? { backgroundImage: `${decoration.darkenBackground ? 'linear-gradient(#211a2677,#211a26aa),' : ''}url(${JSON.stringify(playerAppearance.background)})` } : undefined}
         >
-          <MusicListeningStage player={player} user={userProfile} companion={companion} disc={appearance.disc} caption={appearance.note} decoration={appearance.musicDecoration} onBack={closePanel} onSettings={() => setDrawer('settings')} onLibrary={() => setDrawer('library')}/>
+          <MusicListeningStage player={player} user={userProfile} companion={companion} disc={playerAppearance.disc} caption={playerAppearance.note} decoration={playerAppearance.musicDecoration} onBack={closePanel} onSettings={() => setDrawer('settings')} onLibrary={() => setDrawer('library')}/>
           {drawer && <div className="music-drawer-backdrop" onClick={event => { if (event.target === event.currentTarget) setDrawer(null); }}>
           <section className="music-drawer" role="dialog" aria-modal="true" aria-label={drawer === 'settings' ? '一起听设置' : '播放列表'}>
           <header className="music-drawer-header"><div><button type="button" aria-pressed={drawer === 'library'} onClick={() => setDrawer('library')}>音乐</button><button type="button" aria-pressed={drawer === 'settings'} onClick={() => setDrawer('settings')}>设置</button></div><button type="button" data-swipe-back aria-label="关闭面板" onClick={() => setDrawer(null)}><X size={20}/></button></header>
           <div className="music-app-scroll space-y-3.5 text-slate-700">
             {drawer === 'settings' && <>
             <section className="space-y-2 rounded-2xl bg-sky-50/60 border border-white/80 p-3">
-              <div className="flex items-center justify-between gap-2"><label htmlFor="music-listening-caption" className="text-xs font-bold text-[#2C4A5C]">头像下方文字</label><button type="button" className="rounded-full bg-white px-2.5 py-1 text-[10px] font-bold text-slate-500 disabled:opacity-40" disabled={!appearance.note} onClick={() => patch({ note: '' })}>恢复默认</button></div>
-              <textarea id="music-listening-caption" rows={2} maxLength={120} value={appearance.note} placeholder={DEFAULT_LISTENING_CAPTION} onChange={event => patch({ note: event.target.value })} className="w-full resize-none rounded-xl bg-white border border-slate-200 px-3 py-2 text-xs outline-none focus:border-sky-400"/>
+              <div className="flex items-center justify-between gap-2"><label htmlFor="music-listening-caption" className="text-xs font-bold text-[#2C4A5C]">头像下方文字</label><button type="button" className="rounded-full bg-white px-2.5 py-1 text-[10px] font-bold text-slate-500 disabled:opacity-40" disabled={!playerAppearance.note} onClick={() => patchPlayer({ note: '' })}>恢复默认</button></div>
+              <textarea id="music-listening-caption" rows={2} maxLength={120} value={playerAppearance.note} placeholder={DEFAULT_LISTENING_CAPTION} onChange={event => patchPlayer({ note: event.target.value })} className="w-full resize-none rounded-xl bg-white border border-slate-200 px-3 py-2 text-xs outline-none focus:border-sky-400"/>
             </section>
             <section className="space-y-2 rounded-2xl bg-sky-50/60 border border-white/80 p-3">
               <div className="flex items-center justify-between gap-2">
@@ -353,9 +360,14 @@ export const ListenTogetherWidget: React.FC<{
               </p>
             </section>
 
-            <WidgetImagePicker label="唱片图案" value={appearance.disc} square round maxSize={1000} onChange={value => patch({ disc: value })}/>
-            <MusicDecorationSettings value={appearance.musicDecoration} onChange={musicDecoration => patch({ musicDecoration })}/>
-            <WidgetImagePicker label="播放器背景" value={appearance.background} maxSize={1920} onChange={value => patch({ background: value })}/>
+            <p className="text-xs font-bold text-[#2C4A5C]">播放页</p>
+            <WidgetImagePicker label="唱片图案" value={playerAppearance.disc} square round maxSize={1000} onChange={value => patchPlayer({ disc: value })}/>
+            <MusicDecorationSettings value={playerAppearance.musicDecoration} onChange={musicDecoration => patchPlayer({ musicDecoration })}/>
+            <WidgetImagePicker label="播放器背景" value={playerAppearance.background} maxSize={1920} onChange={value => patchPlayer({ background: value })}/>
+            <details className="music-widget-appearance"><summary className="cursor-pointer py-2 text-xs font-bold text-[#2C4A5C]">桌面组件</summary><div className="space-y-3 pt-2">
+              <WidgetImagePicker label="组件唱片图案" value={appearance.disc} square round maxSize={600} onChange={value => patch({ disc: value })}/>
+              <WidgetImagePicker label="组件背景" value={appearance.background} maxSize={1000} onChange={value => patch({ background: value })}/>
+            </div></details>
             </>}
             <div hidden={drawer !== 'library'}>
             <NeteaseMusicPanel />

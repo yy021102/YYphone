@@ -133,9 +133,30 @@ export type Ao3Action = { type: 'kudos' | 'bookmark' | 'later'; id: string } |
   { type: 'read'; id: string; chapter: number; now: string; countHit?: boolean } |
   { type: 'comment'; id: string; comment: Ao3Comment } | { type: 'publish'; work: Ao3Work } | { type: 'discover'; work: Ao3Work } |
   { type: 'comments'; work: Ao3Work; comments: Ao3Comment[] } |
+  { type: 'regenerate-chapter'; work: Ao3Work; index: number; chapter: Ao3Chapter; comments: Ao3Comment[]; now: string } |
+  { type: 'delete-chapter'; work: Ao3Work; index: number; now: string } |
   { type: 'continue'; work: Ao3Work; chapter: Ao3Chapter; comments?: Ao3Comment[]; now: string } | { type: 'delete'; id: string };
 /** Pure archive operations: one kudos per reader, chapter-aware history, no chat/memory side effects. */
 export function updateAo3(state: Ao3State, action: Ao3Action): Ao3State {
+  if (action.type === 'regenerate-chapter' || action.type === 'delete-chapter') {
+    const work = state.works.find(w => w.id === action.work.id), index = action.index;
+    if (!work || work.updatedAt !== action.work.updatedAt || JSON.stringify(work.chapters) !== JSON.stringify(action.work.chapters) ||
+      JSON.stringify(ao3ChapterComments(work, index)) !== JSON.stringify(ao3ChapterComments(action.work, index))) throw new Error('作品或本章评论已变化，请重新打开后操作。');
+    if ((!work.owned && !work.generation) || !Number.isInteger(index) || index < 0 || index >= work.chapters.length || !date(action.now)) throw new Error('章节不可操作，请重新打开作品。');
+    if (action.type === 'delete-chapter') {
+      if (work.chapters.length === 1) return updateAo3(state, { type: 'delete', id: work.id });
+      const next = { ...work, chapters: work.chapters.filter((_, i) => i !== index).map((chapter, i) => {
+        const oldIndex = i < index ? i : i + 1;
+        return chapter.title === `Chapter ${oldIndex + 1}` ? { ...chapter, title: `Chapter ${i + 1}` } : chapter;
+      }), comments: work.comments.filter(c => ao3CommentChapter(c) !== index).map(c => ({ ...c, chapter: ao3CommentChapter(c) > index ? ao3CommentChapter(c) - 1 : ao3CommentChapter(c) })), updatedAt: action.now };
+      return { ...state, works: state.works.map(w => w.id === work.id ? next : w), history: state.history.map(h => h.workId === work.id ? { ...h, chapter: Math.min(h.chapter > index ? h.chapter - 1 : h.chapter, next.chapters.length - 1) } : h) };
+    }
+    const remaining = work.comments.filter(c => ao3CommentChapter(c) !== index);
+    if (!isAo3Comments(action.comments) || action.comments.length !== 5 || action.comments.some(c => ao3CommentChapter(c) !== index)) throw new Error('本章新评论不完整，原文与评论已保留。');
+    const next = { ...work, chapters: work.chapters.map((c, i) => i === index ? action.chapter : c), comments: [...remaining, ...action.comments], updatedAt: action.now };
+    if (!isAo3Work(next) || !action.chapter.body.trim()) throw new Error('新章节不完整，原文与评论已保留。');
+    return { ...state, works: state.works.map(w => w.id === work.id ? next : w) };
+  }
   if (action.type === 'comments') {
     const work = state.works.find(w => w.id === action.work.id);
     if (!work || work.updatedAt !== action.work.updatedAt || JSON.stringify(work.chapters) !== JSON.stringify(action.work.chapters)) {

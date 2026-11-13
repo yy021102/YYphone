@@ -172,17 +172,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     </button>
   );
 
+  const renderPage = (page: DesktopPage) => {
   const navigation = <DesktopPageNavigation page={page} onChange={onPageChange} />;
-  const wrapDesktop = (desktop: React.ReactNode) => <DesktopPager page={page} onChange={onPageChange}>{desktop}
-    {isProfileEditorOpen && <ProfileEditor profile={userProfile} onSave={onSaveUserProfile} onClose={() => setIsProfileEditorOpen(false)} />}
-    {paperNotesOpen && <PaperNotes onClose={() => setPaperNotesOpen(false)} />}
-  </DesktopPager>;
-  if (homeStyle === 'free') return wrapDesktop(<FreeDesktopHome value={freeDesktop} onSave={onSaveFreeDesktop} page={page} onPageChange={onPageChange}
-    profile={userProfile} appIcons={appIcons} onOpenApp={onOpenApp} onProfile={() => setIsProfileEditorOpen(true)} onNotes={() => setPaperNotesOpen(true)} renderIcon={renderAppIcon}/>);
-  if (page === 1) return wrapDesktop(<LeisureHome homeStyle={homeStyle} appIcons={appIcons} dockApps={dockApps} onOpenApp={onOpenApp} renderIcon={renderAppIcon} navigation={navigation} />);
-  if (homeStyle === 'halloween') return wrapDesktop(<HalloweenHome navigation={navigation} wallpaperUrl={wallpaperUrl} userProfile={userProfile} apps={apps} dockApps={dockApps} appIcons={appIcons} onOpenApp={onOpenApp} renderIcon={renderAppIcon} onEditProfile={() => setIsProfileEditorOpen(true)} onOpenNotes={() => setPaperNotesOpen(true)} />);
-  if (homeStyle === 'minimal' || homeStyle === 'moonlit') return wrapDesktop(<MinimalHome navigation={navigation} variant={homeStyle} wallpaperUrl={wallpaperUrl} userProfile={userProfile} apps={apps} dockApps={dockApps} appIcons={appIcons} onOpenApp={onOpenApp} renderIcon={renderAppIcon} onEditProfile={() => setIsProfileEditorOpen(true)} onOpenNotes={() => setPaperNotesOpen(true)} />);
-  return wrapDesktop(
+  if (page === 1) return <LeisureHome homeStyle={homeStyle} appIcons={appIcons} dockApps={dockApps} onOpenApp={onOpenApp} renderIcon={renderAppIcon} navigation={navigation} />;
+  if (homeStyle === 'halloween') return <HalloweenHome navigation={navigation} wallpaperUrl={wallpaperUrl} userProfile={userProfile} apps={apps} dockApps={dockApps} appIcons={appIcons} onOpenApp={onOpenApp} renderIcon={renderAppIcon} onEditProfile={() => setIsProfileEditorOpen(true)} onOpenNotes={() => setPaperNotesOpen(true)} />;
+  if (homeStyle === 'minimal' || homeStyle === 'moonlit') return <MinimalHome navigation={navigation} variant={homeStyle} wallpaperUrl={wallpaperUrl} userProfile={userProfile} apps={apps} dockApps={dockApps} appIcons={appIcons} onOpenApp={onOpenApp} renderIcon={renderAppIcon} onEditProfile={() => setIsProfileEditorOpen(true)} onOpenNotes={() => setPaperNotesOpen(true)} />;
+  return (
     <div className="home-desktop classic-home relative w-full h-full flex flex-col justify-between overflow-hidden select-none">
       {/* Upper Content Area (Profile Card + 4 Quadrants Grid) */}
       <div className="classic-home-content w-full flex-1 min-h-0 flex flex-col justify-between px-[clamp(12px,3vw,18px)] pt-1 pb-1.5 overflow-hidden">
@@ -321,4 +316,12 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       {navigation}
     </div>
   );
+  };
+  return <>
+    {homeStyle === 'free' ? <FreeDesktopHome value={freeDesktop} onSave={onSaveFreeDesktop} page={page} onPageChange={onPageChange}
+      profile={userProfile} appIcons={appIcons} onOpenApp={onOpenApp} onProfile={() => setIsProfileEditorOpen(true)} onNotes={() => setPaperNotesOpen(true)} renderIcon={renderAppIcon}/>
+      : <DesktopPager page={page} onChange={onPageChange} pages={[renderPage(0), renderPage(1)]}/>}
+    {isProfileEditorOpen && <ProfileEditor profile={userProfile} onSave={onSaveUserProfile} onClose={() => setIsProfileEditorOpen(false)} />}
+    {paperNotesOpen && <PaperNotes onClose={() => setPaperNotesOpen(false)} />}
+  </>;
 };
