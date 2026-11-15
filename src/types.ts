@@ -2,6 +2,7 @@ export type DesktopActivityId = 'text-adventure' | 'time-capsule' | 'divination'
 
 export type AppId =
   | 'ao3'
+  | 'anthology'
   | DesktopActivityId
   | 'wechat'
   | 'phone_explorer'

@@ -1,6 +1,6 @@
 import { mutateDirectChat } from './coupleSpaceData';
 
-export type ContextNoteSource = 'offline' | 'phone-memory' | 'pomodoro' | 'xianyu';
+export type ContextNoteSource = 'offline' | 'phone-memory' | 'pomodoro' | 'xianyu' | 'anthology';
 
 export interface ContextNoteInput {
   /** 固定 id 时重复调用会更新同一条，而不是新增 */

@@ -9,7 +9,7 @@ import { captureActivityChatScope } from './activityChat';
 import { buildPrompt } from './buildPrompt';
 import { kitchenChatChanges, recordKitchenResult } from './kitchenContext';
 import {
-  copyKitchenRecipe, createKitchenMeal, freshKitchenRecipe, isKitchenMeal, isKitchenRecipe, isKitchenStore,
+  copyKitchenRecipe, createKitchenMeal, deleteKitchenTasting, freshKitchenRecipe, isKitchenMeal, isKitchenRecipe, isKitchenStore,
   KITCHEN_INGREDIENTS, KITCHEN_KEY, KITCHEN_TYPES, kitchenIngredient, kitchenIngredients, kitchenPrompt, kitchenRecipeText,
   loadKitchen, parseKitchenRecipe, patchKitchenMeal, recoverKitchen, saveKitchenMeal, serveKitchenMeal, subscribeKitchen, updateKitchen, validateKitchenRecipe,
   type KitchenRecipe,
@@ -316,4 +316,23 @@ test('queued saves preserve concurrent meals, notify only successful writes and 
   assert.equal(loadKitchen().meals.length, 2); assert.equal(notifications, 2);
   await assert.rejects(updateKitchen(state => state, () => ({ [KITCHEN_KEY]: {} })), /不能覆盖/);
   assert.equal(notifications, 2); unsubscribe();
+});
+
+test('individual tasting deletion removes failed and completed attempts without touching deliveries, recipes or chats', async () => {
+  const meal = await tastingFixture();
+  await assert.rejects(deleteKitchenTasting(meal.id, actor.id, 'one'), /取消/);
+  await updateKitchen(recoverKitchen);
+  await patchKitchenMeal(meal.id, m => ({ ...m, servings: m.servings.map(s => s.actorId === actor.id
+    ? { ...s, tastings: [...s.tastings, { id: 'done', createdAt: meal.createdAt, status: 'done', text: '喜欢' }] } : s) }));
+  const original = loadKitchen(), originalChats = chats();
+  await deleteKitchenTasting(meal.id, actor.id, 'one');
+  assert.deepEqual(loadKitchen().meals[0].servings[0].tastings.map(t => t.id), ['done']);
+  await deleteKitchenTasting(meal.id, actor.id, 'done');
+  const after = loadKitchen();
+  assert.equal(after.meals[0].servings[0].tastings.length, 0);
+  assert.equal(after.meals[0].servings.length, 2);
+  assert.deepEqual(after.meals[0].servings[1], original.meals[0].servings[1]);
+  assert.deepEqual(after.recipes, original.recipes);
+  assert.deepEqual(after.meals[0].recipe, original.meals[0].recipe);
+  assert.deepEqual(chats(), originalChats);
 });

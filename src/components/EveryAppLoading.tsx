@@ -6,6 +6,10 @@ import { PomodoroLoading } from './PomodoroLoading';
 
 type IllustratedApp = Exclude<AppId, 'wechat' | 'phone_explorer' | 'memory' | 'couple_space' | 'pomodoro'>;
 const scenes: Record<IllustratedApp, { title: string; caption: string; eyebrow: string; footer: string; art: ReactNode }> = {
+  anthology: {
+    title: '文集', caption: '给一个念头，留一页纸。', eyebrow: 'THE COLLECTED PAGES', footer: '一些观察，一些尚未说完的想法',
+    art: <g className="every-opening-float"><path d="M87 79h145v169H87q-22 0-22-18V95q0-16 22-16Z" fill="#e4eadd" stroke="#fffaf4" strokeWidth="3"/><path d="M87 79v169m17-146h102m-102 127h102" stroke="#c5d0ba" strokeWidth="2"/><path d="M138 183q-3-49 38-66 17 39-38 66Zm0 0 36-58" fill="#d8cbb4" stroke="#aabca5" strokeWidth="2"/><path d="M109 211h73m-73 8h53" stroke="#c0cab6" strokeWidth="2" strokeLinecap="round"/><path d="m219 64 12-7-2 14-8-1Z" fill="#e6ccd9"/><circle cx="75" cy="64" r="4" fill="#d9dce9"/></g>,
+  },
   ao3: {
     title: 'AO3', caption: '故事，总有另一种可能。', eyebrow: 'ARCHIVE OF OUR OWN', footer: '翻开你喜欢的那一篇',
     art: <g className="every-opening-float"><path d="M61 92q48-17 99 7 51-24 99-7v151q-48-17-99 7-51-24-99-7Z" fill="#fffaf4" stroke="#d5b4b8" strokeWidth="2"/><path d="M160 99v151M82 120q29-6 56 5m-56 19q29-6 56 5m-56 19q29-6 56 5m-56 19q29-6 56 5m44-73q29-11 56-5m-56 29q29-11 56-5m-56 29q29-11 56-5" stroke="#dccbca" strokeWidth="2"/><path d="M196 88v109l12-9 12 9V88" fill="#b66d79"/><path d="M148 69c-15-20-31 1 0 18 31-17 15-38 0-18" fill="#dbb3bb"/></g>,

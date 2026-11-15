@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { AndroidFullscreenControl } from '../components/AndroidFullscreenControl';
 import { McpSettingsPanel } from '../components/McpSettingsPanel';
 import { GithubBackup } from '../components/GithubBackup';
+import { PersistentStorageSettings } from '../components/PersistentStorageSettings';
 import { preserveLauncherIconOnImport } from '../utils/launcherIcons';
 import { backupFilename } from '../utils/backupFilename';
 import { ApiModelPicker } from '../components/ApiModelPicker';
@@ -988,6 +989,7 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
           <p className="text-[11px] leading-relaxed text-slate-500">可答疑、指路、日常聊天和发表情包，不代操作。功能指南离线可看；AI 回复使用当前主 API，默认携带最近 100 条小P消息，没有长期记忆配置，不读取角色聊天或全局世界书。隐藏入口不删除聊天。</p>
         </section>
         <h2 className="settings-section-label">数据与维护<span>给小世界留一份存档</span></h2>
+        <PersistentStorageSettings/>
         <section className="settings-card space-y-3">
           <h3 className="settings-card-heading"><span className="settings-icon" data-tone="blue"><ImageDown size={17} strokeWidth={1.7} /></span>图片空间整理</h3>
           <p className="text-[10px] leading-relaxed text-slate-500">压缩聊天消息、朋友圈和论坛帖子中的已发送图片；不会处理 App 图标、壁纸、锁屏、聊天背景或头像。</p>

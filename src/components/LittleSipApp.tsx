@@ -5,6 +5,8 @@ import { SIP_CUPS, SIP_GROUPS, SIP_INGREDIENTS, copySipRecipe, createSipDrink, f
   patchSipDrink, recoverSip, sipCategory, sipCup, sipIce, sipIngredient, sipPartsAtStage, sipRecipeText, subscribeSip, updateSip, validateSipRecipe,
   type SipDrink, type SipGroup, type SipRecipe, type SipRequest } from '../utils/littleSip';
 import './littleSip.css';
+import { TastingRecord } from './TastingRecord';
+import { deleteSipTasting } from '../utils/littleSip';
 import type { SipChatScope, SipRecordRequest, SipResponse } from '../utils/littleSipContext';
 
 type Props = { userName:string; people:{id:string;name:string}[]; onRequest:(r:SipRequest)=>Promise<SipResponse>; onRecord:(r:SipRecordRequest)=>Promise<SipDrink>; onServe:(drinkId:string,actorId:string)=>Promise<void> };
@@ -145,7 +147,7 @@ export default function LittleSipApp({userName,people,onRequest,onRecord,onServe
           <p className="sip-help">只同步本次成功反馈，不同步其他角色或失败记录；不直接写长期记忆。未勾选时，仍可再次送出原卡片来更新聊天中的反馈。记录卡片需在聊天挂载范围内才会被读取；后续自动记忆仍按原有设置处理。</p>
           <button type="button" className="sip-secondary" disabled={disabled||!drink.servings.some(s=>s.actorId===actorId)} onClick={()=>void requestAI('taste',drink)}><Sparkles size={15}/>邀请试饮 · 1 次 AI</button>
         </section>
-        {drink.servings.map(s=><section className="sip-paper sip-tastings" key={s.actorId}><h3>{s.actorName}的这一口</h3><small>{new Date(s.servedAt).toLocaleString('zh-CN')}</small>{!s.tastings.length&&<p className="sip-help">已经送到，还没有邀请试饮。</p>}{s.tastings.map(t=><article key={t.id}><small>{new Date(t.createdAt).toLocaleString('zh-CN')}</small>{t.status==='done'?<p>{t.text}</p>:t.status==='pending'?<p role="status">TA 正在尝这一杯，离开会取消请求。</p>:<p className="sip-taste-error">{t.error}</p>}</article>)}</section>)}
+        {drink.servings.map(s=><section className="sip-paper sip-tastings" key={s.actorId}><h3>{s.actorName}的这一口</h3><small>{new Date(s.servedAt).toLocaleString('zh-CN')}</small>{!s.tastings.length&&<p className="sip-help">已经送到，还没有邀请试饮。</p>}{s.tastings.map(t=><article key={t.id}><TastingRecord createdAt={t.createdAt} label={`删除${s.actorName}的这条试饮记录`} disabled={disabled||t.status==='pending'} onDelete={()=>run(()=>deleteSipTasting(drink.id,s.actorId,t.id))}>{t.status==='done'?<p>{t.text}</p>:t.status==='pending'?<p role="status">TA 正在尝这一杯，离开会取消请求。</p>:<p className="sip-taste-error">{t.error}</p>}</TastingRecord></article>)}</section>)}
       </>}
       {(view==='menu'||view==='history')&&<>
         <header className="sip-heading"><span className="sip-kicker">{view==='menu'?'YOUR LITTLE DRINK BOOK':'SMALL MOMENTS, KEPT'}</span><h2>{view==='menu'?'把喜欢，收进饮品单。':'每一杯，都有小故事。'}</h2><p>{view==='menu'?'配方单独收存。修改后另存，不覆盖旧配方或旧饮品。':'做好的每一杯与试饮反馈都在这里；不必先收进饮品单。'}</p></header>

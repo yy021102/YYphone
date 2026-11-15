@@ -20,6 +20,43 @@ const story: OfflineStory = { id: 's', title: '雨', characterIds: [], personaId
 beforeEach(async () => { values.clear(); await clearDbStorage(); writeStoredValue('yyphone:api-presets', [main]); });
 afterEach(() => mock.restoreAll());
 
+test('offline summaries follow the selected API output limit without an internal token ceiling', async () => {
+  const bodies: any[] = [];
+  mock.method(globalThis, 'fetch', async (_url: unknown, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body)); bodies.push(body);
+    if (body.max_tokens === 700) return Response.json({ choices: [{ message: { content: '未完成' }, finish_reason: 'length' }] });
+    return Response.json({ choices: [{ message: { content: '书店见面的经历。' } }] });
+  });
+  await summarizeOfflineStory(story, undefined);
+  assert.ok(!Object.hasOwn(bodies[0], 'max_tokens'));
+  writeStoredValue('yyphone:api-presets', [{ ...main, maxTokens: 12000 }]);
+  await summarizeOfflineStory(story, undefined);
+  assert.equal(bodies[1].max_tokens, 12000);
+  saveOfflineApi(secondary);
+  await summarizeOfflineStory(story, undefined);
+  assert.equal(bodies[2].model, secondary.model);
+  assert.ok(!Object.hasOwn(bodies[2], 'max_tokens'));
+  saveOfflineApi(EMPTY_OFFLINE_API);
+  writeStoredValue('yyphone:api-presets', [{ ...main, maxTokens: 700 }]);
+  await assert.rejects(summarizeOfflineStory(story, undefined), /最大输出 Token/);
+  assert.equal(bodies.length, 4);
+});
+
+test('native Gemini summaries also use only the configured output cap', async () => {
+  const bodies: any[] = [];
+  mock.method(globalThis, 'fetch', async (_url: unknown, init?: RequestInit) => {
+    bodies.push(JSON.parse(String(init?.body)));
+    return Response.json({ candidates: [{ content: { parts: [{ text: '书店见面的经历。' }] }, finishReason: 'STOP' }] });
+  });
+  const google = { ...main, endpoint: 'https://generativelanguage.googleapis.com/v1beta', model: 'gemini-test' };
+  writeStoredValue('yyphone:api-presets', [google]);
+  await summarizeOfflineStory(story, undefined);
+  assert.ok(!Object.hasOwn(bodies[0].generationConfig, 'maxOutputTokens'));
+  writeStoredValue('yyphone:api-presets', [{ ...google, maxTokens: 12000 }]);
+  await summarizeOfflineStory(story, undefined);
+  assert.equal(bodies[1].generationConfig.maxOutputTokens, 12000);
+});
+
 test('offline generation falls back to main when empty, uses its own API for all tasks, and can return to main without changing it', async () => {
   const calls: Array<{ url: string; key: string; model: string }> = [];
   mock.method(globalThis, 'fetch', async (url: unknown, init?: RequestInit) => {

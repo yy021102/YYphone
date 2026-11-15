@@ -1,5 +1,6 @@
 import { requestConfiguredAiText } from './aiApi';
 import { resolveOfflineApi } from './offlineApi';
+import { readOfflineSummarySettings, type OfflineSummarySettings } from './offlineSummary';
 import { offlineWechatBackground } from './offlineWechat';
 import {
   currentVersionText,
@@ -176,8 +177,12 @@ export const generateOfflineChoices = async (
 
 export const summarizeOfflineStory = async (
   story: OfflineStory,
-  preset: OfflinePreset | undefined
+  preset: OfflinePreset | undefined,
+  options: { settings?: OfflineSummarySettings; signal?: AbortSignal } = {}
 ): Promise<string> => {
+  const settings = options.settings ?? readOfflineSummarySettings();
+  const instructions = `只根据本次输入的剧情记录事实，背景设定和过往摘要仅用于辨别人物，不得把其中未发生于本批的事件写入总结。不编造经历，不把人物归属、计划和已发生的事混淆。${settings.prompt.trim()
+    ? `\n【自定义总结要求，优先用于人称、文风、格式与详略】\n${settings.prompt.trim()}` : ''}\n本批最终总结最多 ${settings.maxChars} 字（含标点与标题），内容少时可以更短。优先保留关键事实、日期、关系变化、承诺和未完事项，省略重复措辞。`;
   const { system, userName } = buildSystem(story, preset);
   const characterNames = readOfflineContacts()
     .filter((c) => story.characterIds.includes(c.id))
@@ -187,6 +192,7 @@ export const summarizeOfflineStory = async (
   const summaries: string[] = [];
   const api = resolveOfflineApi();
   for (const [index, segment] of segments.entries()) {
+    options.signal?.throwIfAborted();
     const period = `${formatSummaryDate(segment.from)} 至 ${formatSummaryDate(segment.to)}`;
     const summary = await requestConfiguredAiText(
       system,
@@ -194,11 +200,20 @@ export const summarizeOfflineStory = async (
         `【线下剧情记录 ${index + 1}/${segments.length}；时间：${period}】`,
         segment.text,
         `请将以上这一段剧情整理为供角色日后回忆的客观事件记录。必须全程使用第三人称和真实姓名，明确写出玩家姓名“${userName}”以及角色姓名“${characterNames.join('、') || '登场角色'}”；禁止使用“我”“玩家”“对方”“他们”等代称替代姓名。按时间顺序逐项写出本段发生的每一件事，给每件事标注记录中对应的具体年月日（YYYY年M月D日）；不得用“后来”“之后”“某天”等模糊表述代替具体日期。保留具体言行、人物、地点、物品、数字、事件结果、情绪变化、关系变化、承诺、约定、悬念和来源；禁止省略事件、把多件事笼统合并、模糊化细节、杜撰记录中没有的信息。只可精简重复措辞，不能删减事实。只输出正文，不要标题、说明或评价。`,
+        instructions,
       ].join('\n\n'),
-      { api, temperature: 0.2, maxTokens: Math.max(1600, Math.min(8000, Math.ceil(segment.text.length / 2))) }
+      { api, temperature: 0.2, signal: options.signal }
     );
     if (!summary.trim()) throw new Error(`线下剧情 ${index + 1}/${segments.length} 的摘要为空，未保存不完整摘要。`);
     summaries.push(`【${period}】\n${summary.trim()}`);
   }
-  return summaries.join('\n\n');
+  let result = summaries.join('\n\n');
+  if (result.length > settings.maxChars) {
+    result = (await requestConfiguredAiText(`${system}\n${instructions}`,
+      `将以下临时摘要合并提炼为一篇不超过 ${settings.maxChars} 字的完整总结，不机械截断句子。只输出正文。\n${result}`,
+      { api, temperature: 0.2, signal: options.signal })).trim();
+  }
+  options.signal?.throwIfAborted();
+  if (!result || result.length > settings.maxChars) throw new Error(`总结未满足 ${settings.maxChars} 字限制，未保存，请调整字数或范围后重试。`);
+  return result;
 };

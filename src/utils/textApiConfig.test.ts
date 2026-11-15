@@ -6,6 +6,7 @@ import { requestConfiguredAiText, getActiveApiPreset } from './aiApi';
 import { requestChatReply } from './chatReply';
 import { clearDbStorage } from './dbStorage';
 import { writeStoredValue } from './localStorage';
+import { summarizeJournal } from './journalPolicy';
 
 const values = new Map<string, string>();
 Object.defineProperty(globalThis, 'window', { configurable: true, value: { localStorage: {
@@ -21,6 +22,36 @@ beforeEach(async () => {
   writeStoredValue('yyphone:api-presets', [{ id: 'main', name: '主 API', ...connection, temperature: 0 }]);
 });
 afterEach(() => mock.restoreAll());
+
+test('journal summaries follow the API token cap while keeping the visible character limit', async () => {
+  let calls = 0;
+  mock.method(globalThis, 'fetch', async (_url: unknown, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body)); calls++;
+    if (calls === 1) assert.ok(!Object.hasOwn(body, 'max_tokens'));
+    else assert.equal(body.max_tokens, calls === 2 ? 12000 : 700);
+    assert.ok(body.messages[0].content.includes('最多 400 字'));
+    // An explicit low API cap must still surface truncation without a paid retry.
+    if (body.max_tokens < 2000) return Response.json({ choices: [{ message: { content: '未完成的摘要' }, finish_reason: 'length' }] });
+    return response('小雨和林渡约定周末一起做饭。');
+  });
+  assert.equal(await summarizeJournal('整理聊天', '他们约定周末做饭'), '小雨和林渡约定周末一起做饭。');
+  writeStoredValue('yyphone:api-presets', [{ id: 'main', name: '主 API', ...connection, maxTokens: 12000 }]);
+  assert.equal(await summarizeJournal('整理聊天', '他们约定周末做饭'), '小雨和林渡约定周末一起做饭。');
+  writeStoredValue('yyphone:api-presets', [{ id: 'main', name: '主 API', ...connection, maxTokens: 700 }]);
+  await assert.rejects(summarizeJournal('整理聊天', '他们约定周末做饭'), /最大输出 Token/);
+  assert.equal(calls, 3); // Reaching the cap must not silently retry paid requests.
+});
+
+test('journal length validation still rejects overlong summaries after one refinement', async () => {
+  let calls = 0;
+  mock.method(globalThis, 'fetch', async (_url: unknown, init?: RequestInit) => {
+    calls++;
+    assert.ok(!Object.hasOwn(JSON.parse(String(init?.body)), 'max_tokens'));
+    return response('长'.repeat(401));
+  });
+  await assert.rejects(summarizeJournal('整理聊天', '输入记录'), /未满足 400 字上限/);
+  assert.equal(calls, 2);
+});
 
 test('chat and Little P requests pass cancellation to fetch and discard responses arriving after stop', async () => {
   for (const google of [false, true]) {

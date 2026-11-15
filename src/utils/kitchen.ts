@@ -273,6 +273,13 @@ export const patchKitchenMeal = (id: string, change: (meal: KitchenMeal) => Kitc
   if (!state.meals.some(m => m.id === id)) throw new Error('这份料理已不在餐桌记录中。');
   return { ...state, meals: state.meals.map(m => m.id === id ? change(m) : m) };
 });
+export const deleteKitchenTasting = (mealId: string, actorId: string, tastingId: string): Promise<void> => patchKitchenMeal(mealId, meal => ({
+  ...meal, servings: meal.servings.map(serving => {
+    if (serving.actorId !== actorId) return serving;
+    if (serving.tastings.some(t => t.id === tastingId && t.status === 'pending')) throw new Error('请先取消正在进行的品尝，再删除记录。');
+    return { ...serving, tastings: serving.tastings.filter(t => t.id !== tastingId) };
+  }),
+}));
 export const recoverKitchen = (state: KitchenStore): KitchenStore => ({ ...state, meals: state.meals.map(meal => ({ ...meal,
   servings: meal.servings.map(s => ({ ...s, tastings: s.tastings.map(t => t.status === 'pending'
     ? { ...t, status: 'error', error: '上次品尝已中断，不会自动重试。' } : t) })) })) });

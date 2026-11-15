@@ -181,6 +181,11 @@ export const patchSipDrink = (id:string,change:(d:SipDrink)=>SipDrink): Promise<
   if(!s.drinks.some(d=>d.id===id))throw new Error('这杯饮品已不在制作记录中。');
   return {...s,drinks:s.drinks.map(d=>d.id===id?change(d):d)};
 });
+export const deleteSipTasting = (drinkId:string,actorId:string,tastingId:string):Promise<void> => patchSipDrink(drinkId,d=>({...d,servings:d.servings.map(s=>{
+  if(s.actorId!==actorId)return s;
+  if(s.tastings.some(t=>t.id===tastingId&&t.status==='pending'))throw new Error('请先取消正在进行的试饮，再删除记录。');
+  return {...s,tastings:s.tastings.filter(t=>t.id!==tastingId)};
+})}));
 export const recoverSip = (s:SipStore): SipStore => ({...s,drinks:s.drinks.map(d=>({...d,servings:d.servings.map(v=>({...v,
   tastings:v.tastings.map(t=>t.status==='pending'?{...t,status:'error',error:'上次试饮已中断，不会自动重试。'}:t)}))}))});
 export function sipRecipeText(r:SipRecipe): string {

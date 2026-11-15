@@ -4,10 +4,34 @@ import {createElement} from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import SipGlass from '../components/SipGlass';
 import {SIP_CUPS,SIP_INGREDIENTS,SIP_KEY,copySipRecipe,createSipDrink,freshSipRecipe,isSipDrink,isSipRecipe,loadSip,parseSipRecipe,
-  patchSipDrink,recoverSip,serveSipDrink,sipCategory,sipIce,sipMixedColor,sipPartsAtStage,sipShareText,sipVolume,subscribeSip,updateSip,validateSipRecipe,type SipRecipe} from './littleSip';
+  deleteSipTasting,patchSipDrink,recoverSip,serveSipDrink,sipCategory,sipIce,sipMixedColor,sipPartsAtStage,sipShareText,sipVolume,subscribeSip,updateSip,validateSipRecipe,type SipRecipe} from './littleSip';
 import {removeStorageItem,setStorageItemsAtomically} from './dbStorage';
 const recipe=():SipRecipe=>({...freshSipRecipe('测试玩家'),name:'晚风桃桃',parts:[{id:'jasmine',amount:150},{id:'milk',amount:150},{id:'pearls',amount:30}]});
 const actor={id:'fixture-actor',name:'测试调饮师'};
+
+test('individual sip feedback deletion preserves other attempts, recipients and stored recipes',async()=>{
+  const previous=Object.getOwnPropertyDescriptor(globalThis,'window'),values=new Map<string,string>();
+  Object.defineProperty(globalThis,'window',{configurable:true,value:{localStorage:{
+    get length(){return values.size;},key:(i:number)=>[...values.keys()][i]??null,getItem:(k:string)=>values.get(k)??null,
+    setItem:(k:string,v:string)=>values.set(k,v),removeItem:(k:string)=>values.delete(k),
+  }}});
+  try{
+  const r=recipe(),drink=serveSipDrink(serveSipDrink(createSipDrink(r),actor),{id:'other',name:'另一位'});
+  drink.servings[0].tastings=[{id:'error',createdAt:drink.createdAt,status:'error',text:'',error:'生成失败'},
+    {id:'done',createdAt:drink.createdAt,status:'done',text:'清甜'}, {id:'pending',createdAt:drink.createdAt,status:'pending',text:''}];
+  drink.servings[1].tastings=[{id:'error',createdAt:drink.createdAt,status:'done',text:'另一人的记录'}];
+  await updateSip(()=>({recipes:[r],drinks:[drink]}));
+  await assert.rejects(deleteSipTasting(drink.id,actor.id,'pending'),/取消/);
+  await deleteSipTasting(drink.id,actor.id,'error');
+  assert.deepEqual(loadSip().drinks[0].servings[0].tastings.map(t=>t.id),['done','pending']);
+  await deleteSipTasting(drink.id,actor.id,'done');
+  const after=loadSip();
+  assert.deepEqual(after.recipes,[r]);assert.equal(after.drinks.length,1);assert.equal(after.drinks[0].servings.length,2);
+  assert.deepEqual(after.drinks[0].servings[1],drink.servings[1]);
+  assert.equal(after.drinks[0].servings[0].tastings[0].id,'pending');
+  await removeStorageItem(SIP_KEY);
+  }finally{if(previous)Object.defineProperty(globalThis,'window',previous);else Reflect.deleteProperty(globalThis,'window');}
+});
 test('ingredient cabinet is unique, food-only catalogued and measured in bounded five-unit steps',()=>{
   assert.equal(new Set(SIP_INGREDIENTS.map(i=>i.id)).size,SIP_INGREDIENTS.length);
   assert.equal(SIP_CUPS.length,6);

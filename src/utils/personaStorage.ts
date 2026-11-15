@@ -8,7 +8,7 @@ const SHARED = new Set([
   'yyphone:api-presets', 'yyphone:active-api-preset', 'yyphone:voice-model', 'yyphone:image-generation',
   'yyphone:image-generation-presets', 'yyphone:active-image-generation-preset', 'yyphone:mcp-settings',
   'yyphone:image-prompt-presets', 'yyphone:vision-api',
-  'yyphone:offline-api', 'yyphone:game-api', 'yyphone:offline-presets', 'yyphone:offline-style',
+  'yyphone:offline-api', 'yyphone:game-api', 'yyphone:offline-presets', 'yyphone:offline-style', 'yyphone:offline-summary-settings',
   'yyphone:beauty-settings', 'yyphone:beauty-presets', 'yyphone:font-settings', 'yyphone:font-presets', 'yyphone:chat-runtime',
   'yyphone:lock-settings', 'yyphone:show-status-bar', 'yyphone:follow-system-dark',
   'yyphone:opening-animation', 'yyphone:opening-style', 'yyphone:chat-appearance', 'yyphone:chat-regex',

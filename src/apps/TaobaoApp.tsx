@@ -648,9 +648,7 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack, giftCoupon, onCoup
 
   const sendCharacterDeliveryNotification = async (
     charId: string,
-    eventText: string,
-    card: Record<string, unknown>,
-    requestReply: boolean
+    card: Record<string, unknown>
   ) => {
     const character = contacts.find((contact) => contact.id === charId);
     if (!character) throw new Error('找不到要通知的通讯录角色。');
@@ -697,29 +695,6 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack, giftCoupon, onCoup
     chat.messages.push(triggerMessage);
     chat.updatedAt = timestamp;
     writeStorageString(STORAGE_KEYS.wechatChats, JSON.stringify(chats));
-    if (!requestReply) return;
-
-    const reply = await requestConfiguredAiText(
-      `你正在扮演${character.name}。角色设定：${getCharacterPersona(character.id) || '保持自然、亲切且符合上下文。'}。你刚收到玩家送来的商品，请用微信消息自然感谢或互动。只返回一条简短纯文本消息，不要 JSON。`,
-      `【系统提示：礼物已立即送达】${eventText} 请以角色身份自然地向玩家发一条感谢或互动消息。`
-    );
-    const latestRaw = readStorageString(STORAGE_KEYS.wechatChats);
-    const latestChats: unknown = latestRaw ? JSON.parse(latestRaw) : [];
-    if (!Array.isArray(latestChats)) throw new Error('微信聊天数据格式无效，无法保存 AI 回复。');
-    const currentChat = (latestChats as Array<Record<string, unknown>>).find((item) => item.id === chat?.id);
-    if (!currentChat || !Array.isArray(currentChat.messages)) {
-      throw new Error('保存 AI 回复时找不到角色微信会话。');
-    }
-    const replyTimestamp = new Date().toISOString();
-    currentChat.messages.push({
-      id: `message-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      senderId: charId,
-      text: reply,
-      thought: '',
-      createdAt: replyTimestamp,
-    });
-    currentChat.updatedAt = replyTimestamp;
-    writeStorageString(STORAGE_KEYS.wechatChats, JSON.stringify(latestChats));
   };
 
   // ==================== 9. 结算支付与送礼/通知角色 ====================
@@ -844,12 +819,12 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack, giftCoupon, onCoup
           }
         }
         appendCharacterContextEvent(recipient.id, event, 'taobao');
-        await sendCharacterDeliveryNotification(recipient.id, event, card, true);
+        await sendCharacterDeliveryNotification(recipient.id, card);
       } else {
         const event = `玩家购买了「${checkoutProduct.title}」（¥${Number(checkoutProduct.price).toFixed(2)}），并选择让你知道。`;
         for (const charId of notifyCharIds) {
           appendCharacterContextEvent(charId, event, 'taobao');
-          await sendCharacterDeliveryNotification(charId, event, card, false);
+          await sendCharacterDeliveryNotification(charId, card);
         }
       }
     } catch (error) {
@@ -1868,7 +1843,7 @@ export const TaobaoApp: React.FC<TaobaoAppProps> = ({ onBack, giftCoupon, onCoup
               {buyForWho === 'char' && (
                 <div className="pt-1.5 space-y-1">
                   <span className="text-[10px] text-pink-400 font-medium block">
-                    选择收礼物的角色（立即到货并触发 TA 主动发信息）：
+                    选择收礼物的角色（礼物送达后可在聊天中查看）：
                   </span>
                   <select
                     value={targetCharId}

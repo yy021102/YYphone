@@ -63,6 +63,7 @@ export function ChannelsApp({ userName, avatarUrl, contacts: sourceContacts, onB
   const [panel, setPanel] = useState<'compose' | 'refresh' | null>(null);
   const [draft, setDraft] = useState('');
   const [reply, setReply] = useState('');
+  const [replyAs, setReplyAs] = useState('self');
   const [focus, setFocus] = useState<Focus | null>(null);
   const [filter, setFilter] = useState('all');
   const [busy, setBusy] = useState(false);
@@ -103,6 +104,7 @@ export function ChannelsApp({ userName, avatarUrl, contacts: sourceContacts, onB
     nearBottom.current = true;
     scrollRef.current?.scrollTo({ top: focus?.kind === 'messages' ? scrollRef.current.scrollHeight : focus ? 0 : listPositions.current[`${tab}:${filter}`] ?? 0 });
     setMediaKind(''); setMediaUrl(''); setMediaText('');
+    setReplyAs('self');
   }, [tab, focus?.id, filter]);
 
   const profile = readStoredValue(PROFILE_KEY, emptyChannelProfile(), isChannelProfile);
@@ -462,9 +464,32 @@ export function ChannelsApp({ userName, avatarUrl, contacts: sourceContacts, onB
 
   const sendReply = () => {
     if (!focus || !selected || !reply.trim()) return;
+    const actor = focus.kind === 'posts' && replyAs !== 'self' ? contacts.find(person => person.id === replyAs) : me;
+    if (!actor) { setError('这个角色已不在通讯录中，请重新选择回复身份。'); return; }
     revealOwnReply.current = true;
-    if (update(focus.kind, selected.id, (item) => appendChannelReply(item, me, reply.trim(), { own: true, thread: focus.kind === 'messages', now: Date.now() }))) setReply('');
+    if (update(focus.kind, selected.id, (item) => appendChannelReply(item, actor, reply.trim(), { own: actor.id === 'self', thread: focus.kind === 'messages', now: Date.now() }))) setReply('');
     else revealOwnReply.current = false;
+  };
+  const generateRoleReply = async () => {
+    if (lock.current || focus?.kind !== 'posts' || !selected) return;
+    const actor = contacts.find(person => person.id === replyAs);
+    if (!actor) { setError('请先选择要回复的角色。'); return; }
+    const post = selected, direction = reply.trim();
+    lock.current = true; setBusy(true); setError(''); setBusyLabel('回复中…');
+    try {
+      const context = await promptContext([actor], false, `${post.text} ${post.textImage || ''} ${post.textVideo || ''} ${direction}`);
+      const raw: unknown = JSON.parse(await requestConfiguredAiText(context,
+        `请只以「${actor.name}」（ID：${actor.id}）的身份，在视频号评论区回复这条动态。作者：${currentPerson(post.author).name}。\n动态：${post.text}\n文字图：${post.textImage || '无'}\n文字视频：${post.textVideo || '无'}\n最近评论：${JSON.stringify(post.replies.slice(-16))}\n${direction ? `回复方向：${direction}\n` : ''}结合这个角色本身与平台上的人设、绑定世界书及允许带入的上下文，写一条自然的评论。只根据公开内容发言，不泄露私聊隐私，不替玩家或其他人说话，不写心声或旁白。若自己是动态作者，就以作者身份回应评论。返回 {"text":"评论正文"}。`,
+        { json: true }));
+      if (!isRecord(raw) || typeof raw.text !== 'string') throw new Error('角色回复格式不完整，请重试。');
+      const text = channelVisibleText(raw.text).trim();
+      if (!text || text.length > 2000) throw new Error('角色回复为空或过长，请重试。');
+      if (!mounted.current) return;
+      if (update('posts', post.id, item => appendChannelReply(item, actor, text, { now: Date.now() })) && viewRef.current.focus?.id === post.id) {
+        revealOwnReply.current = true; setReply(current => current === direction ? '' : current);
+      }
+    } catch (cause) { if (mounted.current) setError(cause instanceof Error ? cause.message : '角色回复失败，请重试。'); }
+    finally { lock.current = false; if (mounted.current) setBusy(false); }
   };
   const sendMedia = () => {
     if (!selected || focus?.kind !== 'messages' || !mediaKind || mediaBusy) return;
@@ -576,6 +601,7 @@ export function ChannelsApp({ userName, avatarUrl, contacts: sourceContacts, onB
     </div>;
   });
   const renderComposer = (post: boolean) => <div className="channel-reply-composer">
+    {post && <div className="mb-2 flex items-center gap-2 text-xs text-[#6e8879]"><label className="flex min-w-0 flex-1 items-center gap-2">回复身份<select aria-label="视频号回复身份" value={replyAs} disabled={busy} onChange={e => setReplyAs(e.target.value)} className="min-w-0 flex-1 rounded-lg bg-white/70 px-2 py-1.5 text-inherit"><option value="self">{me.name}（我）</option>{contacts.filter(p => p.id !== 'self').map(person => <option key={person.id} value={person.id}>{person.name}</option>)}</select></label>{replyAs !== 'self' && <button type="button" className="shrink-0 rounded-lg bg-white/70 px-2 py-1.5" disabled={busy} onClick={() => void generateRoleReply()}><Sparkles size={12} className="mr-1 inline"/>让 TA 回复</button>}</div>}
     {!post && <><div className="channel-dm-tools">{(['image', 'voice', 'video', 'transfer'] as const).map(kind => <button type="button" key={kind} aria-pressed={mediaKind === kind} onClick={() => { setMediaKind(mediaKind === kind ? '' : kind); setMediaUrl(''); setMediaText(''); }}>{({ image: '图片', voice: '语音', video: '视频', transfer: '转账' })[kind]}</button>)}</div>{mediaKind && <div className="channel-dm-attachment"><textarea aria-label="附件内容" placeholder={mediaKind === 'transfer' ? '转账备注' : '描述内容'} value={mediaText} onChange={e => setMediaText(e.target.value)} maxLength={2000} />{mediaKind === 'transfer' && <input aria-label="转账金额" type="number" min="0.01" step="0.01" value={mediaAmount} onChange={e => setMediaAmount(e.target.value)} />}{mediaKind === 'image' && <><input aria-label="私信上传图片" type="file" accept="image/*" disabled={mediaBusy} onChange={async e => { const file = e.target.files?.[0]; const id = focus?.id; if (!file) return; setMediaBusy(true); try { const url = await compressChatPhoto(file); if (mounted.current && viewRef.current.focus?.id === id) setMediaUrl(url); } catch { setError('图片处理失败'); } finally { setMediaBusy(false); } }} />{mediaUrl && <img src={mediaUrl} alt="待发送图片" />}</>}<button type="button" disabled={mediaBusy} onClick={sendMedia}>{mediaBusy ? '处理中…' : '发送附件'}</button></div>}</>}
     <div className="channel-reply-field"><textarea ref={replyInput} aria-label="互动内容" rows={2} maxLength={2000} placeholder={post ? '评论' : '发送消息'} value={reply} onChange={(event) => setReply(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); sendReply(); } }} />
       <button type="button" className="channel-send" aria-label="发送" disabled={!reply.trim()} onClick={sendReply}><Send size={17} /></button></div>

@@ -11,6 +11,8 @@ import type { ActivityChatScope } from '../utils/activityChat';
 import type { KitchenRecordRequest, KitchenResponse } from '../utils/kitchenContext';
 import { KitchenArt, KitchenIngredientArt } from './KitchenArt';
 import './kitchen.css';
+import { TastingRecord } from './TastingRecord';
+import { deleteKitchenTasting } from '../utils/kitchen';
 
 interface Props {
   userName: string; people: { id: string; name: string }[];
@@ -243,7 +245,7 @@ export default function KitchenApp({ userName, people, onRequest, onRecord, onSe
         <p className="kitchen-help">先送出卡片，再邀请品尝；TA 可以喜欢，也可以诚实地说不合口味。默认只保存在餐桌，勾选才同步，不直接写入长期记忆。</p>
       </section>
       <section className="kitchen-memories"><h3>这一餐的小回忆</h3>{meal.servings.length ? meal.servings.map(s => <article key={s.actorId}><header><Heart size={13}/><strong>{s.actorName}</strong><small>{new Date(s.servedAt).toLocaleString('zh-CN')} 收到料理</small></header>
-        {!s.tastings.length && <p>料理已经送到了，还没有留下品尝留言。</p>}{s.tastings.map(t => <div className="kitchen-tasting" key={t.id}><small>{new Date(t.createdAt).toLocaleString('zh-CN')}</small><p>{t.status === 'done' ? t.text : t.status === 'pending' ? '正在等待这一次的品尝反馈……' : t.error}</p></div>)}</article>) : <p className="kitchen-help">还没有送给谁，但亲手做好的这一刻已经留下了。</p>}</section>
+        {!s.tastings.length && <p>料理已经送到了，还没有留下品尝留言。</p>}{s.tastings.map(t => <div className="kitchen-tasting" key={t.id}><TastingRecord createdAt={t.createdAt} label={`删除${s.actorName}的这条试吃记录`} disabled={disabled || t.status === 'pending'} onDelete={() => run(() => deleteKitchenTasting(meal.id, s.actorId, t.id))}><p>{t.status === 'done' ? t.text : t.status === 'pending' ? '正在等待这一次的品尝反馈……' : t.error}</p></TastingRecord></div>)}</article>) : <p className="kitchen-help">还没有送给谁，但亲手做好的这一刻已经留下了。</p>}</section>
       <div className="kitchen-actions kitchen-bottom-actions"><button type="button" className="kitchen-secondary" disabled={disabled} onClick={() => restart(meal.recipe)}>再做一份 / 调整配方</button><button type="button" className="kitchen-text-button" disabled={disabled} onClick={() => setDeleting({ kind: 'meal', id: meal.id })}><Trash2 size={14}/>删除这份成品</button></div>
     </> : <div role="alert" className="kitchen-error">这份料理已不存在，请回到餐桌重新选择。<button type="button" onClick={() => go('table')}>回到餐桌</button></div>)}
     <details className="kitchen-guide"><summary>小厨房使用说明</summary><p>本次打开厨房期间，切换菜品和甜品会保留各自的未完成搭配。自己制作、查看、送卡片不调用 AI；请角色下厨或品尝各手动请求一次。没有库存、体力和经营任务。</p><p>完成的配方和成品分别保存；重新制作会另存一份，不覆盖原记录。删除配方不删除成品，删除成品不撤回已发送的聊天卡片。记录保存在本机，清除应用数据前请做好整机备份。</p><p>角色制作与品尝可选择同步到当前玩家、角色、存档的私聊，进入后续聊天上下文；不会直接写入长期记忆。这里是虚拟料理与互动，不提供现实烹饪时间或饮食安全判断。</p></details>

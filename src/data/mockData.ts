@@ -131,6 +131,7 @@ export const SECOND_PAGE_APPS: AppMetadata[] = [
   { id: 'character-perspective', name: '侧写', iconName: 'ScanFace', category: '角色', color: 'from-rose-200/40 to-violet-100/30', textColor: 'text-[#ad96ba]' },
   { id: 'kitchen', name: '下厨房', iconName: 'CookingPot', category: '生活', color: 'from-orange-200/40 to-amber-100/40', textColor: 'text-[#c7a17e]' },
   { id: 'ao3', name: 'AO3', iconName: 'AO3', category: '阅读', color: 'from-red-100/80 to-rose-100/60', textColor: 'text-[#990000]' },
+  { id: 'anthology', name: '文集', iconName: 'Feather', category: '阅读', color: 'from-emerald-100/60 to-rose-100/40', textColor: 'text-[#8c9f89]' },
 ];
 
 export const ALL_APPS: AppMetadata[] = [...MAIN_GRID_APPS, ...SECOND_PAGE_APPS, ...DOCK_APPS];

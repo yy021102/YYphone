@@ -22,6 +22,7 @@ import {
   CupSoda,
   ScanFace,
   CookingPot,
+  Feather,
 } from 'lucide-react';
 import { AppIconOverrides, AppId, AppMetadata, BeautySettings, UserProfile } from '../types';
 import { ProfileEditor } from './ProfileEditor';
@@ -85,6 +86,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     switch (iconName) {
       case 'AO3':
         return <img className={className} src={`${import.meta.env?.BASE_URL ?? '/'}ao3-logo.png`} alt="" aria-hidden="true" style={{ objectFit: 'contain', position: 'static', width: '75%', height: '75%' }}/>;
+      case 'Feather':
+        return <Feather className={className} />;
       case 'MessageCircle':
         return <MessageCircle className={className} />;
       case 'BookOpenText':

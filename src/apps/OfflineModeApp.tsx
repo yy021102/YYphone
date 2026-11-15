@@ -22,6 +22,8 @@ import {
 import { AppHeader } from '../components/AppHeader';
 import { OfflineApiSettings } from '../components/OfflineApiSettings';
 import { OfflineFontSettings } from '../components/OfflineFontSettings';
+import { OfflineSummaryPanel } from '../components/OfflineSummaryPanel';
+import { saveOfflineSummaryBatches } from '../utils/offlineSummary';
 import { FONT_FAMILIES } from '../utils/fontSettings';
 import { readOfflineGroupChats } from '../utils/offlineWechat';
 import { ColorWheel, hexToRgba } from '../components/ColorWheel';
@@ -47,12 +49,11 @@ import {
   readOfflineStories,
   readOfflineStyle,
   readOfflineWorldBooks,
-  saveOfflineMemory,
   writeOfflinePresets,
   writeOfflineStories,
   writeOfflineStyle,
 } from '../utils/offlineData';
-import { generateOfflineChoices, generateOfflineText, summarizeOfflineStory } from '../utils/offlineAi';
+import { generateOfflineChoices, generateOfflineText } from '../utils/offlineAi';
 
 interface OfflineModeAppProps {
   onBack: () => void;
@@ -220,7 +221,7 @@ export const OfflineModeApp: React.FC<OfflineModeAppProps> = ({ onBack }) => {
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
   const [openingHint, setOpeningHint] = useState('');
   const [manualOpening, setManualOpening] = useState('');
-  const [summaryModal, setSummaryModal] = useState<{ storyId: string; text: string } | null>(null);
+  const [summaryModal, setSummaryModal] = useState<OfflineStory | null>(null);
   const [activePresetId, setActivePresetId] = useState('');
   const [notice, setNotice] = useState('');
   const [style, setStyle] = useState<OfflineStyle>(() => readOfflineStyle());
@@ -375,24 +376,9 @@ export const OfflineModeApp: React.FC<OfflineModeAppProps> = ({ onBack }) => {
     }
   };
 
-  const handleEndStory = async () => {
+  const handleEndStory = () => {
     if (!story || busy) return;
-    if (story.messages.length < 2) {
-      flash('剧情还太短，先多写几段再结束吧');
-      return;
-    }
-    if (!window.confirm('结束这段线下剧情？会生成摘要并写入角色记忆，之后角色在微信里就知道这些事了。（结束后仍可以继续写）')) return;
-    setBusy('summary');
-    try {
-      const summary = await summarizeOfflineStory(story, storyPreset);
-      saveOfflineMemory(story, summary);
-      patchStory(story.id, (s) => ({ ...s, ended: true }));
-      setSummaryModal({ storyId: story.id, text: summary });
-    } catch (error) {
-      showYyError(error instanceof Error ? error.message : String(error), '生成剧情摘要失败');
-    } finally {
-      setBusy('');
-    }
+    setSummaryModal(story);
   };
 
   const swipe = (message: OfflineMessage, delta: number) => {
@@ -737,7 +723,7 @@ export const OfflineModeApp: React.FC<OfflineModeAppProps> = ({ onBack }) => {
               </p>
             )}
             {story.ended && !busy && (
-              <p className="text-center text-[10px] text-sky-400">这段剧情已写入角色记忆，继续书写会在下次「结束」时更新</p>
+              <p className="text-center text-[10px] text-sky-400">这段剧情已结束，仍可继续书写或在「总结记忆」中更新摘要</p>
             )}
             <div ref={bottomRef} />
           </div>
@@ -750,7 +736,7 @@ export const OfflineModeApp: React.FC<OfflineModeAppProps> = ({ onBack }) => {
                 </button>
                 <button type="button" className={pillBtn} onClick={() => setStyleOpen(true)}>🎨 外观</button>
                 <button type="button" disabled={!!busy} onClick={() => void handleEndStory()} className={`${pillBtn} disabled:opacity-40`}>
-                  <Flag className="mr-1 inline h-3 w-3" />结束并写入记忆
+                  <Flag className="mr-1 inline h-3 w-3" />总结记忆
                 </button>
               </div>
               <div className="flex items-end gap-2">
@@ -1061,33 +1047,16 @@ export const OfflineModeApp: React.FC<OfflineModeAppProps> = ({ onBack }) => {
       )}
 
       {/* ---------- 剧情摘要 ---------- */}
-      {summaryModal && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-900/25 p-5 backdrop-blur-xs">
-          <div className="w-full max-w-sm space-y-3 rounded-[26px] border border-white bg-white/95 p-5 shadow-2xl">
-            <h3 className="text-sm font-bold text-[#4A5A6A]">已写入角色记忆</h3>
-            <p className="text-[11px] text-slate-400">下面这段摘要会成为角色在微信里对这段线下剧情的记忆，可以修改。</p>
-            <textarea
-              className={`${inputClass} h-48 resize-none leading-relaxed`}
-              value={summaryModal.text}
-              onChange={(e) => setSummaryModal({ ...summaryModal, text: e.target.value })}
-            />
-            <div className="flex gap-2">
-              <button
-                type="button"
-                className={`${gradBtn} flex-1`}
-                onClick={() => {
-                  const target = stories.find((s) => s.id === summaryModal.storyId);
-                  if (target && summaryModal.text.trim()) saveOfflineMemory(target, summaryModal.text.trim());
-                  setSummaryModal(null);
-                }}
-              >
-                保存
-              </button>
-              <button type="button" className={pillBtn} onClick={() => setSummaryModal(null)}>不改了</button>
-            </div>
-          </div>
-        </div>
-      )}
+      {summaryModal && <OfflineSummaryPanel key={summaryModal.id} story={summaryModal}
+        preset={presets.find(p => p.id === summaryModal.presetId) ?? presets[0]}
+        onClose={() => setSummaryModal(null)} onBusy={value => setBusy(value ? 'summary' : '')}
+        onSave={(drafts, replace, end) => {
+          const latest = readOfflineStories().find(s => s.id === summaryModal.id);
+          if (!latest || JSON.stringify(latest) !== JSON.stringify(summaryModal)) throw new Error('剧情已变化，请关闭面板后重新选择范围。');
+          saveOfflineSummaryBatches(latest, drafts, replace);
+          patchStory(latest.id, s => ({ ...s, ended: end || s.ended }));
+          setSummaryModal(null); flash('总结已保存到角色记忆。');
+        }}/>}
     </div>
   );
 };

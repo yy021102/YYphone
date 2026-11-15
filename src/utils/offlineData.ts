@@ -59,6 +59,14 @@ export interface OfflineMemory {
   characterIds: string[];
   summary: string;
   createdAt: string;
+  batches?: OfflineSummaryBatch[];
+}
+
+export interface OfflineSummaryBatch {
+  id: string;
+  messageIds: string[];
+  summary: string;
+  createdAt: string;
 }
 
 export interface OfflineContact {
@@ -356,7 +364,7 @@ export const readOfflineMemories = (): OfflineMemory[] =>
 const noteIdOf = (storyId: string, charId: string) => `offline-note-${storyId}-${charId}`;
 
 /** 同一个故事只保留一条摘要，重新结束时覆盖；同时把摘要写进每个登场角色的微信单聊上下文。 */
-export const saveOfflineMemory = (story: OfflineStory, summary: string) => {
+export const saveOfflineMemory = (story: OfflineStory, summary: string, batches?: OfflineSummaryBatch[]) => {
   const others = readOfflineMemories().filter((memory) => memory.storyId !== story.id);
   writeStoredValue(OFFLINE_MEMORIES_KEY, [
     ...others,
@@ -366,6 +374,7 @@ export const saveOfflineMemory = (story: OfflineStory, summary: string) => {
       storyTitle: story.title,
       characterIds: story.characterIds,
       summary,
+      ...(batches ? { batches } : {}),
       createdAt: new Date().toISOString(),
     },
   ]);
@@ -377,6 +386,7 @@ export const saveOfflineMemory = (story: OfflineStory, summary: string) => {
       title: `线下剧情《${story.title}》`,
       content: summary,
       detail: summary,
+      bump: !!batches,
     });
   });
 };
