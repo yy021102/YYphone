@@ -32,6 +32,7 @@ import { frameGradient } from '../utils/avatarFrame';
 import { PaperNotes } from './PaperNotes';
 import { MinimalHome } from './MinimalHome';
 import { HalloweenHome } from './HalloweenHome';
+import { ChristmasHome } from './ChristmasHome';
 import { DesktopPager, DesktopPageNavigation } from './DesktopPager';
 import { LeisureHome } from './LeisureHome';
 import { HomeSystemDock } from './HomeSystemDock';
@@ -179,6 +180,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   const navigation = <DesktopPageNavigation page={page} onChange={onPageChange} />;
   if (page === 1) return <LeisureHome homeStyle={homeStyle} appIcons={appIcons} dockApps={dockApps} onOpenApp={onOpenApp} renderIcon={renderAppIcon} navigation={navigation} />;
   if (homeStyle === 'halloween') return <HalloweenHome navigation={navigation} wallpaperUrl={wallpaperUrl} userProfile={userProfile} apps={apps} dockApps={dockApps} appIcons={appIcons} onOpenApp={onOpenApp} renderIcon={renderAppIcon} onEditProfile={() => setIsProfileEditorOpen(true)} onOpenNotes={() => setPaperNotesOpen(true)} />;
+  if (homeStyle === 'christmas') return <ChristmasHome navigation={navigation} wallpaperUrl={wallpaperUrl} userProfile={userProfile} apps={apps} dockApps={dockApps} appIcons={appIcons} onOpenApp={onOpenApp} renderIcon={renderAppIcon} onEditProfile={() => setIsProfileEditorOpen(true)} onOpenNotes={() => setPaperNotesOpen(true)}/>;
   if (homeStyle === 'minimal' || homeStyle === 'moonlit') return <MinimalHome navigation={navigation} variant={homeStyle} wallpaperUrl={wallpaperUrl} userProfile={userProfile} apps={apps} dockApps={dockApps} appIcons={appIcons} onOpenApp={onOpenApp} renderIcon={renderAppIcon} onEditProfile={() => setIsProfileEditorOpen(true)} onOpenNotes={() => setPaperNotesOpen(true)} />;
   return (
     <div className="home-desktop classic-home relative w-full h-full flex flex-col justify-between overflow-hidden select-none">

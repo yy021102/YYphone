@@ -64,3 +64,43 @@ test('character actions honor the switch, authorship and a bounded list; finance
   assert.match(characterRecallInstructions([char], true, ['a']), /recall:true/);
   assert.doesNotMatch(characterRecallInstructions([char], false, ['a']), /CHAR_PRIVATE_SENTINEL/);
 });
+
+test('proactive contact never promotes an empty recalled message to current input, but preserves seen history and its recall time', () => {
+  const recalled = recallMessage(user, ['a'], [], () => .1);
+  recalled.recall!.at = '2026-11-12T12:03:00Z';
+  seed([recalled, char]);
+  const prompt = buildPrompt({ chatId: 'chat', currentInput: '', proactive: true, timeAwarenessEnabled: true });
+  assert.equal(prompt.filter(p => p.tokenCategory === 'currentInput').length, 1);
+  assert.doesNotMatch(prompt.at(-1)!.content, /WITHDRAWN_PRIVATE_SENTINEL|可知原内容/);
+  assert.match(prompt.at(-1)!.content, /本轮玩家没有发来新消息/);
+  assert.match(prompt.at(-1)!.content, /这同样约束 thought/);
+  const recallHistory = prompt.filter(p => p.tokenCategory === 'history' && p.content.includes('WITHDRAWN_PRIVATE_SENTINEL'));
+  assert.equal(recallHistory.length, 1); assert.match(recallHistory[0].content, /撤回发生时间/);
+  assert.match(JSON.stringify(prompt), /上次聊天间隔/);
+  seed([recallMessage(user, ['a'], [], () => .99)]);
+  assert.doesNotMatch(JSON.stringify(buildPrompt({ chatId: 'chat', currentInput: '', proactive: true })), /WITHDRAWN_PRIVATE_SENTINEL/);
+});
+
+test('proactive time gap ignores recent system notes; disabling time awareness omits the gap and recall timestamps', () => {
+  const now = Date.now();
+  seed([{ ...char, createdAt: new Date(now - 2*3600000).toISOString() },
+    { ...char, id: 'note', senderId: 'narrator', kind: 'context-note', text: '系统背景', createdAt: new Date(now).toISOString() }]);
+  const prompt = buildPrompt({ chatId: 'chat', proactive: true });
+  assert.match(prompt.find(p => p.content.includes('【上次聊天间隔】'))!.content, /距现在2 小时/);
+  const recalled = recallMessage(user, ['a'], [], () => .1); seed([recalled]);
+  const withoutTime = buildPrompt({ chatId: 'chat', proactive: true, timeAwarenessEnabled: false });
+  assert.doesNotMatch(JSON.stringify(withoutTime), /【当前时间】|【上次聊天间隔】|【撤回发生时间】/);
+  assert.match(withoutTime.at(-1)!.content, /本对话关闭了时间感知/);
+  assert.match(withoutTime.at(-1)!.content, /没有可见的玩家日程就承认不知道/);
+});
+
+test('proactive contact inherits role schedules and only authorized user calendar entries', () => {
+  seed([char]); const now = new Date(), date = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+  const calendar = { entries: [{id:'plan',kind:'schedule',date,title:'USER_CALENDAR_SENTINEL'}], visibleCharacterIds:['a'], scheduleCharacterIds:['a'], schedules:[{id:'a-plan',charId:'a',date,text:'OWN_SCHEDULE_SENTINEL'},{id:'b-plan',charId:'b',date,text:'OTHER_SCHEDULE_SECRET'}] };
+  writeStoredValue('yyphone:calendar-data',calendar);
+  const prompt = JSON.stringify(buildPrompt({chatId:'chat',proactive:true}));
+  assert.match(prompt,/USER_CALENDAR_SENTINEL/);assert.match(prompt,/OWN_SCHEDULE_SENTINEL/);assert.doesNotMatch(prompt,/OTHER_SCHEDULE_SECRET/);
+  writeStoredValue('yyphone:calendar-data',{...calendar,visibleCharacterIds:[]});
+  const privateCalendar = JSON.stringify(buildPrompt({chatId:'chat',proactive:true}));
+  assert.doesNotMatch(privateCalendar,/USER_CALENDAR_SENTINEL/);assert.match(privateCalendar,/OWN_SCHEDULE_SENTINEL/);
+});

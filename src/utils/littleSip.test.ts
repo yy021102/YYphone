@@ -3,11 +3,20 @@ import {test} from 'node:test';
 import {createElement} from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import SipGlass from '../components/SipGlass';
-import {SIP_CUPS,SIP_INGREDIENTS,SIP_KEY,copySipRecipe,createSipDrink,freshSipRecipe,isSipDrink,isSipRecipe,loadSip,parseSipRecipe,
+import {SIP_CUPS,SIP_INGREDIENTS,SIP_KEY,SIP_MULLED_WINE,sipRecipeText,copySipRecipe,createSipDrink,freshSipRecipe,isSipDrink,isSipRecipe,loadSip,parseSipRecipe,
   deleteSipTasting,patchSipDrink,recoverSip,serveSipDrink,sipCategory,sipIce,sipMixedColor,sipPartsAtStage,sipShareText,sipVolume,subscribeSip,updateSip,validateSipRecipe,type SipRecipe} from './littleSip';
 import {removeStorageItem,setStorageItemsAtomically} from './dbStorage';
 const recipe=():SipRecipe=>({...freshSipRecipe('测试玩家'),name:'晚风桃桃',parts:[{id:'jasmine',amount:150},{id:'milk',amount:150},{id:'pearls',amount:30}]});
 const actor={id:'fixture-actor',name:'测试调饮师'};
+test('mulled wine is a complete warm alcohol recipe, fits its cup and retains warmth in copies, servings and shared context',()=>{
+  const r=copySipRecipe(SIP_MULLED_WINE);validateSipRecipe(r);assert(isSipRecipe(r));assert.equal(sipCategory(r),'酒饮');assert.equal(sipIce(r),0);assert(sipVolume(r)<=sipCupCapacity(r));
+  const drink=serveSipDrink(createSipDrink(r),actor);assert.equal(drink.recipe.temperature,'hot');assert.match(sipRecipeText(drink.recipe),/温热饮/);assert.match(sipShareText(drink,actor.id),/温热饮/);
+  assert.doesNotMatch(sipShareText(drink,actor.id),/虚拟调饮|食品安全|游戏偏好|现实饮用安全|不售卖/);
+  const image=renderToStaticMarkup(createElement(SipGlass,{recipe:r}));assert.match(image,/data-sip-temperature="hot"/);assert.match(image,/data-sip-garnish="rosemary"/);assert.doesNotMatch(image,/class="sip-ice"/);
+  assert.equal(isSipRecipe({...r,ice:'regular'}),false);assert.equal(isSipRecipe({...r,temperature:'unknown'}),false);
+  r.parts[0].amount=5;assert.equal(SIP_MULLED_WINE.parts[0].amount,200);
+});
+const sipCupCapacity=(r:SipRecipe)=>SIP_CUPS.find(c=>c.id===r.cupId)!.capacity;
 
 test('individual sip feedback deletion preserves other attempts, recipients and stored recipes',async()=>{
   const previous=Object.getOwnPropertyDescriptor(globalThis,'window'),values=new Map<string,string>();

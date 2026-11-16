@@ -41,6 +41,7 @@ export const SIP_INGREDIENTS: SipIngredient[] = [
   { id:'vodka',name:'伏特加',group:'spirit',color:'#e3e9e4',unit:'ml',max:100 },
   { id:'whisky',name:'威士忌',group:'spirit',color:'#b5844a',unit:'ml',max:100 },
   { id:'tequila',name:'龙舌兰',group:'spirit',color:'#e5d1a2',unit:'ml',max:100 },
+  { id:'red-wine',name:'红葡萄酒',group:'spirit',color:'#8d4658',unit:'ml',max:300 },
   { id:'baileys',name:'百利甜',group:'liqueur',color:'#d6b493',unit:'ml',max:100 },
   { id:'cointreau',name:'君度',group:'liqueur',color:'#e9d8b2',unit:'ml',max:100 },
   { id:'absinthe',name:'苦艾酒',group:'modifier',color:'#b4c58a',unit:'ml',max:40 },
@@ -54,6 +55,11 @@ export const SIP_INGREDIENTS: SipIngredient[] = [
   { id:'mango',name:'芒果果肉',group:'fruit',color:'#efbb4f',unit:'g',max:80,shape:'cube' },
   { id:'lemon',name:'柠檬片',group:'fruit',color:'#e5d474',unit:'g',max:40,shape:'fruit' },
   { id:'mint',name:'薄荷叶',group:'fruit',color:'#8aaa7e',unit:'g',max:10,shape:'leaf' },
+  { id:'orange-slice',name:'鲜橙片',group:'fruit',color:'#e6aa68',unit:'g',max:60,shape:'fruit' },
+  { id:'apple-fruit',name:'苹果果肉',group:'fruit',color:'#e7c39c',unit:'g',max:60,shape:'cube' },
+  { id:'mixed-berries',name:'混合莓果',group:'fruit',color:'#986279',unit:'g',max:40,shape:'pearl' },
+  { id:'christmas-spice',name:'圣诞香料包',group:'fruit',color:'#ab8970',unit:'g',max:10,shape:'leaf' },
+  { id:'rock-sugar',name:'冰糖',group:'topping',color:'#f2e8da',unit:'g',max:40,shape:'cube' },
   { id:'honey',name:'蜂蜜糖浆',group:'syrup',color:'#cfab62',unit:'ml',max:40 },
   { id:'brown-sugar',name:'黑糖糖浆',group:'syrup',color:'#886047',unit:'ml',max:40 },
   { id:'garnish-lemon',name:'杯口柠檬片',group:'garnish',color:'#e5d474',unit:'g',max:30 },
@@ -61,11 +67,13 @@ export const SIP_INGREDIENTS: SipIngredient[] = [
   { id:'apple-slice',name:'苹果片',group:'garnish',color:'#d99891',unit:'g',max:40 },
   { id:'garnish-strawberry',name:'装饰草莓',group:'garnish',color:'#d9858e',unit:'g',max:40 },
   { id:'ice-cream',name:'冰淇淋雪顶',group:'garnish',color:'#fff0d6',unit:'g',max:60 },
+  { id:'rosemary',name:'迷迭香枝',group:'garnish',color:'#97aa86',unit:'g',max:10,shape:'leaf' },
 ];
 export interface SipPart { id: string; amount: number }
 export interface SipRecipe {
   id: string; name: string; cupId: SipCupId; parts: SipPart[]; sweetness: number;
   ice: 'none' | 'light' | 'regular'; finish: 'layered' | 'stirred';
+  temperature?: 'hot';
   maker: { name: string; actorId?: string; note?: string }; adapted: boolean;
 }
 export interface SipTasting {
@@ -98,8 +106,15 @@ export const freshSipRecipe = (name: string): SipRecipe => ({ id:`recipe-${crypt
 export const copySipRecipe = (r: SipRecipe): SipRecipe => ({
   id:r.id,name:r.name,cupId:r.cupId,parts:r.parts.map(p=>({id:p.id,amount:p.amount})),sweetness:r.sweetness,ice:r.ice,finish:r.finish,adapted:r.adapted,
   maker:{name:r.maker.name,...(r.maker.actorId?{actorId:r.maker.actorId}:{}),...(r.maker.note?{note:r.maker.note}:{})},
+  ...(r.temperature ? {temperature:r.temperature} : {}),
 });
+export const SIP_MULLED_WINE: SipRecipe = {
+  id:'builtin-christmas-mulled-wine', name:'圣诞热红酒', cupId:'coffee', sweetness:25, ice:'none', finish:'stirred', temperature:'hot', adapted:false,
+  parts:[{id:'red-wine',amount:200},{id:'orange-juice',amount:25},{id:'orange-slice',amount:25},{id:'apple-fruit',amount:20},{id:'mixed-berries',amount:10},{id:'strawberry',amount:10},{id:'rock-sugar',amount:5},{id:'christmas-spice',amount:5},{id:'rosemary',amount:5}],
+  maker:{name:'一杯之间',note:'橙香、莓果与红酒在温热中相拥。圣诞香料包含肉桂、丁香、八角、香叶与少许草果，最后点缀迷迭香。'},
+};
 export function validateSipRecipe(r: SipRecipe, complete = true): void {
+  if (r.temperature !== undefined && r.temperature !== 'hot' || r.temperature === 'hot' && r.ice !== 'none') throw new Error('热饮请设为不加冰。');
   if (!SIP_CUPS.some(c => c.id === r.cupId) || !nonemptyText(r.id,200) || typeof r.name !== 'string' || r.name.length > 40 ||
       complete && !r.name.trim() || ![0,25,50,75,100].includes(r.sweetness) ||
       !['none','light','regular'].includes(r.ice) || !['layered','stirred'].includes(r.finish) ||
@@ -125,9 +140,10 @@ export function isSipRecipe(v: unknown): v is SipRecipe {
       !isObject(v.maker) || !nonemptyText(v.maker.name,100) || typeof v.adapted !== 'boolean' ||
       v.maker.actorId !== undefined && !nonemptyText(v.maker.actorId,200) ||
       v.maker.note !== undefined && !nonemptyText(v.maker.note,500)) return false;
+  if (v.temperature !== undefined && v.temperature !== 'hot') return false;
   const cupId=SIP_CUPS.find(c=>c.id===v.cupId)?.id;
   if(!cupId)return false;
-  const checked:SipRecipe={id:v.id,name:v.name,cupId,parts:v.parts,sweetness:v.sweetness,ice:v.ice,finish:v.finish,adapted:v.adapted,
+  const checked:SipRecipe={id:v.id,name:v.name,cupId,parts:v.parts,sweetness:v.sweetness,ice:v.ice,finish:v.finish,adapted:v.adapted,...(v.temperature === 'hot' ? {temperature:'hot' as const} : {}),
     maker:{name:v.maker.name,...(typeof v.maker.actorId==='string'?{actorId:v.maker.actorId}:{}),...(typeof v.maker.note==='string'?{note:v.maker.note}:{})}};
   try { validateSipRecipe(checked); return true; } catch { return false; }
 }
@@ -192,10 +208,10 @@ export function sipRecipeText(r:SipRecipe): string {
   const body=r.parts.filter(p=>sipIngredient(p.id).group!=='garnish'),garnishes=r.parts.filter(p=>sipIngredient(p.id).group==='garnish');
   const describe=(parts:SipPart[])=>parts.map(p=>`${sipIngredient(p.id).name} ${p.amount}${sipIngredient(p.id).unit}`).join('、');
   return [`${r.name} · ${sipCategory(r)}`,`${sipCup(r.cupId).name} / ${sipCup(r.cupId).capacity}ml；${describe(body)}`,
+    ...(r.temperature === 'hot' ? ['温热饮 · 香料与果香慢慢融合，不加冰'] : []),
     ...(garnishes.length?[`顶部装饰：${describe(garnishes)}`]:[]),
-    `糖度${r.sweetness}%（游戏偏好标签，材料本身也可能含糖）；${{none:'不加冰',light:'少冰',regular:'正常冰'}[r.ice]}；${r.finish==='stirred'?'搅拌均匀':'保留分层'}`,
-    `署名：${r.maker.name}${r.adapted?' · 经玩家调整':''}${r.maker.note?`；原配方留言：${r.maker.note}`:''}`,
-    '这是虚拟调饮游戏。小料和顶部装饰按1g约占1ml、冰按杯容量估量，仅用于防溢出和插画，不是物理模拟、营养或现实饮用安全建议。'].join('\n');
+    `糖度${r.sweetness}%；${{none:'不加冰',light:'少冰',regular:'正常冰'}[r.ice]}；${r.finish==='stirred'?'搅拌均匀':'保留分层'}`,
+    `署名：${r.maker.name}${r.adapted?' · 经玩家调整':''}${r.maker.note?`；原配方留言：${r.maker.note}`:''}`].join('\n');
 }
 export function sipShareText(d:SipDrink,actorId:string): string {
   if(!isSipDrink(d))throw new Error('饮品记录无效，不能送出。');

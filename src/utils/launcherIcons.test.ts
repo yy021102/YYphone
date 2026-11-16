@@ -1,14 +1,23 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readFile } from 'node:fs/promises';
-import { LAUNCHER_ICONS, LAUNCHER_ICON_KEY, isLauncherIcon, launcherIconPaths, preserveLauncherIconOnImport } from './launcherIcons';
+import { DEFAULT_LAUNCHER_ICON, LAUNCHER_ICONS, LAUNCHER_ICON_KEY, isLauncherIcon, launcherIconPaths, preserveLauncherIconOnImport } from './launcherIcons';
 import { isPersonaRecordKey } from './personaStorage';
 
 test('launcher choices are device-wide and preserve GitHub Pages base paths', () => {
+  assert.equal(DEFAULT_LAUNCHER_ICON, 'mist-garden');
+  assert.equal(LAUNCHER_ICONS.find(icon => icon.id === 'default')?.name, '初见');
   assert.equal(isPersonaRecordKey('yyphone:launcher-icon'), false);
   assert.equal(isLauncherIcon('claw'), true); assert.equal(isLauncherIcon('javascript:alert(1)'), false);
   assert.equal(launcherIconPaths('ndsl', '/YYphone/').image, '/YYphone/app-icon-options/ndsl/icon-512.png');
   assert.equal(launcherIconPaths('slot', '/').apple, '/app-icon-options/slot/icon-180.png');
+});
+
+test('initial install manifest uses the garden while the original icon remains a separate choice', async () => {
+  const manifest = JSON.parse(await readFile(new URL('../../public/manifest.json', import.meta.url), 'utf8'));
+  assert(manifest.icons.every((icon: { src: string }) => icon.src.includes('/mist-garden/')));
+  const old = JSON.parse(await readFile(new URL('../../public/app-icon-options/default/manifest.webmanifest', import.meta.url), 'utf8'));
+  assert.equal(new URL(old.start_url, 'https://phone.invalid/app-icon-options/default/manifest.webmanifest').searchParams.get('launcher'), 'default');
 });
 
 test('restoring a pre-change backup preserves the icon chosen for this device and leaves backup data unchanged', () => {

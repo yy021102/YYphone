@@ -13,7 +13,7 @@ import { shouldShowTimestamp, effectiveChatTimeZone, formatChatTimestamp } from 
 import { syncAliasExperiences } from '../utils/aliasExperiences';
 import { isChatSendKey } from '../utils/chatSendKey';
 import { BIRTHDAY_CHANGE } from '../utils/birthday';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { acknowledgeCouponRequests, assertCouponAvailable, coupleBlockProtection, coupleRewardContext, useCoupleCoupon, type CoupleProductId } from '../utils/coupleRewards';
 import { CoupleCorrespondence } from '../components/CoupleCorrespondence';
 import { AliasAccountSwitcher, AliasChat, AliasConversationList, AliasFriendRequests, AliasManager, useAliasAccounts } from '../components/WeChatAliases';
@@ -1110,6 +1110,31 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
   }, [activeChatId, isVisible, HISTORY_PAGE_SIZE, searchJump]);
 
   const chatScrollRef = useRef<HTMLDivElement>(null);
+  const selectionViewport = useRef<{ chatId: string; top: number; anchors: { id: string; offset: number }[] } | null>(null);
+  const rememberSelectionViewport = () => {
+    const pane = chatScrollRef.current;
+    if (!pane) return;
+    const bounds = pane.getBoundingClientRect();
+    selectionViewport.current = { chatId: activeChatId, top: pane.scrollTop,
+      anchors: Array.from(pane.querySelectorAll<HTMLElement>('[data-message-id]')).filter(node => {
+        const rect = node.getBoundingClientRect();
+        return rect.bottom > bounds.top && rect.top < bounds.bottom;
+      }).map(node => ({ id: node.dataset.messageId!, offset: node.getBoundingClientRect().top - bounds.top })) };
+  };
+  useLayoutEffect(() => {
+    const snapshot = selectionViewport.current;
+    selectionViewport.current = null;
+    const pane = chatScrollRef.current;
+    if (!snapshot || !pane || snapshot.chatId !== activeChatId) return;
+    const nodes = Array.from(pane.querySelectorAll<HTMLElement>('[data-message-id]'));
+    for (const anchor of snapshot.anchors) {
+      const node = nodes.find(item => item.dataset.messageId === anchor.id);
+      if (!node) continue;
+      pane.scrollTop += node.getBoundingClientRect().top - pane.getBoundingClientRect().top - anchor.offset;
+      return;
+    }
+    pane.scrollTop = snapshot.top;
+  }, [selectMode, activeChatId]);
   const composerTouchStartX = useRef(0);
   const activeMessageCount = chats.find((chat) => chat.id === activeChatId)?.messages.filter(isVisibleChatMessage).length ?? 0;
   const activePaymentUpdates = chats.find((chat) => chat.id === activeChatId)?.messages.filter(isVisibleChatMessage).map(message => message.paymentSettledAt ?? '').join('|');
@@ -2254,6 +2279,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
   };
 
   const exitSelectMode = () => {
+    rememberSelectionViewport();
     setSelectMode(false);
     setSelectedIds([]);
     setForwardOpen(false);
@@ -3151,6 +3177,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       const promptMessages = buildPrompt({
         chatId: chat.id,
         currentInput,
+        proactive,
         historyLimit: chat.currentChatHistoryCount ?? 200,
         callMode: callConnectedAt ? activeCallMode ?? undefined : undefined,
         regenerate,
@@ -3247,10 +3274,6 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
           ? ['如上文有你自己的情侣空间券库存，可选返回顶层字段 "coupleCouponUse":"库存中的商品id" 使用一张；不使用就省略，不能通过reply伪造券卡片或库存。']
           : ['本轮不能使用情侣空间券，不要返回coupleCouponUse。']),
       ].join('\n');
-      if (proactive) promptMessages.push({
-        role: 'user',
-        content: `【定时主动联系】这不是玩家新发来的消息。请根据人设、${chat.timeAwarenessEnabled === false ? '已有聊天' : '当前时间与已有聊天'}主动联系玩家，聊一个自然的新话题或关心近况。不要假装玩家刚说过话，不要机械重复上一轮回复，不要提定时器或后台任务。`,
-      });
       if (!previewOnly && chat.type === 'direct' && apiPreset) {
         controller.signal.throwIfAborted();
         setMcpStatus(null);
@@ -4153,8 +4176,10 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
   };
   const displayChatMessages = activeChat
     ? buildPaymentDisplayMessages(activeChat.messages.filter(message => !hiddenMessageIds.includes(message.id) && isVisibleChatMessage(message)), activeChat.participantIds[0] ?? '')
-      .filter(message => !selectMode || (!message.paymentReceiptId && !message.paymentNotice))
     : [];
+  // Choose the history window before hiding generated payment rows; selection must not pull in older messages.
+  const visibleChatMessages = displayChatMessages.slice(-visibleMessageCount)
+    .filter(message => !selectMode || (!message.paymentReceiptId && !message.paymentNotice));
   const selectedGame = WECHAT_GAMES.find((game) => game.id === discoverPage);
   const talkInBoardGame = async (opponentId: string, gameName: string, message: string, context: string, history: BoardGameChatLine[]) => {
     const actor = contacts.find((contact) => contact.id === opponentId);
@@ -4391,7 +4416,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                   </div>
                 ) : null;
               })()}
-              {displayChatMessages.slice(-visibleMessageCount).flatMap((message, messageIndex, visibleList) => {
+              {visibleChatMessages.flatMap((message, messageIndex, visibleList) => {
                 const previousMessage = visibleList[messageIndex - 1];
                 const diceValue = readChatDiceValue(message);
                 const divider = shouldShowTimestamp(previousMessage?.createdAt, message.createdAt) ? (
@@ -4446,7 +4471,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                       )}
                       <button
                         type="button"
-                        onClick={() => { setReactionMenuId(''); setSelectMode(true); setSelectedIds([message.id]); }}
+                        onClick={() => { rememberSelectionViewport(); setReactionMenuId(''); setSelectMode(true); setSelectedIds([message.id]); }}
                         className="rounded-full bg-white/85 px-2.5 py-1 text-slate-500 shadow-sm"
                       >
                         多选
@@ -5549,7 +5574,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
               const direct=readStoredValue(CHATS_STORAGE_KEY,[],isChatList).find(c=>c.type==='direct'&&c.participantIds.length===1&&c.participantIds[0]===actor.id);
               const prompt=buildPrompt({chatId:direct?.id??'',backgroundCharacterId:actor.id,currentInput:context,historyLimit:20,memoryInjection:memory});
               prompt.push({role:'system',content:[
-                `【当前唯一任务：一杯之间 · ${input.kind==='recipe'?'角色调饮配方草稿':'角色试饮'}】你是${actor.name}，按照人设、关系和偏好回应。这是虚拟调饮游戏，不是真实饮食、医疗、营养或酒精安全指导。不要断言过敏安全，不鼓励过量饮酒。`,
+                `【当前唯一任务：一杯之间 · ${input.kind==='recipe'?'角色调饮配方草稿':'角色试饮'}】你是${actor.name}，按照人设、关系和偏好回应，只写本次配方或品尝感受，不附加声明。`,
                 input.kind==='recipe'?[
                   `从给定材料柜选择最多10种材料，ID不可编造、不可重复，用量为5的倍数且不超过各材料上限。杯型：${sip.SIP_CUPS.map(c=>`${c.id}=${c.name}${c.capacity}ml`).join('、')}。`,
                   '总占用=所有材料用量相加（小料和顶部装饰按1g约1ml）+冰占用；none冰为0，light为杯容量10%，regular为20%。不得超过杯容量，至少40ml非糖浆的液体。顶部装饰同样放在parts中；garnish-lemon是杯口柠檬片，lemon是杯内柠檬片，不要混淆。基酒、利口酒、修饰酒均含酒；百利甜和冰淇淋雪顶也含奶。尊重玩家要求，尤其不含酒、不含奶等限制。',

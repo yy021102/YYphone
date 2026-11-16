@@ -6,8 +6,9 @@ import { dirname, join } from 'node:path';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', 'public');
 const base = JSON.parse(await readFile(join(root, 'manifest.json'), 'utf8'));
 const choices = [
-  ['default', '默认', 'pwa-512x512.png'], ['claw', '抓娃娃机', '抓娃娃机.jpg'],
+  ['default', '初见', 'pwa-512x512.png'], ['claw', '抓娃娃机', '抓娃娃机.jpg'],
   ['slot', '老虎机', '老虎机.jpg'], ['ndsl', 'NDSL', 'ndsl.jpg'],
+  ['mist-garden', '雾色花园', 'app-icon-sources/mist-garden.png'],
 ];
 for (const [id, name, source] of choices) {
   const directory = join(root, 'app-icon-options', id);

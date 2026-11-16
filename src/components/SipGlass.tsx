@@ -15,7 +15,7 @@ export default function SipGlass({ recipe, stage = 5, pouring = '' }: { recipe:S
   const {x,y,w,h,path,stem,straw,handle}=cupShapes[recipe.cupId],center=x+w/2;
   const parts=sipPartsAtStage(recipe,stage);
   const liquids=parts.filter(p=>sipIngredient(p.id).unit==='ml'), solids=parts.filter(p=>sipIngredient(p.id).unit==='g'&&sipIngredient(p.id).group!=='garnish');
-  const garnishes=parts.filter(p=>sipIngredient(p.id).group==='garnish'),rimFruit=garnishes.filter(p=>p.id!=='ice-cream');
+  const garnishes=parts.filter(p=>sipIngredient(p.id).group==='garnish'),rimFruit=garnishes.filter(p=>p.id!=='ice-cream'&&p.id!=='rosemary');
   const capacity=sipCup(recipe.cupId).capacity, liquid=liquids.reduce((n,p)=>n+p.amount,0);
   const solid=solids.reduce((n,p)=>n+p.amount,0), ice=stage>=3?sipIce(recipe):0;
   const fill=Math.min(.94,(liquid+solid+ice)/capacity)*h, top=y+h-fill;
@@ -35,7 +35,7 @@ export default function SipGlass({ recipe, stage = 5, pouring = '' }: { recipe:S
             const half=recipe.cupId==='martini'?Math.max(3,(y+h-py)/h*w/2-6):recipe.cupId==='goblet'?Math.max(8,Math.sqrt(Math.max(0,1-((py-y)/h)**2))*w/2-12):w/2-20;
             const px=center-half+((i*37+index*17)%(half*2));
             if(item.shape==='leaf')return <ellipse key={i} cx={px} cy={py-10} rx="5" ry="11" fill={item.color} transform={`rotate(${i*29} ${px} ${py-10})`}/>;
-            if(item.shape==='fruit')return item.id==='lemon'?<g key={i} transform={`translate(${px} ${py-8}) rotate(${i*23})`}><circle r="11" fill={item.color}/><circle r="8" fill="#f8efbc"/><path d="M-7 0H7M0-7V7M-5-5L5 5M-5 5L5-5" stroke={item.color}/></g>:<g key={i}><path d={`M${px-8} ${py-9}Q${px} ${py+12} ${px+8} ${py-9}Z`} fill={item.color}/><path d={`M${px-3} ${py-4}H${px-1}M${px+2} ${py}H${px+4}`} stroke="#f8e1ae" strokeWidth="1.5"/></g>;
+            if(item.shape==='fruit')return (item.id==='lemon'||item.id==='orange-slice')?<g key={i} transform={`translate(${px} ${py-8}) rotate(${i*23})`}><circle r="11" fill={item.color}/><circle r="8" fill="#f8efbc"/><path d="M-7 0H7M0-7V7M-5-5L5 5M-5 5L5-5" stroke={item.color}/></g>:<g key={i}><path d={`M${px-8} ${py-9}Q${px} ${py+12} ${px+8} ${py-9}Z`} fill={item.color}/><path d={`M${px-3} ${py-4}H${px-1}M${px+2} ${py}H${px+4}`} stroke="#f8e1ae" strokeWidth="1.5"/></g>;
             return item.shape==='cube'?<rect key={i} x={px-5} y={py-6} width="11" height="10" rx={item.id==='rice-mochi'?5:2} fill={item.color} stroke="#fff" strokeOpacity=".3" transform={`rotate(${i*17} ${px} ${py})`}/>:item.id==='purple-rice'?<ellipse key={i} cx={px} cy={py} rx="2" ry="4" fill={item.color} transform={`rotate(${i*31} ${px} ${py})`}/>:<g key={i}><circle cx={px} cy={py} r={item.id==='red-bean'?4:6} fill={item.color}/><circle cx={px-1.5} cy={py-2} r="1.5" fill="#fff" opacity=".28"/></g>;
           })}</g>;
         })}
@@ -48,6 +48,8 @@ export default function SipGlass({ recipe, stage = 5, pouring = '' }: { recipe:S
         <path d={`M${x+w-10} ${y+16}L${x+w-18} ${y+h-37}`} stroke="#fff" strokeWidth="2" opacity=".6" strokeLinecap="round"/>
         {recipe.cupId==='rocks'&&<path d="M83 146L88 281M109 146L112 281M135 146V281M162 146V281M189 146L186 281M215 146L209 281" stroke="#fff" strokeOpacity=".35" strokeWidth="3"/>}</g>
       <ellipse cx={center} cy={y} rx={w/2} ry="6" fill="#f9fcf8" fillOpacity=".2" stroke="#afc0bb"/>
+      {recipe.temperature==='hot'&&stage>=2&&liquid>0&&<g className="sip-warm-steam" data-sip-temperature="hot" fill="none" stroke="#c1b9ad" strokeWidth="2" strokeLinecap="round" opacity=".6">{[-20,0,20].map((offset,i)=><path key={offset} style={{animationDelay:`${i*.6}s`}} d={`M${center+offset} ${y-12}q-8-13 0-25t0-25`}/>)}</g>}
+      {garnishes.some(p=>p.id==='rosemary')&&<g data-sip-garnish="rosemary" transform={`translate(${x+w-15} ${y+5}) rotate(20)`} stroke="#8fa27c" strokeLinecap="round"><path d="M0 20V-48" strokeWidth="2"/>{[-38,-28,-18,-8,2].map(pos=><path key={pos} d={`M0 ${pos}l-9-10m9 10 9-12`} strokeWidth="3"/>)}</g>}
       {straw&&<><path d={`M181 ${y+h-27}L222 30L241 23`} fill="none" stroke="#d3a7b3" strokeWidth="9" strokeLinecap="round"/><path d={`M179 ${y+h-27}L220 30L240 23`} fill="none" stroke="#f7e5e9" strokeWidth="2" opacity=".7"/></>}
       {garnishes.filter(p=>p.id==='ice-cream').map(p=><g key={p.id} data-sip-garnish={p.id} transform={`translate(${center} ${y-8}) scale(${.7+p.amount/100})`}>
         <ellipse rx="39" ry="10" cy="7" fill="#e1cfb1"/><path d="M-38 4C-42-10-25-25-12-22C-15-43 16-47 21-25C39-24 47-3 35 6Z" fill="#fff0d6" stroke="#dcc9a4" strokeWidth="1.5"/>
@@ -66,6 +68,6 @@ export default function SipGlass({ recipe, stage = 5, pouring = '' }: { recipe:S
       {pouring&&<g key={pouring} className="sip-pour-stream"><path d={`M130 0V${y+25}`} stroke={sipIngredient(pouring).color} strokeWidth="9" strokeLinecap="round"/><circle cx="130" cy={y+30} r="7" fill={sipIngredient(pouring).color}/></g>}
       <path d="M45 73L48 82L57 85L48 88L45 97L42 88L33 85L42 82ZM252 235L254 241L260 243L254 245L252 251L250 245L244 243L250 241Z" fill="#c6bc96" opacity=".7"/>
     </svg>
-    <figcaption>{stage===0?'挑一只喜欢的杯子':stage===1?'小料，先铺进杯底':stage===2?'把喜欢的风味，慢慢倒进来':stage===3?'加一点冰，留一点甜':stage===4?'在杯口，放一点漂亮心情':recipe.finish==='stirred'?'轻轻搅匀，风味相拥':'保留分层，慢慢品尝'}</figcaption>
+    <figcaption>{stage===0?'挑一只喜欢的杯子':stage===1?'小料，先铺进杯底':stage===2?'把喜欢的风味，慢慢倒进来':stage===3?recipe.temperature==='hot'?'不加冰，让香气暖暖地散开':'加一点冰，留一点甜':stage===4?'在杯口，放一点漂亮心情':recipe.temperature==='hot'?'热气里，果香与香料慢慢相拥':recipe.finish==='stirred'?'轻轻搅匀，风味相拥':'保留分层，慢慢品尝'}</figcaption>
   </figure>;
 }

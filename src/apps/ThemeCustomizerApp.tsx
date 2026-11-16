@@ -17,6 +17,8 @@ import { GlobalFontSettings } from '../components/GlobalFontSettings';
 import { SpecialOpeningSettings } from '../components/SpecialOpeningSettings';
 import { HalloweenThemePreview } from '../components/HalloweenHomeArt';
 import { HALLOWEEN_CHANGE, readHalloweenReward } from '../utils/halloween';
+import { CHRISTMAS_CHANGE, canChooseChristmasTheme } from '../utils/christmas';
+import { CHRISTMAS_ACCESS_CHANGE } from '../utils/christmasAccess';
 import type { FontSettings } from '../utils/fontSettings';
 import { useErrorDialog } from '../components/ErrorDialog';
 import { ALL_APPS, THEMES, WALLPAPERS } from '../data/mockData';
@@ -57,7 +59,7 @@ const isBeautySettings = (value: unknown): value is BeautySettings => {
   return (
     (settings.desktopAppearance === undefined || isDesktopAppearance(settings.desktopAppearance)) &&
     typeof settings.themeId === 'string' &&
-    (settings.homeStyle === undefined || settings.homeStyle === 'classic' || settings.homeStyle === 'minimal' || settings.homeStyle === 'moonlit' || settings.homeStyle === 'halloween' || settings.homeStyle === 'free') &&
+    (settings.homeStyle === undefined || settings.homeStyle === 'classic' || settings.homeStyle === 'minimal' || settings.homeStyle === 'moonlit' || settings.homeStyle === 'halloween' || settings.homeStyle === 'christmas' || settings.homeStyle === 'free') &&
     (settings.freeDesktop === undefined || isFreeDesktopLayout(settings.freeDesktop)) &&
     THEMES.some((theme) => theme.id === settings.themeId) &&
     typeof settings.wallpaperId === 'string' &&
@@ -107,6 +109,8 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
 }) => {
   const [wallpaperDraft, setWallpaperDraft] = useState(customWallpapers);
   const [halloweenUnlocked, setHalloweenUnlocked] = useState(() => readHalloweenReward().unlocked);
+  const [christmasUnlocked, setChristmasUnlocked] = useState(canChooseChristmasTheme);
+  useEffect(() => { const refresh = () => setChristmasUnlocked(canChooseChristmasTheme()); window.addEventListener(CHRISTMAS_CHANGE, refresh); window.addEventListener(CHRISTMAS_ACCESS_CHANGE, refresh); return () => { window.removeEventListener(CHRISTMAS_CHANGE, refresh); window.removeEventListener(CHRISTMAS_ACCESS_CHANGE, refresh); }; }, []);
   useEffect(() => {
     const refresh = () => setHalloweenUnlocked(readHalloweenReward().unlocked);
     window.addEventListener(HALLOWEEN_CHANGE, refresh);
@@ -374,7 +378,7 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
             <strong className="flex flex-wrap items-center gap-2 text-xs text-slate-600">自由 · 随心布置</strong>
             <span className="mt-1 block text-[10px] text-slate-400">可进入试用</span>
           </button>
-          <div className="mt-3 grid grid-cols-2 gap-2">{([{ id: 'classic', name: '清新 · 轻透', colors: ['#dcecf8', '#f3dce7'], description: '渐变毛玻璃 · 组件桌面' }, { id: 'minimal', name: '素简 · 纸白', colors: ['#f4f2ee', '#55544f'], description: '暖白与石墨 · 简约布局' }, { id: 'moonlit', name: '月光 · 花笺', colors: ['#ede9f4', '#b7a5d0'], description: '月白雾紫 · 花枝信笺' }, ...(halloweenUnlocked ? [{ id: 'halloween' as const, name: '万圣 · 南瓜夜宴', colors: ['#2b263e', '#dfb996'], description: '夜间糖果铺 · 橱窗货架' }] : [])] as const).map(style => <button type="button" key={style.id} aria-pressed={(currentSettings.homeStyle ?? 'classic') === style.id} onClick={() => { if (onApplyPreset({ ...currentSettings, homeStyle: style.id })) { setStatus(`已应用主页面风格「${style.name}」。`); setError(''); } else setError('主页面风格保存失败。'); }} className={`rounded-xl border p-3 text-left ${(currentSettings.homeStyle ?? 'classic') === style.id ? 'border-slate-400 ring-1 ring-slate-300' : 'border-white bg-white/50'}`}>{style.id === 'halloween' ? <HalloweenThemePreview/> : <div className="mb-3 flex h-16 items-center justify-center gap-1 rounded-lg" style={{ background: style.colors[0] }}>{[0, 1, 2, 3].map(i => <span key={i} className="h-5 w-5 rounded-md border border-white/80" style={{ background: style.colors[1], opacity: .4 + i * .15 }} />)}</div>}<strong className="block text-[11px] font-semibold text-slate-600">{style.name}</strong><span className="mt-1 block text-[9px] text-slate-400">{style.description}</span></button>)}</div>
+          <div className="mt-3 grid grid-cols-2 gap-2">{([{ id: 'classic', name: '清新 · 轻透', colors: ['#dcecf8', '#f3dce7'], description: '渐变毛玻璃 · 组件桌面' }, { id: 'minimal', name: '素简 · 纸白', colors: ['#f4f2ee', '#55544f'], description: '暖白与石墨 · 简约布局' }, { id: 'moonlit', name: '月光 · 花笺', colors: ['#ede9f4', '#b7a5d0'], description: '月白雾紫 · 花枝信笺' }, ...(christmasUnlocked ? [{ id: 'christmas' as const, name: '圣诞 · 雪夜来信', colors: ['#edf2f4', '#b6c6ba'], description: '雪夜小屋 · 冬日信笺' }] : []), ...(halloweenUnlocked ? [{ id: 'halloween' as const, name: '万圣 · 南瓜夜宴', colors: ['#2b263e', '#dfb996'], description: '夜间糖果铺 · 橱窗货架' }] : [])] as const).map(style => <button type="button" key={style.id} aria-pressed={(currentSettings.homeStyle ?? 'classic') === style.id} onClick={() => { if (onApplyPreset({ ...currentSettings, homeStyle: style.id })) { setStatus(`已应用主页面风格「${style.name}」。`); setError(''); } else setError('主页面风格保存失败。'); }} className={`rounded-xl border p-3 text-left ${(currentSettings.homeStyle ?? 'classic') === style.id ? 'border-slate-400 ring-1 ring-slate-300' : 'border-white bg-white/50'}`}>{style.id === 'halloween' ? <HalloweenThemePreview/> : <div className="mb-3 flex h-16 items-center justify-center gap-1 rounded-lg" style={{ background: style.colors[0] }}>{[0, 1, 2, 3].map(i => <span key={i} className="h-5 w-5 rounded-md border border-white/80" style={{ background: style.colors[1], opacity: .4 + i * .15 }} />)}</div>}<strong className="block text-[11px] font-semibold text-slate-600">{style.name}</strong><span className="mt-1 block text-[9px] text-slate-400">{style.description}</span></button>)}</div>
           <h3 className="mt-4 px-0.5 text-[11px] font-semibold text-[#2C4A5C]">系统主题配色</h3>
           <div className="mt-3 grid grid-cols-3 gap-2">
             {THEMES.map((theme) => {

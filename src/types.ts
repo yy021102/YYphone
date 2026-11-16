@@ -128,7 +128,7 @@ export interface DesktopAppearance {
 
 export interface BeautySettings {
   desktopAppearance?: DesktopAppearance;
-  homeStyle?: 'classic' | 'minimal' | 'moonlit' | 'halloween' | 'free';
+  homeStyle?: 'classic' | 'minimal' | 'moonlit' | 'halloween' | 'christmas' | 'free';
   freeDesktop?: import('./utils/freeDesktop').FreeDesktopLayout;
   themeId: string;
   wallpaperId: string;

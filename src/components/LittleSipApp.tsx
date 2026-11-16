@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight, BookHeart, Check, Coffee, CupSoda, GlassWater, History, Leaf, Loader2, Martini, Minus, Plus, Send, Sparkles, Trash2, Wine, X } from 'lucide-react';
 import SipGlass from './SipGlass';
-import { SIP_CUPS, SIP_GROUPS, SIP_INGREDIENTS, copySipRecipe, createSipDrink, freshSipRecipe, loadSip, parseSipRecipe,
+import { SIP_CUPS, SIP_GROUPS, SIP_INGREDIENTS, SIP_MULLED_WINE, copySipRecipe, createSipDrink, freshSipRecipe, loadSip, parseSipRecipe,
   patchSipDrink, recoverSip, sipCategory, sipCup, sipIce, sipIngredient, sipPartsAtStage, sipRecipeText, subscribeSip, updateSip, validateSipRecipe,
   type SipDrink, type SipGroup, type SipRecipe, type SipRequest } from '../utils/littleSip';
 import './littleSip.css';
@@ -41,6 +41,7 @@ export default function LittleSipApp({userName,people,onRequest,onRecord,onServe
   useEffect(()=>{if(error||notice)root.current?.querySelector('[role="alert"],[role="status"]')?.scrollIntoView({block:'center'});},[error,notice]);
   useEffect(()=>{if(!pouring)return;const timer=window.setTimeout(()=>setPouring(''),900);return()=>window.clearTimeout(timer);},[pouring]);
   const disabled=working||busy;
+  const classicRecipes = <details className="sip-paper sip-classic-recipes"><summary>经典饮品<span>＋</span></summary><div className="sip-classic-list"><section className="sip-winter-recipe"><h3>圣诞热红酒</h3><p>红酒、鲜橙、苹果与莓果，裹着肉桂和丁香的香气。</p><details><summary>查看完整配方</summary><pre className="sip-formula">{sipRecipeText(SIP_MULLED_WINE)}</pre></details><button type="button" className="sip-secondary" disabled={disabled} onClick={() => start({...copySipRecipe(SIP_MULLED_WINE), id:`recipe-${crypto.randomUUID()}`, maker:{...SIP_MULLED_WINE.maker,name:userName}})}>载入热红酒配方</button></section></div></details>;
   const go=(next:typeof view)=>{cancel();setError('');setNotice('');setDeleting(null);setConsent(false);setSyncCreation(false);setSyncTaste(false);setView(next);};
   const run=async(action:()=>Promise<void>)=>{
     if(operation.current)return;operation.current=true;setWorking(true);setError('');setNotice('');
@@ -107,8 +108,9 @@ export default function LittleSipApp({userName,people,onRequest,onRecord,onServe
       {error&&<p className="sip-alert" role="alert">{error}</p>}{notice&&<p className="sip-notice" role="status">{notice}</p>}
       {view==='make'&&<>
         {step===0&&<header className="sip-heading"><span className="sip-kicker">A LITTLE CUP OF HAPPINESS</span><h2>把喜欢的，<em>都装进这一杯。</em></h2><p>今天你是调饮师。也可以把吧台交给 TA。</p></header>}
+        {step===0&&classicRecipes}
         <ol className="sip-steps" aria-label="调饮步骤">{steps.map((s,i)=><li key={s} aria-current={i===step?'step':undefined}><span>{i<step?<Check size={11}/>:i+1}</span><small>{s}</small></li>)}</ol>
-        <div className="sip-preview"><SipGlass recipe={draft} stage={step} pouring={pouring}/><div className="sip-volume"><span>{previewVolume} / {sipCup(draft.cupId).capacity} <small>ml 估量</small></span><i><b style={{width:`${previewVolume/sipCup(draft.cupId).capacity*100}%`}}/></i></div></div>
+        <div className="sip-preview"><SipGlass recipe={draft} stage={step} pouring={pouring}/><div className="sip-volume"><span>{previewVolume} / {sipCup(draft.cupId).capacity} <small>ml</small></span><i><b style={{width:`${previewVolume/sipCup(draft.cupId).capacity*100}%`}}/></i></div></div>
         <section className="sip-paper sip-workbench"><span className="sip-kicker">STEP {String(step+1).padStart(2,'0')}</span><h3>{['先挑一只喜欢的杯子','铺一点小惊喜在杯底','喜欢的风味，慢慢倒入','一点清凉，一点甜','在杯口，放一点漂亮心情','最后，给它一个名字'][step]}</h3>
           {step===0&&<div className="sip-cup-options">{SIP_CUPS.map(c=><button type="button" key={c.id} disabled={disabled} aria-pressed={draft.cupId===c.id} onClick={()=>change({...draft,cupId:c.id})}>{c.id==='martini'?<Martini size={26} strokeWidth={1.2}/>:c.id==='goblet'?<Wine size={26} strokeWidth={1.2}/>:c.id==='coffee'?<Coffee size={26} strokeWidth={1.2}/>:<GlassWater size={26} strokeWidth={1.2}/>}<strong>{c.name}</strong><small>{c.capacity}ml</small></button>)}</div>}
           {(step===1||step===2||step===4)&&<>
@@ -119,9 +121,9 @@ export default function LittleSipApp({userName,people,onRequest,onRecord,onServe
                 <span style={{background:item.color}}><Icon size={20} strokeWidth={1.3}/></span><strong>{item.name}</strong><small>{included?'已在杯中':item.group==='garnish'?'装饰在杯口':item.unit==='g'?'放一点小料':'倒入 30ml'}</small><Plus size={13}/></button>;
             })}</div>
             <div className="sip-parts">{selectedParts.map(p=>{const item=sipIngredient(p.id);return <div className="sip-part" key={p.id}><div><strong>{item.name}</strong><span>{p.amount}{item.unit}</span><button type="button" aria-label={`移除${item.name}`} disabled={disabled} onClick={()=>change({...draft,parts:draft.parts.filter(q=>q.id!==p.id)})}><X size={14}/></button></div><div className="sip-amount"><button type="button" aria-label={`${item.name}减少5${item.unit}`} disabled={disabled||p.amount<=5} onClick={()=>change({...draft,parts:draft.parts.map(q=>q.id===p.id?{...q,amount:q.amount-5}:q)})}><Minus size={13}/></button><input type="range" min="5" max={item.max} step="5" aria-label={`${item.name}用量`} value={p.amount} disabled={disabled} onChange={e=>change({...draft,parts:draft.parts.map(q=>q.id===p.id?{...q,amount:Number(e.target.value)}:q)},item.unit==='ml'?item.id:'')}/><button type="button" aria-label={`${item.name}增加5${item.unit}`} disabled={disabled||p.amount>=item.max} onClick={()=>change({...draft,parts:draft.parts.map(q=>q.id===p.id?{...q,amount:q.amount+5}:q)},item.unit==='ml'?item.id:'')}><Plus size={13}/></button></div></div>;})}</div>
-            {(step===4||!selectedParts.length)&&<p className="sip-help">{step===1?'小料可以跳过，也可以放上珍珠、椰果或鲜果。':step===4?'这一步可以跳过。装饰会留在杯口，搅拌也不会沉底；杯内柠檬片和杯口柠檬片可以分别添加。为统一估量，装饰同样按 1g 约占 1ml 计入杯容量。':'至少加入 40ml 饮料；用量可以自由调整，但别让杯子满出来。'}</p>}
+            {(step===4||!selectedParts.length)&&<p className="sip-help">{step===1?'小料可以跳过，也可以放上珍珠、椰果或鲜果。':step===4?'这一步可以跳过。装饰会留在杯口，搅拌也不会沉底；杯内柠檬片和杯口柠檬片可以分别添加。':'至少加入 40ml 饮料；用量可以自由调整，但别让杯子满出来。'}</p>}
           </>}
-          {step===3&&<><span className="sip-field-title">想要几分甜？</span><div className="sip-choice-row">{[0,25,50,75,100].map(n=><button type="button" key={n} disabled={disabled} aria-pressed={draft.sweetness===n} onClick={()=>change({...draft,sweetness:n})}>{n===0?'不额外加糖':`${n}%`}</button>)}</div><span className="sip-field-title">清凉的程度</span><div className="sip-choice-row">{(['none','light','regular'] as const).map((ice,i)=><button type="button" key={ice} disabled={disabled} aria-pressed={draft.ice===ice} onClick={()=>change({...draft,ice})}>{['不加冰','少冰','正常冰'][i]}</button>)}</div><p className="sip-help">糖度是偏好标签，不代表实际含糖量；果汁、糖浆和小料本身也可能含糖。冰块也占杯容量，装不下时会提醒你。</p></>}
+          {step===3&&<><span className="sip-field-title">想要几分甜？</span><div className="sip-choice-row">{[0,25,50,75,100].map(n=><button type="button" key={n} disabled={disabled} aria-pressed={draft.sweetness===n} onClick={()=>change({...draft,sweetness:n})}>{n===0?'不额外加糖':`${n}%`}</button>)}</div><span className="sip-field-title">{draft.temperature==='hot'?'这杯暖暖地喝':'清凉的程度'}</span><div className="sip-choice-row">{(['none','light','regular'] as const).map((ice,i)=><button type="button" key={ice} disabled={disabled || draft.temperature==='hot' && ice!=='none'} aria-pressed={draft.ice===ice} onClick={()=>change({...draft,ice})}>{['不加冰','少冰','正常冰'][i]}</button>)}</div><p className="sip-help">糖度是偏好标签，不代表实际含糖量；果汁、糖浆和小料本身也可能含糖。冰块也占杯容量，装不下时会提醒你。</p></>}
           {step===5&&<><div className="sip-choice-row">{(['layered','stirred'] as const).map((finish,i)=><button type="button" key={finish} disabled={disabled} aria-pressed={draft.finish===finish} onClick={()=>change({...draft,finish})}>{['保留漂亮分层','轻轻搅拌均匀'][i]}</button>)}</div><label>给这杯取个名字<input maxLength={40} value={draft.name} disabled={disabled} onChange={e=>change({...draft,name:e.target.value})} placeholder="例如：晚风里的一颗桃"/></label><p className="sip-help">{sipCategory(draft)} · {draft.maker.actorId?`${draft.maker.name}的配方${draft.adapted?'，经你调整':''}`:`${draft.maker.name}亲手调配`}</p></>}
           {step===5&&draftScope&&<label className="sip-checkbox"><input type="checkbox" checked={syncCreation} disabled={disabled} onChange={e=>setSyncCreation(e.target.checked)}/><span>完成后，将调整后的制作记录和配方同步到{draft.maker.name}当前存档的私聊（不写长期记忆）</span></label>}
           <div className="sip-actions">{step>0&&<button type="button" className="sip-secondary" disabled={disabled} onClick={()=>{setStep(step-1);setGroup(stepGroup(step-1));setError('');}}><ArrowLeft size={14}/>上一步</button>}<button type="button" className="sip-primary" disabled={disabled} onClick={step===5?complete:next}>{working?<Loader2 size={15} className="sip-spin"/>:step===5?<Check size={15}/>:<ArrowRight size={15}/>} {step===5?'做好这一杯':'下一步'}</button></div>
@@ -153,6 +155,7 @@ export default function LittleSipApp({userName,people,onRequest,onRecord,onServe
         <header className="sip-heading"><span className="sip-kicker">{view==='menu'?'YOUR LITTLE DRINK BOOK':'SMALL MOMENTS, KEPT'}</span><h2>{view==='menu'?'把喜欢，收进饮品单。':'每一杯，都有小故事。'}</h2><p>{view==='menu'?'配方单独收存。修改后另存，不覆盖旧配方或旧饮品。':'做好的每一杯与试饮反馈都在这里；不必先收进饮品单。'}</p></header>
         {view==='menu'&&<div className="sip-tabs">{['全部','奶饮','果茶 / 果饮','清茶 / 清饮','咖啡','酒饮'].map(f=><button type="button" key={f} aria-pressed={filter===f} onClick={()=>setFilter(f)}>{f}</button>)}</div>}
         {view==='menu'?<>
+          {classicRecipes}
           {!store.recipes.filter(r=>filter==='全部'||sipCategory(r)===filter).length&&<p className="sip-empty">这一页还空着，调好一杯后，把配方收进来吧。</p>}
           {store.recipes.filter(r=>filter==='全部'||sipCategory(r)===filter).map(r=><article className="sip-paper sip-menu-card" key={r.id}><div className="sip-card-heading"><CupSoda size={22}/><span><strong>{r.name}</strong><small>{sipCategory(r)} · {r.maker.name}{r.adapted?' · 经你调整':''}</small></span><button type="button" disabled={disabled} aria-label={`删除配方 ${r.name}`} onClick={()=>setDeleting({kind:'recipe',id:r.id})}><Trash2 size={15}/></button></div><details><summary>查看完整配方</summary><pre>{sipRecipeText(r)}</pre></details><div className="sip-actions"><button type="button" className="sip-primary" disabled={disabled} onClick={()=>start(r)}>照方调一杯</button><button type="button" className="sip-secondary" disabled={disabled} onClick={()=>start(r,true)}>修改后另存</button></div></article>)}
         </>:<>
@@ -163,7 +166,6 @@ export default function LittleSipApp({userName,people,onRequest,onRecord,onServe
         <button type="button" className="sip-secondary" disabled={disabled} onClick={()=>start()}><Plus size={15}/>新调一杯</button>
       </>}
       {busy&&<button type="button" className="sip-cancel" onClick={cancel}><Loader2 size={14} className="sip-spin"/>正在等 TA 回应 · 点击取消</button>}
-      <footer className="sip-footer">原创虚拟调饮 · 不售卖真实饮品<br/>体积、颜色与动效为游戏估量，不是物理或食品安全模拟。含酒配方明确归入酒饮，不提供营养、过敏或现实饮用安全保证。</footer>
     </main>
   </div>;
 }

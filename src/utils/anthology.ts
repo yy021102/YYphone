@@ -1,4 +1,6 @@
 import { readStorageString, readStoredValue, writeStoredValue } from './localStorage';
+import { setStorageItemsAtomically } from './dbStorage';
+import { readAnthologyUser } from './anthologyUser';
 
 export const ANTHOLOGY_KEY = 'yyphone:anthology';
 export const ANTHOLOGY_DRAFT_KEY = 'yyphone:anthology-draft';
@@ -24,6 +26,7 @@ export const ANTHOLOGY_STYLES = [
 export interface AnthologyDraft {
   authorId: string; genre: string; style: string; customStyle: string; direction: string; material: string;
   length: 'short' | 'medium' | 'long'; attachChats: boolean; chatCount: number; attachMemories: boolean;
+  manuscriptId?: string;
 }
 export const defaultAnthologyDraft = (): AnthologyDraft => ({ authorId: '', genre: 'narrative', style: 'plain', customStyle: '',
   direction: '', material: '', length: 'medium', attachChats: false, chatCount: 100, attachMemories: false });
@@ -31,17 +34,22 @@ export interface AnthologyAuthor { id: string; name: string; persona: string; av
 export interface AnthologyArticle {
   id: string; authorId: string; authorName: string; authorAvatar: string; title: string; body: string;
   genre: string; style: string; favorite: boolean; createdAt: string; updatedAt: string; draft: AnthologyDraft;
+  authorKind?: 'character' | 'user';
+  sourceManuscript?: { id: string; title: string; authorName: string };
 }
 const record = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 export function isAnthologyDraft(v: unknown): v is AnthologyDraft {
   return record(v) && ['authorId', 'genre', 'style', 'customStyle', 'direction', 'material'].every(k => typeof v[k] === 'string') &&
     ANTHOLOGY_GENRES.some(g => g.id === v.genre) && ANTHOLOGY_STYLES.some(s => s.id === v.style) &&
     ['short', 'medium', 'long'].includes(String(v.length)) && typeof v.attachChats === 'boolean' && typeof v.attachMemories === 'boolean' &&
-    Number.isInteger(v.chatCount) && Number(v.chatCount) >= 1 && Number(v.chatCount) <= 300;
+    Number.isInteger(v.chatCount) && Number(v.chatCount) >= 1 && Number(v.chatCount) <= 300 &&
+    (v.manuscriptId === undefined || typeof v.manuscriptId === 'string');
 }
 export function isAnthologyArticle(v: unknown): v is AnthologyArticle {
   return record(v) && ['id', 'authorId', 'authorName', 'authorAvatar', 'title', 'body', 'genre', 'style', 'createdAt', 'updatedAt'].every(k => typeof v[k] === 'string') &&
-    !!v.id && !!v.title && !!v.body && typeof v.favorite === 'boolean' && isAnthologyDraft(v.draft);
+    !!v.id && !!v.title && !!v.body && typeof v.favorite === 'boolean' && isAnthologyDraft(v.draft) &&
+    (v.authorKind === undefined || v.authorKind === 'character' || v.authorKind === 'user') &&
+    (v.sourceManuscript === undefined || record(v.sourceManuscript) && ['id', 'title', 'authorName'].every(k => typeof (v.sourceManuscript as Record<string, unknown>)[k] === 'string'));
 }
 export function readAnthologyArticles(): AnthologyArticle[] {
   const raw = readStorageString(ANTHOLOGY_KEY);
@@ -57,14 +65,30 @@ export function readAnthologyAuthors(): AnthologyAuthor[] {
     record(v) && typeof v.id === 'string' && typeof v.name === 'string'
       ? [{ id: v.id, name: v.name, persona: typeof v.persona === 'string' ? v.persona : '', avatarUrl: typeof v.avatarUrl === 'string' ? v.avatarUrl : '' }] : []);
 }
-export function saveAnthologyArticle(article: AnthologyArticle, original?: AnthologyArticle) {
+function prepareArticleSave(article: AnthologyArticle, original?: AnthologyArticle) {
   if (!isAnthologyArticle(article)) throw new Error('文章内容不完整，未保存。');
   const current = readAnthologyArticles(), existing = current.find(a => a.id === article.id);
   if (original && (!existing || existing.body !== original.body || existing.title !== original.title)) throw new Error('原稿已修改或删除，本次内容未覆盖原稿。');
   if (!original && existing) throw new Error('文章编号重复，原稿已保留。');
   const saved = { ...article, favorite: existing?.favorite ?? article.favorite };
-  writeStoredValue(ANTHOLOGY_KEY, existing ? current.map(a => a.id === article.id ? saved : a) : [saved, ...current]);
+  return { saved, articles: existing ? current.map(a => a.id === article.id ? saved : a) : [saved, ...current] };
+}
+export function saveAnthologyArticle(article: AnthologyArticle, original?: AnthologyArticle) {
+  const { saved, articles } = prepareArticleSave(article, original);
+  writeStoredValue(ANTHOLOGY_KEY, articles);
   return saved;
+}
+export async function saveGeneratedAnthologyArticle(article: AnthologyArticle, original?: AnthologyArticle) {
+  const { saved, articles } = prepareArticleSave(article, original);
+  await setStorageItemsAtomically({ [ANTHOLOGY_KEY]: articles, [ANTHOLOGY_DRAFT_KEY]: defaultAnthologyDraft() });
+  return saved;
+}
+export const isUserManuscript = (article: AnthologyArticle) => article.authorKind === 'user';
+export function createAnthologyManuscript(): AnthologyArticle {
+  const user = readAnthologyUser(), now = new Date().toISOString();
+  return { id: crypto.randomUUID(), authorId: 'anthology:user', authorKind: 'user', authorName: user.name, authorAvatar: user.avatarUrl,
+    title: '', body: '', genre: 'narrative', style: 'custom', favorite: false, createdAt: now, updatedAt: now,
+    draft: { ...defaultAnthologyDraft(), style: 'custom' } };
 }
 export function favoriteAnthologyArticle(id: string) {
   const current = readAnthologyArticles();

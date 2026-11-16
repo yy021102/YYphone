@@ -1,5 +1,6 @@
 import { useRef, useState, type PointerEvent } from 'react';
 import { readStoredValue, writeStoredValue } from '../utils/localStorage';
+import { LittlePSnowman } from './ChristmasSnowArt';
 
 export const LITTLE_P_POSITION_KEY = 'yyphone:little-p-position';
 interface Position { x: number; y: number }
@@ -23,7 +24,7 @@ function LittlePGhost() {
   </svg>;
 }
 
-export function LittlePLauncher({ ghost = false, imageUrl, onOpen }: { ghost?: boolean; imageUrl?: string; onOpen: () => void }) {
+export function LittlePLauncher({ ghost = false, snowman = false, imageUrl, onOpen }: { ghost?: boolean; snowman?: boolean; imageUrl?: string; onOpen: () => void }) {
   const [position, setPosition] = useState(readPosition), [dragging, setDragging] = useState(false);
   const zone = useRef<HTMLDivElement>(null);
   const gesture = useRef<{ id: number; startX: number; startY: number; x: number; y: number; moved: boolean; previous: Position | null } | null>(null);
@@ -59,12 +60,12 @@ export function LittlePLauncher({ ghost = false, imageUrl, onOpen }: { ghost?: b
     if (current.moved && latest.current) writeStoredValue(LITTLE_P_POSITION_KEY, latest.current);
   };
   return <div className="little-p-launcher-zone" ref={zone}>
-    <button type="button" aria-label="打开小P" title="点击打开小P，拖动调整位置" className={`little-p-launcher${ghost ? ' is-ghost' : imageUrl ? ' has-custom-image' : ''}${dragging ? ' is-dragging' : ''}`}
+    <button type="button" aria-label="打开小P" title="点击打开小P，拖动调整位置" className={`little-p-launcher${snowman ? ' is-snowman' : ghost ? ' is-ghost' : imageUrl ? ' has-custom-image' : ''}${dragging ? ' is-dragging' : ''}`}
       style={position ? { left: `${position.x * 100}%`, top: `${position.y * 100}%`, right: 'auto', bottom: 'auto', transform: `translate(${-position.x * 100}%, ${-position.y * 100}%)` } : undefined}
       onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={cancel} onLostPointerCapture={cancel}
       onClick={event => { if (suppressClick.current && event.detail !== 0) { suppressClick.current = false; event.preventDefault(); return; } suppressClick.current = false; onOpen(); }}
       onDragStart={event => event.preventDefault()} onContextMenu={event => event.preventDefault()}>
-      {ghost ? <LittlePGhost/> : imageUrl ? <img src={imageUrl} alt="" draggable={false}/> : <><span aria-hidden="true">✦</span><span>小P</span></>}
+      {snowman ? <LittlePSnowman/> : ghost ? <LittlePGhost/> : imageUrl ? <img src={imageUrl} alt="" draggable={false}/> : <><span aria-hidden="true">✦</span><span>小P</span></>}
     </button>
   </div>;
 }

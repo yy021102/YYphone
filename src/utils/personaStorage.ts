@@ -16,6 +16,7 @@ const SHARED = new Set([
   'yyphone:calendar-appearance', 'yyphone:music-appearance', 'yyphone:music-player-appearance', 'yyphone:birthday-settings',
   'yyphone:little-p-visible', 'yyphone:little-p-position',
   'yyphone:backup-date-naming', 'yyphone:netease-music', 'yyphone:launcher-icon',
+  'yyphone:christmas-settings', 'yyphone:christmas-reward',
 ]);
 export function isPersonaRecordKey(key: string): boolean {
   if (key.startsWith(PREFIX) || SHARED.has(key)) return false;

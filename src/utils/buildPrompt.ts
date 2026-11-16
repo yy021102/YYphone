@@ -11,6 +11,7 @@ import { CharacterNpc, getNpcByParticipantId, readCharacterNpcs, userNpcContext 
 import { readStorageString } from './localStorage';
 import { buildListenTogetherContext } from './musicPlayback';
 import { buildCalendarContext } from './calendarData';
+import { proactiveChatInstructions } from './proactiveChat';
 import { buildWeatherContext } from './weatherData';
 import { buildMomentsInjection, MomentsInjection } from './momentsData';
 import { buildCoupleSpaceInjection, CoupleInjection } from './coupleSpaceData';
@@ -29,6 +30,7 @@ import { recallContext, type ChatRecall } from './chatRecall';
 import { imageDescriptionText, photoPromptFields, type ChatImageDescription, type ImageDescriptionTarget } from './imageDescriptions';
 
 export interface PromptChatMessage {
+  hidden?: boolean;
   recall?: ChatRecall;
   chatTranslation?: ChatTranslation;
   externalUrl?: string;
@@ -122,6 +124,8 @@ export interface BuildPromptOptions {
   /** Background tasks can use character/world/player settings before a first chat exists. */
   backgroundCharacterId?: string;
   currentInput?: string;
+  /** No new user utterance exists on a scheduled proactive turn. */
+  proactive?: boolean;
   historyLimit?: number;
   /** Caller-specific cap across current and mounted chats; does not change saved chat settings. */
   historyWindowOverride?: number;
@@ -880,8 +884,8 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
   const continueGroup = chat.type !== 'direct' &&
     (!latestGroupTurn || latestGroupTurn.senderId !== 'user' && latestGroupTurn.source !== 'user-narration') &&
     (currentInput === undefined || !currentInput.trim() || currentInput === previousUserInput);
-  const requestedInput = continueGroup ? '' : currentInput ?? previousUserInput;
-  const latestUserMessage = continueGroup ? undefined : [...chat.messages].reverse().find(
+  const requestedInput = options.proactive || continueGroup ? '' : currentInput ?? previousUserInput;
+  const latestUserMessage = options.proactive || continueGroup ? undefined : [...chat.messages].reverse().find(
     (message) => (message.senderId === 'user' || message.source === 'user-narration') && message.text === requestedInput
   );
   const input = latestUserMessage?.kind === 'recalled' ? recallContext(latestUserMessage, chat.participantIds) : latestUserMessage?.source === 'user-narration' ? toMessageContent(latestUserMessage) : latestUserMessage?.kind === 'forum-forward' &&
@@ -994,7 +998,10 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
       ? `【挂载${source.label}·记录${attachedIds.indexOf(item.conversation.id) + 1}】`
       : chat.type !== 'direct' ? `【当前${source.label}】` : '';
     const isContextNote = item.message.kind === 'context-note' || item.message.kind === 'recalled';
-    const messageContent = item.message.kind === 'recalled' ? recallContext(item.message, chat.participantIds) : toMessageContent(item.message);
+    const recalledAt = item.message.kind === 'recalled' && item.message.recall ? Date.parse(item.message.recall.at) : NaN;
+    const messageContent = item.message.kind === 'recalled' ? [recallContext(item.message, chat.participantIds),
+      options.timeAwarenessEnabled !== false && Number.isFinite(recalledAt) ? `【撤回发生时间】${formatClock(new Date(recalledAt), options.timeZone)}。这是历史中的撤回，不是本轮新发生的动作。` : '',
+    ].filter(Boolean).join('\n') : toMessageContent(item.message);
     const speakerLabel = item.conversation.type !== 'direct' && item.message.senderId !== 'narrator'
       ? `${speaker}（ID：${item.message.senderId}）`
       : speaker;
@@ -1037,13 +1044,16 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
   if (options.timeAwarenessEnabled !== false) {
     const nowDate = new Date();
     const inputDate = latestUserMessage ? Date.parse(latestUserMessage.createdAt) : NaN;
-    const lastMessageDate = Math.max(lastLocalHistoryDate, Number.isFinite(inputDate) ? inputDate : 0);
+    const lastMessageDate = options.proactive
+      ? chat.messages.filter(m => !m.hidden && m.senderId !== 'narrator' && !['thought', 'thinking', 'context-note', 'recalled'].includes(m.kind ?? '')).reduce((latest, m) => Math.max(latest, Date.parse(m.createdAt) || 0), 0)
+      : Math.max(lastLocalHistoryDate, Number.isFinite(inputDate) ? inputDate : 0);
     const gapMs = lastMessageDate > 0 ? nowDate.getTime() - lastMessageDate : 0;
     const hour = getClockHour(nowDate, options.timeZone);
     messages.push({
       role: 'system',
       content: [
         `【当前时间】现在是${formatClock(nowDate, options.timeZone)}，${timeOfDayLabel(hour)}。`,
+        options.proactive && lastMessageDate > 0 ? `【上次聊天间隔】上一次实际发言在${formatClock(new Date(lastMessageDate), options.timeZone)}，距现在${formatDuration(Math.max(0, gapMs))}。这次主动联系不代表旧消息刚刚再次发来。` : '',
         Number.isFinite(inputDate)
           ? `【末尾玩家消息的原始发送时间】${formatClock(new Date(inputDate), options.timeZone)}${nowDate.getTime() - inputDate >= 60000 ? `，距现在${formatDuration(nowDate.getTime() - inputDate)}` : ''}。提示词末尾单独列出的玩家消息仍是这条原消息，不是在点击生成回复时重新发送。`
           : '',
@@ -1061,7 +1071,7 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
     tokenCategory: 'currentInput',
     content: [
       ...(chat.type !== 'direct' ? [`【当前${currentSource.label}】`] : []),
-      continueGroup
+      options.proactive ? proactiveChatInstructions(options.timeAwarenessEnabled !== false) : continueGroup
         ? '【群聊自然续聊指令，不是玩家发言】玩家本轮没有发送新消息，只是让群聊继续。请从当前群聊历史末尾接着聊，优先承接最近一位成员的新话、问题、玩笑或尚未展开的话题，让成员彼此回应、追问、分享自己的想法或自然延伸。此前玩家的话已经属于历史，不要再次当作刚收到的新消息逐个回应，也不要重复上一轮的结论、安慰或提问。根据人设、关系和谁确实有话要说来安排发言，不要求所有人轮流表态，不把每句话都转向玩家；话题已经聊完时可自然带出相近的新话题，不突然跳题、不替玩家发言、不编造玩家的新回应。仍严格遵守本轮 JSON、发言者身份、消息条数与心声要求。'
         : latestUserMessage?.kind === 'image' ? toMessageContent(latestUserMessage) : input,
     ].join('\n'),

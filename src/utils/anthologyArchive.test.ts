@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { beforeEach, test } from 'node:test';
 import { clearDbStorage } from './dbStorage';
 import { readStorageString, writeStoredValue } from './localStorage';
-import { ANTHOLOGY_KEY, ANTHOLOGY_DRAFT_KEY, defaultAnthologyDraft, readAnthologyArticles, readAnthologyDraft, saveAnthologyArticle, type AnthologyArticle } from './anthology';
+import { ANTHOLOGY_KEY, ANTHOLOGY_DRAFT_KEY, createAnthologyManuscript, defaultAnthologyDraft, isUserManuscript, readAnthologyArticles, readAnthologyDraft, saveAnthologyArticle, type AnthologyArticle } from './anthology';
 import { clearAnthologyData, createAnthologyArchive, importAnthologyArchive } from './anthologyArchive';
 
 const values = new Map<string, string>();
@@ -40,4 +40,16 @@ test('invalid archives and duplicate IDs fail before changing any data', async (
     await assert.rejects(importAnthologyArchive(bad, 'replace'), /有效的文集备份/);
     assert.equal(readStorageString(ANTHOLOGY_KEY), original); assert.equal(readStorageString(ANTHOLOGY_DRAFT_KEY), draft);
   }
+});
+
+test('archives preserve personal manuscript ownership and response references while accepting legacy character articles', async () => {
+  const own = { ...createAnthologyManuscript(), title: '我的观察', body: '写下一些自己的想法。' };
+  saveAnthologyArticle(own);
+  saveAnthologyArticle({ ...article('response'), sourceManuscript: { id: own.id, title: own.title, authorName: own.authorName }, draft: { ...defaultAnthologyDraft(), manuscriptId: own.id } });
+  const archive = JSON.parse(JSON.stringify(createAnthologyArchive()));
+  await clearAnthologyData(); await importAnthologyArchive(archive, 'replace');
+  assert.equal(readAnthologyArticles().filter(isUserManuscript).length, 1);
+  const response = readAnthologyArticles().find(a => a.id === 'response')!;
+  assert.equal(response.sourceManuscript?.id, own.id); assert.equal(response.draft.manuscriptId, own.id);
+  assert.equal(isUserManuscript(response), false);
 });

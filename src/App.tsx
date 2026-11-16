@@ -25,6 +25,8 @@ import { findCouponUse, type CouponGiftTarget } from './utils/coupleRewards';
 import { LockScreen } from './components/LockScreen';
 import { BirthdayRuntime } from './components/BirthdayRuntime';
 import { HalloweenRuntime } from './components/HalloweenRuntime';
+import { ChristmasRuntime } from './components/ChristmasRuntime';
+import { canChooseChristmasTheme } from './utils/christmas';
 import { birthdayIsDue, readBirthdaySettings, readBirthdaySeen } from './utils/birthday';
 import { HomeScreen } from './components/HomeScreen';
 import { EdgeSwipeBack } from './components/EdgeSwipeBack';
@@ -100,7 +102,7 @@ const isBeautySettings = (value: unknown): value is BeautySettings => {
   return (
     (settings.desktopAppearance === undefined || isDesktopAppearance(settings.desktopAppearance)) &&
     typeof settings.themeId === 'string' &&
-    (settings.homeStyle === undefined || settings.homeStyle === 'classic' || settings.homeStyle === 'minimal' || settings.homeStyle === 'moonlit' || settings.homeStyle === 'halloween' || settings.homeStyle === 'free') &&
+    (settings.homeStyle === undefined || settings.homeStyle === 'classic' || settings.homeStyle === 'minimal' || settings.homeStyle === 'moonlit' || settings.homeStyle === 'halloween' || settings.homeStyle === 'christmas' || settings.homeStyle === 'free') &&
     (settings.freeDesktop === undefined || isFreeDesktopLayout(settings.freeDesktop)) &&
     typeof settings.wallpaperId === 'string' &&
     !!settings.wallpapers &&
@@ -533,6 +535,7 @@ export default function App() {
     return () => clearInterval(timer);
   }, []);
 
+  const activeHomeStyle = beautySettings.homeStyle === 'christmas' && !canChooseChristmasTheme() ? 'classic' : beautySettings.homeStyle;
   const currentTheme = THEMES.find((t) => t.id === beautySettings.themeId) || THEMES[0];
   const currentWallpaper =
     WALLPAPERS.find((w) => w.id === beautySettings.wallpaperId) || WALLPAPERS[0];
@@ -543,10 +546,10 @@ export default function App() {
     const homeImage = beautySettings.wallpapers.homeScreen;
     const background = homeImage
       ? `url("${homeImage}") center / cover no-repeat`
-      : !activeApp && !isLocked && beautySettings.homeStyle === 'halloween' ? '#2b263e' : currentWallpaper.style;
+      : !activeApp && !isLocked && activeHomeStyle === 'halloween' ? '#2b263e' : currentWallpaper.style;
     document.documentElement.style.background = background;
     document.body.style.background = background;
-  }, [beautySettings.wallpapers.homeScreen, beautySettings.homeStyle, activeApp, isLocked, currentWallpaper.style]);
+  }, [beautySettings.wallpapers.homeScreen, activeHomeStyle, activeApp, isLocked, currentWallpaper.style]);
 
   const handleOpenApp = (appId: AppId) => {
     setCouponGift(null);
@@ -670,7 +673,7 @@ export default function App() {
         data-desktop-color={!activeApp && !isLocked && beautySettings.desktopAppearance?.textColor ? '' : undefined}
         data-desktop-panels={!activeApp && !isLocked && beautySettings.desktopAppearance?.panelOpacity !== undefined ? '' : undefined}
         data-desktop-icons={!activeApp && !isLocked && beautySettings.desktopAppearance?.iconOpacity !== undefined ? '' : undefined}
-        data-home-style={!activeApp && !isLocked ? beautySettings.homeStyle : undefined}
+        data-home-style={!activeApp && !isLocked ? activeHomeStyle : undefined}
         data-home-page={!activeApp && !isLocked ? desktopPage : undefined}
         className={`w-full md:w-[min(412px,calc(93vh*9/19.5))] h-full md:h-[min(850px,93vh)] md:rounded-[44px] overflow-hidden relative flex flex-col shadow-[0_25px_80px_rgba(0,0,0,0.7),0_0_0_1px_rgba(255,255,255,0.14)] transition-all ${
           activeApp || isLocked
@@ -684,20 +687,20 @@ export default function App() {
                 backgroundSize: 'cover',
                 backgroundPosition: 'center',
               }
-            : !activeApp && !isLocked && beautySettings.homeStyle === 'halloween' ? { background: '#2b263e' } : !activeApp && !isLocked && beautySettings.homeStyle === 'minimal' ? { background: '#f4f2ee' } : !activeApp && !isLocked && beautySettings.homeStyle === 'moonlit' ? { background: '#ede9f4' } : { background: currentWallpaper.style }
+            : !activeApp && !isLocked && activeHomeStyle === 'halloween' ? { background: '#2b263e' } : !activeApp && !isLocked && activeHomeStyle === 'minimal' ? { background: '#f4f2ee' } : !activeApp && !isLocked && activeHomeStyle === 'moonlit' ? { background: '#ede9f4' } : { background: currentWallpaper.style }
         }
       >
         <EdgeSwipeBack enabled={!isLocked && !openingVisible}/>
         <div className="contents" inert={openingVisible} aria-hidden={openingVisible || undefined}>
         {/* Dynamic theme backdrop wash */}
-        {!beautySettings.wallpapers.homeScreen && (activeApp || isLocked || !['minimal', 'moonlit', 'halloween'].includes(beautySettings.homeStyle ?? 'classic')) && (
+        {!beautySettings.wallpapers.homeScreen && (activeApp || isLocked || !['minimal', 'moonlit', 'halloween', 'christmas'].includes(activeHomeStyle ?? 'classic')) && (
           <div
             className={`absolute inset-0 bg-gradient-to-b ${currentTheme.gradient} opacity-90 pointer-events-none transition-all duration-700`}
           />
         )}
 
         {/* Ambient aesthetic glow patches */}
-        {!beautySettings.wallpapers.homeScreen && (activeApp || isLocked || !['minimal', 'moonlit', 'halloween'].includes(beautySettings.homeStyle ?? 'classic')) && (
+        {!beautySettings.wallpapers.homeScreen && (activeApp || isLocked || !['minimal', 'moonlit', 'halloween', 'christmas'].includes(activeHomeStyle ?? 'classic')) && (
           <>
             <div className="absolute -top-32 -right-32 w-80 h-80 rounded-full bg-[#DFF1FA] blur-3xl pointer-events-none opacity-70" />
             <div className="absolute top-1/2 -left-32 w-80 h-80 rounded-full bg-[#FAD4E0] blur-3xl pointer-events-none opacity-50" />
@@ -805,7 +808,7 @@ export default function App() {
             <HomeScreen
               page={desktopPage}
               onPageChange={setDesktopPage}
-              homeStyle={beautySettings.homeStyle}
+              homeStyle={activeHomeStyle}
               freeDesktop={beautySettings.freeDesktop}
               onSaveFreeDesktop={layout => handleSaveBeautySettings({ ...beautySettings, freeDesktop: layout })}
               wallpaperUrl={beautySettings.wallpapers.homeScreen}
@@ -846,7 +849,7 @@ export default function App() {
           </div>
         </div>
         {!isLocked && !activeApp && littlePVisible && (
-          <LittlePLauncher ghost={beautySettings.homeStyle === 'halloween'} imageUrl={beautySettings.appIcons['little-p']} onOpen={() => setLittlePOpen(true)}/>
+          <LittlePLauncher ghost={activeHomeStyle === 'halloween'} snowman={activeHomeStyle === 'christmas'} imageUrl={beautySettings.appIcons['little-p']} onOpen={() => setLittlePOpen(true)}/>
         )}
         <LittlePPanel open={littlePOpen && littlePVisible && !isLocked && !activeApp}
           onClose={() => setLittlePOpen(false)} onHide={() => handleLittlePVisible(false)} />
@@ -856,6 +859,8 @@ export default function App() {
         <BirthdayRuntime unlocked={!isLocked && !openingVisible} atHome={!isLocked && !activeApp && !openingVisible} onOpenChat={openNotifiedChat} onOpenChange={setBirthdayOpen} />
         <HalloweenRuntime unlocked={!isLocked && !openingVisible} atHome={!isLocked && !activeApp && !openingVisible} onOpenBeauty={() => handleOpenApp('customizer')}
           blocked={birthdayOpen || !activeApp && birthdayIsDue(readBirthdaySettings(), readBirthdaySeen())} />
+        <ChristmasRuntime unlocked={!isLocked && !openingVisible} atHome={!isLocked && !activeApp && !openingVisible}
+          blocked={birthdayOpen || !activeApp && birthdayIsDue(readBirthdaySettings(), readBirthdaySeen())} onOpenBeauty={() => handleOpenApp('customizer')}/>
         {notification && (
           <div className="absolute left-3 right-3 top-[max(env(safe-area-inset-top,0px),12px)] z-[100] flex items-center gap-3 rounded-3xl border border-white bg-white/95 p-3 shadow-xl backdrop-blur-xl" role="status">
             <button type="button" onClick={() => openNotifiedChat(notification.chatId)} className="flex min-w-0 flex-1 items-center gap-3 text-left" aria-label={`查看${notification.name}的新消息`}>
