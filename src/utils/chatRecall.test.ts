@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
-import { beforeEach, test } from 'node:test';
+import { afterEach, beforeEach, mock, test } from 'node:test';
 import { clearDbStorage } from './dbStorage';
 import { writeStoredValue } from './localStorage';
 import { canRecallMessage, recallContext, recallMessage, recallTimeline, parseRecallActions, characterRecallInstructions, validChatRecall, type RecallMessage } from './chatRecall';
 import { buildPrompt } from './buildPrompt';
 import { readDirectMessages } from './journalData';
+import { generatePhoneScope } from './phoneAi';
 
 const values = new Map<string, string>();
 Object.defineProperty(globalThis, 'window', { configurable: true, value: { localStorage: {
@@ -12,6 +13,7 @@ Object.defineProperty(globalThis, 'window', { configurable: true, value: { local
   clear: () => values.clear(), key: (i: number) => [...values.keys()][i] ?? null, get length() { return values.size; },
 } } });
 beforeEach(async () => { values.clear(); await clearDbStorage(); });
+afterEach(() => mock.restoreAll());
 const user: RecallMessage = { id: 'user-message', senderId: 'user', kind: 'text', text: 'WITHDRAWN_PRIVATE_SENTINEL', createdAt: '2026-11-12T12:00:00Z' };
 const char: RecallMessage = { id: 'char-message', senderId: 'a', kind: 'text', text: 'CHAR_PRIVATE_SENTINEL', createdAt: '2026-11-12T12:01:00Z' };
 function seed(messages: RecallMessage[], type = 'direct') {
@@ -79,6 +81,44 @@ test('proactive contact never promotes an empty recalled message to current inpu
   assert.match(JSON.stringify(prompt), /上次聊天间隔/);
   seed([recallMessage(user, ['a'], [], () => .99)]);
   assert.doesNotMatch(JSON.stringify(buildPrompt({ chatId: 'chat', currentInput: '', proactive: true })), /WITHDRAWN_PRIVATE_SENTINEL/);
+});
+
+test('unseen recall is only a notice; seen recall contains the text without instructions to question the user', () => {
+  const unseen = recallMessage(user, ['a'], [], () => .99);
+  assert.equal(recallContext(unseen, ['a']), '[玩家撤回了一条消息]');
+  const seen = recallMessage(user, ['a'], [], () => .1);
+  assert.equal(recallContext(seen, ['a']), '[玩家撤回了一条消息] 你看到了，内容为："WITHDRAWN_PRIVATE_SENTINEL"');
+  assert.doesNotMatch(recallContext(seen, ['a']), /可以自然询问|追问|每轮|不能猜中/);
+});
+
+test('diary history-only context retains recalled messages once in history without replaying a current input', () => {
+  const seen = recallMessage(user, ['a'], [], () => .1);
+  seen.recall!.at = '2026-11-12T12:03:00Z'; seed([seen, char]);
+  const prompt = buildPrompt({chatId:'chat', historyOnly:true});
+  assert.equal(prompt.filter(p=>p.tokenCategory==='currentInput').length,0);
+  const recalls = prompt.filter(p=>p.content.includes('WITHDRAWN_PRIVATE_SENTINEL'));
+  assert.equal(recalls.length,1);assert.equal(recalls[0].tokenCategory,'history');assert.match(recalls[0].content,/撤回发生时间/);
+  seed([recallMessage(user,['a'],[],()=>.99),char]);
+  const hidden = buildPrompt({chatId:'chat', historyOnly:true});assert.doesNotMatch(JSON.stringify(hidden),/WITHDRAWN_PRIVATE_SENTINEL/);
+});
+
+test('actual icity requests keep recalls in dated background, never in the current user task', async () => {
+  writeStoredValue('yyphone:api-presets', [{ id:'test',name:'test',endpoint:'https://test.invalid/v1',apiKey:'test',model:'test' }]);
+  const requests: Array<{messages:Array<{role:string;content:string}>}> = [];
+  mock.method(globalThis,'fetch',async(_url:unknown,init?:RequestInit) => {
+    requests.push(JSON.parse(String(init?.body)));
+    return Response.json({choices:[{message:{content:JSON.stringify({diaries:[{dateStr:'11月17日',timeStr:'19:00',weather:'未记录',mood:'平静',content:'今天把手边的事情做完，才想起昨晚的聊天。'}]})}}]});
+  });
+  for (const seen of [true,false]) {
+    const recalled=recallMessage(user,['a'],[],()=>seen ? .1 : .99);recalled.recall!.at='2026-11-12T12:03:00Z';seed([recalled,char]);
+    await generatePhoneScope('icity',{charId:'a',charName:'甲',userName:'玩家',npcs:[]},{charId:'a',wallpaperUrl:'',userRemark:'',npcThreads:[],photos:[],browserHistory:[],notes:[],icityDiaries:[],agentSession:{doubaoTopic:'',doubaoTurns:[],claudeTopic:'',claudeTurns:[]}});
+    const messages=requests.at(-1)!.messages;
+    assert(messages.every(m=>m.role!=='user'||!m.content.includes('WITHDRAWN_PRIVATE_SENTINEL')));
+    const background=messages.filter(m=>m.role==='system').map(m=>m.content).join('\n');
+    assert.equal(background.split('WITHDRAWN_PRIVATE_SENTINEL').length-1,seen?1:0);
+    assert.match(background,/撤回发生时间/);
+  }
+  assert.equal(requests.length,2);
 });
 
 test('proactive time gap ignores recent system notes; disabling time awareness omits the gap and recall timestamps', () => {

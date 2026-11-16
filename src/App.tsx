@@ -546,6 +546,7 @@ export default function App() {
     const homeImage = beautySettings.wallpapers.homeScreen;
     const background = homeImage
       ? `url("${homeImage}") center / cover no-repeat`
+      : !activeApp && !isLocked && activeHomeStyle === 'christmas' ? 'var(--christmas-desktop-background)'
       : !activeApp && !isLocked && activeHomeStyle === 'halloween' ? '#2b263e' : currentWallpaper.style;
     document.documentElement.style.background = background;
     document.body.style.background = background;
@@ -687,7 +688,7 @@ export default function App() {
                 backgroundSize: 'cover',
                 backgroundPosition: 'center',
               }
-            : !activeApp && !isLocked && activeHomeStyle === 'halloween' ? { background: '#2b263e' } : !activeApp && !isLocked && activeHomeStyle === 'minimal' ? { background: '#f4f2ee' } : !activeApp && !isLocked && activeHomeStyle === 'moonlit' ? { background: '#ede9f4' } : { background: currentWallpaper.style }
+            : !activeApp && !isLocked && activeHomeStyle === 'christmas' ? { background: 'var(--christmas-desktop-background)' } : !activeApp && !isLocked && activeHomeStyle === 'halloween' ? { background: '#2b263e' } : !activeApp && !isLocked && activeHomeStyle === 'minimal' ? { background: '#f4f2ee' } : !activeApp && !isLocked && activeHomeStyle === 'moonlit' ? { background: '#ede9f4' } : { background: currentWallpaper.style }
         }
       >
         <EdgeSwipeBack enabled={!isLocked && !openingVisible}/>

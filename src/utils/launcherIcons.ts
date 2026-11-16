@@ -1,11 +1,16 @@
 import { readStoredValue, writeStoredValue } from './localStorage';
 
 export const LAUNCHER_ICON_KEY = 'yyphone:launcher-icon';
-export const DEFAULT_LAUNCHER_ICON = 'mist-garden';
+export const DEFAULT_LAUNCHER_ICON = 'pastel-yy';
+export const LAUNCHER_ICON_CATEGORIES = ['初始', '画板', '游戏机', '哥特'] as const;
 export const LAUNCHER_ICONS = [
-  { id: 'mist-garden', name: '雾色花园' },
-  { id: 'default', name: '初见' }, { id: 'claw', name: '抓娃娃机' },
-  { id: 'slot', name: '老虎机' }, { id: 'ndsl', name: 'NDSL' },
+  { id: 'mist-garden', name: '雾色花园', category: '画板' },
+  { id: 'sunlit-sea', name: '晴海', category: '画板' },
+  { id: 'default', name: '初见', category: '初始' }, { id: 'claw', name: '抓娃娃机', category: '游戏机' },
+  { id: 'pastel-yy', name: '晴染', category: '初始' },
+  { id: 'slot', name: '老虎机', category: '游戏机' }, { id: 'ndsl', name: 'NDSL', category: '游戏机' },
+  { id: 'gothic-rose', name: '蔷薇圣窗', category: '哥特' },
+  { id: 'silent-manuscript', name: '缄默手稿', category: '哥特' },
 ] as const;
 export type LauncherIconId = typeof LAUNCHER_ICONS[number]['id'];
 export const isLauncherIcon = (value: unknown): value is LauncherIconId => LAUNCHER_ICONS.some(icon => icon.id === value);

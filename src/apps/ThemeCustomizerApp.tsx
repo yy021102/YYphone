@@ -362,6 +362,7 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
       />
 
       <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar p-4 space-y-4">
+        <LauncherIconSettings/>
         <details className="glass-card group rounded-2xl p-3">
           <summary className="flex cursor-pointer list-none items-center gap-2 text-xs font-bold text-[#2C4A5C]">
             <Palette className="h-3.5 w-3.5 shrink-0 text-pink-500" />
@@ -537,7 +538,6 @@ export const ThemeCustomizerApp: React.FC<ThemeCustomizerAppProps> = ({
           </div>
         </details>
         <GlobalFontSettings fontSettings={fontSettings} onSaveFontSettings={onSaveFontSettings} />
-        <LauncherIconSettings/>
         <details className="glass-card group rounded-2xl p-3">
           <summary className="flex cursor-pointer list-none items-center gap-2 text-xs font-bold text-[#2C4A5C]">
             <LayoutGrid className="h-3.5 w-3.5 shrink-0 text-pink-500" />

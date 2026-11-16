@@ -5,7 +5,8 @@ import { DEFAULT_LAUNCHER_ICON, LAUNCHER_ICONS, LAUNCHER_ICON_KEY, isLauncherIco
 import { isPersonaRecordKey } from './personaStorage';
 
 test('launcher choices are device-wide and preserve GitHub Pages base paths', () => {
-  assert.equal(DEFAULT_LAUNCHER_ICON, 'mist-garden');
+  assert.equal(DEFAULT_LAUNCHER_ICON, 'pastel-yy');
+  assert.equal(LAUNCHER_ICONS.find(icon => icon.id === DEFAULT_LAUNCHER_ICON)?.name, '晴染');
   assert.equal(LAUNCHER_ICONS.find(icon => icon.id === 'default')?.name, '初见');
   assert.equal(isPersonaRecordKey('yyphone:launcher-icon'), false);
   assert.equal(isLauncherIcon('claw'), true); assert.equal(isLauncherIcon('javascript:alert(1)'), false);
@@ -13,9 +14,9 @@ test('launcher choices are device-wide and preserve GitHub Pages base paths', ()
   assert.equal(launcherIconPaths('slot', '/').apple, '/app-icon-options/slot/icon-180.png');
 });
 
-test('initial install manifest uses the garden while the original icon remains a separate choice', async () => {
+test('initial install manifest uses Qingran while the original icon remains a separate choice', async () => {
   const manifest = JSON.parse(await readFile(new URL('../../public/manifest.json', import.meta.url), 'utf8'));
-  assert(manifest.icons.every((icon: { src: string }) => icon.src.includes('/mist-garden/')));
+  assert(manifest.icons.every((icon: { src: string }) => icon.src.includes(`/${DEFAULT_LAUNCHER_ICON}/`)));
   const old = JSON.parse(await readFile(new URL('../../public/app-icon-options/default/manifest.webmanifest', import.meta.url), 'utf8'));
   assert.equal(new URL(old.start_url, 'https://phone.invalid/app-icon-options/default/manifest.webmanifest').searchParams.get('launcher'), 'default');
 });

@@ -144,7 +144,7 @@ export const generatePhoneScope = async (
     item.type === 'direct' && Array.isArray(item.participantIds) &&
     item.participantIds.length === 1 && item.participantIds[0] === ctx.charId) : undefined;
   const background = buildPrompt({ chatId: chat && typeof chat.id === 'string' ? chat.id : '',
-    backgroundCharacterId: ctx.charId, currentInput: '', memoryInjection: memory, historyWindowOverride: PHONE_HISTORY_LIMIT });
+    backgroundCharacterId: ctx.charId, historyOnly: true, memoryInjection: memory, historyWindowOverride: PHONE_HISTORY_LIMIT });
   const scopes = scope === 'all' ? PHONE_GEN_SCOPES : [scope];
   const system = [
     ...background.filter((message) => message.role === 'system').map((message) => message.content),

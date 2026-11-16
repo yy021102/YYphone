@@ -126,6 +126,8 @@ export interface BuildPromptOptions {
   currentInput?: string;
   /** No new user utterance exists on a scheduled proactive turn. */
   proactive?: boolean;
+  /** Background writing reads the timeline without creating or replaying a current user turn. */
+  historyOnly?: boolean;
   historyLimit?: number;
   /** Caller-specific cap across current and mounted chats; does not change saved chat settings. */
   historyWindowOverride?: number;
@@ -884,8 +886,8 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
   const continueGroup = chat.type !== 'direct' &&
     (!latestGroupTurn || latestGroupTurn.senderId !== 'user' && latestGroupTurn.source !== 'user-narration') &&
     (currentInput === undefined || !currentInput.trim() || currentInput === previousUserInput);
-  const requestedInput = options.proactive || continueGroup ? '' : currentInput ?? previousUserInput;
-  const latestUserMessage = options.proactive || continueGroup ? undefined : [...chat.messages].reverse().find(
+  const requestedInput = options.historyOnly || options.proactive || continueGroup ? '' : currentInput ?? previousUserInput;
+  const latestUserMessage = options.historyOnly || options.proactive || continueGroup ? undefined : [...chat.messages].reverse().find(
     (message) => (message.senderId === 'user' || message.source === 'user-narration') && message.text === requestedInput
   );
   const input = latestUserMessage?.kind === 'recalled' ? recallContext(latestUserMessage, chat.participantIds) : latestUserMessage?.source === 'user-narration' ? toMessageContent(latestUserMessage) : latestUserMessage?.kind === 'forum-forward' &&
@@ -1066,6 +1068,7 @@ export const buildPrompt = (options: BuildPromptOptions): OpenAiMessage[] => {
       ].filter(Boolean).join('\n'),
     });
   }
+  if (options.historyOnly) return messages;
   messages.push({
     role: 'user',
     tokenCategory: 'currentInput',

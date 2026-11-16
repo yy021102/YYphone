@@ -34,17 +34,15 @@ export function recallMessage<T extends RecallMessage>(message: T, participants:
   return result as T;
 }
 export function recallContext(message: RecallMessage, viewerIds: readonly string[]): string {
-  if (!validChatRecall(message.recall)) return '[一条消息已撤回，原内容不可见]';
+  if (!validChatRecall(message.recall)) return '[一条消息已撤回]';
   const r = message.recall;
   const allowed = viewerIds.filter(id => id === message.senderId || r.seenBy.includes(id));
   const denied = viewerIds.filter(id => !allowed.includes(id));
   const status = `[${message.senderId === 'user' ? '玩家' : `成员 ${message.senderId}`}撤回了一条消息]`;
-  if (!allowed.length) return `${status} 你没有看到撤回前的内容，不能猜中、引用或回应其具体内容；可以自然询问，也可以不追问。`;
-  return [status,
-    `仅这些角色看到了原内容或是原作者：${allowed.join('、')}。${denied.length ? `这些角色没有看到：${denied.join('、')}，不得知道或引用原文，除非其他人在之后明确告知。` : ''}`,
-    `可知原内容：${JSON.stringify({ kind: r.original.kind, text: r.original.text, title: r.original.title, content: r.original.content, source: r.original.source, stickerId: r.original.stickerId })}`,
-    '这是已经撤回的旧消息，不是新发言。原作者记得自己撤回了什么，但不要每轮反复提起。',
-  ].join('\n');
+  if (!allowed.length) return status;
+  const content = r.original.kind === 'text' ? JSON.stringify(r.original.text) : JSON.stringify({ kind: r.original.kind, text: r.original.text, title: r.original.title, content: r.original.content, source: r.original.source, stickerId: r.original.stickerId });
+  if (viewerIds.length === 1) return `${status} 你看到了，内容为：${content}`;
+  return `${status} 这些角色看到了：${allowed.join('、')}，内容为：${content}${denied.length ? `；这些角色没有看到：${denied.join('、')}` : ''}`;
 }
 export function recallTimeline<T extends RecallMessage>(messages: T[], ids: ReadonlySet<string>, participants: string[], random = Math.random): T[] {
   const updated = messages.map(message => ids.has(message.id) && canRecallMessage(message) ? recallMessage(message, participants, messages, random) : message);
