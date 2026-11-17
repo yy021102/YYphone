@@ -1,9 +1,8 @@
 import { useEffect, useId, useRef, useState, type CSSProperties } from 'react';
 import type { OpeningStyle } from '../utils/phoneOpening';
-import { RainOpeningScene } from './RainOpeningScene';
 import { CreamOpeningScene } from './CreamOpeningScene';
 
-export const OPENING_TIMING = { intro: 2450, rainIntro: 4000, acrossIntro: 4500, creamIntro: 4700, staticIntro: 900, reducedIntro: 550, exit: 600, shortExit: 160 } as const;
+export const OPENING_TIMING = { intro: 2450, acrossIntro: 4500, creamIntro: 4700, reducedIntro: 550, exit: 600, shortExit: 160 } as const;
 
 export function YYphoneMark() {
   const id = useId();
@@ -40,8 +39,6 @@ export function PhoneOpening({ ready, onComplete, openingStyle = 'pearl' }: { re
   const enterRef = useRef<HTMLButtonElement>(null);
   const [reducedMotion, setReducedMotion] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   const [introDone, setIntroDone] = useState(false);
-  const [sceneStatus, setSceneStatus] = useState<'loading' | 'playing' | 'static'>(openingStyle === 'rain' ? 'loading' : 'static');
-  const sceneReady = openingStyle !== 'rain' || sceneStatus !== 'loading';
   const [exit, setExit] = useState<'automatic' | 'skip' | null>(null);
   const leaving = exit !== null || introDone && ready;
   const shortExit = reducedMotion || exit === 'skip';
@@ -60,14 +57,12 @@ export function PhoneOpening({ ready, onComplete, openingStyle = 'pearl' }: { re
   }, []);
 
   useEffect(() => {
-    if (!sceneReady) return;
     const duration = reducedMotion ? OPENING_TIMING.reducedIntro : openingStyle === 'pearl' ? OPENING_TIMING.intro :
       openingStyle === 'across' ? OPENING_TIMING.acrossIntro :
-      openingStyle === 'cream' ? OPENING_TIMING.creamIntro :
-      sceneStatus === 'playing' ? OPENING_TIMING.rainIntro : OPENING_TIMING.staticIntro;
+      OPENING_TIMING.creamIntro;
     const timer = window.setTimeout(() => setIntroDone(true), duration);
     return () => window.clearTimeout(timer);
-  }, [reducedMotion, openingStyle, sceneStatus, sceneReady]);
+  }, [reducedMotion, openingStyle]);
 
   useEffect(() => {
     if (!leaving) return;
@@ -85,8 +80,7 @@ export function PhoneOpening({ ready, onComplete, openingStyle = 'pearl' }: { re
       tabIndex={-1}
       className="yy-phone-opening"
       data-style={openingStyle}
-      data-scene-mode={sceneStatus}
-      data-intro-ready={sceneReady || undefined}
+      data-intro-ready="true"
       data-leaving={leaving || undefined}
       data-reduced-motion={reducedMotion || undefined}
       data-waiting={introDone && !ready || undefined}
@@ -100,23 +94,7 @@ export function PhoneOpening({ ready, onComplete, openingStyle = 'pearl' }: { re
       }}
     >
       <p id={hintId} className="sr-only">轻点画面或按回车键进入，开场也会自动结束。</p>
-      {openingStyle === 'rain' ? <>
-        <RainOpeningScene reducedMotion={reducedMotion} leaving={leaving} onReady={setSceneStatus} onEnded={() => setIntroDone(true)} />
-        <div className="yy-rain-copy">
-          <h1 id={titleId} aria-label="Rain outside. You are here.">
-            <span className="yy-rain-line">
-              <span className="yy-rain-word" style={{ '--word-delay': '550ms' } as CSSProperties}>Rain</span>{' '}
-              <span className="yy-rain-word" style={{ '--word-delay': '800ms' } as CSSProperties}>outside.</span>
-            </span>
-            <span className="yy-rain-line">
-              <span className="yy-rain-word" style={{ '--word-delay': '1250ms' } as CSSProperties}>You</span>{' '}
-              <span className="yy-rain-word" style={{ '--word-delay': '1450ms' } as CSSProperties}>are</span>{' '}
-              <span className="yy-rain-word" style={{ '--word-delay': '1650ms' } as CSSProperties}>here.</span>
-            </span>
-          </h1>
-        </div>
-        <div className="yy-rain-brand" aria-hidden="true"><span>YYphone</span><span>歪歪机</span></div>
-      </> : openingStyle === 'across' ? <>
+      {openingStyle === 'across' ? <>
         <div className="yy-across-atmosphere" aria-hidden="true" />
         <div className="yy-across-scene" aria-hidden="true">
           <div className="yy-across-horizon" />

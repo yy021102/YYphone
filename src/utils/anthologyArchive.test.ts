@@ -15,7 +15,7 @@ const article = (id: string): AnthologyArticle => ({ id, authorId: 'author', aut
 beforeEach(async () => { values.clear(); await clearDbStorage(); });
 
 test('export/clear/import round-trips articles, favorites and writing options without touching chats', async () => {
-  saveAnthologyArticle(article('a'));
+  saveAnthologyArticle({ ...article('a'), discussion: [{ id: 'comment', userName: '读者', userAvatar: '', body: '想和你讨论', createdAt: '2026-11-18', reply: { body: '很愿意听听你的想法', authorName: '林渡', createdAt: '2026-11-18' } }] });
   writeStoredValue(ANTHOLOGY_DRAFT_KEY, { ...defaultAnthologyDraft(), customStyle: '保留短句', direction: '窗边' });
   writeStoredValue('yyphone:wechat-chats', [{ messages: [{ source: 'anthology', text: '已分享文章' }] }]);
   const chats = readStorageString('yyphone:wechat-chats'), archive = createAnthologyArchive();
@@ -23,6 +23,7 @@ test('export/clear/import round-trips articles, favorites and writing options wi
   assert.equal(readStorageString('yyphone:wechat-chats'), chats);
   const result = await importAnthologyArchive(JSON.parse(JSON.stringify(archive)), 'merge');
   assert.deepEqual(result, { added: 1, kept: 0 }); assert.equal(readAnthologyArticles()[0].favorite, true);
+  assert.equal(readAnthologyArticles()[0].discussion?.[0].reply?.body, '很愿意听听你的想法');
   assert.equal(readAnthologyDraft().customStyle, '保留短句'); assert.equal(readStorageString('yyphone:wechat-chats'), chats);
 });
 

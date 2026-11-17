@@ -6,7 +6,7 @@ import { isPersonaRecordKey } from './personaStorage';
 
 test('launcher choices are device-wide and preserve GitHub Pages base paths', () => {
   assert.equal(DEFAULT_LAUNCHER_ICON, 'pastel-yy');
-  assert.equal(LAUNCHER_ICONS.find(icon => icon.id === DEFAULT_LAUNCHER_ICON)?.name, '晴染');
+  assert.equal(LAUNCHER_ICONS.find(icon => icon.id === DEFAULT_LAUNCHER_ICON)?.name, '晕染');
   assert.equal(LAUNCHER_ICONS.find(icon => icon.id === 'default')?.name, '初见');
   assert.equal(isPersonaRecordKey('yyphone:launcher-icon'), false);
   assert.equal(isLauncherIcon('claw'), true); assert.equal(isLauncherIcon('javascript:alert(1)'), false);

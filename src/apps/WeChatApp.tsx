@@ -4830,6 +4830,12 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
                             )}
                           </div>
                         </div>
+                      ) : message.kind === 'link' && message.source === '文集' ? (
+                        <button type="button" disabled={selectMode} onClick={event => { event.stopPropagation(); setGuessRecordPreview(message); }}
+                          className="w-56 max-w-full overflow-hidden rounded-xl bg-[#fffdf8] text-left shadow-sm" aria-label={`阅读文章：${message.title}`}>
+                          <div className="flex gap-3 p-3"><BookOpen size={27} strokeWidth={1.3} className="shrink-0 text-[#a79481]"/><div className="min-w-0"><strong className="line-clamp-2 text-sm text-[#62594f]">{message.title}</strong><p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-[#9c9185]">{message.content}</p></div></div>
+                          <div className="border-t border-[#eee7dc] px-3 py-1.5 text-[10px] text-[#a99b8b]">文集 · 文章</div>
+                        </button>
                       ) : message.kind === 'link' && message.source === '生日来信' ? (
                         <button type="button" disabled={selectMode} className="birthday-chat-envelope" onClick={event => { event.stopPropagation(); setGuessRecordPreview(message); }}>
                           <span aria-hidden="true">✧</span><strong>{message.title}</strong><small>一封生日来信</small>
@@ -8431,7 +8437,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       {guessRecordPreview && (
         <div className="absolute inset-0 z-[85] flex items-center justify-center bg-black/40 p-5 backdrop-blur-sm"
           onClick={(event) => { if (event.target === event.currentTarget) setGuessRecordPreview(null); }}>
-          <section role="dialog" aria-modal="true" aria-label={guessRecordPreview.source === '生日来信' ? '生日来信' : guessRecordPreview.source === '微信占卜 · 塔罗' ? '塔罗完整手记' : guessRecordPreview.source === '微信占卜 · 星盘' ? '星盘完整手记' : guessRecordPreview.source === '微信占卜 · 奇门' ? '奇门完整手记' : guessRecordPreview.source === '微信 · 一杯之间' ? '饮品完整配方' : guessRecordPreview.source === 'AO3' ? 'AO3 作品' : '游戏完整记录'}
+          <section role="dialog" aria-modal="true" aria-label={guessRecordPreview.source === '生日来信' ? '生日来信' : guessRecordPreview.source === '微信占卜 · 塔罗' ? '塔罗完整手记' : guessRecordPreview.source === '微信占卜 · 星盘' ? '星盘完整手记' : guessRecordPreview.source === '微信占卜 · 奇门' ? '奇门完整手记' : guessRecordPreview.source === '微信 · 一杯之间' ? '饮品完整配方' : guessRecordPreview.source === 'AO3' ? 'AO3 作品' : guessRecordPreview.source === '文集' ? '文集文章' : '游戏完整记录'}
             className="flex max-h-[85%] w-full max-w-md flex-col overflow-hidden rounded-3xl border border-white/80 bg-white/95 shadow-2xl">
             <header className="flex items-center justify-between border-b border-slate-100 p-4">
               <div><p className="text-[10px] text-sky-600">{guessRecordPreview.source}</p><h2 className="text-sm font-bold text-[#2C4A5C]">{guessRecordPreview.title}</h2></div>

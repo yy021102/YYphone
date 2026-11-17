@@ -31,11 +31,16 @@ export interface AnthologyDraft {
 export const defaultAnthologyDraft = (): AnthologyDraft => ({ authorId: '', genre: 'narrative', style: 'plain', customStyle: '',
   direction: '', material: '', length: 'medium', attachChats: false, chatCount: 100, attachMemories: false });
 export interface AnthologyAuthor { id: string; name: string; persona: string; avatarUrl: string }
+export interface AnthologyDiscussion {
+  id: string; userName: string; userAvatar: string; body: string; createdAt: string;
+  reply?: { body: string; authorName: string; createdAt: string };
+}
 export interface AnthologyArticle {
   id: string; authorId: string; authorName: string; authorAvatar: string; title: string; body: string;
   genre: string; style: string; favorite: boolean; createdAt: string; updatedAt: string; draft: AnthologyDraft;
   authorKind?: 'character' | 'user';
   sourceManuscript?: { id: string; title: string; authorName: string };
+  discussion?: AnthologyDiscussion[];
 }
 const record = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 export function isAnthologyDraft(v: unknown): v is AnthologyDraft {
@@ -49,7 +54,10 @@ export function isAnthologyArticle(v: unknown): v is AnthologyArticle {
   return record(v) && ['id', 'authorId', 'authorName', 'authorAvatar', 'title', 'body', 'genre', 'style', 'createdAt', 'updatedAt'].every(k => typeof v[k] === 'string') &&
     !!v.id && !!v.title && !!v.body && typeof v.favorite === 'boolean' && isAnthologyDraft(v.draft) &&
     (v.authorKind === undefined || v.authorKind === 'character' || v.authorKind === 'user') &&
-    (v.sourceManuscript === undefined || record(v.sourceManuscript) && ['id', 'title', 'authorName'].every(k => typeof (v.sourceManuscript as Record<string, unknown>)[k] === 'string'));
+    (v.sourceManuscript === undefined || record(v.sourceManuscript) && ['id', 'title', 'authorName'].every(k => typeof (v.sourceManuscript as Record<string, unknown>)[k] === 'string')) &&
+    (v.discussion === undefined || Array.isArray(v.discussion) && v.discussion.every(d => record(d) &&
+      ['id', 'userName', 'userAvatar', 'body', 'createdAt'].every(k => typeof d[k] === 'string') &&
+      (d.reply === undefined || record(d.reply) && ['body', 'authorName', 'createdAt'].every(k => typeof (d.reply as Record<string, unknown>)[k] === 'string'))));
 }
 export function readAnthologyArticles(): AnthologyArticle[] {
   const raw = readStorageString(ANTHOLOGY_KEY);
@@ -70,7 +78,8 @@ function prepareArticleSave(article: AnthologyArticle, original?: AnthologyArtic
   const current = readAnthologyArticles(), existing = current.find(a => a.id === article.id);
   if (original && (!existing || existing.body !== original.body || existing.title !== original.title)) throw new Error('原稿已修改或删除，本次内容未覆盖原稿。');
   if (!original && existing) throw new Error('文章编号重复，原稿已保留。');
-  const saved = { ...article, favorite: existing?.favorite ?? article.favorite };
+  const saved = { ...article, favorite: existing?.favorite ?? article.favorite,
+    ...(existing?.discussion ? { discussion: existing.discussion } : {}) };
   return { saved, articles: existing ? current.map(a => a.id === article.id ? saved : a) : [saved, ...current] };
 }
 export function saveAnthologyArticle(article: AnthologyArticle, original?: AnthologyArticle) {
@@ -84,6 +93,22 @@ export async function saveGeneratedAnthologyArticle(article: AnthologyArticle, o
   return saved;
 }
 export const isUserManuscript = (article: AnthologyArticle) => article.authorKind === 'user';
+export function addAnthologyDiscussion(articleId: string, body: string): AnthologyDiscussion {
+  const articles = readAnthologyArticles(), article = articles.find(a => a.id === articleId);
+  if (!article || isUserManuscript(article)) throw new Error('请在角色的文章下回复。');
+  if (!body.trim() || body.trim().length > 8000) throw new Error('回复请填写 1～8000 字。');
+  const user = readAnthologyUser();
+  const item = { id: crypto.randomUUID(), userName: user.name, userAvatar: user.avatarUrl, body: body.trim(), createdAt: new Date().toISOString() };
+  writeStoredValue(ANTHOLOGY_KEY, articles.map(a => a.id === articleId ? { ...a, discussion: [...a.discussion ?? [], item] } : a));
+  return item;
+}
+export function saveAnthologyDiscussionReply(original: AnthologyArticle, discussionId: string, reply: NonNullable<AnthologyDiscussion['reply']>) {
+  const articles = readAnthologyArticles(), article = articles.find(a => a.id === original.id);
+  const previous = original.discussion?.find(d => d.id === discussionId), current = article?.discussion?.find(d => d.id === discussionId);
+  if (!article || article.body !== original.body || article.title !== original.title || article.authorId !== original.authorId ||
+    !previous || !current || current.body !== previous.body || current.reply) throw new Error('文章或回复已变动，本次作者回应未覆盖现有内容。');
+  writeStoredValue(ANTHOLOGY_KEY, articles.map(a => a.id === article.id ? { ...a, discussion: a.discussion!.map(d => d.id === discussionId ? { ...d, reply } : d) } : a));
+}
 export function createAnthologyManuscript(): AnthologyArticle {
   const user = readAnthologyUser(), now = new Date().toISOString();
   return { id: crypto.randomUUID(), authorId: 'anthology:user', authorKind: 'user', authorName: user.name, authorAvatar: user.avatarUrl,

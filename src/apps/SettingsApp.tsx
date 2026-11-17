@@ -51,7 +51,7 @@ import {
   replaceDbStorage,
 } from '../utils/dbStorage';
 import { compressUploadedImages } from '../utils/bulkImageCompression';
-import { OPENING_STYLES, openingMedia, type OpeningStyle } from '../utils/phoneOpening';
+import { OPENING_STYLES, type OpeningStyle } from '../utils/phoneOpening';
 import { CreamWordmark } from '../components/CreamOpeningScene';
 import {
   getVoiceProviderDefaults,
@@ -922,15 +922,13 @@ export const SettingsApp: React.FC<SettingsAppProps> = ({
                     onClick={() => void updateOpeningStyle(style.id)}
                     className={`yy-opening-choice ${openingStyle === style.id ? 'is-selected' : ''}`}>
                     <span className={`yy-opening-choice-art is-${style.id}`} aria-hidden="true">
-                      {style.id === 'rain' ? <img src={openingMedia().poster} alt="" /> :
-                        style.id === 'cream' ? <CreamWordmark /> :
+                      {style.id === 'cream' ? <CreamWordmark /> :
                         style.id === 'across' ? <span className="yy-opening-choice-glass" /> : 'YY'}
                     </span>
                     <strong>{style.name}</strong><span>{style.description}</span>
                   </button>)}
                 </div>
               </fieldset>
-              {openingStyle === 'rain' && <p className="text-[10px] leading-relaxed text-slate-400">视频素材来源：小红书@蓝莓大王</p>}
               <button type="button" disabled={openingBusy} onClick={onPreviewOpening} className="rounded-xl border border-slate-200/70 bg-white/80 px-3 py-2 text-[11px] font-semibold text-[#657187] disabled:opacity-50">
                 预览开机动画
               </button>

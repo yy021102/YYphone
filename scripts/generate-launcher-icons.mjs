@@ -10,8 +10,8 @@ const choices = [
   ['slot', '老虎机', 'app-icon-sources/slot.png'], ['ndsl', 'NDSL', 'app-icon-sources/ndsl.png'],
   ['mist-garden', '雾色花园', 'app-icon-sources/mist-garden.png'],
   ['sunlit-sea', '晴海', 'app-icon-sources/sunlit-sea.png'],
-  ['pastel-yy', '晴染', 'app-icon-sources/pastel-yy.png'],
-  ['gothic-rose', '蔷薇圣窗', 'app-icon-sources/gothic-rose.png'],
+  ['pastel-yy', '晕染', 'app-icon-sources/pastel-yy.png'],
+  ['ascii-lily', '百合by小野', '百合by小野.jpg'],
   ['silent-manuscript', '缄默手稿', 'app-icon-sources/silent-manuscript.png'],
 ];
 for (const [id, name, source] of choices) {

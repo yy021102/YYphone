@@ -2,9 +2,10 @@ import assert from 'node:assert/strict';
 import { beforeEach, afterEach, mock, test } from 'node:test';
 import { clearDbStorage } from './dbStorage';
 import { readStorageString, writeStoredValue } from './localStorage';
-import { ANTHOLOGY_KEY, ANTHOLOGY_DRAFT_KEY, ANTHOLOGY_GENRES, ANTHOLOGY_STYLES, createAnthologyManuscript, defaultAnthologyDraft, isUserManuscript, readAnthologyDraft, readAnthologyArticles, saveAnthologyArticle, saveGeneratedAnthologyArticle, favoriteAnthologyArticle, deleteAnthologyArticle, anthologyExportText, type AnthologyArticle } from './anthology';
+import { ANTHOLOGY_KEY, ANTHOLOGY_DRAFT_KEY, ANTHOLOGY_GENRES, ANTHOLOGY_STYLES, addAnthologyDiscussion, createAnthologyManuscript, defaultAnthologyDraft, isUserManuscript, readAnthologyDraft, readAnthologyArticles, saveAnthologyArticle, saveGeneratedAnthologyArticle, favoriteAnthologyArticle, deleteAnthologyArticle, anthologyExportText, type AnthologyArticle } from './anthology';
 import { anthologyWritingGuidance } from './anthologyPrompts';
-import { anthologyContext, generateAnthologyArticle, shareAnthologyArticle } from './anthologyGeneration';
+import { anthologyContext, generateAnthologyArticle, replyToAnthologyDiscussion, shareAnthologyArticle } from './anthologyGeneration';
+import { buildPrompt, toMessageContent } from './buildPrompt';
 
 const values = new Map<string, string>();
 Object.defineProperty(globalThis, 'window', { configurable: true, value: { localStorage: {
@@ -112,9 +113,18 @@ test('manuscripts retain concurrent favorites, reject stale overwrites and remai
 test('explicit sharing includes the complete article once and distinguishes fiction/thought from real events', () => {
   const original = manuscript(); shareAnthologyArticle(original, ['a', 'a']); shareAnthologyArticle(original, ['a']);
   const chats = JSON.parse(readStorageString('yyphone:wechat-chats')!);
-  const notes = chats.find((c: any) => c.id === 'chat-a').messages.filter((m: any) => m.source === 'anthology');
+  const notes = chats.find((c: any) => c.id === 'chat-a').messages.filter((m: any) => m.source === '文集');
   assert.equal(notes.length, 1); assert.match(notes[0].aiContext, /不是新发生的经历或对话承诺/); assert.match(notes[0].aiContext, /不能只看它用了多少时间/);
+  assert.equal(notes[0].senderId, 'user'); assert.equal(notes[0].kind, 'link');
+  assert.equal(notes[0].title, original.title); assert.ok(notes[0].content.includes(original.body));
+  assert.match(toMessageContent(notes[0]), /这篇文章是你自己写的/);
+  writeStoredValue('yyphone:wechat-chats', chats.map((chat: any) => ({ ...chat, noteName: '', context: '', messages: chat.messages.map((message: any, index: number) => ({ id: `fixture-${index}`, ...message })) })));
+  assert.ok(String(buildPrompt({ chatId: 'chat-a' }).at(-1)?.content).includes(original.body));
   assert.equal(chats.find((c: any) => c.id === 'chat-b').messages.length, 1);
+  shareAnthologyArticle(original, ['b']);
+  const other = JSON.parse(readStorageString('yyphone:wechat-chats')!).find((c: any) => c.id === 'chat-b').messages.at(-1);
+  assert.match(toMessageContent(other), /分享者不等于作者/);
+  assert.ok(!toMessageContent(other).includes('这篇文章是你自己写的'));
 });
 
 test('successful generation stores the original choices on the article and atomically resets the next writing form', async () => {
@@ -139,6 +149,8 @@ test('personal manuscripts retain user authorship, share as user writing and onl
   assert.equal(own.authorName, '小月亮'); assert.ok(isUserManuscript(own));
   const context = anthologyContext({ ...draft(), manuscriptId: own.id });
   assert.equal(context.respondingToManuscript?.body, own.body);
+  assert.equal(context.respondingToManuscript?.writtenByUser, true);
+  assert.equal(context.respondingToManuscript?.authorKind, 'user');
   assert.equal(context.userPersona.personality, '好奇且重视自主');
   const encoded = JSON.stringify(context);
   for (const hidden of ['PHOTO_SECRET', 'INACTIVE_PERSONA_SECRET', 'UNSELECTED_MANUSCRIPT_SECRET', 'CHAT_SECRET_RECENT']) assert.ok(!encoded.includes(hidden));
@@ -167,4 +179,43 @@ test('responding to a deleted or edited manuscript cannot silently use a stale s
   });
   await assert.rejects(generateAnthologyArticle({ ...draft(), manuscriptId: own.id }, new AbortController().signal), /已修改或删除/);
   assert.equal(readAnthologyArticles().length, 1); assert.match(readAnthologyArticles()[0].body, /重新修改/);
+});
+
+test('article discussion persists before AI, keeps author identity, and survives later edits', async () => {
+  const original = saveAnthologyArticle(manuscript());
+  const comment = addAnthologyDiscussion(original.id, '忙碌也可能让人踏实，你怎么看？');
+  const chatsBefore = readStorageString('yyphone:wechat-chats');
+  mock.method(globalThis, 'fetch', async (_url: unknown, init?: RequestInit) => {
+    const request = JSON.parse(String(init?.body)), input = JSON.parse(request.messages[1].content);
+    assert.match(request.messages[0].content, /原作者/);
+    assert.equal(input.author.id, original.authorId);
+    assert.equal(input.article.body, original.body);
+    assert.equal(input.currentDiscussion.body, comment.body);
+    assert.equal(readAnthologyArticles()[0].discussion?.[0].body, comment.body);
+    return Response.json({ choices: [{ message: { content: JSON.stringify({ body: '踏实本身并没有错。我更在意，那是自己选择的充实，还是不得不证明什么。' }) } }] });
+  });
+  await replyToAnthologyDiscussion(original.id, comment.id, new AbortController().signal);
+  assert.match(readAnthologyArticles()[0].discussion![0].reply!.body, /自己选择/);
+  assert.equal(readStorageString('yyphone:wechat-chats'), chatsBefore);
+  saveAnthologyArticle({ ...original, title: '改一个题目' }, original);
+  assert.ok(readAnthologyArticles()[0].discussion![0].reply);
+  await assert.rejects(replyToAnthologyDiscussion(original.id, comment.id, new AbortController().signal), /已经回应/);
+});
+
+test('failed, stopped and stale discussion replies retain the user comment without fabricating an author reply', async () => {
+  saveAnthologyArticle(manuscript());
+  const comment = addAnthologyDiscussion('article', '想听听你的想法');
+  const aborted = new AbortController(); aborted.abort();
+  await assert.rejects(replyToAnthologyDiscussion('article', comment.id, aborted.signal));
+  const fetchMock = mock.method(globalThis, 'fetch', async () => Response.json({ choices: [{ message: { content: '{}' } }] }));
+  await assert.rejects(replyToAnthologyDiscussion('article', comment.id, new AbortController().signal), /完整回应/);
+  assert.equal(readAnthologyArticles()[0].discussion![0].body, comment.body);
+  assert.equal(readAnthologyArticles()[0].discussion![0].reply, undefined);
+  fetchMock.mock.mockImplementation(async () => {
+    const original = readAnthologyArticles()[0];
+    saveAnthologyArticle({ ...original, body: '生成期间修改了文章正文' }, original);
+    return Response.json({ choices: [{ message: { content: '{"body":"这是对旧版正文的回复"}' } }] });
+  });
+  await assert.rejects(replyToAnthologyDiscussion('article', comment.id, new AbortController().signal), /已变动/);
+  assert.equal(readAnthologyArticles()[0].discussion![0].reply, undefined);
 });

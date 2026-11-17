@@ -1,3 +1,8 @@
+self.addEventListener('activate', (event) => {
+  // This retired cache contains only the removed rain opening's video/poster.
+  event.waitUntil(caches.delete('yyphone-opening-media-v1').catch(() => false));
+});
+
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   const chatId = event.notification.data?.chatId;

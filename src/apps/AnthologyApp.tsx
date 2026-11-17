@@ -7,6 +7,7 @@ import { generateAnthologyArticle, shareAnthologyArticle } from '../utils/anthol
 import { writeStoredValue } from '../utils/localStorage';
 import { clearAnthologyData, createAnthologyArchive, importAnthologyArchive, parseAnthologyArchive } from '../utils/anthologyArchive';
 import './anthology.css';
+import { AnthologyDiscussion } from '../components/AnthologyDiscussion';
 
 const message = (cause: unknown) => cause instanceof Error ? cause.message : '这次操作没有完成，请重试。';
 const date = (value: string) => new Date(value).toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' });
@@ -147,10 +148,11 @@ export function AnthologyApp({ onBack }: { onBack: () => void }) {
         {article.sourceManuscript && <p className="anthology-response-source">回应《{article.sourceManuscript.title}》</p>}
         <div className="anthology-body">{article.body}</div><div className="anthology-end-mark">· · ·</div>
         <div className="anthology-reading-actions"><button type="button" aria-pressed={article.favorite} onClick={() => favorite(article.id)}><Bookmark size={15} fill={article.favorite ? 'currentColor' : 'none'}/>{article.favorite ? '已收藏' : '收藏'}</button><button type="button" onClick={() => { setRecipients(authors.some(a => a.id === article.authorId) ? [article.authorId] : []); setShare(true); setError(''); }}><Send size={15}/>分享</button><button type="button" onClick={() => exportArticle(article)}><Download size={15}/>导出</button><button type="button" onClick={() => editArticle(article)}><Pencil size={15}/>修改</button>{isUserManuscript(article) ? <button type="button" onClick={() => openWriter(undefined, article)}><Feather size={15}/>请角色回应</button> : <button type="button" onClick={() => openWriter(article)}><RefreshCw size={15}/>重写</button>}<button type="button" onClick={() => remove(article)}><Trash2 size={15}/>删除</button></div>
+        {!isUserManuscript(article) && <AnthologyDiscussion key={article.id} article={article} onUpdate={refresh}/>}
       </article>}
     </div>
     {dataMenu && <div className="anthology-overlay"><section className="anthology-dialog" role="dialog" aria-modal="true" aria-label="文集数据"><header><h2><Menu size={17}/>文集数据</h2><button type="button" aria-label="关闭文集数据" disabled={archiveBusy} onClick={() => { setDataMenu(false); setError(''); }}><X size={18}/></button></header><div className="anthology-dialog-scroll">
-      <p className="anthology-hint">备份包含全部文章、个人手稿、收藏状态和写作选项。</p>
+      <p className="anthology-hint">备份包含全部文章、个人手稿、文章回复、收藏状态和写作选项。</p>
       <button type="button" className="anthology-primary" disabled={archiveBusy} onClick={exportData}><Download size={15}/>导出文集数据</button>
       <label>导入方式<select aria-label="文集数据导入方式" value={importMode} disabled={archiveBusy} onChange={e => setImportMode(e.target.value as 'merge' | 'replace')}><option value="merge">合并导入，相同编号保留本地</option><option value="replace">替换当前全部文集</option></select></label>
       <button type="button" className="anthology-primary" disabled={archiveBusy} onClick={() => archiveFile.current?.click()}><Upload size={15}/>{archiveBusy ? '正在处理…' : '导入文集数据'}</button>

@@ -59,29 +59,8 @@ test('normal opening is approximately three seconds; skipping and reduced motion
   assert.ok(normal >= 2000 && normal <= 3100);
   assert.ok(OPENING_TIMING.reducedIntro + OPENING_TIMING.shortExit < 1000);
   assert.ok(OPENING_TIMING.shortExit <= 200);
-  assert.equal(OPENING_TIMING.rainIntro, 4000);
   assert.equal(OPENING_TIMING.acrossIntro, 4500);
   assert.equal(OPENING_TIMING.creamIntro, 4700);
-});
-
-test('rain uses layered English words and a small wordmark without the pearl sculpture', () => {
-  const html = renderToStaticMarkup(<PhoneOpening ready openingStyle="rain" onComplete={() => {}} />);
-  assert.match(html, /aria-label="Rain outside\. You are here\."/);
-  assert.equal((html.match(/class="yy-rain-word"/g) ?? []).length, 5);
-  assert.match(html, /--word-delay:550ms/);
-  assert.match(html, /--word-delay:1650ms/);
-  assert.match(html, /class="yy-rain-brand"/);
-  assert.match(html, /playsInline=""/i);
-  assert.doesNotMatch(html, /yy-opening-sculpture|yy-opening-skip|跳过|loop=|autoPlay=|src="[^"]+\.mp4"/i);
-});
-
-test('reduced-motion rain does not even mount a video element', () => {
-  reducedMotion = true;
-  try {
-    const html = renderToStaticMarkup(<PhoneOpening ready openingStyle="rain" onComplete={() => {}} />);
-    assert.match(html, /rain-window-poster\.webp/);
-    assert.doesNotMatch(html, /<video/);
-  } finally { reducedMotion = false; }
 });
 
 test('across the screen has two lights, a glass boundary and staggered English without external media', () => {
@@ -92,7 +71,7 @@ test('across the screen has two lights, a glass boundary and staggered English w
   for (const name of ['yy-across-glass', 'yy-across-orb-far', 'yy-across-orb-near', 'yy-across-ripple', 'yy-across-brand']) assert.ok(html.includes(name));
   assert.doesNotMatch(html, /<video|<img|https?:|yy-opening-sculpture|yy-rain-scene|data-leaving/);
   const css = readFileSync(resolve('src', 'components', 'phoneOpening.css'), 'utf8');
-  assert.match(css, /animation: yy-rain-word 1200ms 2200ms/);
+  assert.match(css, /animation: yy-opening-word 1200ms 2200ms/);
   assert.match(css, /animation-delay: 1000ms/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.yy-across-ripple \{ display: none; \}/);
 });
