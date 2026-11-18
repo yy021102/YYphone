@@ -2,15 +2,15 @@ import assert from 'node:assert/strict';
 import { afterEach, beforeEach, mock, test } from 'node:test';
 import { clearDbStorage } from './dbStorage';
 import { readStorageString, writeStoredValue } from './localStorage';
-import { advance, generateRound, newSave as createEmptySave, persistSave, pickCard, readSave, saveKey, validatePlan } from './nurture';
-import { BODY_PARTS, emptyPortrait, imagePoint, initialWallet, validPortrait, touchTargets, selectRoundTouches, validateTouchReplies } from './nurtureGame';
+import { advance, resetGameData, generateRound, newSave as createEmptySave, persistSave, pickCard, readSave, saveKey, validatePlan } from './nurture';
+import { BODY_PARTS, SHOP, SCHEDULES, DATES, emptyPortrait, imagePoint, initialWallet, validPortrait, touchTargets, selectRoundTouches, validateTouchReplies } from './nurtureGame';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { NurtureStage } from '../components/NurtureStage';
 import { NurtureCardArt } from '../components/NurtureCardArt';
 import { archiveRound, emptyMemory, makeRecap, memoryContext, memoryFor, relationshipStage } from './nurtureMemory';
 import type { Save } from './nurture';
-import { configureGame, currentPlan, defaultDesign, validateDesign, validateShopReactions } from './nurtureDesign';
+import { configureGame, currentPlan, defaultDesign as emptyDesign, validateDesign, validateShopReactions } from './nurtureDesign';
 import { NurtureModuleEditor } from '../components/NurtureModuleEditor';
 import { NurtureSettings } from '../components/NurtureSettings';
 import { cardsForDraw, generateCommonCards, mergeCommonCards, playbackDuration, prepareDrawSequence, isPityRare } from './nurtureGacha';
@@ -23,9 +23,22 @@ import { defaultPool, poolContext, poolStatus, publishPool } from './nurturePool
 import { NurturePreview } from '../components/NurturePreview';
 import { NurtureGamePages } from '../components/NurtureGamePages';
 import { NurtureStatusNote } from '../components/NurtureStatusNote';
+import { readPortraitPresets, savePortraitPreset, deletePortraitPreset } from './nurturePortraitPresets';
+import { readCardPresets, saveCardPreset, deleteCardPreset, importPresetCards } from './nurtureCardPresets';
+import { NurtureCardPresets } from '../components/NurtureCardPresets';
+import { changeMemoryRecords, deleteRoundRecord, draftRoundRecord, editRoundRecord } from './nurtureRecords';
+import { NurtureMemoryPanel } from '../components/NurtureMemoryPanel';
+import { RoundRecordEditor } from '../components/NurtureRecordEditor';
+import { playbackReviewStep } from './nurturePlaybackReview';
+import { NurturePlaybackReview } from '../components/NurturePlaybackReview';
+import { readCatalogPresets, saveCatalogPreset, applyCatalogPreset, deleteCatalogPreset } from './nurtureCatalogPresets';
+import { NurtureCatalogPresets } from '../components/NurtureCatalogPresets';
 
+function defaultDesign(name = '\u6211'): import('./nurtureDesign').GameDesign {
+  return { ...emptyDesign(name), shop: SHOP.map(p => ({ ...p })), schedules: SCHEDULES.map(a => ({ ...a, price: 0, delta: { ...a.delta } })), dates: DATES.map(a => ({ ...a, delta: { ...a.delta } })) };
+}
 function newSave(): Save {
-  return { ...createEmptySave(), cards: [
+  return { ...createEmptySave(), stats: { mood: 70, energy: 80, affection: 20, growth: 10 }, design: defaultDesign(), cards: [
     { id: 'fixture-r', name: 'Common fixture', rarity: 'R', weight: 75, image: '', description: 'An ordinary daily moment.' },
     { id: 'fixture-sr', name: 'Middle fixture', rarity: 'SR', weight: 22, image: '', description: 'An afternoon memory.' },
     { id: 'fixture-ssr', name: 'SSR fixture', rarity: 'SSR', weight: 3, image: '', description: 'A rare night memory.' },
@@ -42,6 +55,162 @@ beforeEach(async () => {
   writeStoredValue('yyphone:api-presets', [{ id: 'main', name: '主 API', endpoint: 'https://nurture.invalid/v1', apiKey: 'fixture', model: 'model' }]);
 });
 afterEach(() => mock.restoreAll());
+test('playback review exposes only seen steps, preserves all outcomes and never advances or settles again', () => {
+  const save = newSave();
+  const step = { action: 'Actual draw', thought: 'Before draw', resultThought: 'After draw', speech: 'Exact authored reply', draw: true, drawnCards: [save.cards[2]], card: save.cards[2], delta: { mood: 5, energy: 0, affection: 0, growth: 0 }, wallet: { gems: 200, coins: 1000, recharged: 0 }, pityAfter: 0 };
+  save.rounds = [{ id: 'review-round', createdAt: '2026-11-18T00:00:00Z', openingThought: 'Opening thought', cursor: 0, before: save.stats, after: save.stats, steps: [step, { ...step, draw: false, drawnCards: undefined, card: undefined }] }];
+  const live = advance(save), before = JSON.stringify(live);
+  assert.equal(playbackReviewStep(live.rounds[0], -1)!.thought, 'Opening thought');
+  assert.equal(playbackReviewStep(live.rounds[0], 0)!.resultThought, 'After draw');
+  for (const index of [1, 2, -2, .5]) assert.equal(playbackReviewStep(live.rounds[0], index), undefined);
+  const copy = playbackReviewStep(live.rounds[0], 0)!; copy.drawnCards![0].name = 'Changed copy';
+  for (let i = 0; i < 4; i++) {
+    const html = renderToStaticMarkup(createElement(NurturePlaybackReview, { round: live.rounds[0], index: 0, onNavigate: () => {}, onClose: () => {} }));
+    for (const text of ['Before draw', 'After draw', 'Exact authored reply', save.cards[2].name, '返回当前', '回看期间暂停推进']) assert.ok(html.includes(text));
+  }
+  assert.equal(JSON.stringify(live), before); assert.equal(live.wallet!.gems, 200); assert.equal(live.collection.length, 1); assert.equal(live.rounds[0].cursor, 1);
+  const completed = advance(live), finishedBefore = JSON.stringify(completed);
+  assert.equal(playbackReviewStep(completed.rounds[0], 1)!.action, 'Actual draw');
+  assert.equal(JSON.stringify(completed), finishedBefore);
+});
+
+test('shop, schedule and date presets share cloned content with append and replace, preserving unrelated game data', () => {
+  const source = defaultDesign(); source.shop[0] = { ...source.shop[0], image: 'data:image/png;base64,product', reaction: '收到礼物的原话', effectsEnabled: true, effects: { mood: 5, energy: 0, affection: 2, growth: 0 } };
+  source.shop = [source.shop[0]];
+  const shop = saveCatalogPreset('user', 'My shop', 'shop', source);
+  const schedule = saveCatalogPreset('user', 'My schedule', 'schedules', source);
+  const dates = saveCatalogPreset('user', 'My dates', 'dates', source);
+  assert.deepEqual(readCatalogPresets('other'), []);
+  const target = emptyDesign('Another hero'); target.drawCost = 35;
+  const a = applyCatalogPreset(target, shop, 'append'), b = applyCatalogPreset(target, shop, 'append');
+  assert.equal(a.shop[0].reaction, '收到礼物的原话'); assert.equal(a.shop[0].image, source.shop[0].image); assert.equal(a.shop[0].effects!.mood, 5);
+  a.shop[0].reaction = 'Only A'; assert.equal(b.shop[0].reaction, '收到礼物的原话');
+  assert.equal(readCatalogPresets('user')[0].entries[0].name, shop.entries[0].name);
+  assert.equal(applyCatalogPreset(a, shop, 'append').shop.length, 1);
+  let combined = applyCatalogPreset(b, schedule, 'append'); combined = applyCatalogPreset(combined, dates, 'append');
+  assert.equal(combined.schedules.length, 3); assert.equal(combined.dates.length, 2);
+  assert.equal(combined.drawCost, 35); assert.equal(combined.hero.name, 'Another hero');
+  combined.schedules.push({ ...combined.schedules[0], id: 'extra', name: 'Extra schedule' });
+  const replaced = applyCatalogPreset(combined, schedule, 'replace');
+  assert.equal(replaced.schedules.length, 3); assert.equal(replaced.dates.length, 2); assert.equal(combined.schedules.length, 4);
+  saveCatalogPreset('user', 'Updated schedule', 'schedules', replaced, schedule.id); assert.equal(readCatalogPresets('user').length, 3);
+  deleteCatalogPreset('user', shop.id); assert.equal(b.shop.length, 1); assert.equal(readCatalogPresets('user').length, 2);
+  assert.throws(() => saveCatalogPreset('user', 'Invalid shop', 'shop', defaultDesign()), /反应/);
+  assert.throws(() => saveCatalogPreset('user', 'Empty', 'dates', emptyDesign()), /至少/);
+  for (const kind of ['shop', 'schedules', 'dates'] as const) {
+    const html = renderToStaticMarkup(createElement(NurtureCatalogPresets, { kind, design: source, onChange: () => {} }));
+    assert.ok(html.includes('跨角色套用')); assert.ok(html.includes('保存当前内容为新预设'));
+  }
+  resetGameData('a', 'user'); assert.equal(readCatalogPresets('user').length, 2);
+});
+
+test('reset clears only the current character and identity, retains shared presets and restarts first-round continuity', () => {
+  const a = newSave(), b = newSave(); a.pity = 59; a.srPity = 19; a.collection = [...a.cards];
+  a.memory = { ...emptyMemory(), completedRounds: 15, mood: 'Past mood', thoughts: 'Past thoughts' };
+  const aKey = saveKey('a', 'user'), bKey = saveKey('b', 'user'), otherKey = saveKey('a', 'other');
+  persistSave(aKey, a); persistSave(bKey, b); persistSave(otherKey, a);
+  saveCardPreset('user', 'Shared cards', a.cards);
+  savePortraitPreset('user', 'Shared art', { ...emptyPortrait(), image: 'data:image/png;base64,art' });
+  const fresh = resetGameData('a', 'user');
+  assert.deepEqual(fresh, createEmptySave()); assert.deepEqual(readSave(aKey), fresh);
+  assert.deepEqual(readSave(bKey), b); assert.deepEqual(readSave(otherKey), a);
+  assert.equal(readCardPresets('user').length, 1); assert.equal(readPortraitPresets('user').length, 1);
+  assert.equal(memoryContext(fresh).stage.id, 'first'); assert.equal(memoryContext(fresh).previousRound, null);
+  const settings = renderToStaticMarkup(createElement(NurtureSettings, { save: a, userName: 'User', actorName: 'Player A', onSave: () => {}, onClose: () => {}, onReset: () => {} }));
+  assert.ok(settings.includes('清除当前角色游戏数据')); assert.ok(settings.includes('Player A')); assert.ok(settings.includes('共享预设保留'));
+});
+
+test('record edits reach next-round continuity and deletion removes related memory without undoing settled assets', () => {
+  const save = newSave();
+  const steps = [{ action: 'Old action', thought: 'Old thought', speech: 'Old reply', draw: false, delta: { mood: 0, energy: 0, affection: 0, growth: 0 } }];
+  const round = { id: 'record-1', number: 1, createdAt: '2026-11-18T00:00:00Z', cursor: 1, steps, before: save.stats, after: save.stats, recap: { summary: 'Old summary', mood: 'Old mood', thoughts: 'Old thoughts', threads: [{ id: 'thread-1', text: 'Old plan', status: 'open' as const }], specialEvents: [{ title: 'Old event', detail: 'Old details', stepIndexes: [0] }] } };
+  save.rounds = [round]; save.memory = archiveRound(emptyMemory(), round); save.collection = [save.cards[0]];
+  const draft = draftRoundRecord(round);
+  draft.steps[0].action = 'New action'; draft.steps[0].thought = 'New thought';
+  draft.recap!.summary = 'New summary'; draft.recap!.mood = 'New mood'; draft.recap!.thoughts = 'New thoughts';
+  let next = editRoundRecord(save, round.id, draft);
+  assert.equal(save.rounds[0].steps[0].action, 'Old action');
+  assert.equal(memoryContext(next).previousRound!.summary, 'New summary');
+  assert.equal(memoryContext(next).playerThoughts, 'New thoughts');
+  next = changeMemoryRecords(next, memory => ({ ...memory, events: [], threads: [], mood: '', thoughts: '' }));
+  assert.deepEqual(memoryContext(next).milestones, []); assert.deepEqual(memoryContext(next).recentSpecialEvents, []);
+  assert.deepEqual(memoryContext(next).unfinished, []); assert.equal(memoryContext(next).previousRound!.mood, '');
+  const key = saveKey('a', 'records'); persistSave(key, next); next = readSave(key);
+  assert.deepEqual(memoryContext(next).recentSpecialEvents, []);
+  next = deleteRoundRecord(next, round.id);
+  assert.equal(next.rounds.length, 0); assert.equal(memoryContext(next).previousRound, null);
+  assert.deepEqual(next.wallet, save.wallet); assert.deepEqual(next.stats, save.stats); assert.deepEqual(next.collection, save.collection);
+  assert.equal(next.memory!.completedRounds, 1);
+  const deleted = deleteRoundRecord(save, round.id);
+  assert.deepEqual(deleted.memory!.events, []); assert.deepEqual(deleted.memory!.threads, []);
+  assert.equal(deleted.memory!.thoughts, '');
+  const locked = { ...save, rounds: [{ ...round, cursor: 0 }] };
+  assert.throws(() => deleteRoundRecord(locked, round.id), /播放完成/);
+  assert.throws(() => editRoundRecord(locked, round.id, draft), /播放完成/);
+  assert.throws(() => changeMemoryRecords(locked, m => m), /播放完成/);
+  const html = renderToStaticMarkup(createElement(NurtureMemoryPanel, { save, actorName: 'Player', onChange: () => {} }));
+  assert.ok(html.includes('编辑记录')); assert.ok(html.includes('删除记录')); assert.ok(html.includes('标为已完成'));
+  const log = renderToStaticMarkup(createElement(RoundRecordEditor, { round, onSave: () => {}, onDelete: () => {} }));
+  assert.ok(log.includes('编辑本轮日志')); assert.ok(log.includes('删除本轮日志'));
+});
+
+test('new games start with empty catalogs and zero stats; migration removes untouched examples only once', () => {
+  const fresh = createEmptySave(), design = emptyDesign();
+  assert.deepEqual(fresh.stats, { mood: 0, energy: 0, affection: 0, growth: 0 });
+  assert.deepEqual([design.shop, design.schedules, design.dates], [[], [], []]);
+  const old = newSave(); delete old.starterContentCleared;
+  old.pending = currentPlan(old);
+  old.design!.shop[0].name = 'My edited product';
+  old.design!.dates.push({ id: 'custom-date', name: 'My date', description: '', price: 0, delta: { ...fresh.stats } });
+  const key = saveKey('a', 'cleanup'); persistSave(key, old);
+  const next = readSave(key);
+  assert.deepEqual(next.stats, fresh.stats); assert.deepEqual(next.pending!.stats, fresh.stats);
+  assert.equal(next.design!.shop.length, 1); assert.equal(next.design!.shop[0].name, 'My edited product');
+  assert.equal(next.design!.schedules.length, 0); assert.equal(next.design!.dates.length, 1);
+  next.stats.mood = 70; next.design!.shop = defaultDesign().shop;
+  persistSave(key, next); assert.equal(readSave(key).stats.mood, 70);
+  assert.equal(readSave(key).design!.shop.length, 4);
+});
+
+test('portrait presets share complete snapshots across players without linking saves or user identities', () => {
+  const portrait = { ...emptyPortrait(), image: 'data:image/png;base64,preset', points: { '头': { x: .5, y: .2 } }, replies: { '头': '预设里的原话' } };
+  const preset = savePortraitPreset('user', 'Daily', portrait);
+  const a = newSave(), b = newSave();
+  a.portrait = readPortraitPresets('user')[0].portrait;
+  b.portrait = readPortraitPresets('user')[0].portrait;
+  a.portrait.replies['头'] = 'Only A';
+  assert.equal(b.portrait.replies['头'], '预设里的原话');
+  assert.equal(readPortraitPresets('user')[0].portrait.replies['头'], '预设里的原话');
+  assert.deepEqual(readPortraitPresets('other-user'), []);
+  assert.throws(() => savePortraitPreset('user', 'Invalid', { ...portrait, replies: {} }), /发言/);
+  savePortraitPreset('user', 'Updated', a.portrait, preset.id);
+  assert.equal(readPortraitPresets('user').length, 1);
+  assert.equal(b.portrait.replies['头'], '预设里的原话');
+  deletePortraitPreset('user', preset.id); assert.deepEqual(readPortraitPresets('user'), []);
+  assert.equal(b.portrait.image, portrait.image);
+});
+
+test('card batch presets preserve art and zero weights, support partial imports and skip duplicates', () => {
+  const cards = newSave().cards.map(c => ({ ...c, image: 'data:image/png;base64,art', artType: 'text' as const, artText: 'Saved art', weight: 0 }));
+  const preset = saveCardPreset('user', 'Commons', cards);
+  assert.equal(readCardPresets('user')[0].cards.length, 3);
+  assert.equal(readCardPresets('user')[0].cards[0].weight, 0);
+  const a = importPresetCards([], preset.cards.slice(0, 1));
+  const b = importPresetCards([], readCardPresets('user')[0].cards);
+  assert.equal(a.length, 1); assert.equal(b.length, 3);
+  assert.equal(importPresetCards(b, preset.cards).length, 3);
+  assert.equal(importPresetCards(b, [{ ...cards[0], id: 'another-id' }]).length, 3);
+  a[0].artText = 'Only A'; assert.equal(b[0].artText, 'Saved art');
+  assert.equal(readCardPresets('user')[0].cards[0].artText, 'Saved art');
+  assert.deepEqual(readCardPresets('other-user'), []);
+  assert.throws(() => saveCardPreset('user', 'Bad', [{ ...cards[0], weight: -1 }]));
+  assert.throws(() => saveCardPreset('user', 'Empty', []));
+  const html = renderToStaticMarkup(createElement(NurtureCardPresets, { cards, onChange: () => {} }));
+  assert.ok(html.includes('只选 R 普卡')); assert.ok(html.includes('全选'));
+  deleteCardPreset('user', preset.id); assert.deepEqual(readCardPresets('user'), []);
+  assert.equal(b.length, 3);
+});
+
 test('new games have no sample cards and old sample cards are removed only from live and pending pools', () => {
   assert.deepEqual(createEmptySave().cards, []);
   const samples = [
@@ -85,7 +254,7 @@ test('character and user saves remain isolated, including pending plans', () => 
   const a = newSave(); a.stats.mood = 12; a.pending = { stats: a.stats, speech: '只给你', cards: [], event: a.event };
   persistSave(saveKey('a', 'user'), a);
   assert.equal(readSave(saveKey('a', 'user')).pending?.speech, '只给你');
-  assert.equal(readSave(saveKey('b', 'user')).stats.mood, 70);
+  assert.equal(readSave(saveKey('b', 'user')).stats.mood, 0);
   assert.equal(readSave(saveKey('a', 'other-user')).pending, undefined);
 });
 test('playback gives longer text more reading time and paused dialogs preserve complete existing content', () => {
@@ -563,7 +732,7 @@ test('edited game introduction and catalogs reach AI and drive actual activity, 
   design.shop = [{ id: 'new-gift', name: '羽毛笔', description: '写下日常', type: '道具', currency: 'coins', price: 10 }]; design.drawCost = 1; design.rechargeGems = 5;
   const plan = currentPlan(s); plan.stats.energy = 90; plan.cards = [s.cards[2]];
   const configured = configureGame(s, plan, design);
-  assert.equal(s.design, undefined); assert.equal(s.pending, undefined);
+  assert.deepEqual(s.design, defaultDesign()); assert.equal(s.pending, undefined);
   persistSave(saveKey('a', 'user'), configured);
   assert.deepEqual(readSave(saveKey('a', 'user')).design, design);
   assert.equal(readSave(saveKey('b', 'user')).design, undefined);

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Upload, Crosshair, Trash2 } from 'lucide-react';
 import { BODY_PARTS, imagePoint, type BodyPart, type Portrait } from '../utils/nurtureGame';
 import { compressImage } from '../utils/imageFile';
+import { NurturePortraitPresets } from './NurturePortraitPresets';
 
 export function NurturePortraitEditor({ value, onChange, onBusy }: { value: Portrait; onChange: (value: Portrait) => void; onBusy: (busy: boolean) => void }) {
   const [selected, setSelected] = useState<BodyPart>('头');
@@ -21,6 +22,7 @@ export function NurturePortraitEditor({ value, onChange, onBusy }: { value: Port
     finally { if (alive.current && version === uploadVersion.current) { setUploading(false); onBusy(false); } }
   };
   return <fieldset className="nurture-portrait-editor" disabled={uploading}><legend>立绘与触碰回应</legend><p className="nurture-hint">上传一张完整立绘，点击「定位部位」，选择部位后点击图片上的对应位置。更换图片需重新定位，原有发言会保留。</p>
+    <NurturePortraitPresets value={value} onChange={portrait => { onChange(portrait); setLocating(false); }}/>
     <label className="nurture-upload"><Upload size={16}/>{uploading ? '正在处理图片…' : value.image ? '更换立绘' : '上传立绘'}<input type="file" accept="image/*" disabled={uploading} onChange={e => { void upload(e.target.files?.[0]); e.target.value = ''; }}/></label>
     {value.image && <><button type="button" className="nurture-locate-toggle" aria-pressed={locating} onClick={() => setLocating(!locating)}><Crosshair size={16}/>{locating ? '完成定位' : '定位部位'}</button>
       <div className="nurture-part-picker">{BODY_PARTS.map(part => <button type="button" key={part} aria-pressed={selected === part} onClick={() => setSelected(part)}>{part}{value.points[part] ? ' ✓' : ''}</button>)}</div>

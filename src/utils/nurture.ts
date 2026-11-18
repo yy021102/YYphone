@@ -5,7 +5,7 @@ import { readAnthologyAuthors } from './anthology';
 import { readNurtureIdentity, ownedProducts, validOwnedProduct, productContext, type OwnedProduct } from './nurtureInventory';
 import { BODY_PARTS, emptyPortrait, initialWallet, validPortrait, validWallet, touchTargets, selectRoundTouches, type Portrait, type Wallet, type BodyPart } from './nurtureGame';
 import { MEMORY_RULES, archiveRound, makeRecap, memoryContext, memoryFor, validMemory, validRecap, type NurtureMemory, type RoundRecap } from './nurtureMemory';
-import { defaultDesign, validDesign, validateDesign, validProduct, type GameDesign, type GameProduct } from './nurtureDesign';
+import { defaultDesign, withoutStarterContent, emptyDelta, validDesign, validateDesign, validProduct, type GameDesign, type GameProduct } from './nurtureDesign';
 import { cardsForDraw, isPityRare, prepareDrawSequence, srPityFromCollection } from './nurtureGacha';
 import { defaultPool, poolContext, validPool, type PoolCampaign } from './nurturePool';
 
@@ -16,7 +16,7 @@ export type Event = { title: string; description: string; enabled: boolean; ends
 export type Plan = { stats: Stats; speech: string; cards: Card[]; event: Event; pool?: PoolCampaign };
 export type Step = { action: string; thought: string; speech: string; delta: Stats; draw: boolean; card?: Card; kind?: string; target?: BodyPart; itemId?: string; wallet?: Wallet; acquired?: string; receipt?: string; drawCount?: 1 | 10; drawnCards?: Card[]; resultThought?: string; paymentThought?: string; drawResultIds?: string[]; pityAfter?: number; srPityAfter?: number; purchasedItem?: OwnedProduct; sentItemId?: string; statusNote?: string; giftedProduct?: GameProduct };
 export type Round = { id: string; createdAt: string; steps: Step[]; cursor: number; before: Stats; after: Stats; number?: number; recap?: RoundRecap; eventTitle?: string; openingThought?: string; poolRevision?: string };
-export type Save = { version: 1; stats: Stats; cards: Card[]; event: Event; collection: Card[]; rounds: Round[]; pending?: Plan; portrait?: Portrait; wallet?: Wallet; inventory?: string[]; memory?: NurtureMemory; design?: GameDesign; pity?: number; srPity?: number; items?: OwnedProduct[]; pool?: PoolCampaign };
+export type Save = { version: 1; stats: Stats; cards: Card[]; event: Event; collection: Card[]; rounds: Round[]; pending?: Plan; portrait?: Portrait; wallet?: Wallet; inventory?: string[]; memory?: NurtureMemory; design?: GameDesign; pity?: number; srPity?: number; items?: OwnedProduct[]; pool?: PoolCampaign; starterContentCleared?: boolean };
 const keys = Object.keys(STAT_LABELS) as (keyof Stats)[];
 const BRIEF_THOUGHT_RULES = '\n心理活动用于逐条播放，务必简短：thought、openingThought、paymentThought、resultThought 每段只写1～2个短句，建议20～45个中文字，围绕眼前这次具体操作与反应；不要写长篇分析、背景复述或重复抒情。memory.thoughts也用简短句子概括留存的心情。此要求只针对AI生成的心理活动，绝不能缩写、截断、改写用户预设的留言、触碰发言或收礼反应。';
 const ROUND_TOUCH_RULES = '\n本轮touchTargets已经由程序随机抽选，数量最多3个。必须为列表中的每个位置分别安排恰好1个kind=touch的步骤，target逐一匹配；禁止重复触碰同一位置或触碰列表外位置。列表为空时不触碰。先在openingThought中写打开游戏的心声，再将这些触碰放在steps开头，全部触碰结束后才安排其他可选游戏操作。每次触碰的thought必须写角色在触碰该具体部位、读到该部位reply原文之后的第一人称心理活动：结合位置、触碰动作、这句具体发言、人设、当前关系阶段与前轮记忆写出独立反应，不能套用相同的泛泛独白，不能只写触碰前的期待。角色此时只读到了预设reply，不得补写、改写或揣测user的新发言。speech仍返回空字符串，程序将原样填入对应reply。';
@@ -33,7 +33,7 @@ export function validatePlan(v: unknown): asserts v is Plan {
   if (v.event.enabled && (!String(v.event.title).trim() || !Number.isFinite(Date.parse(String(v.event.endsAt))) || Date.parse(String(v.event.endsAt)) <= Date.now())) throw new Error('开启活动需要标题和未来的结束时间。');
 }
 export function newSave(): Save {
-  return { version: 1, portrait: emptyPortrait(), wallet: initialWallet(), inventory: [], stats: { mood: 70, energy: 80, affection: 20, growth: 10 }, cards: [], event: { title: '', description: '', endsAt: '', enabled: false }, collection: [], rounds: [], pity: 0, srPity: 0 };
+  return { version: 1, portrait: emptyPortrait(), wallet: initialWallet(), inventory: [], stats: emptyDelta(), starterContentCleared: true, cards: [], event: { title: '', description: '', endsAt: '', enabled: false }, collection: [], rounds: [], pity: 0, srPity: 0 };
 }
 const starterCards = new Map([['first', '初见的微光'], ['afternoon', '只属于你的午后'], ['promise', '星夜约定']]);
 const withoutStarterCards = (cards: Card[]) => cards.filter(c => starterCards.get(c.id) !== c.name);
@@ -69,16 +69,27 @@ export function readSave(key: string): Save {
     if (v.design !== undefined && !validDesign(v.design)) throw new Error();
     if (v.pool !== undefined && !validPool(v.pool) || obj(v.pending) && v.pending.pool !== undefined && !validPool(v.pending.pool)) throw new Error();
     if (v.items !== undefined && (!Array.isArray(v.items) || !v.items.every(validOwnedProduct) || new Set(v.items.map(i => i.id)).size !== v.items.length)) throw new Error();
-    const save = { ...v, srPity: v.srPity ?? srPityFromCollection(v.collection as Card[]), portrait: v.portrait ?? emptyPortrait(), wallet: v.wallet ?? initialWallet(), inventory: v.inventory ?? [] } as Save;
+    let save = { ...v, srPity: v.srPity ?? srPityFromCollection(v.collection as Card[]), portrait: v.portrait ?? emptyPortrait(), wallet: v.wallet ?? initialWallet(), inventory: v.inventory ?? [] } as Save;
+    const needsCleanup = !save.starterContentCleared;
+    if (needsCleanup) {
+      const cleanStats = (stats: Stats) => stats.mood === 70 && stats.energy === 80 && stats.affection === 20 && stats.growth === 10 ? emptyDelta() : stats;
+      save = { ...save, starterContentCleared: true, stats: cleanStats(save.stats), design: save.design ? withoutStarterContent(save.design) : undefined,
+        pending: save.pending ? { ...save.pending, stats: cleanStats(save.pending.stats) } : undefined };
+    }
     const cards = withoutStarterCards(save.cards);
     const pending = save.pending ? { ...save.pending, cards: withoutStarterCards(save.pending.cards) } : undefined;
-    if (cards.length !== save.cards.length || pending?.cards.length !== save.pending?.cards.length) {
+    if (needsCleanup || cards.length !== save.cards.length || pending?.cards.length !== save.pending?.cards.length) {
       const migrated = { ...save, cards, pending }; persistSave(key, migrated); return migrated;
     }
     return save;
   } catch { throw new Error('养成存档无法读取，原数据已保留。请先在系统设置导出备份。'); }
 }
 export function persistSave(key: string, save: Save) { writeStoredValue(key, save); }
+export function resetGameData(actorId: string, userId: string): Save {
+  const save = newSave();
+  persistSave(saveKey(actorId, userId), save);
+  return save;
+}
 export function pickCard(cards: Card[], random = Math.random): Card | undefined {
   const total = cards.reduce((n, c) => n + c.weight, 0);
   if (!(total > 0)) return undefined;

@@ -1,8 +1,11 @@
+import { NurturePlaybackReview } from '../components/NurturePlaybackReview';
+import { RoundRecordEditor } from '../components/NurtureRecordEditor';
+import { changeMemoryRecords, editRoundRecord, deleteRoundRecord } from '../utils/nurtureRecords';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, Heart, Settings, Star, Sparkles, Eye, Pause, Play } from 'lucide-react';
 import { readAnthologyAuthors } from '../utils/anthology';
 import { readNurtureIdentity, ownedProducts } from '../utils/nurtureInventory';
-import { advance, generateRound, persistSave, readSave, saveKey, STAT_LABELS, validatePlan, type Save, type Stats, type Step } from '../utils/nurture';
+import { advance, resetGameData, generateRound, persistSave, readSave, saveKey, STAT_LABELS, validatePlan, type Save, type Stats, type Step } from '../utils/nurture';
 import './nurture.css';
 import { NurtureCardArt } from '../components/NurtureCardArt';
 import { NurtureInventory } from '../components/NurtureInventory';
@@ -37,6 +40,10 @@ function Game({ actorId, user, onLock, onColors }: { actorId: string; user: Retu
   const [showingLastStep, setShowingLastStep] = useState(false);
   const [preview, setPreview] = useState(false);
   const [paused, setPaused] = useState(false);
+  const [autoPlay, setAutoPlay] = useState(false);
+  const [reviewIndex, setReviewIndex] = useState<number | null>(null);
+  const reviewing = reviewIndex !== null;
+  const [resetVersion, setResetVersion] = useState(0);
   const [settings, setSettings] = useState(false), [tab, setTab] = useState<'home' | 'cards' | 'items' | 'logs'>('home');
   const controller = useRef<AbortController | null>(null);
   useEffect(() => () => { controller.current?.abort(); }, []);
@@ -46,35 +53,55 @@ function Game({ actorId, user, onLock, onColors }: { actorId: string; user: Retu
   useEffect(() => { onLock(busy || playing || preview); return () => onLock(false); }, [busy, playing, preview, onLock]);
   const commit = (next: Save) => { persistSave(key, next); setSave(next); };
   useEffect(() => {
-    if (!save || !hasPendingSteps || error || paused) return;
+    if (!save || !hasPendingSteps || error || paused || !autoPlay || reviewing) return;
     const timer = window.setTimeout(() => { try { const next = advance(save); commit(next); if (next.rounds[0].cursor === next.rounds[0].steps.length) setShowingLastStep(true); } catch(e) { setError(errorText(e)); } }, playbackDuration(currentStep));
     return () => window.clearTimeout(timer);
-  }, [save, hasPendingSteps, error, paused, currentStep]);
+  }, [save, hasPendingSteps, error, paused, currentStep, autoPlay, reviewing]);
   useEffect(() => {
-    if (!showingLastStep || paused) return;
+    if (!showingLastStep || paused || !autoPlay || error || reviewing) return;
     const timer = window.setTimeout(() => setShowingLastStep(false), playbackDuration(round?.steps.at(-1)));
     return () => window.clearTimeout(timer);
-  }, [showingLastStep, paused]);
+  }, [showingLastStep, paused, autoPlay, error, round, reviewing]);
+  const continuePlayback = () => {
+    if (!save || busy || preview || reviewing || !playing) return;
+    setPaused(false);
+    if (showingLastStep) { setShowingLastStep(false); return; }
+    try { const next = advance(save); commit(next); setError(''); if (next.rounds[0].cursor === next.rounds[0].steps.length) setShowingLastStep(true); }
+    catch (e) { setError(errorText(e)); }
+  };
+  const resetCurrentGame = () => {
+    if (busy || playing || preview) return;
+    try {
+      const fresh = resetGameData(actorId, user.id); setSave(fresh); setError(''); setSettings(false); setTab('home');
+      setShowingLastStep(false); setReviewIndex(null); setPaused(false); setAutoPlay(false); setResetVersion(v => v + 1);
+    } catch (e) { setError(errorText(e)); }
+  };
+  const updateRecords = (update: (current: Save) => Save) => {
+    if (!save || busy || playing || preview) return;
+    try { commit(update(save)); setError(''); } catch (e) { setError(errorText(e)); }
+  };
   const generate = async () => {
     if (!save || busy || playing || preview || controller.current) return;
-    const active = new AbortController(); controller.current = active; setBusy(true); setPaused(false); setTab('home'); setError('');
+    const active = new AbortController(); controller.current = active; setBusy(true); setReviewIndex(null); setPaused(false); setTab('home'); setError('');
     try { const next = await generateRound(save, actorId, active.signal); active.signal.throwIfAborted(); commit(next); setTab('home'); }
     catch(e) { if (!active.signal.aborted) setError(errorText(e)); }
     finally { if (controller.current === active) { controller.current = null; setBusy(false); } }
   };
   if (!save) return <p role="alert" className="nurture-error">{error}</p>;
-  return <><div className="nurture-toolbar" inert={preview}><span><span className="nurture-online"/> {actor.name} · {busy ? '正在操作' : playing ? '游戏进行中' : '已登录'}</span><div className="nurture-toolbar-actions">{playing && <button type="button" aria-label={paused ? "\u7ee7\u7eed\u64ad\u653e" : "\u6682\u505c\u64ad\u653e"} title={paused ? "\u7ee7\u7eed\u64ad\u653e" : "\u6682\u505c\u64ad\u653e"} onClick={() => setPaused(p => !p)}>{paused ? <Play size={17}/> : <Pause size={17}/>}</button>}<button aria-label="生成新一轮" title={busy ? '角色正在操作…' : playing ? '正在播放…' : '生成新一轮'} disabled={busy || playing} onClick={() => void generate()}><Sparkles size={17} className={busy ? 'animate-pulse' : undefined}/></button><button aria-label={"\u9884\u89c8\u6e38\u620f\u9875\u9762"} title={"\u9884\u89c8\u6e38\u620f\u9875\u9762"} disabled={busy || playing} onClick={() => setPreview(true)}><Eye size={17}/></button><button aria-label="策划设置" title="策划设置" disabled={busy || playing} onClick={() => setSettings(true)}><Settings size={18}/></button></div></div>
+  return <><div className="nurture-toolbar" inert={preview || reviewing}><span><span className="nurture-online"/> {actor.name} · {busy ? '正在操作' : playing ? '游戏进行中' : '已登录'}</span><div className="nurture-toolbar-actions">{playing && autoPlay && <button type="button" aria-label={paused ? "\u7ee7\u7eed\u64ad\u653e" : "\u6682\u505c\u64ad\u653e"} title={paused ? "\u7ee7\u7eed\u64ad\u653e" : "\u6682\u505c\u64ad\u653e"} onClick={() => setPaused(p => !p)}>{paused ? <Play size={17}/> : <Pause size={17}/>}</button>}<button aria-label="生成新一轮" title={busy ? '角色正在操作…' : playing ? '正在播放…' : '生成新一轮'} disabled={busy || playing} onClick={() => void generate()}><Sparkles size={17} className={busy ? 'animate-pulse' : undefined}/></button><button aria-label={"\u9884\u89c8\u6e38\u620f\u9875\u9762"} title={"\u9884\u89c8\u6e38\u620f\u9875\u9762"} disabled={busy || playing} onClick={() => setPreview(true)}><Eye size={17}/></button><button aria-label="策划设置" title="策划设置" disabled={busy || playing} onClick={() => setSettings(true)}><Settings size={18}/></button></div></div>
+      {playing && <div className="nurture-playback-controls" inert={reviewing}><label><input type="checkbox" checked={autoPlay} onChange={e => { setAutoPlay(e.target.checked); setPaused(false); }}/>{'\u81ea\u52a8\u64ad\u653e'}</label><button type="button" disabled={!round?.cursor} onClick={() => setReviewIndex(Math.max(-1, (round?.cursor ?? 0) - 2))}>{'\u4e0a\u4e00\u6761'}</button><button type="button" onClick={continuePlayback}>{showingLastStep ? '\u7ed3\u675f\u672c\u8f6e' : '\u70b9\u51fb\u7ee7\u7eed'}<Play size={14}/></button></div>}
     <div className="nurture-scroll" inert={preview}>
       <nav className="nurture-tabs">{(['home', 'cards', 'items', 'logs'] as const).map((t, i) => <button key={t} disabled={busy || playing} aria-current={tab === t ? 'page' : undefined} onClick={() => setTab(t)}>{['陪伴', `卡册 ${save.collection.length}`, `物品栏 ${ownedProducts(save).filter(i => i.status === 'owned').length}`, '游戏日志'][i]}{t === 'items' && playing && round?.steps[round.cursor - 1]?.kind === 'gift' && <NurtureTap key={`${round.id}:${round.cursor}`}/>}</button>)}</nav>
-      {tab === 'home' && <><NurtureStage save={save} userName={save.design?.hero.nickname || save.design?.hero.name || user.name} actorName={actor.name} onConfigure={(plan, design) => { if (busy || playing || preview) return; validatePlan(plan); commit(configureGame(save, plan, design)); }} step={currentStep} busy={busy} playing={playing} paused={paused} onSettings={() => setSettings(true)}/>
+      {tab === 'home' && <><NurtureStage key={resetVersion} save={save} userName={save.design?.hero.nickname || save.design?.hero.name || user.name} actorName={actor.name} onConfigure={(plan, design) => { if (busy || playing || preview) return; validatePlan(plan); commit(configureGame(save, plan, design)); }} step={currentStep} busy={busy} playing={playing} paused={paused || reviewing} onSettings={() => setSettings(true)}/>
       </>}
       {tab === 'cards' && <section><h2 className="nurture-section-title">收集的每一瞬间</h2>{!save.collection.length && <p className="nurture-hint">角色在游戏中抽到的卡面，会珍藏在这里。</p>}<div className="nurture-card-grid">{save.collection.map((c, i) => <article key={i} className="nurture-card"><NurtureCardArt card={c}/><small>{c.rarity}</small><strong>{c.name}</strong><p>{c.description}</p></article>)}</div></section>}
       {tab === 'items' && <NurtureInventory save={save}/>}
-      {tab === 'logs' && <section><NurtureMemoryPanel save={save} actorName={actor.name}/><h2 className="nurture-section-title">{actor.name}的游戏日志</h2>{!save.rounds.length && <p className="nurture-hint">日常尚未开始。</p>}{save.rounds.map((r, i) => <details key={r.id} className="nurture-log"><summary>第 {r.number ?? save.rounds.length - i} 轮 · {new Date(r.createdAt).toLocaleString('zh-CN')} · {r.cursor}/{r.steps.length}</summary><NurtureRoundRecap round={r}/>{r.steps.slice(0, r.cursor).map((s, index) => <StepView key={index} step={s} index={index}/>)}</details>)}</section>}
+      {tab === 'logs' && <section><NurtureMemoryPanel save={save} actorName={actor.name} onChange={memory => updateRecords(current => changeMemoryRecords(current, () => memory))}/><h2 className="nurture-section-title">{actor.name}的游戏日志</h2>{!save.rounds.length && <p className="nurture-hint">日常尚未开始。</p>}{save.rounds.map((r, i) => <details key={r.id} className="nurture-log"><summary>第 {r.number ?? save.rounds.length - i} 轮 · {new Date(r.createdAt).toLocaleString('zh-CN')} · {r.cursor}/{r.steps.length}</summary><RoundRecordEditor round={r} onSave={draft => updateRecords(current => editRoundRecord(current, r.id, draft))} onDelete={() => updateRecords(current => deleteRoundRecord(current, r.id))}/><NurtureRoundRecap round={r}/>{r.steps.slice(0, r.cursor).map((s, index) => <StepView key={index} step={s} index={index}/>)}</details>)}</section>}
       {error && <p className="nurture-error" role="alert">{error}<button onClick={() => setError('')}>关闭提示</button></p>}
     </div>
+    {reviewing && round && <NurturePlaybackReview round={round} index={reviewIndex!} onNavigate={setReviewIndex} onClose={() => setReviewIndex(null)}/>}
     {preview && <NurturePreview save={save} actorName={actor.name} userName={save.design?.hero.nickname || save.design?.hero.name || user.name} onClose={() => setPreview(false)}/>}
-    {settings && <NurtureSettings save={save} userName={user.name} onClose={() => setSettings(false)} onSave={(design, portrait) => { if (busy || playing || preview) return; commit({ ...save, design, portrait }); setSettings(false); }}/>}</>;
+    {settings && <NurtureSettings save={save} userName={user.name} actorName={actor.name} onReset={resetCurrentGame} onClose={() => setSettings(false)} onSave={(design, portrait) => { if (busy || playing || preview) return; commit({ ...save, design, portrait }); setSettings(false); }}/>}</>;
 }
 function StepView({ step: s, index, before }: { step: import('../utils/nurture').Step; index: number; before?: Stats }) {
   return <article className="nurture-step"><small>STEP {String(index + 1).padStart(2, '0')}</small><h3>{s.action}</h3><NurtureStatusNote text={s.statusNote}/><blockquote>“{s.thought}”</blockquote>{s.resultThought && <blockquote>{s.resultThought}</blockquote>}{s.speech && <p className="nurture-speech">{s.speech}</p>}{s.draw && <div className="nurture-draw">{s.card ? <><div className="nurture-draw-history">{cardsForDraw(s).map((card, i) => <div key={i}><NurtureCardArt card={card}/><strong>{card.rarity} ? {card.name}</strong></div>)}</div><Star size={16}/>{s.card.rarity} · {s.card.name}<p>{s.card.description}</p></> : '卡池暂未开放，本次未抽卡。'}</div>}{s.receipt && <p className="nurture-receipt">{s.receipt}</p>}<div className="nurture-deltas">{statKeys.map(k => { const delta = before ? Math.max(0, Math.min(100, before[k] + s.delta[k])) - before[k] : s.delta[k]; return delta !== 0 && <span key={k}>{STAT_LABELS[k]} {delta > 0 ? '+' : ''}{delta}</span>; })}</div></article>;

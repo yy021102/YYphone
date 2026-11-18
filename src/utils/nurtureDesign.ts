@@ -11,7 +11,16 @@ export type GameProduct = { id: string; name: string; description: string; type:
 export type GameDesign = { description: string; hero: { name: string; nickname: string; setting: string }; shop: GameProduct[]; schedules: GameActivity[]; dates: GameActivity[]; drawCost: number; rechargeGems: number; colors?: NurtureColors; statusNote?: string };
 export const emptyDelta = (): Stats => ({ mood: 0, energy: 0, affection: 0, growth: 0 });
 export function defaultDesign(userName = '我'): GameDesign {
-  return { description: '一款以陪伴、触碰互动、日程培养、约会与卡面收集为核心的养成游戏。', hero: { name: userName, nickname: '', setting: '' }, shop: SHOP.map(p => ({ ...p })), schedules: SCHEDULES.map(a => ({ ...a, price: 0, delta: { ...a.delta } })), dates: DATES.map(a => ({ ...a, delta: { ...a.delta } })), drawCost: 100, rechargeGems: 60 };
+  return { description: '一款以陪伴、触碰互动、日程培养、约会与卡面收集为核心的养成游戏。', hero: { name: userName, nickname: '', setting: '' }, shop: [], schedules: [], dates: [], drawCost: 100, rechargeGems: 60 };
+}
+// Remove only untouched starter content, preserving user-created or edited entries.
+export function withoutStarterContent(design: GameDesign): GameDesign {
+  const same = (a: object, b: object) => JSON.stringify(Object.entries(a).sort()) === JSON.stringify(Object.entries(b).sort());
+  return { ...design,
+    shop: design.shop.filter(p => !SHOP.some(sample => same(p, sample))),
+    schedules: design.schedules.filter(a => !SCHEDULES.some(sample => same(a, { ...sample, price: 0 }))),
+    dates: design.dates.filter(a => !DATES.some(sample => same(a, sample))),
+  };
 }
 const obj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const text = (v: unknown, max = 6000) => typeof v === 'string' && v.length <= max;
