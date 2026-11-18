@@ -1,3 +1,4 @@
+import { NurtureNumberInput } from './NurtureNumberInput';
 import { useEffect, useRef, useState } from 'react';
 import type { GameProduct } from '../utils/nurtureDesign';
 import { emptyDelta } from '../utils/nurtureDesign';
@@ -22,7 +23,7 @@ export function NurtureProductEditor({ product, onChange, onBusy }: { product: G
   return <fieldset disabled={busy}><legend>商品展示与收到后的反应</legend><label className="nurture-upload">{busy ? '正在处理图片…' : '上传商品图片'}<input type="file" accept="image/*" onChange={e => { void upload(e.target.files?.[0]); e.target.value = ''; }}/></label><label>商品图片链接<input type="url" value={product.image?.startsWith('data:') ? '' : product.image ?? ''} onChange={e => onChange({ image: e.target.value })} placeholder={product.image?.startsWith('data:') ? '已上传图片，可填链接替换' : 'https://…'}/></label>{product.image && <img className="nurture-product-preview" src={product.image} alt={product.name}/>}
     <label>「我」收到后的反应（必填）<textarea required maxLength={1500} value={product.reaction ?? ''} onChange={e => onChange({ reaction: e.target.value })} placeholder="由你填写收到这件东西后的发言或反应，送出时原样播放。"/></label><p className="nurture-hint">购买只放入物品栏；角色送出后才播放反应。AI 只写角色的心理活动，不替你补写。</p>
     <label className="nurture-checkbox"><input type="checkbox" checked={product.effectsEnabled ?? false} onChange={e => onChange({ effectsEnabled: e.target.checked, effects })}/>收到后影响数值</label>
-    {product.effectsEnabled && <div className="nurture-stat-fields">{(Object.keys(STAT_LABELS) as (keyof Stats)[]).map(k => <label key={k}>{STAT_LABELS[k]}变化<input required type="number" min={-15} max={15} value={effects[k]} onChange={e => onChange({ effects: { ...effects, [k]: e.target.valueAsNumber } })}/></label>)}</div>}
+    {product.effectsEnabled && <div className="nurture-stat-fields">{(Object.keys(STAT_LABELS) as (keyof Stats)[]).map(k => <label key={k}>{STAT_LABELS[k]}变化<NurtureNumberInput min={-15} max={15} value={effects[k]} onChange={number => onChange({ effects: { ...effects, [k]: number } })}/></label>)}</div>}
     {error && <p role="alert" className="nurture-error">{error}</p>}
   </fieldset>;
 }

@@ -425,19 +425,17 @@ test('追更 produces a new chapter and five independent comments, then commits 
     assert.ok(request.messages[0].content.startsWith('优先前置要求'));
     assert.doesNotMatch(JSON.stringify(request), /不该自动注入的全局内容/);
     assert.deepEqual(input.worldBooks, ['【绑定书 / 角色背景】\n角色绑定背景默认读取']);
-    if (calls === 1) {
-      assert.equal(input.chapter, 3);
-      assert.match(input.idea, /希望两人一起去海边，先把误会说清楚/);
-      return Response.json({ choices: [{ message: { content: '{"chapterTitle":"新的约定","body":"第三章的新正文。"}' } }] });
-    }
+    assert.equal(input.chapter, 3);
+    assert.match(input.idea, /希望两人一起去海边，先把误会说清楚/);
     assert.equal(input.commentPlan.count, 5); assert.equal(input.commentPlan.chapter, 2);
-    assert.equal(input.currentChapter.body, '第三章的新正文。');
+    assert.equal(input.currentChapter.number, 3);
     assert.deepEqual(input.comments, []);
-    assert.equal(input.work.chapters.length, 3);
-    return completion(generated(input.commentPlan));
+    assert.deepEqual(input.previousChapters, work.chapters);
+    assert.deepEqual(input.commentWorldBooks, input.worldBooks);
+    return Response.json({ choices: [{ message: { content: JSON.stringify({ chapterTitle: '新的约定', body: '第三章的新正文。', comments: generated(input.commentPlan) }) } }] });
   });
   const update = await generateAo3ChapterUpdate(work, new AbortController().signal, '  希望两人一起去海边，先把误会说清楚  ');
-  assert.equal(calls, 2); assert.equal(update.comments.length, 5);
+  assert.equal(calls, 1); assert.ok(update.comments); assert.equal(update.comments.length, 5);
   assert.ok(update.comments.every(c => c.chapter === 2));
   assert.equal(update.comments[1].replyTo, update.comments[0].id);
   assert.equal(update.comments[1].author, work.author);
@@ -454,23 +452,44 @@ test('追更 produces a new chapter and five independent comments, then commits 
     comments: update.comments.map(c => ({ ...c, chapter: 0 })), now }), /回复跨章/);
 });
 
-test('failed or cancelled new-chapter comments never partially save a chapter or overwrite old comments', async () => {
+test('invalid new-chapter comments preserve the complete chapter for saving; cancellation still never saves', async () => {
   const work = setup(); let calls = 0;
   const controller = new AbortController();
   mock.method(globalThis, 'fetch', async () => {
     calls++;
-    if (calls % 2 === 1) return Response.json({ choices: [{ message: { content: '{"chapterTitle":"未保存的续章","body":"新章正文"}' } }] });
-    return completion([]);
+    return Response.json({ choices: [{ message: { content: '{"chapterTitle":"保留的续章","body":"新章正文","comments":[]}' } }] });
   });
-  await assert.rejects(generateAo3ChapterUpdate(work, controller.signal), /五条评论/);
+  const update = await generateAo3ChapterUpdate(work, controller.signal);
+  assert.equal(calls, 1); assert.equal(update.chapter.body, '新章正文'); assert.equal(update.comments, undefined); assert.match(update.commentError!, /五条评论/);
   assert.deepEqual(readAo3State().works[0], work);
+  const state = updateAo3(readAo3State(), { type: 'continue', work, ...update, now });
+  assert.equal(state.works[0].chapters.length, 3); assert.deepEqual(state.works[0].comments, work.comments);
+  writeAo3State(state); assert.deepEqual(readAo3State(), state);
+  const html = renderToStaticMarkup(createElement(Ao3Comments, { work: state.works[0], chapter: 2, userName: '我', onAction: () => true }));
+  assert.match(html, /生成本章评论/);
   mock.method(globalThis, 'fetch', async () => {
     calls++;
-    if (calls % 2 === 1) return Response.json({ choices: [{ message: { content: '{"chapterTitle":"未保存的续章","body":"新章正文"}' } }] });
     controller.abort(); return completion([]);
   });
   await assert.rejects(generateAo3ChapterUpdate(work, controller.signal));
+  assert.deepEqual(readAo3State(), state); assert.equal(calls, 2);
+});
+
+test('a truncated comments array does not discard a fully decoded chapter body; unfinished bodies remain errors', async () => {
+  const work = setup(); let calls = 0;
+  const body = '完整的正文。\n\n人物说：“一起走吧。”';
+  mock.method(globalThis, 'fetch', async () => {
+    calls++;
+    return Response.json({ choices: [{ message: { content: `{"chapterTitle":"新章","body":${JSON.stringify(body)},"comments":[{"body":"未完成` } }] });
+  });
+  const update = await generateAo3ChapterUpdate(work, new AbortController().signal);
+  assert.equal(update.chapter.body, body); assert.equal(update.comments, undefined); assert.ok(update.commentError); assert.equal(calls, 1);
   assert.deepEqual(readAo3State().works[0], work);
+  mock.method(globalThis, 'fetch', async () => {
+    calls++; return Response.json({ choices: [{ message: { content: '{"chapterTitle":"新章","body":"不完整' } }] });
+  });
+  await assert.rejects(generateAo3ChapterUpdate(work, new AbortController().signal));
+  assert.deepEqual(readAo3State().works[0], work); assert.equal(calls, 2);
 });
 
 test('removing trailing chapters through the editor removes only their comments and keeps retained chapter threads valid', () => {

@@ -33,6 +33,11 @@ import { playbackReviewStep } from './nurturePlaybackReview';
 import { NurturePlaybackReview } from '../components/NurturePlaybackReview';
 import { readCatalogPresets, saveCatalogPreset, applyCatalogPreset, deleteCatalogPreset } from './nurtureCatalogPresets';
 import { NurtureCatalogPresets } from '../components/NurtureCatalogPresets';
+import { NurtureCollection } from '../components/NurtureCollection';
+import { groupedCollection, changeCardRarity, DEFAULT_RARITY_WEIGHTS } from './nurtureCollection';
+import { parseNurtureNumber, NurtureNumberInput } from '../components/NurtureNumberInput';
+import { typewriterCount, thoughtPlaybackMs, DIALOG_HOLD_MS } from '../components/NurturePlaybackText';
+import { rechargePrice, rechargeQuote } from './nurtureRecharge';
 
 function defaultDesign(name = '\u6211'): import('./nurtureDesign').GameDesign {
   return { ...emptyDesign(name), shop: SHOP.map(p => ({ ...p })), schedules: SCHEDULES.map(a => ({ ...a, price: 0, delta: { ...a.delta } })), dates: DATES.map(a => ({ ...a, delta: { ...a.delta } })) };
@@ -55,6 +60,150 @@ beforeEach(async () => {
   writeStoredValue('yyphone:api-presets', [{ id: 'main', name: '主 API', endpoint: 'https://nurture.invalid/v1', apiKey: 'fixture', model: 'model' }]);
 });
 afterEach(() => mock.restoreAll());
+test('draws return 30 coins per actual card and configured schedule rewards settle only once after successful completion', async () => {
+  const save = newSave(); save.wallet = { gems: 2000, coins: 20, recharged: 0 };
+  save.design!.schedules = [
+    { id: 'paid-task', name: 'Garden task', description: '', price: 5, coinReward: 80, delta: { mood: 0, energy: -5, affection: 0, growth: 2 } },
+    { id: 'unaffordable-task', name: 'Expensive task', description: '', price: 9999, coinReward: 500, delta: { mood: 0, energy: 0, affection: 0, growth: 2 } },
+  ];
+  let calls = 0; mock.method(Math, 'random', () => 0);
+  mock.method(globalThis, 'fetch', async (_url: unknown, init?: RequestInit) => {
+    calls++; const source = JSON.parse(JSON.parse(String(init?.body)).messages[1].content);
+    assert.equal(source.game.drawCoinReward, 30); assert.equal(source.schedules[0].coinReward, 80); assert.equal(source.event, null);
+    const base = { action: 'Play', thought: 'Plan my budget.', speech: '', draw: false, delta: { mood: 0, energy: 0, affection: 0, growth: 0 } };
+    return Response.json({ choices: [{ message: { content: JSON.stringify({ steps: [
+      { ...base, kind: 'draw', draw: true, drawCount: 1, drawResultIds: source.drawSequence.slice(0, 1), resultThought: 'A familiar common card.' },
+      { ...base, kind: 'draw', draw: true, drawCount: 10, drawResultIds: source.drawSequence.slice(1, 11), resultThought: 'These daily moments are nice.' },
+      { ...base, kind: 'schedule', itemId: 'paid-task' }, { ...base, kind: 'schedule', itemId: 'unaffordable-task' },
+    ] }) } }] });
+  });
+  let next = await generateRound(save, 'a', new AbortController().signal);
+  assert.equal(next.wallet!.coins, 20);
+  next = advance(next); assert.equal(next.wallet!.coins, 50); assert.equal(next.rounds[0].steps[0].coinReward, 30);
+  next = advance(next); assert.equal(next.wallet!.coins, 350); assert.equal(next.rounds[0].steps[1].coinReward, 300);
+  next = advance(next); assert.equal(next.wallet!.coins, 425);
+  const key = saveKey('a', 'rewards'); persistSave(key, next); next = readSave(key);
+  next = advance(next); assert.equal(next.wallet!.coins, 425); assert.equal(advance(next).wallet!.coins, 425);
+  assert.equal(next.collection.length, 11); assert.equal(calls, 1);
+});
+
+test('collection groups duplicate cards by identity and rarity; rarity selection applies editable default weights', () => {
+  const cards = newSave().cards, collection = [cards[0], cards[0], cards[1], cards[2], cards[0]];
+  const grouped = groupedCollection(collection); assert.equal(grouped.length, 3); assert.equal(grouped[0].count, 3);
+  const html = renderToStaticMarkup(createElement(NurtureCollection, { cards: collection }));
+  assert.equal((html.match(/class="nurture-card"/g) ?? []).length, 3); assert.ok(html.includes('×3'));
+  assert.ok(html.indexOf('>SSR<') < html.indexOf('>SR<')); assert.ok(html.indexOf('>SR<') < html.indexOf('>R<'));
+  for (const rarity of ['R', 'SR', 'SSR'] as const) {
+    const changed = changeCardRarity({ ...cards[0], weight: 999 }, rarity);
+    assert.equal(changed.weight, DEFAULT_RARITY_WEIGHTS[rarity]); assert.equal(changed.pityEligible, rarity === 'SSR');
+    validatePlan({ ...currentPlan(newSave()), cards: [{ ...changed, weight: 12.5 }] });
+  }
+  const editor = renderToStaticMarkup(createElement(NurtureModuleEditor, { module: 'draw', save: newSave(), userName: 'User', onSave: () => {} }));
+  assert.ok(editor.includes('<option value="SSR"')); assert.ok(editor.includes('<option value="SR"')); assert.ok(editor.includes('<option value="R"'));
+});
+
+test('characters choose different recharge amounts in one request; conversion and order snapshots stay exact', async () => {
+  assert.deepEqual(rechargeQuote(2.5, 37.5), { yuan: 2.5, gems: 93 });
+  for (const amount of [0, -1, 1.234, NaN, Infinity]) assert.throws(() => rechargeQuote(amount, 10));
+  const save = newSave(); save.design = { ...defaultDesign(), gemsPerYuan: 37.5, rechargeGems: 99999 };
+  let calls = 0;
+  mock.method(globalThis, 'fetch', async (_url: unknown, init?: RequestInit) => {
+    calls++;
+    const source = JSON.parse(JSON.parse(String(init?.body)).messages[1].content);
+    assert.equal(source.game.rechargeGems, undefined); assert.equal(source.game.rechargePriceYuan, undefined);
+    assert.ok(source.gameRules.includes('充值金额由角色自行选择'));
+    const base = { action: 'Recharge', thought: 'Choose the amount I need.', speech: '', draw: false, delta: { mood: 0, energy: 0, affection: 0, growth: 0 }, kind: 'daily' };
+    const charge = { ...base, kind: 'recharge', paymentThought: 'Confirm the amount.', resultThought: 'The gems arrived.' };
+    return Response.json({ choices: [{ message: { content: JSON.stringify({ steps: [{ ...charge, rechargeYuan: 2.5 }, { ...charge, rechargeYuan: 18.99 }, base, base] }) } }] });
+  });
+  let next = await generateRound(save, 'a', new AbortController().signal);
+  assert.equal(next.wallet!.gems, 300);
+  assert.equal(next.rounds[0].steps[0].rechargeGems, 93); assert.equal(next.rounds[0].steps[1].rechargeGems, 712);
+  next = advance(advance(next)); assert.equal(next.wallet!.gems, 1105); assert.equal(next.wallet!.recharged, 805);
+  const html = renderToStaticMarkup(createElement(NurtureRecharge, { step: next.rounds[0].steps[1], actorName: 'Player', orderId: 'snapshot', gemsPerYuan: 999, gems: 12345 }));
+  assert.ok(html.includes('18.99')); assert.ok(html.includes('712 星钻')); assert.ok(!html.includes('模拟')); assert.ok(!html.includes('不会真实扣款'));
+  const key = saveKey('a', 'variable-recharge'); persistSave(key, next); next = readSave(key);
+  assert.equal(next.rounds[0].steps[1].rechargeRate, 37.5); assert.equal(calls, 1);
+});
+
+test('custom recharge exchange rate reaches AI, checkout and settlement, with a compatible legacy default', async () => {
+  assert.equal(rechargePrice(60), '6.00'); assert.equal(rechargePrice(1200, 100), '12.00');
+  const save = newSave(); save.design = { ...defaultDesign(), gemsPerYuan: 100, rechargeGems: 1200 };
+  for (const rate of [0, -1, NaN, Infinity]) assert.throws(() => validateDesign({ ...save.design, gemsPerYuan: rate }));
+  let calls = 0;
+  mock.method(globalThis, 'fetch', async (_url: unknown, init?: RequestInit) => {
+    calls++;
+    const source = JSON.parse(JSON.parse(String(init?.body)).messages[1].content);
+    assert.equal(source.game.gemsPerYuan, 100); assert.equal(source.game.gemsPerYuan, 100);
+    const base = { kind: 'daily', action: 'Wait', thought: 'Wait a moment.', speech: '', draw: false, delta: { mood: 0, energy: 0, affection: 0, growth: 0 } };
+    return Response.json({ choices: [{ message: { content: JSON.stringify({ steps: [{ ...base, kind: 'recharge', rechargeYuan: 12, paymentThought: 'Twelve yuan for 1200 gems.', resultThought: 'They arrived.' }, base, base, base] }) } }] });
+  });
+  let next = await generateRound(save, 'a', new AbortController().signal);
+  const checkout = renderToStaticMarkup(createElement(NurtureRecharge, { step: next.rounds[0].steps[0], actorName: 'Player', gems: 1200, gemsPerYuan: 100, orderId: 'rate-check' }));
+  assert.ok(checkout.includes('12.00')); assert.ok(checkout.includes('100')); assert.ok(!checkout.includes('120.00'));
+  next = advance(next); assert.equal(next.wallet!.gems, 1500); assert.equal(next.wallet!.recharged, 1200); assert.equal(calls, 1);
+});
+
+test('page-specific monologues never leak before the tap and page transition; typewriter is quick and preserves Unicode', () => {
+  assert.equal(DIALOG_HOLD_MS, 5000);
+  assert.equal(thoughtPlaybackMs('抽卡前'), 160 + 3 * 24 + 5000);
+  assert.equal(thoughtPlaybackMs('抽卡后'), 160 + 3 * 24 + 5000);
+  const save = newSave();
+  for (const kind of ['shop', 'schedule', 'date', 'status', 'draw', 'recharge', 'gift']) {
+    const html = renderToStaticMarkup(createElement(NurtureStage, { save, userName: 'User', actorName: 'Actor', busy: false, playing: true, onSettings: () => {}, step: { kind, action: 'Perform action', thought: 'PAGE_SPECIFIC_THOUGHT', speech: 'FUTURE_REACTION', delta: { mood: 0, energy: 0, affection: 0, growth: 0 }, draw: kind === 'draw', resultThought: 'FUTURE_RESULT' } }));
+    for (const text of ['PAGE_SPECIFIC_THOUGHT', 'FUTURE_REACTION', 'FUTURE_RESULT']) assert.ok(!html.includes(text), `${kind} must enter its page first`);
+    if (kind !== 'gift') assert.ok(html.includes('nurture-screen-tap'), `${kind} shows the tap first`);
+  }
+  const text = '摸到这里，感觉隔着屏幕也暖暖的。💗';
+  assert.equal(typewriterCount(text, 0, 160), 0);
+  assert.equal(typewriterCount(text, 159, 160), 0);
+  assert.equal(typewriterCount(text, 184, 160), 1);
+  assert.equal(typewriterCount(text, 160 + Array.from(text).length * 24, 160), Array.from(text).length);
+  const legacy = '保留完整的长心理活动💗'.repeat(300);
+  assert.equal(typewriterCount(legacy, 4160, 160), Array.from(legacy).length);
+});
+
+test('signed input allows intermediate minus text and negative schedule, date and gift effects persist', () => {
+  assert.ok(Number.isNaN(parseNurtureNumber('-'))); assert.ok(Number.isNaN(parseNurtureNumber('')));
+  assert.equal(parseNurtureNumber('-5'), -5); assert.equal(parseNurtureNumber('-0.5'), -.5);
+  const design = defaultDesign();
+  design.schedules[0].delta.energy = parseNurtureNumber('-12');
+  design.dates[0].delta.energy = parseNurtureNumber('-10');
+  design.shop[0] = { ...design.shop[0], effectsEnabled: true, effects: { mood: -5, energy: -8, affection: 2, growth: 0 } };
+  validateDesign(design);
+  const save = configureGame(newSave(), currentPlan(newSave()), design), key = saveKey('a', 'signed');
+  persistSave(key, save); const stored = readSave(key);
+  assert.equal(stored.design!.schedules[0].delta.energy, -12); assert.equal(stored.design!.dates[0].delta.energy, -10); assert.equal(stored.design!.shop[0].effects!.mood, -5);
+  design.schedules[0].delta.energy = parseNurtureNumber('-'); assert.throws(() => validateDesign(design));
+  const input = renderToStaticMarkup(createElement(NurtureNumberInput, { value: -5, min: -15, max: 15, onChange: () => {} }));
+  assert.ok(input.includes('type="text"')); assert.ok(input.includes('value="-5"'));
+  for (const module of ['shop', 'draw', 'schedule', 'date']) {
+    const html = renderToStaticMarkup(createElement(NurtureModuleEditor, { module, save: newSave(), userName: 'User', onSave: () => {} }));
+    assert.ok(!/<details\b[^>]*\bopen(?:=|\s|>)/.test(html), `${module} must start collapsed`);
+  }
+});
+
+test('restart preserves saved content and pending pool edits but removes all player progress', () => {
+  const old = newSave(); old.pity = 59; old.srPity = 19; old.collection = [...old.cards];
+  old.wallet = { gems: 999, coins: 555, recharged: 699 }; old.inventory = ['dress'];
+  old.memory = { ...emptyMemory(), completedRounds: 20, mood: 'Old mood', thoughts: 'Old memories' };
+  old.portrait = { ...emptyPortrait(), image: 'data:image/png;base64,portrait', points: { '头': { x: .4, y: .2 } }, replies: { '头': '原话' } };
+  old.design!.statusNote = 'Saved note'; old.design!.hero.nickname = 'Saved nickname';
+  old.pending = { ...currentPlan(old), speech: 'Saved greeting', cards: [{ ...old.cards[2], id: 'pending-card', name: 'Pending rare' }], pool: { ...defaultPool(), name: 'Pending pool' } };
+  const key = saveKey('a', 'restart'); persistSave(key, old);
+  const b = newSave(); persistSave(saveKey('b', 'restart'), b);
+  const fresh = resetGameData('a', 'restart', 'restart');
+  assert.deepEqual(fresh.portrait, old.portrait); assert.deepEqual(fresh.design, old.design);
+  assert.deepEqual(fresh.cards, old.pending.cards); assert.deepEqual(fresh.pool, old.pending.pool);
+  assert.equal(fresh.pending, undefined);
+  assert.deepEqual(fresh.stats, createEmptySave().stats); assert.deepEqual(fresh.wallet, initialWallet());
+  assert.deepEqual(fresh.rounds, []); assert.deepEqual(fresh.collection, []); assert.deepEqual(fresh.inventory, []);
+  assert.equal(fresh.pity, 0); assert.equal(fresh.srPity, 0);
+  assert.equal(memoryContext(fresh).stage.id, 'first'); assert.equal(memoryContext(fresh).playerThoughts, '');
+  assert.deepEqual(readSave(key), fresh); assert.deepEqual(readSave(saveKey('b', 'restart')), b);
+  const empty = resetGameData('a', 'restart', 'all'); assert.deepEqual(empty, createEmptySave());
+});
+
 test('playback review exposes only seen steps, preserves all outcomes and never advances or settles again', () => {
   const save = newSave();
   const step = { action: 'Actual draw', thought: 'Before draw', resultThought: 'After draw', speech: 'Exact authored reply', draw: true, drawnCards: [save.cards[2]], card: save.cards[2], delta: { mood: 5, energy: 0, affection: 0, growth: 0 }, wallet: { gems: 200, coins: 1000, recharged: 0 }, pityAfter: 0 };
@@ -99,7 +248,7 @@ test('shop, schedule and date presets share cloned content with append and repla
   assert.throws(() => saveCatalogPreset('user', 'Empty', 'dates', emptyDesign()), /至少/);
   for (const kind of ['shop', 'schedules', 'dates'] as const) {
     const html = renderToStaticMarkup(createElement(NurtureCatalogPresets, { kind, design: source, onChange: () => {} }));
-    assert.ok(html.includes('跨角色套用')); assert.ok(html.includes('保存当前内容为新预设'));
+    assert.ok(html.includes('\u5171\u4eab\u9884\u8bbe')); assert.ok(html.includes('\u4f7f\u7528\u9884\u8bbe')); assert.ok(html.includes('\u4fdd\u5b58\u9884\u8bbe'));
   }
   resetGameData('a', 'user'); assert.equal(readCatalogPresets('user').length, 2);
 });
@@ -206,7 +355,7 @@ test('card batch presets preserve art and zero weights, support partial imports 
   assert.throws(() => saveCardPreset('user', 'Bad', [{ ...cards[0], weight: -1 }]));
   assert.throws(() => saveCardPreset('user', 'Empty', []));
   const html = renderToStaticMarkup(createElement(NurtureCardPresets, { cards, onChange: () => {} }));
-  assert.ok(html.includes('只选 R 普卡')); assert.ok(html.includes('全选'));
+  assert.ok(html.includes('\u4f7f\u7528\u9884\u8bbe')); assert.ok(html.includes('\u4fdd\u5b58\u9884\u8bbe')); assert.ok(!html.includes('type=\"checkbox\"'));
   deleteCardPreset('user', preset.id); assert.deepEqual(readCardPresets('user'), []);
   assert.equal(b.length, 3);
 });
@@ -253,7 +402,7 @@ test('R duplicates remain ordinary, do not count as pity rares and are collected
 test('character and user saves remain isolated, including pending plans', () => {
   const a = newSave(); a.stats.mood = 12; a.pending = { stats: a.stats, speech: '只给你', cards: [], event: a.event };
   persistSave(saveKey('a', 'user'), a);
-  assert.equal(readSave(saveKey('a', 'user')).pending?.speech, '只给你');
+  assert.equal(readSave(saveKey('a', 'user')).pending?.speech, '');
   assert.equal(readSave(saveKey('b', 'user')).stats.mood, 0);
   assert.equal(readSave(saveKey('a', 'other-user')).pending, undefined);
 });
@@ -287,13 +436,13 @@ test('generation uses only selected player and next-round content; playback resu
   s.pending = { stats: { ...s.stats, mood: 99 }, speech: '想看花', cards: [s.cards[2]], event: { ...s.event, enabled: true, title: '花朝', endsAt: '2099-01-01T12:00', description: '赏花' } };
   mock.method(globalThis, 'fetch', async (_url: unknown, init?: RequestInit) => {
     const body = JSON.parse(String(init?.body)), source = JSON.parse(body.messages[1].content);
-    assert.equal(source.player.id, 'a'); assert.equal(source.stats.mood, 99); assert.equal(source.greeting, '想看花'); assert.equal(source.event.title, '花朝');
+    assert.equal(source.player.id, 'a'); assert.equal(source.stats.mood, 99); assert.equal(source.greeting, undefined); assert.equal(source.event, null);
     assert.ok(!String(init?.body).includes('OTHER_ACTOR_SECRET'));
     assert.ok(body.messages[0].content.includes('建议20～45个中文字'));
     return Response.json({ choices: [{ message: { content: JSON.stringify({ steps: Array.from({ length: 4 }, (_, i) => ({ action: '陪伴', thought: '今天也想照顾好你', speech: '谢谢', delta: { mood: 5, energy: -1, affection: 2, growth: 1 }, draw: i === 0, resultThought: 'Actual result reaction', drawResultIds: source.drawSequence.slice(0, 1) })) }) } }] });
   });
   const generated = await generateRound(s, 'a', new AbortController().signal);
-  assert.equal(generated.rounds[0].steps[0].speech, '想看花');
+  assert.equal(generated.rounds[0].steps[0].speech, '');
   assert.equal(s.pending.speech, '想看花'); assert.equal(generated.pending, undefined); assert.equal(generated.collection.length, 0);
   const key = saveKey('a', 'user'); persistSave(key, advance(generated));
   let resumed = readSave(key);
@@ -331,7 +480,7 @@ test('touch uses exact per-part reply and shop, schedule, recharge settle only d
     assert.ok(!String(init?.body).includes('data:image')); // Full portrait stays local.
     return Response.json({ choices: [{ message: { content: JSON.stringify({ steps: [
       { ...base, kind: 'touch', target: '头' }, { ...base, kind: 'shop', itemId: 'dress' },
-      { ...base, kind: 'schedule', itemId: 'reading' }, { ...base, kind: 'recharge' },
+      { ...base, kind: 'schedule', itemId: 'reading' }, { ...base, kind: 'recharge', rechargeYuan: 6 },
     ] }) } }] });
   });
   const generated = await generateRound(s, 'a', new AbortController().signal);
@@ -349,7 +498,8 @@ test('touch uses exact per-part reply and shop, schedule, recharge settle only d
 test('game stage renders full portrait, viewing-only modules and active touch position', () => {
   const save = newSave(); save.portrait = { image: '/portrait.png', points: { 脸: { x: .45, y: .2 } }, replies: { 脸: '好痒呀' } };
   const html = renderToStaticMarkup(createElement(NurtureStage, { save, userName: '小雨', actorName: '林渡', busy: false, playing: true, onSettings: () => {}, step: { action: '碰脸', thought: '小心一点', speech: '好痒呀', delta: save.stats, draw: false, kind: 'touch', target: '脸' } }));
-  for (const label of ['小雨的立绘', '抽卡', '商城', '日程', '约会', '限时活动', '状态', '好痒呀', 'left:45%;top:20%']) assert.ok(html.includes(label), label);
+  for (const label of ['小雨的立绘', '抽卡', '商城', '日程', '约会', '状态', '好痒呀', 'left:45%;top:20%']) assert.ok(html.includes(label), label);
+  assert.ok(!html.includes('限时活动'));
   assert.ok(!html.includes('<meter'));
 });
 test('text and image card art persist separately and render consistently', () => {
@@ -407,7 +557,7 @@ test('eye preview displays browsable game pages without editors, scripted playba
   const preview = renderToStaticMarkup(createElement(NurturePreview, { save, actorName: '林渡', userName: '小月', onClose: () => {} }));
   for (const label of ['游戏页面预览', '抽卡', '商城', '日程', '约会', '物品栏']) assert.ok(preview.includes(label));
   for (const label of ['nurture-stage-dialog', '角色操作预览', '自动切换场景', 'nurture-role-opening', '<form', '<textarea', '定位部位']) assert.ok(!preview.includes(label), label);
-  const expected = { draw: '单抽', shop: '购买', stats: '心情', schedule: '安排', date: '赴约', recharge: '确认支付', cards: '我的卡册', inventory: '物品栏' };
+  const expected = { draw: '单抽', shop: '购买', stats: '心情', schedule: '安排', date: '赴约', recharge: '确认支付', cards: '卡册', inventory: '物品栏' };
   for (const [panel, label] of Object.entries(expected)) {
     const html = renderToStaticMarkup(createElement(NurtureGamePages, { panel, save, userName: '小月', onNavigate: () => {} }));
     assert.ok(html.includes(label), panel);
@@ -418,7 +568,7 @@ test('eye preview displays browsable game pages without editors, scripted playba
       assert.ok(!html.includes(save.cards[1].name));
       assert.ok(html.includes('60')); assert.ok(html.includes('十连'));
     }
-    for (const forbidden of ['<form', '<input', '<textarea', '新增商品', '新增日程', '保存 · 下一轮生效']) assert.ok(!html.includes(forbidden), `${panel}: ${forbidden}`);
+    for (const forbidden of ['<form', ...(panel === 'recharge' ? [] : ['<input']), '<textarea', '新增商品', '新增日程', '保存 · 下一轮生效']) assert.ok(!html.includes(forbidden), `${panel}: ${forbidden}`);
   }
   assert.equal(network.mock.callCount(), 0); assert.equal(JSON.stringify(save), original);
   const limited = { ...save.cards[2], id: 'featured-limited', name: '优先展示的限定', limited: true, image: '/limited-art.png' };
@@ -551,16 +701,16 @@ test('recharge prepares checkout thoughts in the same API call and settles only 
   mock.method(globalThis, 'fetch', async (_url: unknown, init?: RequestInit) => {
     apiCalls++;
     const source = JSON.parse(JSON.parse(String(init?.body)).messages[1].content);
-    assert.equal(source.game.rechargePriceYuan, 6);
+    assert.equal(source.game.gemsPerYuan, 10);
     const base = { action: '看看今天', thought: '先安排好日常', speech: '', delta: { mood: 0, energy: 0, affection: 0, growth: 0 }, draw: false, kind: 'daily' };
-    return Response.json({ choices: [{ message: { content: JSON.stringify({ steps: [{ ...base, kind: 'recharge', thought: '这次补一点星钻，留着买衣服。', paymentThought: '确认一下金额，正好够这一份。', resultThought: '到账了，下次给你挑件喜欢的。' }, base, base, base] }) } }] });
+    return Response.json({ choices: [{ message: { content: JSON.stringify({ steps: [{ ...base, kind: 'recharge', rechargeYuan: 6, thought: '这次补一点星钻，留着买衣服。', paymentThought: '确认一下金额，正好够这一份。', resultThought: '到账了，下次给你挑件喜欢的。' }, base, base, base] }) } }] });
   });
   let next = await generateRound(save, 'a', new AbortController().signal);
   const step = next.rounds[0].steps[0];
   assert.equal(apiCalls, 1); assert.ok(step.paymentThought?.includes('确认一下金额'));
   assert.ok(playbackDuration(step) >= 16000); assert.equal(next.wallet?.gems, 300);
   const html = renderToStaticMarkup(createElement(NurtureRecharge, { step, actorName: '林渡', gems: 60, orderId: 'order-1' }));
-  for (const label of ['模拟充值收银台', '确认充值订单', '6.00', '60 星钻', '零钱（模拟）', '这次补一点星钻']) assert.ok(html.includes(label), label);
+  for (const label of ['\u5145\u503c\u6536\u94f6\u53f0', '确认充值订单', '6.00', '60 星钻', '\u96f6\u94b1', '这次补一点星钻']) assert.ok(html.includes(label), label);
   assert.ok(html.includes('disabled')); assert.ok(!html.includes('<input')); assert.ok(!html.includes('下次给你挑件喜欢的'));
   next = advance(next); persistSave(saveKey('a', 'user'), next); next = readSave(saveKey('a', 'user'));
   assert.equal(next.wallet?.gems, 360); assert.equal(next.rounds[0].steps[0].paymentThought, step.paymentThought);
@@ -740,18 +890,18 @@ test('edited game introduction and catalogs reach AI and drive actual activity, 
     const source = JSON.parse(JSON.parse(String(init?.body)).messages[1].content);
     assert.equal(source.game.description, design.description); assert.deepEqual(source.raised, design.hero); assert.equal(source.stats.energy, 90);
     assert.deepEqual(source.schedules, design.schedules); assert.deepEqual(source.dates, design.dates); assert.deepEqual(source.shop, design.shop);
-    assert.equal(source.game.drawCost, 1); assert.equal(source.game.rechargeGems, 5); assert.ok(!source.schedules.some((a: { id: string }) => a.id === 'reading'));
+    assert.equal(source.game.drawCost, 1); assert.equal(source.game.gemsPerYuan, 10); assert.ok(!source.schedules.some((a: { id: string }) => a.id === 'reading'));
     const base = { action: '安排游戏', thought: '记住书店里的这一刻', speech: '', delta: { mood: 0, energy: 0, affection: 0, growth: 0 }, draw: false };
     return Response.json({ choices: [{ message: { content: JSON.stringify({ steps: [
       { ...base, kind: 'schedule', itemId: 'new-reading' }, { ...base, kind: 'date', itemId: 'new-date' },
-      { ...base, kind: 'shop', itemId: 'new-gift' }, { ...base, kind: 'draw', draw: true, resultThought: 'Actual result reaction', drawResultIds: source.drawSequence.slice(0, 1) }, { ...base, kind: 'recharge' },
+      { ...base, kind: 'shop', itemId: 'new-gift' }, { ...base, kind: 'draw', draw: true, resultThought: 'Actual result reaction', drawResultIds: source.drawSequence.slice(0, 1) }, { ...base, kind: 'recharge', rechargeYuan: .5 },
     ] }) } }] });
   });
   let next = await generateRound(configured, 'a', new AbortController().signal);
   assert.equal(next.stats.energy, 90); assert.equal(next.wallet?.coins, 1000);
   while (next.rounds[0].cursor < next.rounds[0].steps.length) next = advance(next);
   assert.equal(next.stats.growth, 22); assert.equal(next.stats.energy, 87); assert.equal(next.stats.affection, 31);
-  assert.equal(next.wallet?.coins, 980); assert.equal(next.wallet?.gems, 304); assert.equal(next.wallet?.recharged, 5);
+  assert.equal(next.wallet?.coins, 1010); assert.equal(next.wallet?.gems, 304); assert.equal(next.wallet?.recharged, 5);
   assert.deepEqual(next.inventory, ['new-gift']); assert.equal(next.collection[0].rarity, 'SSR');
 });
 test('deleted activities cannot be invented, settings validate, and configuration is locked during unfinished playback', async () => {
@@ -770,18 +920,18 @@ test('deleted activities cannot be invented, settings validate, and configuratio
 test('settings fold game information and leave modules in their own editing panels; playback shows effects without edit controls', () => {
   const save = newSave();
   const settings = renderToStaticMarkup(createElement(NurtureSettings, { save, userName: '小月', onSave: () => {}, onClose: () => {} }));
-  assert.equal((settings.match(/<details/g) ?? []).length, 4);
+  assert.equal((settings.match(/<details/g) ?? []).length, 5);
   for (const label of ['游戏描述', '游戏里的我', '人物设定与介绍', '立绘、部位定位与触碰发言']) assert.ok(settings.includes(label));
   assert.ok(!settings.includes('概率权重'));
-  const expected: Record<string, string> = { draw: '概率权重', stats: '当前数值', schedule: '新增日程', date: '新增约会', shop: '新增商品', event: '结束时间' };
+  const expected: Record<string, string> = { draw: '概率权重', stats: '当前数值', schedule: '新增日程', date: '新增约会', shop: '新增商品' };
   for (const [module, label] of Object.entries(expected)) {
     const editor = renderToStaticMarkup(createElement(NurtureModuleEditor, { module, save, userName: '小月', onSave: () => {} }));
     assert.ok(editor.includes(label), module); assert.ok(editor.includes('<form'));
   }
   const effect = renderToStaticMarkup(createElement(NurtureStage, { save, userName: '小月', actorName: '林渡', busy: false, playing: true, onSettings: () => {}, step: { kind: 'schedule', itemId: 'reading', action: '翻开书', thought: '把这一章读给你听', speech: '', receipt: '午后阅读', delta: save.stats, draw: false } }));
-  assert.ok(effect.includes('把这一章读给你听')); assert.ok(!effect.includes('<form')); assert.ok(!effect.includes('<input')); assert.ok(!effect.includes('新增日程'));
+  assert.ok(!effect.includes('把这一章读给你听')); assert.ok(!effect.includes('<form')); assert.ok(!effect.includes('<input')); assert.ok(!effect.includes('新增日程'));
   const buttons = effect.match(/<button[^>]*>/g) ?? [];
-  assert.ok(buttons.length >= 7); assert.ok(buttons.every(b => b.includes('disabled')));
+  assert.ok(buttons.length >= 6); assert.ok(buttons.every(b => b.includes('disabled')));
 });
 test('continuity carries actual previous stats, feelings, open threads and special memories into the next request', async () => {
   let count = 0, threadId = '';

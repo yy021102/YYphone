@@ -1,7 +1,7 @@
 import { ao3TopPrompt, ao3WorldBooks, ao3Preferences } from './ao3Settings';
 import { requestConfiguredAiText } from './aiApi';
 import { parseAiJson } from './aiResponse';
-import { generateAo3Continuation, generateAo3Replacement, readAo3Characters } from './ao3Generation';
+import { generateAo3Chapter, prepareAo3Continuation, generateAo3Replacement, readAo3Characters } from './ao3Generation';
 import { readCharacterNpcs } from './characterNpcs';
 
 import { ao3ChapterComments, ao3CommentChapter, isAo3Comments, isAo3Work, type Ao3Comment, type Ao3Work } from './ao3Data';
@@ -127,11 +127,23 @@ export async function generateAo3Comments(work: Ao3Work, mode: 'extra' | 'reply'
 }
 
 export async function generateAo3ChapterUpdate(work: Ao3Work, signal: AbortSignal, direction = '') {
-  const chapter = await generateAo3Continuation(work, signal, direction);
-  const next = { ...work, chapters: [...work.chapters, chapter] };
-  const comments = await generateAo3Comments(next, 'chapter', signal, undefined, work.chapters.length);
+  const { draft, cast, idea } = prepareAo3Continuation(work, signal, direction);
+  const plan = { ...createAo3CommentPlan(work, 5), chapter: work.chapters.length };
+  const characterIds = plan.participants.filter(p => p.identity.type === 'character').map(p => p.identity.id);
+  const result = await generateAo3Chapter(draft, work.chapters.length, cast, idea, signal, work, false, {
+    rules: `${AO3_COMMENT_RULES}\n正文与评论同次生成。currentChapter 指本次新章，正文即本次返回的 body，previousChapters 是前文。评论只围绕本次 body，不能针对下一章。commentPlan 和 commentWorldBooks 只用于评论区，不能将其中额外的评论角色或 NPC 强行写入正文。`,
+    data: { commentPlan: plan, currentChapter: { number: work.chapters.length + 1 }, comments: [], commentWorldBooks: ao3WorldBooks(characterIds) },
+  });
   signal.throwIfAborted();
-  return { chapter, comments };
+  const chapter = { title: result.chapterTitle || `Chapter ${work.chapters.length + 1}`, body: result.body };
+  try {
+    assertAo3CommentParticipants(plan);
+    const comments = parseAo3Comments(result.comments, plan, [], work.author);
+    return { chapter, comments, commentError: undefined };
+  } catch (error) {
+    signal.throwIfAborted();
+    return { chapter, comments: undefined, commentError: error instanceof Error ? error.message : '本章评论未生成。' };
+  }
 }
 
 export async function regenerateAo3ChapterUpdate(work: Ao3Work, index: number, signal: AbortSignal, direction = '') {

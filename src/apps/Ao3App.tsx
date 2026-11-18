@@ -178,7 +178,7 @@ export function Ao3App({ onBack, userName = 'user' }: { onBack: () => void; user
       if (controller.signal.aborted || continuationRequest.current !== controller) return;
       if (!commit({ type: 'continue', work, ...next, now: new Date().toISOString() })) return;
       setContinuationDirection('');
-      selectChapter(work.chapters.length); setNotice(`第 ${work.chapters.length + 1} 章已更新`);
+      selectChapter(work.chapters.length); setNotice(next.commentError ? `第 ${work.chapters.length + 1} 章正文已更新，评论暂未生成，可在本章评论区单独生成。` : `第 ${work.chapters.length + 1} 章已更新`);
     } catch (cause) {
       if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : '追更失败，原文已保留，请重试。');
     } finally {
@@ -261,7 +261,7 @@ export function Ao3App({ onBack, userName = 'user' }: { onBack: () => void; user
             <button className="ao3-button" aria-pressed={state.later.includes(work.id)} onClick={() => { if (commit({ type: 'later', id: work.id })) setNotice(state.later.includes(work.id) ? '已移出稍后阅读' : '已加入稍后阅读'); }}>{state.later.includes(work.id) ? '已标记待阅' : '稍后阅读'}</button>
             {continuationButton}
             {work.owned && <button className="ao3-button" disabled={writing} onClick={() => startEditor(work)}>编辑</button>}{(work.owned || work.generation) && <button className="ao3-button" disabled={writing} onClick={() => setDeleteId(work.id)}>删除</button>}</div>
-          <p className="ao3-help">追更使用当前 API，追加下一章和该章五条新评论后一起保存，不覆盖原文或旧章评论。最多 100 章。旧版未标章节的评论保留在第一章。</p>
+          <p className="ao3-help">追更使用当前 API，一次生成下一章及五条新评论。若评论未完成，正文仍会保存，可在本章评论区补生成。不覆盖旧章正文或评论，最多 100 章。</p>
           {continuing && <p className="ao3-writing-status" role="status"><BookOpen size={24}/>正在生成第 {work.chapters.length + 1} 章及本章评论…</p>}
           {regeneratingChapter !== null && <p className="ao3-writing-status" role="status"><BookOpen size={24}/>正在重新生成第 {regeneratingChapter + 1} 章及本章评论…</p>}
           <dl className="ao3-work-meta"><dt>Rating:</dt><dd>{work.rating}</dd><dt>Archive Warning:</dt><dd>{work.warning}</dd><dt>Category:</dt><dd>{work.category}</dd>
