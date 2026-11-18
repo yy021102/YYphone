@@ -6,6 +6,7 @@ import { PomodoroLoading } from './PomodoroLoading';
 
 type IllustratedApp = Exclude<AppId, 'wechat' | 'phone_explorer' | 'memory' | 'couple_space' | 'pomodoro'>;
 const scenes: Record<IllustratedApp, { title: string; caption: string; eyebrow: string; footer: string; art: ReactNode }> = {
+  nurture: { title: '掌心养成', caption: '在他的掌心，慢慢长大。', eyebrow: 'POCKET OF YOU', footer: '每一份陪伴，都被好好收藏', art: <g><circle cx="160" cy="160" r="80" fill="#efdee8"/><path d="M160 205C60 145 120 90 160 140c40-50 100 5 0 65" fill="#c5a1b3"/></g> },
   anthology: {
     title: '文集', caption: '给一个念头，留一页纸。', eyebrow: 'THE COLLECTED PAGES', footer: '一些观察，一些尚未说完的想法',
     art: <g className="every-opening-float"><path d="M87 79h145v169H87q-22 0-22-18V95q0-16 22-16Z" fill="#e4eadd" stroke="#fffaf4" strokeWidth="3"/><path d="M87 79v169m17-146h102m-102 127h102" stroke="#c5d0ba" strokeWidth="2"/><path d="M138 183q-3-49 38-66 17 39-38 66Zm0 0 36-58" fill="#d8cbb4" stroke="#aabca5" strokeWidth="2"/><path d="M109 211h73m-73 8h53" stroke="#c0cab6" strokeWidth="2" strokeLinecap="round"/><path d="m219 64 12-7-2 14-8-1Z" fill="#e6ccd9"/><circle cx="75" cy="64" r="4" fill="#d9dce9"/></g>,

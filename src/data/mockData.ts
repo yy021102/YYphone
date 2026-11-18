@@ -124,6 +124,7 @@ export const DOCK_APPS: AppMetadata[] = [
 ];
 
 export const SECOND_PAGE_APPS: AppMetadata[] = [
+  { id: 'nurture', name: '掌心养成', iconName: 'HeartHandshake', category: '游戏', color: 'from-rose-200/60 to-purple-200/40', textColor: 'text-[#ad86a0]' },
   { id: 'text-adventure', name: '文字冒险', iconName: 'BookOpenText', category: '闲暇', color: 'from-violet-300/40 to-indigo-200/30', textColor: 'text-[#a198c9]' },
   { id: 'time-capsule', name: '时间胶囊', iconName: 'Hourglass', category: '闲暇', color: 'from-sky-200/50 to-cyan-100/30', textColor: 'text-[#8cb5c8]' },
   { id: 'divination', name: '占卜', iconName: 'Orbit', category: '闲暇', color: 'from-amber-100/60 to-purple-200/30', textColor: 'text-[#b3a078]' },

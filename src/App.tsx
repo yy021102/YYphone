@@ -67,6 +67,7 @@ const InventoryApp = lazy(() => import('./apps/InventoryApp').then((module) => (
 const CalendarApp = lazy(() => import('./components/CalendarPanel').then((module) => ({ default: module.CalendarPanel })));
 const Ao3App = lazy(() => import('./apps/Ao3App').then((module) => ({ default: module.Ao3App })));
 const AnthologyApp = lazy(() => import('./apps/AnthologyApp').then((module) => ({ default: module.AnthologyApp })));
+const NurtureApp = lazy(() => import('./apps/NurtureApp').then((module) => ({ default: module.NurtureApp })));
 
 type LockMode = 'none' | 'lock' | 'password';
 interface LockSettings {
@@ -746,6 +747,7 @@ export default function App() {
               {activeApp === 'forum' && <ForumApp onBack={handleBackToHome} />}
               {activeApp === 'ao3' && <Ao3App onBack={handleBackToHome} userName={userProfile.name} />}
               {activeApp === 'anthology' && <AnthologyApp onBack={handleBackToHome} />}
+              {activeApp === 'nurture' && <NurtureApp onBack={handleBackToHome} />}
               {activeApp === 'pomodoro' && <PomodoroApp onBack={handleBackToHome} />}
               {activeApp === 'offline_mode' && (
                 <OfflineModeApp onBack={handleBackToHome} />

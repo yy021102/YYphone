@@ -338,6 +338,8 @@ body {
 .yy-chat-composer :is(.yy-chat-generate, .yy-chat-send) { order: 3; color: inherit; background: transparent; }
 .yy-chat-composer :is(.yy-chat-attachments, .yy-chat-emoji) { width: 28px; height: 28px; border: 1.7px solid currentColor; background: transparent; color: inherit; }
 .yy-chat-composer :is(.yy-chat-attachments, .yy-chat-emoji) svg { width: 24px; height: 24px; color: inherit; }
+.yy-chat-composer .yy-chat-attachments { width: 24px; height: 24px; }
+.yy-chat-composer .yy-chat-attachments svg { width: 20px; height: 20px; }
 .yy-chat-composer .yy-chat-emoji { border: 0; }
 .yy-chat-composer .yy-chat-emoji svg { width: 29px; height: 29px; stroke-width: 1.7; }
 

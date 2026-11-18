@@ -11,10 +11,10 @@ import { desktopPageAfterSwipe, isDesktopActivity } from './desktopNavigation';
 test('desktop identities are unique, place WeChat in the shared dock and route all six second-page activities', () => {
   assert.deepEqual(MAIN_GRID_APPS.map(app => app.id), ['world_book', 'phone_explorer', 'alipay', 'taobao', 'forum', 'pomodoro', 'offline_mode', 'couple_space']);
   assert.deepEqual(DOCK_APPS.map(app => app.id), ['settings', 'customizer', 'memory', 'wechat']);
-  assert.deepEqual(SECOND_PAGE_APPS.map(app => app.id), ['text-adventure', 'time-capsule', 'divination', 'little-sip', 'character-perspective', 'kitchen', 'ao3', 'anthology']);
+  assert.deepEqual(SECOND_PAGE_APPS.map(app => app.id), ['nurture', 'text-adventure', 'time-capsule', 'divination', 'little-sip', 'character-perspective', 'kitchen', 'ao3', 'anthology']);
   assert.equal(new Set(ALL_APPS.map(app => app.id)).size, ALL_APPS.length);
   assert.equal(ALL_APPS.length, MAIN_GRID_APPS.length + DOCK_APPS.length + SECOND_PAGE_APPS.length);
-  for (const app of SECOND_PAGE_APPS) assert.equal(isDesktopActivity(app.id), !['ao3', 'anthology'].includes(app.id));
+  for (const app of SECOND_PAGE_APPS) assert.equal(isDesktopActivity(app.id), !['nurture', 'ao3', 'anthology'].includes(app.id));
   for (const app of [...MAIN_GRID_APPS, ...DOCK_APPS]) assert.equal(isDesktopActivity(app.id), false);
   assert.equal(isDesktopActivity(null), false);
   assert.equal(isDesktopActivity(undefined), false);
