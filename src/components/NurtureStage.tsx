@@ -22,16 +22,16 @@ const modules = [
   { id: 'event', name: '限时活动', subtitle: '限定的浪漫', icon: Gift },
   { id: 'stats', name: '状态', subtitle: '成长状态', icon: Activity },
 ];
-export function NurtureStage({ save, userName, actorName, step, busy, playing, onSettings, onConfigure, viewOnly = false }: { save: Save; userName: string; actorName: string; step?: Step; busy: boolean; playing: boolean; onSettings: () => void; onConfigure?: (plan: Plan, design: GameDesign) => void; viewOnly?: boolean }) {
+export function NurtureStage({ save, userName, actorName, step, busy, playing, onSettings, onConfigure, viewOnly = false, paused = false }: { save: Save; userName: string; actorName: string; step?: Step; busy: boolean; playing: boolean; onSettings: () => void; onConfigure?: (plan: Plan, design: GameDesign) => void; viewOnly?: boolean; paused?: boolean }) {
   const [manualPanel, setPanel] = useState('');
   const locked = busy || playing;
   const design = save.design ?? defaultDesign(userName);
   const [openedStep, setOpenedStep] = useState<Step>();
   useEffect(() => {
-    if (!playing || !step || busy) return;
+    if (!playing || !step || busy || paused) return;
     const timer = window.setTimeout(() => setOpenedStep(step), 550);
     return () => window.clearTimeout(timer);
-  }, [step, playing, busy]);
+  }, [step, playing, busy, paused]);
   const autoPanel = openedStep === step && playing && step && ['draw', 'shop', 'recharge', 'gift', 'schedule', 'date', 'event', 'status'].includes(step.kind || '') ? step.kind === 'status' ? 'stats' : step.kind! : openedStep === step && playing && step?.draw ? 'draw' : '';
   const panel = locked ? autoPanel : manualPanel;
   const panelTitle = panel === 'gift' ? '物品栏' : panel === 'recharge' ? '充值' : modules.find(m => m.id === panel)?.name;
@@ -42,13 +42,13 @@ export function NurtureStage({ save, userName, actorName, step, busy, playing, o
   const activeEvent = save.event.enabled && Date.parse(save.event.endsAt) > Date.now();
   const liveModule = step?.draw ? 'draw' : step?.kind;
   const tapModule = step?.kind === 'recharge' ? 'shop' : step?.kind === 'daily' || step?.kind === 'status' ? 'stats' : liveModule;
-  return <section className="nurture-game-stage" aria-label="游戏主界面">
+  return <section className="nurture-game-stage" data-playback-paused={paused || undefined} aria-label="游戏主界面">
     <div className="nurture-stage-sky"/><div className="nurture-stage-window"/><div className="nurture-stage-floor"/>
     {playing && step?.kind === 'open' && <div className="nurture-role-opening" aria-label="角色打开游戏"><div><Heart size={36}/></div><strong>掌心养成</strong><small>正在进入你的世界…</small><blockquote>{step.thought}</blockquote></div>}
     <div className="nurture-stage-top"><div><small>陪伴你的第 {save.rounds[0]?.number ?? memoryFor(save).completedRounds} 轮</small><h1>{userName}</h1></div><div className="nurture-wallet"><span><Gem size={12}/>{wallet.gems}</span><span><Coins size={12}/>{wallet.coins}</span></div></div>
     <div className="nurture-stage-portrait">{portrait.image ? <div className="nurture-image-plane" style={{ width: `max(100cqw, calc(100cqh * ${portraitRatio}))`, height: `max(100cqh, calc(100cqw / ${portraitRatio}))` }}><img className="nurture-standing-art" onLoad={e => { const image = e.currentTarget; if (image.naturalWidth && image.naturalHeight) setPortraitRatio(image.naturalWidth / image.naturalHeight); }} src={portrait.image} alt={`${userName}的立绘`} draggable={false}/>{playing && point && <NurtureHeartBurst key={`${save.rounds[0]?.cursor}:${step?.target}`} x={point.x} y={point.y} part={step?.target ?? ""}/>}</div> : viewOnly ? <div className="nurture-game-avatar-empty"><Heart size={65} strokeWidth={1}/><strong>{userName}</strong></div> : <button className="nurture-upload-placeholder" disabled={busy || playing || viewOnly} onClick={onSettings}><Shirt size={50} strokeWidth={1}/><strong>把你带进游戏</strong><span>上传立绘 · 标记触碰部位</span></button>}</div>
     <div className="nurture-side-menu">{modules.slice(0, 2).map(m => <button disabled={locked} key={m.id} className={liveModule === m.id && playing ? 'is-active' : ''} onClick={() => setPanel(m.id)}><m.icon size={23}/><strong>{m.name}</strong>{playing && !busy && tapModule === m.id && <NurtureTap key={`${save.rounds[0]?.id}:${save.rounds[0]?.cursor}`}/>}</button>)}</div>
-    {(busy || playing) && <div className="nurture-stage-dialog" aria-live="polite"><span>{busy ? `${actorName}正在思考…` : playing ? step?.target ? `${actorName} · 触碰${step.target}` : `${actorName}正在操作` : userName}</span><p>{busy ? '屏幕那端的人，正在为你安排今天。' : step?.speech || '今天，你会为我安排什么呢？'}</p>{playing && step?.thought && <small>「{step.thought}」</small>}</div>}
+    {(busy || playing) && <div className="nurture-stage-dialog" aria-live="polite"><span>{busy ? `${actorName}正在思考…` : playing ? step?.target ? `${actorName} · 触碰${step.target}` : `${actorName}正在操作` : userName}</span>{(busy || step?.speech) && <p>{busy ? "\u89d2\u8272\u6b63\u5728\u601d\u8003\u2026" : step?.speech}</p>}{playing && step?.thought && <small>「{step.thought}」</small>}</div>}
     <nav className="nurture-bottom-menu" aria-label="游戏功能">{modules.slice(2).map(m => <button disabled={locked} key={m.id} className={liveModule === m.id && playing ? 'is-active' : ''} onClick={() => setPanel(m.id)}><m.icon size={22}/><strong>{m.name}</strong>{playing && !busy && tapModule === m.id && <NurtureTap key={`${save.rounds[0]?.id}:${save.rounds[0]?.cursor}`}/>}</button>)}</nav>
     {panel && <div className="nurture-game-panel" role="dialog" aria-modal="true" aria-label={panelTitle}><header><div><small>POCKET OF YOU</small><h2>{panelTitle}</h2></div><button disabled={locked} onClick={() => setPanel('')} aria-label="关闭功能页面"><X size={20}/></button></header><div className="nurture-panel-content">{viewOnly ? <NurtureGamePages key={panel} panel={panel} save={save} userName={userName} onNavigate={setPanel}/> : !locked ? <NurtureModuleEditor key={panel} module={panel} save={save} userName={userName} onSave={(plan, design) => { onConfigure?.(plan, design); setPanel(''); }}/> : <>{!['draw', 'recharge', 'gift', 'stats'].includes(panel) && <div className="nurture-role-operation"><h3>{step?.action}</h3><blockquote>{step?.thought}</blockquote>{step?.receipt && <p>{step.receipt}</p>}{step?.speech && <p>{step.speech}</p>}</div>}
       {panel === 'stats' && <><section className="nurture-stats" aria-label="被养成对象当前状态">{(Object.keys(STAT_LABELS) as (keyof typeof save.stats)[]).map(k => <div key={k}><span>{STAT_LABELS[k]} <b>{save.stats[k]}</b></span><meter min={0} max={100} value={save.stats[k]}/></div>)}</section><NurtureStatusNote text={step?.statusNote ?? design.statusNote}/><blockquote className="nurture-status-thought">{step?.thought}</blockquote></>}

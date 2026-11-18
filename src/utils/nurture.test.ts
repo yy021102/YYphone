@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, mock, test } from 'node:test';
 import { clearDbStorage } from './dbStorage';
-import { writeStoredValue } from './localStorage';
-import { advance, generateRound, newSave, persistSave, pickCard, readSave, saveKey, validatePlan } from './nurture';
+import { readStorageString, writeStoredValue } from './localStorage';
+import { advance, generateRound, newSave as createEmptySave, persistSave, pickCard, readSave, saveKey, validatePlan } from './nurture';
 import { BODY_PARTS, emptyPortrait, imagePoint, initialWallet, validPortrait, touchTargets, selectRoundTouches, validateTouchReplies } from './nurtureGame';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -24,6 +24,13 @@ import { NurturePreview } from '../components/NurturePreview';
 import { NurtureGamePages } from '../components/NurtureGamePages';
 import { NurtureStatusNote } from '../components/NurtureStatusNote';
 
+function newSave(): Save {
+  return { ...createEmptySave(), cards: [
+    { id: 'fixture-r', name: 'Common fixture', rarity: 'R', weight: 75, image: '', description: 'An ordinary daily moment.' },
+    { id: 'fixture-sr', name: 'Middle fixture', rarity: 'SR', weight: 22, image: '', description: 'An afternoon memory.' },
+    { id: 'fixture-ssr', name: 'SSR fixture', rarity: 'SSR', weight: 3, image: '', description: 'A rare night memory.' },
+  ] };
+}
 const values = new Map<string, string>();
 Object.defineProperty(globalThis, 'window', { configurable: true, value: { localStorage: {
   getItem: (k: string) => values.get(k) ?? null, setItem: (k: string, v: string) => values.set(k, v), removeItem: (k: string) => values.delete(k),
@@ -35,12 +42,62 @@ beforeEach(async () => {
   writeStoredValue('yyphone:api-presets', [{ id: 'main', name: '主 API', endpoint: 'https://nurture.invalid/v1', apiKey: 'fixture', model: 'model' }]);
 });
 afterEach(() => mock.restoreAll());
+test('new games have no sample cards and old sample cards are removed only from live and pending pools', () => {
+  assert.deepEqual(createEmptySave().cards, []);
+  const samples = [
+    { ...newSave().cards[0], id: 'first', name: '初见的微光' },
+    { ...newSave().cards[1], id: 'afternoon', name: '只属于你的午后' },
+    { ...newSave().cards[2], id: 'promise', name: '星夜约定' },
+  ];
+  const custom = { ...newSave().cards[2], id: 'custom', name: '自己上传的卡' };
+  const renamed = { ...samples[0], name: '自己改名后的卡' };
+  const save = { ...createEmptySave(), cards: [...samples, custom, renamed], collection: [...samples], pity: 59 };
+  const plan = currentPlan(save); save.pending = undefined;
+  persistSave(saveKey('a', 'user'), { ...save, pending: plan });
+  const migrated = readSave(saveKey('a', 'user'));
+  assert.deepEqual(migrated.cards.map(c => c.name), [custom.name, renamed.name]);
+  assert.deepEqual(migrated.pending?.cards.map(c => c.name), [custom.name, renamed.name]);
+  assert.equal(migrated.collection.length, 3); assert.equal(migrated.pity, 59);
+  assert.equal(JSON.parse(readStorageString(saveKey('a', 'user'))!).cards.length, 2);
+});
+test('R duplicates remain ordinary, do not count as pity rares and are collected separately on repeated pulls', async () => {
+  const save = newSave(); save.wallet!.gems = 2000; save.collection = Array.from({ length: 5 }, () => ({ ...save.cards[0] }));
+  assert.equal(isPityRare({ ...save.cards[0], pityEligible: true }), false);
+  mock.method(Math, 'random', () => 0);
+  let calls = 0;
+  mock.method(globalThis, 'fetch', async (_url: unknown, init?: RequestInit) => {
+    calls++;
+    const body = JSON.parse(String(init?.body)), source = JSON.parse(body.messages[1].content);
+    assert.ok(body.messages[0].content.includes('Duplicate R cards are normal'));
+    const base = { action: '看看日常', thought: '今天也陪你一会儿', speech: '', kind: 'daily', draw: false, delta: { mood: 0, energy: 0, affection: 0, growth: 0 } };
+    return Response.json({ choices: [{ message: { content: JSON.stringify({ steps: [{ ...base, kind: 'draw', draw: true, drawCount: 10, drawResultIds: source.drawSequence.slice(0, 10), resultThought: '都是熟悉的普卡，先收起来，继续攒钻吧。' }, base, base, base] }) } }] });
+  });
+  let next = await generateRound(save, 'a', new AbortController().signal);
+  assert.ok(cardsForDraw(next.rounds[0].steps[0]).every(c => c.rarity === 'R'));
+  next = advance(next); assert.equal(next.collection.length, 15); assert.equal(next.pity, 10); assert.equal(calls, 1);
+  const draft = { ...createEmptySave(), cards: [save.cards[0]] };
+  assert.doesNotThrow(() => validatePlan(currentPlan(draft)));
+  const incomplete = await generateRound(draft, 'a', new AbortController().signal);
+  assert.equal(incomplete.rounds[0].steps[0].draw, false); assert.equal(incomplete.wallet?.gems, 300);
+  assert.equal(calls, 2); // Draft R cards can be saved without blocking other game activities.
+});
 test('character and user saves remain isolated, including pending plans', () => {
   const a = newSave(); a.stats.mood = 12; a.pending = { stats: a.stats, speech: '只给你', cards: [], event: a.event };
   persistSave(saveKey('a', 'user'), a);
   assert.equal(readSave(saveKey('a', 'user')).pending?.speech, '只给你');
   assert.equal(readSave(saveKey('b', 'user')).stats.mood, 70);
   assert.equal(readSave(saveKey('a', 'other-user')).pending, undefined);
+});
+test('playback gives longer text more reading time and paused dialogs preserve complete existing content', () => {
+  const step = { kind: 'touch', target: '手' as const, action: '轻碰手心', thought: '想再陪你一会儿。', speech: '暖暖的。', delta: { mood: 0, energy: 0, affection: 0, growth: 0 }, draw: false };
+  assert.ok(playbackDuration(step) >= 8000);
+  const long = { ...step, thought: '角色原有的较长心理活动。'.repeat(40), speech: '用户设置的完整发言，不应该丢失。'.repeat(20) };
+  assert.ok(playbackDuration(long) > playbackDuration(step));
+  assert.ok(playbackDuration({ ...step, resultThought: '揭晓后的心理活动。'.repeat(40) }) > playbackDuration(step));
+  const html = renderToStaticMarkup(createElement(NurtureStage, { save: newSave(), userName: '我', actorName: '林渡', step: long, playing: true, busy: false, paused: true, onSettings: () => {} }));
+  assert.ok(html.includes(long.thought)); assert.ok(html.includes(long.speech));
+  assert.ok(html.includes('data-playback-paused="true"'));
+  assert.ok(!html.includes('今天，你会为我安排什么呢？'));
 });
 test('weighted draws respect boundaries and exclude zero weight cards', () => {
   const cards = newSave().cards;
@@ -63,6 +120,7 @@ test('generation uses only selected player and next-round content; playback resu
     const body = JSON.parse(String(init?.body)), source = JSON.parse(body.messages[1].content);
     assert.equal(source.player.id, 'a'); assert.equal(source.stats.mood, 99); assert.equal(source.greeting, '想看花'); assert.equal(source.event.title, '花朝');
     assert.ok(!String(init?.body).includes('OTHER_ACTOR_SECRET'));
+    assert.ok(body.messages[0].content.includes('建议20～45个中文字'));
     return Response.json({ choices: [{ message: { content: JSON.stringify({ steps: Array.from({ length: 4 }, (_, i) => ({ action: '陪伴', thought: '今天也想照顾好你', speech: '谢谢', delta: { mood: 5, energy: -1, affection: 2, growth: 1 }, draw: i === 0, resultThought: 'Actual result reaction', drawResultIds: source.drawSequence.slice(0, 1) })) }) } }] });
   });
   const generated = await generateRound(s, 'a', new AbortController().signal);
@@ -331,7 +389,7 @@ test('recharge prepares checkout thoughts in the same API call and settles only 
   let next = await generateRound(save, 'a', new AbortController().signal);
   const step = next.rounds[0].steps[0];
   assert.equal(apiCalls, 1); assert.ok(step.paymentThought?.includes('确认一下金额'));
-  assert.equal(playbackDuration(step), 7600); assert.equal(next.wallet?.gems, 300);
+  assert.ok(playbackDuration(step) >= 16000); assert.equal(next.wallet?.gems, 300);
   const html = renderToStaticMarkup(createElement(NurtureRecharge, { step, actorName: '林渡', gems: 60, orderId: 'order-1' }));
   for (const label of ['模拟充值收银台', '确认充值订单', '6.00', '60 星钻', '零钱（模拟）', '这次补一点星钻']) assert.ok(html.includes(label), label);
   assert.ok(html.includes('disabled')); assert.ok(!html.includes('<input')); assert.ok(!html.includes('下次给你挑件喜欢的'));
@@ -359,11 +417,58 @@ test('sixty-pull pity is counted card by card, resets on rare drops and supports
   assert.equal(sixty.cards[119].rarity, 'SSR'); assert.equal(sixty.counters[119], 0);
   const early = prepareDrawSequence(cards, 59, pool => pool.find(c => c.rarity === 'SSR'), 2);
   assert.deepEqual(early.counters, [0, 0]);
-  const custom = [{ ...cards[0], pityEligible: false }, { ...cards[1], pityEligible: true }, { ...cards[2], pityEligible: false }];
+  const custom = [{ ...cards[0], pityEligible: false }, { ...cards[1], rarity: 'SPECIAL', pityEligible: true }, { ...cards[2], pityEligible: false }];
   const guaranteed = prepareDrawSequence(custom, 59, pool => pool[0], 1);
-  assert.equal(guaranteed.cards[0].rarity, 'SR'); assert.ok(isPityRare(guaranteed.cards[0]));
+  assert.equal(guaranteed.cards[0].rarity, 'SPECIAL'); assert.ok(isPityRare(guaranteed.cards[0]));
   assert.throws(() => prepareDrawSequence([cards[0]], 0, pool => pool[0]), /至少一张/);
 });
+test('twenty-pull SR guarantee stays independent and yields to simultaneous SSR guarantee', () => {
+  const cards = newSave().cards;
+  const draws = prepareDrawSequence(cards, 0, pool => pool[0], 120);
+  for (const index of [19, 39, 79, 99]) {
+    assert.equal(draws.cards[index].rarity, 'SR');
+    assert.equal(draws.srCounters[index], 0);
+    assert.equal(draws.counters[index], (index + 1) % 60);
+  }
+  for (const index of [59, 119]) {
+    assert.equal(draws.cards[index].rarity, 'SSR');
+    assert.equal(draws.counters[index], 0); assert.equal(draws.srCounters[index], 0);
+  }
+  const simultaneous = prepareDrawSequence(cards, 59, pool => pool[0], 1, 19);
+  assert.equal(simultaneous.cards[0].rarity, 'SSR');
+  assert.deepEqual(simultaneous.srCounters, [0]);
+  const early = prepareDrawSequence(cards, 10, pool => pool.find(c => c.rarity === 'SSR'), 1, 18);
+  assert.deepEqual(early.counters, [0]); assert.deepEqual(early.srCounters, [0]);
+  const noSr = prepareDrawSequence(cards.filter(c => c.rarity !== 'SR'), 0, pool => pool[0], 20);
+  assert.equal(noSr.cards[19].rarity, 'SSR');
+  assert.equal(isPityRare({ ...cards[1], pityEligible: true }), false);
+});
+
+test('SR guarantee settles once, survives reload and migrates old collection history', async () => {
+  const save = newSave(); save.srPity = 19; save.pity = 25;
+  mock.method(Math, 'random', () => 0);
+  let calls = 0;
+  mock.method(globalThis, 'fetch', async (_url: unknown, init?: RequestInit) => {
+    calls++;
+    const source = JSON.parse(JSON.parse(String(init?.body)).messages[1].content);
+    assert.equal(source.pity.srCount, 19); assert.equal(source.pity.srLimit, 20);
+    assert.equal(source.drawSequence[0], save.cards[1].id);
+    const base = { action: 'Draw', thought: 'One more.', speech: '', delta: { mood: 0, energy: 0, affection: 0, growth: 0 }, draw: false, kind: 'daily' };
+    return Response.json({ choices: [{ message: { content: JSON.stringify({ steps: [{ ...base, kind: 'draw', draw: true, drawCount: 1, drawResultIds: source.drawSequence.slice(0, 1), resultThought: 'An SR.' }, base, base, base] }) } }] });
+  });
+  let next = await generateRound(save, 'a', new AbortController().signal);
+  assert.equal(next.srPity, 19); assert.equal(next.pity, 25);
+  const key = saveKey('a', 'sr-user'); persistSave(key, next); next = readSave(key);
+  next = advance(next); assert.equal(next.srPity, 0); assert.equal(next.pity, 26);
+  persistSave(key, next); next = readSave(key);
+  next = advance(advance(advance(next))); assert.equal(next.srPity, 0); assert.equal(next.collection.length, 1); assert.equal(calls, 1);
+  const legacy = newSave(); delete legacy.srPity;
+  legacy.collection = [legacy.cards[1], ...Array.from({ length: 17 }, () => legacy.cards[0])];
+  persistSave(key, legacy); assert.equal(readSave(key).srPity, 17);
+  legacy.collection = Array.from({ length: 45 }, () => legacy.cards[0]);
+  persistSave(key, legacy); assert.equal(readSave(key).srPity, 19);
+});
+
 test('ten-pull pity carries across rounds and reloads with one API request and no premature reset', async () => {
   const save = newSave(); save.pity = 55; save.wallet!.gems = 2000;
   mock.method(Math, 'random', () => 0);
@@ -418,7 +523,7 @@ test('single and ten pulls settle exact costs once, preserve all cards across re
   let next = await generateRound(save, 'a', new AbortController().signal);
   assert.equal(apiCalls, 1); assert.equal(sample, 80); assert.equal(JSON.stringify(save), original);
   assert.equal(next.collection.length, 0); assert.equal(cardsForDraw(next.rounds[0].steps[0]).length, 10);
-  assert.equal(playbackDuration(next.rounds[0].steps[0]), 9500); assert.equal(playbackDuration(next.rounds[0].steps[1]), 6500);
+  assert.ok(playbackDuration(next.rounds[0].steps[0]) >= 14000); assert.ok(playbackDuration(next.rounds[0].steps[1]) >= 11000);
   next = advance(next); assert.equal(next.collection.length, 10); assert.equal(next.wallet?.gems, 1000);
   const key = saveKey('a', 'user'); persistSave(key, next); next = readSave(key);
   next = advance(next); assert.equal(next.collection.length, 11); assert.equal(next.wallet?.gems, 900);

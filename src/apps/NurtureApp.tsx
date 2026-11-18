@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Heart, Settings, Star, Sparkles, Eye } from 'lucide-react';
+import { ArrowLeft, Heart, Settings, Star, Sparkles, Eye, Pause, Play } from 'lucide-react';
 import { readAnthologyAuthors } from '../utils/anthology';
 import { readNurtureIdentity, ownedProducts } from '../utils/nurtureInventory';
 import { advance, generateRound, persistSave, readSave, saveKey, STAT_LABELS, validatePlan, type Save, type Stats, type Step } from '../utils/nurture';
@@ -36,6 +36,7 @@ function Game({ actorId, user, onLock, onColors }: { actorId: string; user: Retu
   const [error, setError] = useState(initial.error), [busy, setBusy] = useState(false);
   const [showingLastStep, setShowingLastStep] = useState(false);
   const [preview, setPreview] = useState(false);
+  const [paused, setPaused] = useState(false);
   const [settings, setSettings] = useState(false), [tab, setTab] = useState<'home' | 'cards' | 'items' | 'logs'>('home');
   const controller = useRef<AbortController | null>(null);
   useEffect(() => () => { controller.current?.abort(); }, []);
@@ -45,27 +46,27 @@ function Game({ actorId, user, onLock, onColors }: { actorId: string; user: Retu
   useEffect(() => { onLock(busy || playing || preview); return () => onLock(false); }, [busy, playing, preview, onLock]);
   const commit = (next: Save) => { persistSave(key, next); setSave(next); };
   useEffect(() => {
-    if (!save || !hasPendingSteps || error) return;
-    const timer = window.setTimeout(() => { try { const next = advance(save); commit(next); if (next.rounds[0].cursor === next.rounds[0].steps.length) setShowingLastStep(true); } catch(e) { setError(errorText(e)); } }, playbackDuration(round?.cursor ? round.steps[round.cursor - 1] : undefined));
+    if (!save || !hasPendingSteps || error || paused) return;
+    const timer = window.setTimeout(() => { try { const next = advance(save); commit(next); if (next.rounds[0].cursor === next.rounds[0].steps.length) setShowingLastStep(true); } catch(e) { setError(errorText(e)); } }, playbackDuration(currentStep));
     return () => window.clearTimeout(timer);
-  }, [save, hasPendingSteps, error]);
+  }, [save, hasPendingSteps, error, paused, currentStep]);
   useEffect(() => {
-    if (!showingLastStep) return;
+    if (!showingLastStep || paused) return;
     const timer = window.setTimeout(() => setShowingLastStep(false), playbackDuration(round?.steps.at(-1)));
     return () => window.clearTimeout(timer);
-  }, [showingLastStep]);
+  }, [showingLastStep, paused]);
   const generate = async () => {
     if (!save || busy || playing || preview || controller.current) return;
-    const active = new AbortController(); controller.current = active; setBusy(true); setTab('home'); setError('');
+    const active = new AbortController(); controller.current = active; setBusy(true); setPaused(false); setTab('home'); setError('');
     try { const next = await generateRound(save, actorId, active.signal); active.signal.throwIfAborted(); commit(next); setTab('home'); }
     catch(e) { if (!active.signal.aborted) setError(errorText(e)); }
     finally { if (controller.current === active) { controller.current = null; setBusy(false); } }
   };
   if (!save) return <p role="alert" className="nurture-error">{error}</p>;
-  return <><div className="nurture-toolbar" inert={preview}><span><span className="nurture-online"/> {actor.name} · {busy ? '正在操作' : playing ? '游戏进行中' : '已登录'}</span><div className="nurture-toolbar-actions"><button aria-label="生成新一轮" title={busy ? '角色正在操作…' : playing ? '正在播放…' : '生成新一轮'} disabled={busy || playing} onClick={() => void generate()}><Sparkles size={17} className={busy ? 'animate-pulse' : undefined}/></button><button aria-label={"\u9884\u89c8\u6e38\u620f\u9875\u9762"} title={"\u9884\u89c8\u6e38\u620f\u9875\u9762"} disabled={busy || playing} onClick={() => setPreview(true)}><Eye size={17}/></button><button aria-label="策划设置" title="策划设置" disabled={busy || playing} onClick={() => setSettings(true)}><Settings size={18}/></button></div></div>
+  return <><div className="nurture-toolbar" inert={preview}><span><span className="nurture-online"/> {actor.name} · {busy ? '正在操作' : playing ? '游戏进行中' : '已登录'}</span><div className="nurture-toolbar-actions">{playing && <button type="button" aria-label={paused ? "\u7ee7\u7eed\u64ad\u653e" : "\u6682\u505c\u64ad\u653e"} title={paused ? "\u7ee7\u7eed\u64ad\u653e" : "\u6682\u505c\u64ad\u653e"} onClick={() => setPaused(p => !p)}>{paused ? <Play size={17}/> : <Pause size={17}/>}</button>}<button aria-label="生成新一轮" title={busy ? '角色正在操作…' : playing ? '正在播放…' : '生成新一轮'} disabled={busy || playing} onClick={() => void generate()}><Sparkles size={17} className={busy ? 'animate-pulse' : undefined}/></button><button aria-label={"\u9884\u89c8\u6e38\u620f\u9875\u9762"} title={"\u9884\u89c8\u6e38\u620f\u9875\u9762"} disabled={busy || playing} onClick={() => setPreview(true)}><Eye size={17}/></button><button aria-label="策划设置" title="策划设置" disabled={busy || playing} onClick={() => setSettings(true)}><Settings size={18}/></button></div></div>
     <div className="nurture-scroll" inert={preview}>
       <nav className="nurture-tabs">{(['home', 'cards', 'items', 'logs'] as const).map((t, i) => <button key={t} disabled={busy || playing} aria-current={tab === t ? 'page' : undefined} onClick={() => setTab(t)}>{['陪伴', `卡册 ${save.collection.length}`, `物品栏 ${ownedProducts(save).filter(i => i.status === 'owned').length}`, '游戏日志'][i]}{t === 'items' && playing && round?.steps[round.cursor - 1]?.kind === 'gift' && <NurtureTap key={`${round.id}:${round.cursor}`}/>}</button>)}</nav>
-      {tab === 'home' && <><NurtureStage save={save} userName={save.design?.hero.nickname || save.design?.hero.name || user.name} actorName={actor.name} onConfigure={(plan, design) => { if (busy || playing || preview) return; validatePlan(plan); commit(configureGame(save, plan, design)); }} step={currentStep} busy={busy} playing={playing} onSettings={() => setSettings(true)}/>
+      {tab === 'home' && <><NurtureStage save={save} userName={save.design?.hero.nickname || save.design?.hero.name || user.name} actorName={actor.name} onConfigure={(plan, design) => { if (busy || playing || preview) return; validatePlan(plan); commit(configureGame(save, plan, design)); }} step={currentStep} busy={busy} playing={playing} paused={paused} onSettings={() => setSettings(true)}/>
       </>}
       {tab === 'cards' && <section><h2 className="nurture-section-title">收集的每一瞬间</h2>{!save.collection.length && <p className="nurture-hint">角色在游戏中抽到的卡面，会珍藏在这里。</p>}<div className="nurture-card-grid">{save.collection.map((c, i) => <article key={i} className="nurture-card"><NurtureCardArt card={c}/><small>{c.rarity}</small><strong>{c.name}</strong><p>{c.description}</p></article>)}</div></section>}
       {tab === 'items' && <NurtureInventory save={save}/>}
