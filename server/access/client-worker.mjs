@@ -55,11 +55,11 @@ export default {
       } catch { return redirect(returnUrl + '?discord_error=unavailable', [clearFlow]); }
     }
     if (!path.startsWith('/api/client/')) return accessWorker.fetch(request, env);
-    if (path === '/api/client/discord/prepare' && request.method === 'POST') {
-      if (origin !== allowed) return failure('来源不允许。', 403);
-      const text = await request.text();
+    if (path === '/api/client/discord/prepare' && ['POST', 'GET'].includes(request.method)) {
+      if (request.method === 'POST' && origin !== allowed) return failure('来源不允许。', 403);
+      const text = request.method === 'POST' ? await request.text() : '';
       if (text.length > 200) return failure('登录请求无效。');
-      const ticket = new URLSearchParams(text).get('ticket');
+      const ticket = request.method === 'POST' ? new URLSearchParams(text).get('ticket') : url.searchParams.get('ticket');
       if (!/^[a-f0-9]{64}$/.test(ticket || '')) return failure('登录请求无效。');
       const row = await env.DB.prepare('SELECT hash FROM client_oauth_tickets WHERE hash=? AND expires>?').bind(await hash(ticket), Date.now()).first();
       if (!row) return failure('登录请求已过期，请重新登录。');
@@ -117,7 +117,9 @@ export default {
           env.DB.prepare('DELETE FROM client_oauth_tickets WHERE expires<=?').bind(now),
           env.DB.prepare('INSERT INTO client_oauth_tickets(hash,sealed_device,expires) VALUES(?,?,?)').bind(digest, await sealCodes([device, clientReturn(data.return_url, returnUrl, allowed)], env.ADMIN_TOKEN, 'client-ticket:' + digest), now + 60000)
         ]);
-        return cors(Response.json({ url: url.origin + '/api/client/discord/prepare', method: 'POST', fields: { ticket } }), allowed);
+        // Keep a ticket in the URL as well, so already cached GitHub clients
+        // which used GET navigation can finish without a forced storage reset.
+        return cors(Response.json({ url: url.origin + '/api/client/discord/prepare?ticket=' + ticket, method: 'POST', fields: { ticket } }), allowed);
       }
       if (path === '/api/client/exchange') {
         if (!/^[a-f0-9]{64}$/.test(data.grant || '')) return cors(failure('登录凭证无效。'), allowed);

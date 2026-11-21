@@ -268,11 +268,13 @@ test('GitHub Discord authorization returns a device-bound one-time exchange, nev
   const { env } = discordEnvironment();
   const original = 'https://yy021102.github.io/YYphone/?test=discord#my-phone';
   const started = await (await clientCall(env, 'discord/start', { return_url: original })).json();
-  assert.equal(started.url, 'https://phone.test/api/client/discord/prepare');
+  assert.equal(new URL(started.url).pathname, '/api/client/discord/prepare');
+  assert.equal(new URL(started.url).searchParams.get('ticket'), started.fields.ticket);
   assert.equal(started.method, 'POST');
   const prepared = await clientWorker.fetch(new Request(started.url, { method: 'POST', headers: { Origin: 'https://yy021102.github.io', 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(started.fields).toString() }), env);
   assert.equal(prepared.status, 200);
   assert((await prepared.text()).includes('registration.unregister'));
+  assert.equal((await clientWorker.fetch(new Request(started.url), env)).status, 200);
   const authorization = await clientWorker.fetch(new Request('https://phone.test/api/client/discord/authorize?ticket=' + started.fields.ticket), env);
   assert.equal(authorization.status, 302);
   const state = new URL(authorization.headers.get('Location')).searchParams.get('state');
