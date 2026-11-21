@@ -1,8 +1,16 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { ArrowRight, KeyRound } from 'lucide-react';
 import { accessPhraseHash, DEFAULT_FIRST_USE_PASSWORD_HASH, hasFirstUseAccess, normalizeAccessHash, rememberFirstUseAccess } from '../utils/firstUseAccess';
+import { LocalAccessPreviewGate } from './LocalAccessPreviewGate';
 
-export function FirstUseGate({ children, passwordHash = import.meta.env?.VITE_FIRST_USE_PASSWORD_HASH || DEFAULT_FIRST_USE_PASSWORD_HASH,
+type FirstUseGateProps = { children: ReactNode; passwordHash?: string; scope?: string };
+
+export function FirstUseGate(props: FirstUseGateProps) {
+  if (import.meta.env.DEV) return <LocalAccessPreviewGate>{props.children}</LocalAccessPreviewGate>;
+  return <LegacyFirstUseGate {...props} />;
+}
+
+function LegacyFirstUseGate({ children, passwordHash = import.meta.env.VITE_SERVER_ACCESS_GATE ? '' : (import.meta.env?.VITE_FIRST_USE_PASSWORD_HASH || DEFAULT_FIRST_USE_PASSWORD_HASH),
   scope = import.meta.env?.BASE_URL ?? '/' }: { children: ReactNode; passwordHash?: string; scope?: string }) {
   const hash = normalizeAccessHash(passwordHash);
   const [state, setState] = useState<'checking' | 'locked' | 'open'>(passwordHash ? 'checking' : 'open');

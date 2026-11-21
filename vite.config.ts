@@ -10,11 +10,14 @@ const repositoryName = process.env.GITHUB_REPOSITORY?.split('/')[1];
 
 export default defineConfig(() => {
   return {
+    define: { 'import.meta.env.VITE_SERVER_ACCESS_GATE': JSON.stringify(process.env.PHONE_ACCESS_GATE === '1') },
     base: repositoryName ? `/${repositoryName}/` : '/',
     plugins: [
       react(),
       tailwindcss(),
       VitePWA({
+        // Authenticated deployments must always check the server before loading.
+        disable: process.env.PHONE_ACCESS_GATE === '1',
         registerType: 'autoUpdate',
         includeAssets: ['tubiao.jpg', 'apple-touch-icon.png', 'pwa-192x192.png', 'pwa-512x512.png', 'app-icon-options/**/*', 'openings/christmas.webp'],
         manifest: false,

@@ -1,0 +1,17 @@
+{
+    "name":  "yyphone",
+    "pages_build_output_dir":  "./dist",
+    "compatibility_date":  "2026-11-21",
+    "vars":  {
+                 "DISCORD_GUILD_ID":  "1379304008157499423",
+                 "DISCORD_REDIRECT_URI":  "https://yyphone.pages.dev/api/auth/discord/callback",
+                 "DISCORD_CLIENT_ID":  "1573730575842279564"
+             },
+    "d1_databases":  [
+                         {
+                             "binding":  "DB",
+                             "database_name":  "yyphone-access",
+                             "database_id":  "3175b412-0aee-4ebd-8793-79bd1ecb9646"
+                         }
+                     ]
+}

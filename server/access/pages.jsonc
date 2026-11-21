@@ -1,0 +1,6 @@
+{
+  "name": "yyphone",
+  "pages_build_output_dir": "../../dist",
+  "compatibility_date": "2026-11-21",
+  "d1_databases": [{ "binding": "DB", "database_name": "yyphone-access", "database_id": "3175b412-0aee-4ebd-8793-79bd1ecb9646" }]
+}
