@@ -71,7 +71,10 @@ export async function discordRoute(request, env) {
   if (!code || code.length > 2048) return fail('authorization');
   try {
     const response = await call(env, 'https://discord.com/api/oauth2/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ client_id: env.DISCORD_CLIENT_ID, client_secret: env.DISCORD_CLIENT_SECRET, grant_type: 'authorization_code', code, redirect_uri: env.DISCORD_REDIRECT_URI }).toString() });
-    if (!response.ok) return fail('authorization');
+    if (!response.ok) {
+      const failure = await response.json().catch(() => ({}));
+      return fail(failure.error === 'invalid_client' ? 'app_credentials' : 'authorization');
+    }
     const token = await response.json(), scopes = (token.scope || '').split(' ');
     if (typeof token.access_token !== 'string' || !Number.isFinite(token.expires_in) || token.expires_in <= 0 || !scopes.includes('identify') || !scopes.includes('guilds.members.read')) return fail('authorization');
     const profileResponse = await call(env, API + '/users/@me', { headers: { Authorization: 'Bearer ' + token.access_token } });

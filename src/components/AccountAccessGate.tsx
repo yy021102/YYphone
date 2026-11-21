@@ -9,7 +9,11 @@ document.querySelector('#discordLogin a').onclick=event=>{event.preventDefault()
 const discordErrors: Record<string, string> = {
   not_member: '你尚未加入指定服务器，或尚未完成服务器的入群验证。',
   banned: '此账号已被封禁，请联系作者。', device_limit: '已绑定两个设备，请联系作者解绑旧设备。',
-  cancelled: '已取消 Discord 授权，可重新尝试。', state: '登录验证已过期，请重新登录。'
+  cancelled: '已取消 Discord 授权，可重新尝试。', state: '登录验证已过期，请重新登录。',
+  not_configured: 'Discord 登录服务尚未配置完成，请联系作者。', wrong_origin: '请从正式入口重新发起 Discord 登录。',
+  authorization: 'Discord 授权验证失败，请重新授权；若持续失败，请联系作者检查应用配置。',
+  app_credentials: 'Discord 应用密钥验证失败，需要作者更新登录服务配置。',
+  unavailable: 'Discord 验证服务暂时不可用，请稍后重试。'
 };
 export function AccountAccessGate({ children }: { children: ReactNode }) {
   const base = (import.meta.env.VITE_ACCESS_API_URL || 'https://yyphone.pages.dev').replace(/\/$/, '');

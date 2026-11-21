@@ -8,6 +8,7 @@ import { Script } from 'node:vm';
 import { gate } from './gate.mjs';
 import { discordReady } from './discord.mjs';
 import clientWorker from './client-worker.mjs';
+import { checkDiscordConfiguration } from './discord-configuration.mjs';
 
 function environment() {
   const db = new DatabaseSync(':memory:');
@@ -344,4 +345,22 @@ test('eight-character passwords and case-insensitive short codes work while lega
   assert.equal((await call(env, '/api/auth/register', { ...credentials, username: '234567890', code: legacy })).status, 200);
   assert.equal((await call(env, '/api/admin/revoke-code', { code: code.toLowerCase() }, '', true)).status, 200);
   assert.equal((await call(env, '/api/auth/login', credentials)).status, 401);
+});
+test('Discord configuration checks report invalid credentials without leaking secrets or retaining the probe token', async () => {
+  const { env } = discordEnvironment();
+  assert.equal((await call(env, '/api/admin/discord/check', {})).status, 403);
+  env.DISCORD_FETCH = async () => Response.json({ error: 'invalid_client' }, { status: 401 });
+  const failed = await checkDiscordConfiguration(env);
+  assert.equal(failed.credentials_valid, false);assert.equal(failed.reason, 'invalid_client');
+  assert(!JSON.stringify(failed).includes(env.DISCORD_CLIENT_SECRET));
+  let revoked = false;
+  env.DISCORD_FETCH = async (url, options) => {
+    assert(options.headers.Authorization.startsWith('Basic '));
+    if (url.endsWith('/revoke')) { revoked = true;return Response.json({}); }
+    assert.equal(new URLSearchParams(options.body).get('grant_type'), 'client_credentials');
+    return Response.json({ access_token: 'private-probe-token' });
+  };
+  const success = await checkDiscordConfiguration(env);
+  assert.equal(success.credentials_valid, true);assert(revoked);
+  assert(!JSON.stringify(success).includes('private-probe-token'));
 });

@@ -6,6 +6,7 @@ import { createSession } from './device-session.mjs';
 import { discordRoute, discordReady, discordSessionAllowed } from './discord.mjs';
 import { adminAuth } from './admin-session.mjs';
 import { activationCode, normalizeActivationCode } from './activation-code.mjs';
+import { checkDiscordConfiguration } from './discord-configuration.mjs';
 
 const encoder = new TextEncoder();
 const hex = b => Array.from(new Uint8Array(b), n => n.toString(16).padStart(2, '0')).join('');
@@ -70,6 +71,7 @@ async function handle(request, env) {
     const data = await body(request);
     const adminResponse = await adminAuth(request, env, path, data);
     if (adminResponse) return adminResponse;
+    if (path === '/api/admin/discord/check') return json(await checkDiscordConfiguration(env));
     const usersResponse = await userAdmin(path, data, env, hash);
     if (usersResponse) return usersResponse;
     if (path === '/api/admin/batches/create') {

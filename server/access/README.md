@@ -68,6 +68,8 @@ ADMIN_TOKEN 请用密码管理器生成至少32字节的随机秘密，只保存
 
 Discord 登录配置在根目录 `wrangler.jsonc`：目标服务器 `1379304008157499423`、Client ID `1573730575842279564`、回调 `https://yyphone.pages.dev/api/auth/discord/callback`。Client Secret 仅存 Cloudflare 项目 yyphone 的 `DISCORD_CLIENT_SECRET` Secret。替换应用凭证可使用 `configure-discord.ps1 -ClientId ...`，在隐藏输入中粘贴密钥。
 
+更新 Pages Secret 后还需重新发布接口层，让线上部署使用新值。作者可在主站调用受管理权限保护的 `POST /api/admin/discord/check` 验证实际生效的凭证；它使用官方 client-credentials 检查并立即撤销临时测试令牌，响应只含配置ID、状态和白名单错误原因，不返回密钥或访问令牌。`401 invalid_client` 表示当前应用凭证未通过 Discord 校验，需检查是否复制了正确应用的当前 Client Secret。
+
 Discord 登录使用官方 OAuth2 授权码流程和 `identify guilds.members.read` 权限，不需要机器人或读取聊天内容。随机 state 通过十分钟、绑定浏览器的 HttpOnly Cookie 和数据库一次性记录防伪造及重放。账号按 Discord 固定用户 ID 创建，昵称变化不会重建账号，不会自动与QQ用户合并。服务器成员免激活码，仍限制两个浏览器设备，作者可封禁或解绑。尚未完成服务器入群筛选的用户需先完成筛选。
 
 Discord 授权凭证仅加密保存服务端，最多15分钟复查一次成员资格；检测到退服或被移除时撤销该账号的会话。缓存过期后 Discord 接口故障会拒绝访问，稍后可重试。会话不超过七天及 Discord access token 有效期，过期后需重新授权；不保存 refresh token。内部成员授权记录不会计入发码、余量和核销统计，已注册总量包含两种登录方式。Discord 应用密钥和用户令牌均不会发给浏览器。
