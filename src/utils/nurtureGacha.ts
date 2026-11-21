@@ -41,7 +41,7 @@ export function playbackDuration(step?: Step) {
 export async function generateCommonCards(design: GameDesign, existing: Card[], count: number, direction: string, signal: AbortSignal): Promise<Card[]> {
   if (!Number.isInteger(count) || count < 3 || count > 30) throw new Error('批量生成数量请填写 3～30 张。');
   if (direction.length > 3000) throw new Error('卡面方向请控制在 3000 字以内。');
-  const raw = await requestConfiguredAiText('你是养成游戏的卡面策划。按游戏介绍与人物设定批量设计普通R卡：朴素、日常、有具体生活细节，把重大剧情和珍贵时刻留给稀有卡。每张卡名和场景不同，不重复已有卡名。只写画面与氛围，不替user编造对白或承诺。不要生成图片URL、稀有卡或概率。只返回JSON：{"cards":[{"name":"卡名","description":"画面描述","artText":"显示在文字卡面上的短文"}]}，数量严格等于count。', JSON.stringify({ task: 'common-cards', game: design.description, hero: design.hero, existingNames: existing.map(c => c.name), count, direction }), { json: true, signal, maxTokens: 6000, includeGlobalWorldBooks: true });
+  const raw = await requestConfiguredAiText('你是养成游戏的卡面策划。按游戏介绍与人物设定批量设计普通R卡：朴素、日常、有具体生活细节，把重大剧情和珍贵时刻留给稀有卡。每张卡名和场景不同，不重复已有卡名。只写画面与氛围，不替user编造对白或承诺。不要生成图片URL、稀有卡或概率。只返回JSON：{"cards":[{"name":"卡名","description":"画面描述","artText":"显示在文字卡面上的短文"}]}，数量严格等于count。', JSON.stringify({ task: 'common-cards', game: design.description, hero: design.hero, existingNames: existing.map(c => c.name), count, direction }), { json: true, signal, includeGlobalWorldBooks: true });
   signal.throwIfAborted();
   const parsed = parseAiJson(raw);
   if (!obj(parsed) || !Array.isArray(parsed.cards) || parsed.cards.length !== count) throw new Error('AI 返回的普卡数量不符，请重试。');
