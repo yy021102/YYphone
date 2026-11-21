@@ -6,6 +6,23 @@ Workers 同域托管小手机与登录页面，D1 保存账号、激活码摘要
 
 ## 部署
 
+### GitHub Pages 先测试、Cloudflare 后正式发布
+
+GitHub Actions 的普通生产构建使用 `AccountAccessGate` 显示与本地及主站共用的验证页，并调用 `https://yyphone.pages.dev/api/client/*` 进行真实注册、登录和验证。登录凭证与设备标识存放在独立 IndexedDB 数据库中，关闭页面后保留，不使用旧统一口令，也不提供跳过验证的按钮。本地 DEV 仍提供设计预览；Cloudflare 的 PHONE_ACCESS_GATE 构建由服务端先验证，不重复展示客户端门禁。
+
+GitHub API 只允许固定来源 `https://yy021102.github.io`，不依赖第三方 Cookie。Discord 使用原来的主站回调，通过一次性、绑定设备、60秒有效的交换码回到固定 GitHub Pages 路径，不在 URL 中传递正式会话令牌。两站共用数据库和两设备上限，测试会真实消耗激活码、创建用户，可在同一作者后台管理。GitHub 的静态文件仍是公开托管，客户端页面本身无法阻止下载源码。
+
+当前主站仅补上 API，同时保留原小手机版本：`build-api-overlay.mjs` 将非 API 请求代理到原不可变部署 `https://6de26fb7.yyphone.pages.dev`。主站正式升级前，不要删除这个基线部署。发布接口层：
+
+```powershell
+node server/access/build-api-overlay.mjs
+Push-Location server/access/api-site
+npx wrangler pages deploy --project-name yyphone --branch main
+Pop-Location
+```
+
+`api-site` 仅包含自动生成的构建和配置，已被 Git 忽略。GitHub 测试通过后，按下方正常 `build-pages.mjs` 流程发布主站，便会换成新版小手机及服务端完整门禁，继续保留同一跨站 API。
+
 ### 现有 yyphone.pages.dev 原站（推荐）
 
 无需迁移域名，使用 Pages Advanced Mode 承载同一后端。根目录 `wrangler.jsonc` 是 Pages 发布配置（Pages 不接受自定义配置文件路径）。数据库已创建，后续发布前执行可重复运行的 schema 初始化以补齐新表，然后构建并发布：
@@ -74,13 +91,15 @@ Pop-Location
 
 后台和小手机两个项目必须使用相同 ADMIN_TOKEN（用于重新导出加密码）和 D1 绑定。小手机门禁正式上线后，将 `server/access/admin-site/wrangler.jsonc` 中 ACCESS_READY 改成 `true` 并重新发布后台，即可去掉暂未上线的提示。
 
-本机 Windows 已加密保存管理密钥，可以运行以下命令打开管理页并把密钥放入剪贴板，再粘贴验证；无须把密钥显示在终端或发给分发管理员：
+后台首次登录后使用 HttpOnly / Secure / SameSite=Strict Cookie 记住当前浏览器，最长一年，刷新或关闭后台不会要求反复输入密钥；“退出管理”会使该 Cookie 立即失效。未登录的访客仍无法查看用户、发码或执行管理操作。
+
+本机 Windows 已加密保存管理密钥，可以运行以下命令生成一次性作者登录链接并直接打开，无需输入密钥：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File server/access/manage.ps1
 ```
 
-该本机密钥文件位于被 Git 忽略的 `.private/admin-token.xml`，通过 Windows 当前用户凭证加密，仅同一 Windows 用户可读取。换电脑前请另行安全备份管理密钥。网页只在当前页面内存中保留密钥，刷新后需重新输入。管理密钥只给作者，分发管理员只接收对应的一批激活码。
+该本机密钥文件位于被 Git 忽略的 `.private/admin-token.xml`，通过 Windows 当前用户凭证加密，仅同一 Windows 用户可读取。换电脑前请另行安全备份管理密钥。网页登录时将密钥换为独立设备会话，不在 localStorage 保存主密钥。一次性作者链接有效30分钟，使用后失效，打开时从地址栏清除；新手机可用新链接登录。管理凭证只给作者，分发管理员只接收对应的一批激活码。
 
 为了支持历史批次重新复制，批量激活码通过 AES-GCM 加密存储，密钥从 ADMIN_TOKEN 派生，数据库不会直接保存明文码。变更 ADMIN_TOKEN 前需先导出所有批次或迁移加密数据，否则无法重新导出旧批次；已发出的码仍可激活。旧单码接口仍只返回一次明文码。
 

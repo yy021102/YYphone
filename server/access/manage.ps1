@@ -8,9 +8,10 @@ $credentialPath = Join-Path $PSScriptRoot '.private/admin-token.xml'
 $protected = Import-Clixml -LiteralPath $credentialPath
 $credential = New-Object System.Management.Automation.PSCredential('admin', $protected)
 if ($Action -eq 'open') {
-  Set-Clipboard -Value $credential.GetNetworkCredential().Password
-  Start-Process "$BaseUrl/admin"
-  Write-Output 'Admin page opened. Paste the management key from your clipboard to unlock.'
+  $ownerHeaders = @{ Authorization = 'Bearer ' + $credential.GetNetworkCredential().Password; Origin = $BaseUrl }
+  $ownerLink = Invoke-RestMethod "$BaseUrl/api/admin/bootstrap/create" -Method Post -Headers $ownerHeaders -ContentType 'application/json' -Body '{}'
+  Start-Process $ownerLink.url
+  Write-Output 'Owner login page opened. This browser will remember your login.'
   return
 }
 $headers = @{ Authorization = 'Bearer ' + $credential.GetNetworkCredential().Password; Origin = $BaseUrl }

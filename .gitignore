@@ -9,3 +9,4 @@ coverage/
 !.env.example
 server/access/.private/
 server/access/admin-site/dist/
+server/access/api-site/

@@ -4,6 +4,7 @@ import { sealCodes, openCodes } from './batches.mjs';
 import { userAdmin } from './admin-users.mjs';
 import { createSession } from './device-session.mjs';
 import { discordRoute, discordReady, discordSessionAllowed } from './discord.mjs';
+import { adminAuth } from './admin-session.mjs';
 
 const encoder = new TextEncoder();
 const hex = b => Array.from(new Uint8Array(b), n => n.toString(16).padStart(2, '0')).join('');
@@ -47,6 +48,10 @@ export default {
 };
 async function handle(request, env) {
   const url = new URL(request.url), path = url.pathname;
+  if (env.API_ONLY === 'true' && !path.startsWith('/api/') && path !== '/admin' && path !== '/admin/') {
+    const legacy = new URL(request.url); legacy.host = new URL(env.LEGACY_ASSET_ORIGIN).host;
+    return fetch(new Request(legacy, request));
+  }
   if (path === '/admin' || path === '/admin/') return new Response(adminPage, { headers: {
     'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer',
     'X-Content-Type-Options': 'nosniff',
@@ -60,9 +65,10 @@ async function handle(request, env) {
   const discordResponse = await discordRoute(request, env);
   if (discordResponse) return discordResponse;
   if (path.startsWith('/api/admin/')) {
-    if (!env.ADMIN_TOKEN || !request.headers.get('Authorization')?.startsWith('Bearer ') || await hash(request.headers.get('Authorization').slice(7)) !== await hash(env.ADMIN_TOKEN)) return json({ error: '无权限' }, 403);
     if (request.method !== 'POST') return json({ error: '请使用 POST' }, 405);
     const data = await body(request);
+    const adminResponse = await adminAuth(request, env, path, data);
+    if (adminResponse) return adminResponse;
     const usersResponse = await userAdmin(path, data, env, hash);
     if (usersResponse) return usersResponse;
     if (path === '/api/admin/batches/create') {

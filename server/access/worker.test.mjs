@@ -7,6 +7,7 @@ import { adminPage } from './admin.mjs';
 import { Script } from 'node:vm';
 import { gate } from './gate.mjs';
 import { discordReady } from './discord.mjs';
+import clientWorker from './client-worker.mjs';
 
 function environment() {
   const db = new DatabaseSync(':memory:');
@@ -243,4 +244,58 @@ test('Discord nonmembers, incomplete screening, outages and missing configuratio
   delete env.DISCORD_CLIENT_SECRET;
   assert((await begin()).headers.get('Location').includes('not_configured'));
   assert.equal((await call(env, '/assets/app.js')).status, 401);
+});
+const clientCall = (env, path, data = {}, device = 'a'.repeat(64), token = '', origin = 'https://yy021102.github.io') => clientWorker.fetch(new Request('https://phone.test/api/client/' + path, { method: 'POST', headers: { Origin: origin, 'Content-Type': 'application/json', 'X-Phone-Device': device, ...(token ? { Authorization: 'Bearer ' + token } : {}) }, body: JSON.stringify(data) }), env);
+test('GitHub client uses real registration, persistent bearer sessions, origin checks and two-device enforcement', async () => {
+  const env = environment();
+  const { code } = await (await call(env, '/api/admin/codes', {}, '', true)).json();
+  const credentials = { username: '1122334455', password: 'github-test-password', code };
+  assert.equal((await clientCall(env, 'register', credentials, 'a'.repeat(64), '', 'https://untrusted.test')).status, 403);
+  const registration = await clientCall(env, 'register', credentials);
+  assert.equal(registration.status, 200);
+  assert.equal(registration.headers.get('Access-Control-Allow-Origin'), 'https://yy021102.github.io');
+  assert.equal(registration.headers.has('Set-Cookie'), false);
+  const first = await registration.json();assert.match(first.token, /^[a-f0-9]{64}$/);
+  assert.equal((await clientCall(env, 'me', {}, 'a'.repeat(64), first.token)).status, 200);
+  assert.equal((await clientCall(env, 'me', {}, 'b'.repeat(64), first.token)).status, 401);
+  assert.equal((await clientCall(env, 'login', credentials, 'b'.repeat(64))).status, 200);
+  assert.equal((await clientCall(env, 'login', credentials, 'c'.repeat(64))).status, 403);
+  await call(env, '/api/admin/users/status', { username: credentials.username, disabled: true }, '', true);
+  assert.equal((await clientCall(env, 'me', {}, 'a'.repeat(64), first.token)).status, 401);
+});
+test('GitHub Discord authorization returns a device-bound one-time exchange, never a session token in the URL', async () => {
+  const { env } = discordEnvironment();
+  const started = await (await clientCall(env, 'discord/start')).json();
+  assert(started.url.startsWith('https://phone.test/api/client/discord/authorize?ticket='));
+  const authorization = await clientWorker.fetch(new Request(started.url), env);
+  assert.equal(authorization.status, 302);
+  const state = new URL(authorization.headers.get('Location')).searchParams.get('state');
+  const callback = new Request('https://phone.test/api/auth/discord/callback?code=fake&state=' + state, { headers: { Cookie: cookieJar(authorization) } });
+  const returned = await clientWorker.fetch(callback, env);
+  const destination = new URL(returned.headers.get('Location'));
+  assert.equal(destination.origin, 'https://yy021102.github.io');
+  const grant = destination.hash.split('=')[1];assert.match(grant, /^[a-f0-9]{64}$/);
+  assert(!destination.href.includes('fake-access-token'));
+  assert.equal((await clientCall(env, 'exchange', { grant }, 'b'.repeat(64))).status, 401);
+  const exchanged = await (await clientCall(env, 'exchange', { grant })).json();
+  assert.match(exchanged.token, /^[a-f0-9]{64}$/);
+  assert.notEqual(exchanged.token, grant);
+  assert.equal((await clientCall(env, 'exchange', { grant })).status, 401);
+  assert.equal((await clientCall(env, 'me', {}, 'a'.repeat(64), exchanged.token)).status, 200);
+});
+test('owner login is remembered in an HttpOnly cookie and one-time owner links cannot be replayed', async () => {
+  const env = environment();
+  const link = await (await call(env, '/api/admin/bootstrap/create', {}, '', true)).json();
+  const ticket = link.url.split('=')[1];
+  const loggedIn = await call(env, '/api/admin/bootstrap', { ticket });
+  assert.equal(loggedIn.status, 200);
+  assert(loggedIn.headers.get('Set-Cookie').includes('HttpOnly'));
+  assert(loggedIn.headers.get('Set-Cookie').includes('Max-Age=31536000'));
+  const owner = cookieJar(loggedIn);
+  assert.equal((await call(env, '/api/admin/bootstrap', { ticket })).status, 403);
+  assert.equal((await call(env, '/api/admin/overview', {}, owner)).status, 200);
+  assert.equal((await call(env, '/api/admin/session', {}, owner)).status, 200);
+  assert.equal((await call(env, '/api/admin/bootstrap/create', {}, owner)).status, 403);
+  await call(env, '/api/admin/logout', {}, owner);
+  assert.equal((await call(env, '/api/admin/overview', {}, owner)).status, 403);
 });
