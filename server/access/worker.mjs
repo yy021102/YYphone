@@ -5,6 +5,7 @@ import { userAdmin } from './admin-users.mjs';
 import { createSession } from './device-session.mjs';
 import { discordRoute, discordReady, discordSessionAllowed } from './discord.mjs';
 import { adminAuth } from './admin-session.mjs';
+import { activationCode, normalizeActivationCode } from './activation-code.mjs';
 
 const encoder = new TextEncoder();
 const hex = b => Array.from(new Uint8Array(b), n => n.toString(16).padStart(2, '0')).join('');
@@ -80,7 +81,7 @@ async function handle(request, env) {
         if (existing.label !== label || existing.count !== count) return json({ error: '重复请求的批次信息不一致，请刷新批次列表。' }, 409);
         return json({ id, label, codes: await openCodes(existing.sealed, env.ADMIN_TOKEN, id) });
       }
-      const codes = Array.from({ length: count }, random), now = Date.now();
+      const codes = Array.from({ length: count }, activationCode), now = Date.now();
       const statements = [env.DB.prepare('INSERT INTO code_batches(id,label,count,created_at,sealed) VALUES(?,?,?,?,?)').bind(id, label, count, now, await sealCodes(codes, env.ADMIN_TOKEN, id))];
       const digests = await Promise.all(codes.map(hash));
       // Keep each statement under D1's bind limit and the batch query count small.
@@ -108,7 +109,7 @@ async function handle(request, env) {
       return json({ id: batch.id, label: batch.label, codes, available });
     }
     if (path === '/api/admin/codes') {
-      const code = random();
+      const code = activationCode();
       const digest = await hash(code);
       await env.DB.batch([
         env.DB.prepare('INSERT INTO codes(hash,created_at) VALUES(?,?)').bind(digest, Date.now()),
@@ -117,7 +118,9 @@ async function handle(request, env) {
       return json({ code });
     }
     if (path === '/api/admin/revoke-code' && typeof data.code === 'string') {
-      const result = await env.DB.prepare('UPDATE codes SET revoked=1 WHERE hash=?').bind(await hash(data.code.trim())).run();
+      const code = normalizeActivationCode(data.code);
+      if (!code) return json({ error: '激活码格式不正确。' }, 400);
+      const result = await env.DB.prepare('UPDATE codes SET revoked=1 WHERE hash=?').bind(await hash(code)).run();
       return result.meta.changes ? json({ ok: true }) : json({ error: '激活码不存在。' }, 404);
     }
     if (path === '/api/admin/reset-devices' && typeof data.username === 'string') {
@@ -136,12 +139,13 @@ async function handle(request, env) {
     if (rate.count > 15) return json({ error: '尝试过多，请15分钟后重试。' }, 429);
     const data = await body(request);
     const username = typeof data.username === 'string' ? data.username.trim().toLowerCase() : '';
-    if (!/^[1-9][0-9]{4,11}$/.test(username) || typeof data.password !== 'string' || data.password.length < 10 || data.password.length > 128) return json({ error: '请使用QQ号作为登录账号（5–12位数字，不以0开头）；本站密码需10–128位，请勿填写QQ密码。' }, 400);
+    if (!/^[1-9][0-9]{4,11}$/.test(username) || typeof data.password !== 'string' || data.password.length < 8 || data.password.length > 128) return json({ error: '请使用QQ号作为登录账号（5–12位数字，不以0开头）；本站密码需8–128位，请勿填写QQ密码。' }, 400);
     let user;
     if (path.endsWith('/register')) {
-      if (typeof data.code !== 'string' || !/^[a-f0-9]{64}$/.test(data.code.trim())) return json({ error: '激活码无效' }, 400);
+      const code = normalizeActivationCode(data.code);
+      if (!code) return json({ error: '激活码无效' }, 400);
       const salt = random(), id = random();
-      const result = await env.DB.prepare('INSERT INTO users(id,username,password,salt,code_hash) SELECT ?,?,?,?,hash FROM codes WHERE hash=? AND revoked=0 AND NOT EXISTS(SELECT 1 FROM users WHERE code_hash=codes.hash)').bind(id, username, await passwordHash(data.password, salt), salt, await hash(data.code.trim())).run();
+      const result = await env.DB.prepare('INSERT INTO users(id,username,password,salt,code_hash) SELECT ?,?,?,?,hash FROM codes WHERE hash=? AND revoked=0 AND NOT EXISTS(SELECT 1 FROM users WHERE code_hash=codes.hash)').bind(id, username, await passwordHash(data.password, salt), salt, await hash(code)).run();
       if (!result.meta.changes) return json({ error: '激活码无效或已使用' }, 409);
       user = { id };
     } else {

@@ -21,3 +21,5 @@ CREATE TABLE IF NOT EXISTS client_oauth_tickets (hash TEXT PRIMARY KEY, sealed_d
 CREATE TABLE IF NOT EXISTS client_exchanges (hash TEXT PRIMARY KEY, device_hash TEXT NOT NULL, sealed_session TEXT NOT NULL, expires INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS admin_sessions (hash TEXT PRIMARY KEY, expires INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS admin_bootstrap (hash TEXT PRIMARY KEY, expires INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS oauth_client_flows (state_hash TEXT PRIMARY KEY, sealed_device TEXT NOT NULL, expires INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS oauth_return_targets (state_hash TEXT PRIMARY KEY, return_url TEXT NOT NULL, expires INTEGER NOT NULL);

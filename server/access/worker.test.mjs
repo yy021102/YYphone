@@ -61,6 +61,7 @@ test('bulk batches are distinct, retry-safe, exportable and track redemption and
   const second = await (await create({ count: 50, label: '管理员2' })).json();
   assert.equal(first.codes.length, 50);
   assert.equal(second.codes.length, 50);
+  assert(first.codes.every(code => /^[A-HJ-NP-Z2-9]{15}$/.test(code)));
   assert.equal(new Set([...first.codes, ...second.codes]).size, 100);
   assert.deepEqual((await (await create(firstRequest)).json()).codes, first.codes);
   assert.equal((await create({ ...firstRequest, count: 51 })).status, 409);
@@ -265,21 +266,31 @@ test('GitHub client uses real registration, persistent bearer sessions, origin c
 });
 test('GitHub Discord authorization returns a device-bound one-time exchange, never a session token in the URL', async () => {
   const { env } = discordEnvironment();
-  const started = await (await clientCall(env, 'discord/start')).json();
-  assert(started.url.startsWith('https://phone.test/api/client/discord/authorize?ticket='));
-  const authorization = await clientWorker.fetch(new Request(started.url), env);
+  const original = 'https://yy021102.github.io/YYphone/?test=discord#my-phone';
+  const started = await (await clientCall(env, 'discord/start', { return_url: original })).json();
+  assert.equal(started.url, 'https://phone.test/api/client/discord/prepare');
+  assert.equal(started.method, 'POST');
+  const prepared = await clientWorker.fetch(new Request(started.url, { method: 'POST', headers: { Origin: 'https://yy021102.github.io', 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(started.fields).toString() }), env);
+  assert.equal(prepared.status, 200);
+  assert((await prepared.text()).includes('registration.unregister'));
+  const authorization = await clientWorker.fetch(new Request('https://phone.test/api/client/discord/authorize?ticket=' + started.fields.ticket), env);
   assert.equal(authorization.status, 302);
   const state = new URL(authorization.headers.get('Location')).searchParams.get('state');
-  const callback = new Request('https://phone.test/api/auth/discord/callback?code=fake&state=' + state, { headers: { Cookie: cookieJar(authorization) } });
+  // Flow origin and device are recorded server-side. Even if the extra marker
+  // and device cookies disappear, the original OAuth state cookie is sufficient.
+  const oauthCookie = cookieJar(authorization).split('; ').filter(value => value.startsWith('phone_oauth=')).join('; ');
+  const callback = new Request('https://phone.test/api/auth/discord/callback?code=fake&state=' + state, { headers: { Cookie: oauthCookie } });
   const returned = await clientWorker.fetch(callback, env);
   const destination = new URL(returned.headers.get('Location'));
   assert.equal(destination.origin, 'https://yy021102.github.io');
+  assert.equal(destination.search, '?test=discord');
   const grant = destination.hash.split('=')[1];assert.match(grant, /^[a-f0-9]{64}$/);
   assert(!destination.href.includes('fake-access-token'));
   assert.equal((await clientCall(env, 'exchange', { grant }, 'b'.repeat(64))).status, 401);
   const exchanged = await (await clientCall(env, 'exchange', { grant })).json();
   assert.match(exchanged.token, /^[a-f0-9]{64}$/);
   assert.notEqual(exchanged.token, grant);
+  assert.equal(exchanged.return_url, original);
   assert.equal((await clientCall(env, 'exchange', { grant })).status, 401);
   assert.equal((await clientCall(env, 'me', {}, 'a'.repeat(64), exchanged.token)).status, 200);
 });
@@ -298,4 +309,37 @@ test('owner login is remembered in an HttpOnly cookie and one-time owner links c
   assert.equal((await call(env, '/api/admin/bootstrap/create', {}, owner)).status, 403);
   await call(env, '/api/admin/logout', {}, owner);
   assert.equal((await call(env, '/api/admin/overview', {}, owner)).status, 403);
+});
+test('Discord login from the main phone returns to its own original URL and rejects external return targets', async () => {
+  const { env, finish } = discordEnvironment();
+  const start = await call(env, '/api/auth/discord/start?return_to=' + encodeURIComponent('https://phone.test/?screen=phone#home'));
+  const completed = await finish(start);
+  assert.equal(completed.headers.get('Location'), '/?screen=phone#home');
+  const external = await call(env, '/api/auth/discord/start?return_to=' + encodeURIComponent('https://untrusted.test/'));
+  assert.equal((await finish(external)).headers.get('Location'), '/');
+});
+test('GitHub OAuth cannot be used as an open redirect and cancellation returns to the initiating page', async () => {
+  const { env } = discordEnvironment();
+  const started = await (await clientCall(env, 'discord/start', { return_url: 'https://untrusted.test/' })).json();
+  const authorization = await clientWorker.fetch(new Request('https://phone.test/api/client/discord/authorize?ticket=' + started.fields.ticket), env);
+  const state = new URL(authorization.headers.get('Location')).searchParams.get('state');
+  const oauthCookie = cookieJar(authorization).split('; ').filter(value => value.startsWith('phone_oauth=')).join('; ');
+  const cancelled = await clientWorker.fetch(new Request('https://phone.test/api/auth/discord/callback?error=access_denied&state=' + state, { headers: { Cookie: oauthCookie } }), env);
+  const destination = new URL(cancelled.headers.get('Location'));
+  assert.equal(destination.origin, 'https://yy021102.github.io');
+  assert.equal(destination.searchParams.get('discord_error'), 'cancelled');
+});
+test('eight-character passwords and case-insensitive short codes work while legacy codes remain usable', async () => {
+  const env = environment();
+  const { code } = await (await call(env, '/api/admin/codes', {}, '', true)).json();
+  assert.equal(code.length, 15);
+  const credentials = { username: '123456789', password: 'abc12345', code: code.toLowerCase() };
+  assert.equal((await call(env, '/api/auth/register', { ...credentials, password: '1234567' })).status, 400);
+  assert.equal((await call(env, '/api/auth/register', credentials)).status, 200);
+  assert.equal((await call(env, '/api/auth/login', credentials)).status, 200);
+  const legacy = 'f'.repeat(64);
+  await env.DB.prepare('INSERT INTO codes(hash,created_at) VALUES(?,?)').bind(await hash(legacy), Date.now()).run();
+  assert.equal((await call(env, '/api/auth/register', { ...credentials, username: '234567890', code: legacy })).status, 200);
+  assert.equal((await call(env, '/api/admin/revoke-code', { code: code.toLowerCase() }, '', true)).status, 200);
+  assert.equal((await call(env, '/api/auth/login', credentials)).status, 401);
 });

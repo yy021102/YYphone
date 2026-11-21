@@ -23,7 +23,8 @@ export function AccountAccessGate({ children }: { children: ReactNode }) {
         const url = new URL(location.href), grant = url.hash.match(/^#yyphone_access=([a-f0-9]{64})$/)?.[1];
         if (grant) {
           history.replaceState(null, '', url.pathname + url.search);
-          await accessRequest(base, 'exchange', { grant });
+          const exchanged = await accessRequest(base, 'exchange', { grant });
+          if (exchanged.return_url && new URL(exchanged.return_url).origin === location.origin) history.replaceState(null, '', exchanged.return_url);
         }
         const discordError = url.searchParams.get('discord_error');
         if (discordError) { url.searchParams.delete('discord_error');history.replaceState(null, '', url.pathname + url.search);if (active) setError(discordErrors[discordError] || 'Discord 登录未完成，请重新尝试。'); }
@@ -43,9 +44,13 @@ export function AccountAccessGate({ children }: { children: ReactNode }) {
       busy.current = true;showError('');
       try {
         if (event.data.type === 'yyphone-account-discord') {
-          const result = await accessRequest(base, 'discord/start');
+          const result = await accessRequest(base, 'discord/start', { return_url: location.href });
           if (new URL(result.url).origin !== new URL(base).origin) throw Error('登录地址不正确。');
-          location.assign(result.url);
+          if (result.method === 'POST') {
+            const form = document.createElement('form');form.method = 'POST';form.action = result.url;
+            const ticket = document.createElement('input');ticket.type = 'hidden';ticket.name = 'ticket';ticket.value = result.fields.ticket;form.append(ticket);
+            document.body.append(form);form.submit();
+          } else location.assign(result.url);
         } else { await accessRequest(base, event.data.register ? 'register' : 'login', event.data.data);await accessRequest(base, 'me');setOpen(true); }
       } catch (cause) { showError(cause instanceof Error ? cause.message : '连接失败，请稍后重试。'); }
       finally { busy.current = false; }
@@ -59,6 +64,6 @@ export function AccountAccessGate({ children }: { children: ReactNode }) {
     return () => { clearInterval(timer);window.removeEventListener('focus', recheck); };
   }, [open, base]);
   if (checking) return <div style={{ position: 'fixed', inset: 0, background: '#eef2fa' }} aria-label="正在检查登录状态" />;
-  if (open) return <>{children}<button type="button" onClick={async () => { try { await accessRequest(base, 'logout'); } catch { /* Local logout still removes this browser's token. */ }await forgetAccountSession();setOpen(false);setError(''); }} style={{ position: 'fixed', right: 12, top: 12, zIndex: 2147483647, border: '1px solid #ddd5e5', borderRadius: 20, padding: '8px 14px', background: '#fff', color: '#79628f', fontSize: 12 }}>退出登录</button></>;
+  if (open) return children;
   return <iframe ref={frame} title="小手机注册登录验证" srcDoc={html} onLoad={() => showError(error)} style={{ position: 'fixed', inset: 0, width: '100%', height: '100dvh', border: 0, background: '#eef2fa', zIndex: 2147483646 }} />;
 }
