@@ -16,7 +16,9 @@ GitHub API 只允许固定来源 `https://yy021102.github.io`，不依赖第三�
 
 两站共用数据库和两设备上限，测试会真实消耗激活码、创建用户，可在同一作者后台管理。GitHub 的静态文件仍是公开托管，客户端页面本身无法阻止下载源码。
 
-当前主站仅补上 API，同时保留原小手机版本：`build-api-overlay.mjs` 将非 API 请求代理到原不可变部署 `https://6de26fb7.yyphone.pages.dev`。主站正式升级前，不要删除这个基线部署。发布接口层：
+主站已于2026年11月22日正式升级到完整新版及服务端门禁。日常流程为：push 到 Git → GitHub Pages 自动发布供作者测试 → 测试确认后手动执行下方的正常 `build-pages.mjs` 构建并发布 Cloudflare。push 本身不会自动替换 Cloudflare 主站，发布时会包含所选 Git 提交的整个项目，而不是仅发布单次对话的修改。
+
+以下接口覆盖层仅是此前测试阶段保留旧主站的历史方案：`build-api-overlay.mjs` 将非 API 请求代理到原不可变部署 `https://6de26fb7.yyphone.pages.dev`。正常正式发布不要使用它，否则会回到旧小手机版本。需要恢复历史覆盖方案时才执行：
 
 ```powershell
 node server/access/build-api-overlay.mjs

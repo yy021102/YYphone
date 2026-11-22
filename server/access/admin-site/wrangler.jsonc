@@ -2,6 +2,6 @@
   "name": "yyphone-admin",
   "pages_build_output_dir": "./dist",
   "compatibility_date": "2026-11-21",
-  "vars": { "ACCESS_READY": "false" },
+  "vars": { "ACCESS_READY": "true" },
   "d1_databases": [{ "binding": "DB", "database_name": "yyphone-access", "database_id": "3175b412-0aee-4ebd-8793-79bd1ecb9646" }]
 }
