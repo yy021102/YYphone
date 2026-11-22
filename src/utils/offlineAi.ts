@@ -131,7 +131,6 @@ export const generateOfflineText = async (
   withChoices = false
 ): Promise<{ text: string; choices: string[] }> => {
   const { system, userName } = buildSystem(story, preset, withChoices);
-  const words = preset?.targetWords ?? 800;
   const lastIsUser = history.length > 0 && history[history.length - 1].role === 'user';
   const task = mode === 'opening'
     ? `请为这个故事写开场白：交代时间、地点与氛围，让登场角色自然地出现并与场景互动，给玩家留出可以切入的空间。${openingHint.trim() ? `\n玩家对开场的期望：${openingHint.trim()}` : ''}`
@@ -145,7 +144,6 @@ export const generateOfflineText = async (
   const raw = await requestConfiguredAiText(system, user, {
     api: resolveOfflineApi(),
     temperature: preset?.temperature ?? 0.9,
-    maxTokens: Math.max(1024, Math.min(8000, Math.round(words * 3) + (withChoices ? 300 : 0))),
   });
   const parsed = splitChoices(raw.replace(/<(think|thinking|thought)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '').trim());
   if (!parsed.text) throw new Error('AI 返回了空的剧情内容，请重试。');
