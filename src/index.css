@@ -1038,3 +1038,30 @@ body {
 .channel-message .channel-dm-media strong { margin:0; font-size:calc(12px * var(--font-scale)); color:inherit; font-weight:600; }
 .channel-message .channel-dm-media.is-transfer { min-width:165px; }
 .channel-message .channel-dm-media small { display:block; margin-top:9px; opacity:.85; font-size:10px; }
+
+/* Keep conversation-setting notes legible on every dark-mode setting panel. */
+.wechat-app[data-wechat-theme="dark"] .yy-chat-settings[role="dialog"] {
+  background: #1b2028 !important;
+  color: #e8eef7;
+}
+.wechat-app[data-wechat-theme="dark"] .yy-chat-settings[role="dialog"] :is(section, details) {
+  background: #242b35 !important;
+  border-color: #3b4655 !important;
+}
+.wechat-app[data-wechat-theme="dark"] .yy-chat-settings[role="dialog"] :is(
+  [class~="text-slate-400"], [class~="text-slate-500"], [class~="text-slate-600"],
+  [class~="text-gray-400"], [class~="text-gray-500"], [class~="text-gray-600"]
+) {
+  color: #b8c4d2 !important;
+}
+.wechat-app[data-wechat-theme="dark"] .yy-chat-settings[role="dialog"] :is(
+  input:not([type="checkbox"]):not([type="range"]):not([type="file"]), textarea, select
+) {
+  background-color: #151b23 !important;
+  border-color: #465469 !important;
+  color: #e0e8f2 !important;
+}
+.wechat-app[data-wechat-theme="dark"] .yy-chat-settings[role="dialog"] :is(input, textarea)::placeholder {
+  color: #96a5b8 !important;
+  opacity: 1;
+}

@@ -6840,7 +6840,7 @@ export const WeChatApp: React.FC<WeChatAppProps> = ({
       </div>}
       {chatSettingsOpen && chatSettingsDraft && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-          <section role="dialog" aria-modal="true" aria-labelledby="chat-settings-title" className="flex w-full max-w-sm max-h-[90%] flex-col overflow-y-auto rounded-3xl bg-white/95 p-5 shadow-2xl space-y-3">
+          <section role="dialog" aria-modal="true" aria-labelledby="chat-settings-title" className="yy-chat-settings flex w-full max-w-sm max-h-[90%] flex-col overflow-y-auto rounded-3xl bg-white/95 p-5 shadow-2xl space-y-3">
             <header className="flex items-center justify-between">
               <h2 id="chat-settings-title" className="text-base font-bold text-[#2C4A5C]">对话设置</h2>
               <button disabled={contextPresetBusy} onClick={() => { setChatSettingsOpen(false); setChatSettingsDraft(null); setChatError(''); }} aria-label="关闭" className="w-8 h-8 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 disabled:opacity-40">
