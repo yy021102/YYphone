@@ -364,3 +364,13 @@ test('Discord configuration checks report invalid credentials without leaking se
   assert.equal(success.credentials_valid, true);assert(revoked);
   assert(!JSON.stringify(success).includes('private-probe-token'));
 });
+test('login page preserves the phone name and permits only launcher metadata before login', async () => {
+  const env = environment();
+  const response = await call(env, '/');const html = await response.text();
+  assert(html.includes('<title>YYphone·歪歪机</title>'));
+  assert(html.includes('name="apple-mobile-web-app-title" content="歪歪机"'));
+  assert(!html.includes('<title>歪歪机 · 欢迎回来</title>'));
+  assert(response.headers.get('Content-Security-Policy').includes("manifest-src 'self'"));
+  for (const path of ['/manifest.json', '/app-icon-options/pastel-yy/manifest.webmanifest', '/app-icon-options/ndsl/icon-180.png']) assert.equal((await call(env, path)).status, 200);
+  for (const path of ['/assets/app.js', '/app-icon-options/pastel-yy/script.js', '/app-icon-options/unknown/icon-180.png']) assert.equal((await call(env, path)).status, 401);
+});

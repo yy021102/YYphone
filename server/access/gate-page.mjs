@@ -1,7 +1,8 @@
 import { gateStyle } from './gate-style.mjs';
 import { discordLoginMarkup, discordErrorScript } from './discord-ui.mjs';
+import { launcherHead, launcherScript } from './launcher-metadata.mjs';
 
-export const gate = `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#eef2fa"><title>歪歪机 · 欢迎回来</title><style>${gateStyle}</style>
+export const gate = `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>YYphone·歪歪机</title>${launcherHead}<style>${gateStyle}</style>
 <body><main>
 <header class="brand"><div class="emblem"><svg width="28" height="30" viewBox="0 0 28 32" fill="none" aria-hidden="true"><rect x="6" y="2" width="16" height="28" rx="5" stroke="currentColor" stroke-width="1.4"/><path d="M11 5h6M12 26h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="m10 15 3 3 5-5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></div><p class="eyebrow">A LITTLE WORLD OF YOUR OWN</p><h1>欢迎来到歪歪机</h1><p id="intro">把日常装进口袋，把喜欢留在身边。</p></header>
 <div class="modes" role="tablist" aria-label="账号登录或注册"><button type="button" id="loginMode" role="tab" aria-selected="true">登录</button><button type="button" id="switch" role="tab" aria-selected="false">注册激活</button></div>
@@ -20,4 +21,4 @@ function setMode(value){register=value;document.querySelector('#codeLabel').hidd
 document.querySelector('#switch').onclick=()=>setMode(true);document.querySelector('#loginMode').onclick=()=>setMode(false);
 document.querySelector('#showPassword').onclick=()=>{const visible=form.elements.password.type==='password';form.elements.password.type=visible?'text':'password';document.querySelector('#showPassword').setAttribute('aria-pressed',String(visible));document.querySelector('#showPassword').setAttribute('aria-label',visible?'隐藏密码':'显示密码')};
 form.onsubmit=async event=>{event.preventDefault();submit.disabled=true;error.textContent='';try{const response=await fetch('/api/auth/'+(register?'register':'login'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.fromEntries(new FormData(form)))});const data=await response.json();if(!response.ok)throw Error(data.error);location.replace('/')}catch(errorValue){error.textContent=errorValue.message||'连接失败，请稍后再试'}finally{submit.disabled=false}};
-</script>${discordErrorScript}</body></html>`;
+</script>${discordErrorScript}${launcherScript}</body></html>`;

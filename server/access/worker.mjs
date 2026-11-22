@@ -7,6 +7,7 @@ import { discordRoute, discordReady, discordSessionAllowed } from './discord.mjs
 import { adminAuth } from './admin-session.mjs';
 import { activationCode, normalizeActivationCode } from './activation-code.mjs';
 import { checkDiscordConfiguration } from './discord-configuration.mjs';
+import { isLauncherMetadataPath } from './launcher-metadata.mjs';
 
 const encoder = new TextEncoder();
 const hex = b => Array.from(new Uint8Array(b), n => n.toString(16).padStart(2, '0')).join('');
@@ -66,6 +67,12 @@ async function handle(request, env) {
   }
   const discordResponse = await discordRoute(request, env);
   if (discordResponse) return discordResponse;
+  if (isLauncherMetadataPath(path) && (request.method === 'GET' || request.method === 'HEAD')) {
+    const asset = await env.ASSETS.fetch(request);
+    const response = new Response(asset.body, asset);
+    response.headers.set('Cache-Control', 'public, max-age=0, must-revalidate');
+    return response;
+  }
   if (path.startsWith('/api/admin/')) {
     if (request.method !== 'POST') return json({ error: '请使用 POST' }, 405);
     const data = await body(request);
@@ -168,7 +175,7 @@ async function handle(request, env) {
   if (path === '/api/auth/me') return user ? json({ username: user.username }) : json({ error: '请登录' }, 401);
   if (path.startsWith('/api/')) return json({ error: '接口不存在' }, 404);
   if (!user) {
-    if (request.mode === 'navigate' || path === '/') return new Response(discordReady(env) ? gate.replace('id="discordLogin" hidden', 'id="discordLogin"') : gate, { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'" } });
+    if (request.mode === 'navigate' || path === '/') return new Response(discordReady(env) ? gate.replace('id="discordLogin" hidden', 'id="discordLogin"') : gate, { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self'; manifest-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'" } });
     return json({ error: '请先登录激活' }, 401);
   }
   const asset = await env.ASSETS.fetch(request);
